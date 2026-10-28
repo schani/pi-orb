@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { installSafariLinks, type SafariLinkHost, safariUrl } from "./safari-links.ts";
+import {
+  installSafariLinks,
+  launchSafariAuth,
+  type SafariLinkHost,
+  safariAuthUrl,
+  safariUrl,
+} from "./safari-links.ts";
 
 const APP = "https://pi-orb.example";
 
@@ -137,5 +143,46 @@ describe("installSafariLinks", () => {
     const event = click(href, overrides);
     expect(event.defaultPrevented).toBe(overrides.defaultPrevented ?? false);
     expect(navigations).toEqual([]);
+  });
+});
+
+describe("safariAuthUrl", () => {
+  it("explicitly hands same-origin MCP settings to the receiving browser", () => {
+    const { host } = harness({ standalone: true, maxTouchPoints: 5 });
+    expect(safariAuthUrl("/projects/abc/mcp", host)).toBe(`x-safari-${APP}/projects/abc/mcp`);
+  });
+  it.each([
+    [{ standalone: true, maxTouchPoints: 5 }, "x-safari-https://auth.example/consent?state=opaque"],
+    [{ standalone: false, maxTouchPoints: 5 }, null],
+    [{ maxTouchPoints: 5 }, null],
+    [{ standalone: true, maxTouchPoints: 0 }, null],
+  ] as const)("routes programmatic consent for %o", (navigator, expected) => {
+    const { host } = harness(navigator);
+    expect(safariAuthUrl("https://auth.example/consent?state=opaque", host)).toBe(expected);
+  });
+
+  it.each(["mailto:owner@example.com", "https://["])(
+    "preserves nonexternal navigation: %s",
+    (url) => {
+      const { host } = harness({ standalone: true, maxTouchPoints: 5 });
+      expect(safariAuthUrl(url, host)).toBeNull();
+    },
+  );
+});
+
+describe("launchSafariAuth", () => {
+  it("assigns through the browser adapter", () => {
+    const { host, navigations } = harness({ standalone: true, maxTouchPoints: 5 });
+    expect(launchSafariAuth("x-safari-https://auth.example/", host).isOk()).toBe(true);
+    expect(navigations).toEqual(["x-safari-https://auth.example/"]);
+  });
+  it("returns a typed sanitized platform failure", () => {
+    const { host } = harness({ standalone: true, maxTouchPoints: 5 });
+    host.location.assign = () => {
+      throw new Error("private URL");
+    };
+    expect(launchSafariAuth("x-safari-https://auth.example/", host)._unsafeUnwrapErr()).toEqual({
+      type: "safari_launch_failed",
+    });
   });
 });

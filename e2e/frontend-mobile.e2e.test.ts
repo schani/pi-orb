@@ -6,6 +6,7 @@ import { type Browser, chromium, expect as expectPage, type Page, webkit } from 
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
+import { mockClaudeOwnerConnection } from "./testkit/claude-auth-fixture.ts";
 import { closeRoutedPage } from "./testkit/close-routed-page.ts";
 import { gotoFrontendFixture, gotoFrontendHistory } from "./testkit/frontend-fixture.ts";
 import { waitForFixtureMedia } from "./testkit/media-ready.ts";
@@ -1711,6 +1712,189 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       }
     },
   );
+
+  it.each([
+    { action: "connect", fail: false },
+    { action: "add", fail: false },
+    { action: "connect", fail: true },
+    { action: "add", fail: true },
+  ] as const)(
+    "hands MCP $action to a separate browser before starting cookie-bound consent (launch failure: $fail)",
+    async ({ action, fail }) => {
+      const projectId = randomUUID();
+      const id = randomUUID();
+      const path = `/projects/${projectId}/mcp`;
+      const page = await browser.newPage();
+      const safari = await browser.newPage();
+      const posts: string[] = [];
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      let connected = false;
+      const connection = {
+        name: "auth-handoff",
+        description: "fixture",
+        url: "https://mcp.example/mcp",
+        headers: {},
+        oauth: { id },
+      };
+      await page.addInitScript(`
+        if (navigator.standalone !== true) {
+          Object.defineProperty(navigator, "standalone", { value: true });
+          Object.defineProperty(navigator, "maxTouchPoints", { value: 5 });
+        }
+      `);
+      try {
+        if (fail) {
+          await page.route("**/src/lib/safari-links.ts*", async (route) => {
+            const response = await route.fetch();
+            const body = await response.text();
+            // Inject a platform throw at the adapter, not a production failure switch.
+            const assignment = "() => host.location.assign(url)";
+            expectPage(body).toContain(assignment);
+            await route.fulfill({
+              response,
+              body: body.replace(assignment, '() => { throw new Error("synthetic private URL"); }'),
+            });
+          });
+        }
+        expectPage(
+          (
+            await page.request.post(`${origin}/api/v1/projects`, {
+              data: {
+                id: projectId,
+                name: "Auth handoff",
+                repositoryUrl: "https://github.com/example/auth",
+              },
+            })
+          ).status(),
+        ).toBe(201);
+        if (action === "connect") {
+          expectPage(
+            (
+              await page.request.put(`${origin}/api/v1/projects/${projectId}/mcp`, {
+                data: { revision: 0, servers: [connection] },
+              })
+            ).status(),
+          ).toBe(200);
+        }
+        for (const [owner, label] of [
+          [page, "pwa"],
+          [safari, "safari"],
+        ] as const) {
+          await owner.route(`**/api/v1/projects/${projectId}/mcp/*/oauth{,/**}`, async (route) => {
+            if (route.request().method() === "POST") {
+              posts.push(label);
+              await route.fulfill({
+                headers: {
+                  "set-cookie": "handoff_nonce=safari-only; HttpOnly; SameSite=Lax; Path=/",
+                },
+                json: { url: "https://consent.example/authorize" },
+              });
+            } else
+              await route.fulfill({ json: { status: connected ? "connected" : "auth_required" } });
+          });
+          await owner.route("https://consent.example/**", (route) =>
+            route.fulfill({ contentType: "text/html", body: "<p>Synthetic consent</p>" }),
+          );
+        }
+        await gotoFrontendFixture(page, `${origin}${path}`);
+        const mcp = page.getByRole("tabpanel", { name: "MCPs", exact: true });
+        if (action === "connect") await mcp.locator("summary").click();
+        else {
+          await mcp.getByRole("button", { name: "add server", exact: true }).click();
+          const add = mcp.locator(".mcp-add-area");
+          await add.getByLabel("Name", { exact: true }).fill(connection.name);
+          await add.getByLabel("Endpoint", { exact: true }).fill(connection.url);
+        }
+        const next = fail
+          ? null
+          : page.waitForRequest(
+              (request) =>
+                request.url().startsWith("x-safari-") ||
+                (request.method() === "POST" && request.url().endsWith("/oauth/connect")),
+            );
+        await mcp
+          .getByRole("button", {
+            name: action === "connect" ? "connect" : "add & connect",
+            exact: true,
+          })
+          .click();
+        if (next) expectPage((await next).url()).toBe(`x-safari-${origin}${path}`);
+        else await expectPage(mcp.getByRole("alert")).toContainText("Could not open Safari");
+        expectPage(posts).toEqual([]);
+        expectPage(page.url()).toBe(`${origin}${path}`);
+        await expectPage(mcp.getByRole("button", { name: "connect", exact: true })).toBeEnabled();
+        await expectPage(page.getByRole("button", { name: "Close project config" })).toBeEnabled();
+        const saved = await (
+          await page.request.get(`${origin}/api/v1/projects/${projectId}/mcp`)
+        ).json();
+        expectPage(saved.servers.map((server: { name: string }) => server.name)).toEqual([
+          connection.name,
+        ]);
+        if (fail) {
+          expectPage(errors).toEqual([]);
+          await expectPage(mcp).not.toContainText("synthetic private URL");
+          return;
+        }
+        await gotoFrontendFixture(safari, `${origin}${path}`);
+        const received = safari.getByRole("tabpanel", { name: "MCPs", exact: true });
+        await received.locator("summary").click();
+        expectPage(posts).toEqual([]);
+        await received.getByRole("button", { name: "connect", exact: true }).click();
+        await expectPage(safari).toHaveURL("https://consent.example/authorize");
+        expectPage(posts).toEqual(["safari"]);
+        expectPage(
+          (await safari.context().cookies(origin)).some(
+            (cookie) => cookie.name === "handoff_nonce",
+          ),
+        ).toBe(true);
+        expectPage(
+          (await page.context().cookies(origin)).some((cookie) => cookie.name === "handoff_nonce"),
+        ).toBe(false);
+        connected = true;
+        // A home-screen return can deliver visibilitychange without window focus.
+        await page.evaluate('document.dispatchEvent(new Event("visibilitychange"))');
+        await expectPage(mcp.locator("summary")).toContainText("grant stored");
+        await expectPage(
+          mcp.getByRole("button", { name: "disconnect", exact: true }),
+        ).toBeEnabled();
+      } finally {
+        await closeRoutedPage(page);
+        await closeRoutedPage(safari);
+        expectPage(
+          (await fetch(`${origin}/api/v1/projects/${projectId}`, { method: "DELETE" })).status,
+        ).toBe(202);
+      }
+    },
+  );
+
+  it("hands Claude consent to Safari without opening an in-app tab", async () => {
+    const page = await browser.newPage();
+    await page.addInitScript(`
+      Object.defineProperty(navigator, "standalone", { value: true });
+      Object.defineProperty(navigator, "maxTouchPoints", { value: 5 });
+    `);
+    await mockClaudeOwnerConnection(page);
+    const popups: Page[] = [];
+    page.on("popup", (popup) => popups.push(popup));
+    try {
+      await gotoFrontendFixture(page, `${origin}/`);
+      await page.getByRole("button", { name: "Settings", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
+      await dialog.getByRole("tab", { name: "Claude", exact: true }).click();
+      const handoff = page.waitForRequest((request) => request.url().startsWith("x-safari-"));
+      await dialog
+        .getByRole("button", { name: "Connect Claude subscription", exact: true })
+        .click();
+      expectPage((await handoff).url()).toBe(
+        "x-safari-https://claude.ai/oauth/authorize?fixture=1",
+      );
+      expectPage(popups).toEqual([]);
+      await expectPage(dialog.getByLabel("Claude completion code")).toBeEnabled();
+    } finally {
+      await closeRoutedPage(page);
+    }
+  });
 
   it.each([true, false])(
     "opens external transcript links in Safari only from an iOS home-screen app (standalone %s)",

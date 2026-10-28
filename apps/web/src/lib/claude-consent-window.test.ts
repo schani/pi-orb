@@ -111,3 +111,36 @@ it("maps close exceptions to a typed error", () => {
       ._unsafeUnwrapErr(),
   ).toEqual({ type: "popup_unavailable" });
 });
+
+function safariHost() {
+  return {
+    navigator: { standalone: true, maxTouchPoints: 5 },
+    location: { origin: "https://pi-orb.example", assign: vi.fn() },
+  };
+}
+it("hands validated Claude consent to Safari without reserving an in-app tab", () => {
+  const host = safariHost();
+  const open = vi.fn(() => tab() as unknown as Window);
+  const reserved = reserveConsentWindow(open, host)._unsafeUnwrap();
+  expect(open).not.toHaveBeenCalled();
+  expect(host.location.assign).not.toHaveBeenCalled();
+  expect(reserved.navigate("https://claude.ai/consent?state=opaque").isOk()).toBe(true);
+  expect(host.location.assign).toHaveBeenCalledWith(
+    "x-safari-https://claude.ai/consent?state=opaque",
+  );
+  expect(reserved.close().isOk()).toBe(true);
+});
+it("keeps consent URL validation and typed handoff errors on Safari", () => {
+  const host = safariHost();
+  const reserved = reserveConsentWindow(() => null, host)._unsafeUnwrap();
+  expect(reserved.navigate("https://example.com/private")._unsafeUnwrapErr()).toEqual({
+    type: "invalid_consent_url",
+  });
+  expect(host.location.assign).not.toHaveBeenCalled();
+  host.location.assign.mockImplementation(() => {
+    throw new Error("private URL");
+  });
+  expect(reserved.navigate("https://claude.ai/consent")._unsafeUnwrapErr()).toEqual({
+    type: "popup_unavailable",
+  });
+});

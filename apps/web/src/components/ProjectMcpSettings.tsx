@@ -16,6 +16,7 @@ import {
   mcpConfig,
   mcpDraft,
 } from "../lib/mcp-form.ts";
+import { launchSafariAuth, safariAuthUrl } from "../lib/safari-links.ts";
 import { useMcpAuthorization } from "./McpOAuthControls.tsx";
 import { TextFieldFrame } from "./TextFieldFrame.tsx";
 
@@ -413,6 +414,13 @@ export function ProjectMcpSettings({
     setAdding(false);
     setOpenName(config.value.name);
     if (config.value.oauth && (!previous?.oauth || config.value.oauth.id !== previous.oauth.id)) {
+      const safari = safariAuthUrl(`/projects/${encodeURIComponent(projectId)}/mcp`);
+      if (safari !== null) {
+        setSaving(false);
+        const launched = launchSafariAuth(safari);
+        if (launched.isErr()) setError("Server saved. Could not open Safari. Try Connect again.");
+        return;
+      }
       const connected = await connectMcpOAuth(projectId, config.value.oauth.id);
       if (owner !== lifetime.current) {
         setSaving(false);

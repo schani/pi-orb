@@ -104,6 +104,15 @@ it("binds consent to the browser and completes after process-local state is repl
   expect(wrongBrowser.statusCode).toBe(303);
   expect(wrongBrowser.headers.location).toBe("https://app.example/mcp/oauth/failed");
   expect(exchanges).toBe(0);
+  const otherJar = await restarted.inject({
+    url: callback,
+    headers: { cookie: `__Host-pi-orb-mcp-${id}=${"f".repeat(64)}` },
+  });
+  expect(otherJar.statusCode).toBe(303);
+  expect(otherJar.headers.location).toBe(
+    `https://app.example/mcp/oauth/failed?projectId=${projectId}`,
+  );
+  expect(exchanges).toBe(0);
   const finished = await restarted.inject({
     url: callback,
     headers: { cookie: cookie.split(";")[0] ?? "" },

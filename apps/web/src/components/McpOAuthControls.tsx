@@ -5,6 +5,7 @@ import {
   disconnectMcpOAuth,
   getMcpOAuthStatus,
 } from "../lib/api.ts";
+import { launchSafariAuth, safariAuthUrl } from "../lib/safari-links.ts";
 
 /** One owner for the summary status and actions; stale reads cannot undo a mutation. */
 export function useMcpAuthorization(
@@ -31,17 +32,31 @@ export function useMcpAuthorization(
         } else setError(describeApiError(result.error));
       });
     };
+    const visible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
     refresh();
+    document.addEventListener("visibilitychange", visible);
     window.addEventListener("focus", refresh);
     return () => {
       lifetime.current++;
       window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", visible);
     };
   }, [projectId, id]);
   const act = async (operation: "connect" | "disconnect") => {
     if (!id) return;
-    const epoch = lifetime.current;
     reads.current++;
+    if (operation === "connect") {
+      const safari = safariAuthUrl(`/projects/${encodeURIComponent(projectId)}/mcp`);
+      if (safari !== null) {
+        setSaving(false);
+        const launched = launchSafariAuth(safari);
+        setError(launched.isErr() ? "Could not open Safari. Try Connect again." : null);
+        return;
+      }
+    }
+    const epoch = lifetime.current;
     setSaving(true);
     setError(null);
     const result = await (operation === "connect"

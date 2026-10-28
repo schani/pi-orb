@@ -1,4 +1,5 @@
 import { err, ok, type Result } from "neverthrow";
+import { isIosStandalone, type SafariLinkHost, safariAuthUrl } from "./safari-links.ts";
 
 export type ConsentWindowError = {
   type: "popup_blocked" | "popup_closed" | "popup_unavailable" | "invalid_consent_url";
@@ -41,7 +42,23 @@ export function describeConsentWindowError(error: ConsentWindowError): string {
 /** Called in the trusted click, before any owner-state request. */
 export function reserveConsentWindow(
   open: () => Window | null = () => window.open("about:blank", "_blank"),
+  host: Pick<SafariLinkHost, "navigator" | "location"> = globalThis.window,
 ): Result<ConsentWindow, ConsentWindowError> {
+  if (host && isIosStandalone(host.navigator)) {
+    return ok({
+      close: () => ok(undefined),
+      navigate(value) {
+        const url = consentUrl(value);
+        if (url === null) return err({ type: "invalid_consent_url" });
+        try {
+          host.location.assign(safariAuthUrl(url, host) ?? url);
+          return ok(undefined);
+        } catch {
+          return err({ type: "popup_unavailable" });
+        }
+      },
+    });
+  }
   let tab: Window | null;
   try {
     tab = open();
