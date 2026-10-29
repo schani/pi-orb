@@ -312,6 +312,12 @@ it("boots the production shell and loads built assets and install metadata on di
   try {
     await page.goto(`${origin}/orbs/missing-orb`);
     await expectPage(page.getByText("Orb doesn't exist")).toBeVisible();
+    await expect
+      .poll(
+        () =>
+          responses.filter(({ path, status }) => path.endsWith(".woff2") && status === 200).length,
+      )
+      .toBeGreaterThanOrEqual(2);
     await page.reload();
     await expectPage(page.getByText("Orb doesn't exist")).toBeVisible();
     expect(page.url()).toBe(`${origin}/orbs/missing-orb`);

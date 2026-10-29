@@ -35,3 +35,5 @@ Clean Node 26 installation applies the new seals; typecheck/lint/web build, 44 m
 [Private compatibility-fix archive](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/f80c5983-861b-49b6-9bb1-6683386edf7c/evidence/pr227-node26-compatibility-fixes.tgz) preserves both initial failures, native accounting RED/GREEN, fixture provenance/readiness, clean-install seals and current Node 26 process receipts. Toolchains, installed packages, binaries and bulk historical DST traces are excluded.
 
 On 2026-10-29 PDT, the [first UI failure](https://github.com/schani/pi-orb/actions/runs/40920963723/job/123613737949) matched both valid sharing-notice and drop-feedback statuses; scoping the test to the component-owned status preserves role, text, attachment, draft and no-upload/no-send assertions.
+
+The shell test now observes two successful font responses before reload: controlled observation RED/GREEN establishes the boundary fix, while CI's exact historical ordering remains unproven; cache behavior, timeouts and post-load assertions are unchanged.
