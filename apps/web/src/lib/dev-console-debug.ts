@@ -36,6 +36,7 @@ export interface DebugTraceInput {
   recordCount?: number | undefined;
   scrollY?: number | undefined;
   viewportHeight?: number | undefined;
+  viewportLayoutHeight?: number | undefined;
   viewportOffsetTop?: number | undefined;
   contentHeight?: number | undefined;
 }
@@ -118,6 +119,9 @@ function safeTrace(input: DebugTraceInput, seq: number): DebugTraceEntry {
     ...(input.scrollY !== undefined ? { scrollY: finiteCount(input.scrollY) } : {}),
     ...(input.viewportHeight !== undefined
       ? { viewportHeight: finiteCount(input.viewportHeight) }
+      : {}),
+    ...(input.viewportLayoutHeight !== undefined
+      ? { viewportLayoutHeight: finiteCount(input.viewportLayoutHeight) }
       : {}),
     ...(input.viewportOffsetTop !== undefined
       ? { viewportOffsetTop: finiteCount(input.viewportOffsetTop) }

@@ -8,6 +8,7 @@ type Listen = {
 type Viewport = Listen & { height: number; offsetTop: number; scale: number };
 type Host = Listen & {
   innerHeight: number;
+  navigator: Pick<Navigator, "userAgent">;
   visualViewport: Viewport | null;
   document: Listen & { visibilityState: string };
 };
@@ -16,17 +17,35 @@ type Style = { setProperty(name: string, value: string): void; removeProperty(na
 /** Pins the app box's variables to the visual viewport; returns the cleanup. */
 export function followVisualViewport(style: Style, host: Host): () => void {
   const viewport = host.visualViewport;
-  let applied: { height: number; top: number } | undefined;
+  const iphone = /iPhone|iPod/.test(host.navigator.userAgent);
+  let applied: { height: number; top: number; accessoryInset: number } | undefined;
   const update = () => {
     // Let native pinch zoom pan the existing layout instead of reflowing it.
     if (viewport && viewport.scale !== 1) return;
     const height = viewport?.height ?? host.innerHeight;
     if (height <= 0) return;
     const top = viewport?.offsetTop ?? 0;
-    if (applied?.height === height && applied.top === top) return;
+    // iOS's floating form accessory can overlap the visual viewport. Its native
+    // bounds are not exposed; reserve the screenshot's pill + gap on keyboard shrink.
+    const accessoryInset = iphone && host.innerHeight - height > 150 ? 60 : 0;
+    if (
+      applied?.height === height &&
+      applied.top === top &&
+      applied.accessoryInset === accessoryInset
+    )
+      return;
     style.setProperty("--visual-viewport-height", `${height}px`);
     style.setProperty("--visual-viewport-top", `${top}px`);
-    applied = { height, top };
+    style.setProperty("--keyboard-accessory-inset", `${accessoryInset}px`);
+    if (accessoryInset !== (applied?.accessoryInset ?? 0))
+      devConsoleDebug.record({
+        event: "viewport",
+        outcome: accessoryInset ? "accessory_available" : "accessory_unavailable",
+        viewportHeight: height,
+        viewportLayoutHeight: host.innerHeight,
+        viewportOffsetTop: top,
+      });
+    applied = { height, top, accessoryInset };
     return applied;
   };
   const resume = (outcome: "visible" | "pageshow" | "focus") => {
@@ -59,6 +78,7 @@ export function followVisualViewport(style: Style, host: Host): () => void {
     host.removeEventListener("focus", focus);
     style.removeProperty("--visual-viewport-height");
     style.removeProperty("--visual-viewport-top");
+    style.removeProperty("--keyboard-accessory-inset");
   };
 }
 

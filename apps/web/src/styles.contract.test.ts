@@ -471,3 +471,9 @@ it("gives owner skill disclosures and the add action phone touch targets", () =>
   expect(rule(`${dialog} .project-mcp-connection > summary`, phone)).toContain("min-height: 48px");
   expect(rule(`${dialog} .mcp-add-area > .text-action::before`, phone)).toContain("inset: -16px");
 });
+
+it("reserves native keyboard chrome only for the focused phone editor", () => {
+  expect(rule(".composer:has(.composer-input:focus)", media("(max-width: 600px)"))).toContain(
+    "padding-bottom: max(env(safe-area-inset-bottom), var(--keyboard-accessory-inset, 0px))",
+  );
+});

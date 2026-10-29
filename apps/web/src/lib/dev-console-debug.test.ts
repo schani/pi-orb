@@ -89,19 +89,21 @@ describe("DevConsoleDebug", () => {
         event: "viewport",
         outcome: "visible",
         viewportHeight: value,
+        viewportLayoutHeight: value,
         viewportOffsetTop: value,
       });
     }
     expect(
-      debug.dump().trace.map(({ viewportHeight, viewportOffsetTop }) => ({
+      debug.dump().trace.map(({ viewportHeight, viewportLayoutHeight, viewportOffsetTop }) => ({
         viewportHeight,
+        viewportLayoutHeight,
         viewportOffsetTop,
       })),
     ).toEqual([
-      { viewportHeight: 120, viewportOffsetTop: 120 },
-      { viewportHeight: 0, viewportOffsetTop: 0 },
-      { viewportHeight: 0, viewportOffsetTop: 0 },
-      { viewportHeight: 0, viewportOffsetTop: 0 },
+      { viewportHeight: 120, viewportLayoutHeight: 120, viewportOffsetTop: 120 },
+      { viewportHeight: 0, viewportLayoutHeight: 0, viewportOffsetTop: 0 },
+      { viewportHeight: 0, viewportLayoutHeight: 0, viewportOffsetTop: 0 },
+      { viewportHeight: 0, viewportLayoutHeight: 0, viewportOffsetTop: 0 },
     ]);
   });
 

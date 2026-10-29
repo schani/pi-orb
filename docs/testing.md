@@ -1848,3 +1848,38 @@ selection; direct system launchers are unchanged. Status assertions target their
 release contracts preserve uncertain-apply lock retention. Local scoped checks and all 102 unchanged
 frontend-session cases pass (360.71s, owned-worker exit 0); exact-head CI remains required. Evidence/attribution limits:
 `docs/postmortems/2026-10-29-pg17-ci-qualification.md`.
+
+## iPhone floating accessory reserve (2026-10-28; local, undeployed)
+
+Tests-first evidence: `.context/iphone-accessory/` (unit/browser RED then GREEN;
+layout-height telemetry RED then GREEN). These local logs will be preserved on the
+[planned evidence branch](https://github.com/schani/pi-orb/tree/evidence/iphone-keyboard-2026-10-29)
+after local deletion. Initial qualification passed 954 web units,
+16 selected Chromium/WebKit viewport cases and the web build. After the final
+telemetry/typecheck edits, 53 scoped units, six accessory browser cases, web/E2E
+typechecking and scoped TypeScript lint pass. An intermediate string-based locator
+evaluation returned `undefined` in both engines; using the existing
+`ownerDocument.defaultView.getComputedStyle` pattern corrected that test-only defect.
+Both failed and corrected runs are retained. Preview emulation at 402×874 with a
+547px visual viewport showed 60px padding, an 88px editor ending at 487px and a
+composer ending at 547px; blur restored zero padding. This is synthetic geometry,
+not physical iOS qualification. No full suite or deployment; physical verification
+remains in `TODO.md`.
+
+**Send/Fold follow-up:** native mousedown blurred the textarea, removed the reserve
+and moved Send 60px before mouseup. The controlled WebKit event trace
+(`send-webkit-event-order.log`) compares no cancellation, pointerdown-only,
+mousedown-only and both: pointerdown cancellation suppresses the touch-generated
+click; mousedown-only preserves focus, geometry and click. Both rail controls now
+use mousedown-only; submission/folding remain on click. Initial RED and intermediate
+failed qualification logs remain intact (`send-browser-red.log`,
+`send-browser-green.log`); source changed during those runs, so neither represents
+a frozen-head qualification. Frozen final source passes 16 Chromium/WebKit cases
+(`send-browser-final.log`): original-coordinate split mouse press/release, native
+touchscreen taps, drag-away cancellation, keyboard activation, genuine blur,
+fold/draft retention, existing acceptance-driven folding and accessory/platform
+geometry. Existing Composer units, web/E2E typechecking and scoped lint pass.
+These automated checks are synthetic browser qualification. On 2026-10-29 PDT,
+the user confirmed typing and Send on the reported physical iPhone preview
+(“It's perfect!”). Rotation, broader Safari/home-screen, iPad and Android coverage
+remain pending in `TODO.md`; no deployment is established.

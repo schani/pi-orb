@@ -3335,6 +3335,10 @@ button.orb-phone-menu {
     padding: 0 12px env(safe-area-inset-bottom);
   }
 
+  .composer:has(.composer-input:focus) {
+    padding-bottom: max(env(safe-area-inset-bottom), var(--keyboard-accessory-inset, 0px));
+  }
+
   .composer-phone-feedback {
     max-height: 80px;
     overflow-y: auto;

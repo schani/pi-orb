@@ -425,6 +425,9 @@ export function Composer({
             className="icon-button"
             aria-label="Fold editor"
             title="fold"
+            onMouseDown={(event) => {
+              if (event.button === 0) event.preventDefault();
+            }}
             onClick={fold}
           >
             <Icon name="fold" />
@@ -435,6 +438,10 @@ export function Composer({
             aria-label="Send message"
             title="send"
             disabled={!sendEnabled}
+            onMouseDown={(event) => {
+              // Retain focus/keyboard clearance until click; blur moves Send mid-tap.
+              if (sendEnabled && event.button === 0) event.preventDefault();
+            }}
             onClick={submit}
           >
             <Icon name="send" />

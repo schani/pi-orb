@@ -1473,6 +1473,160 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     }
   });
 
+  it.each(["mouse", "touch"] as const)(
+    "keeps Send under the original pointer with accessory clearance · %s",
+    async (pointer) => {
+      const page = await browser.newPage({
+        viewport: { width: 390, height: 844 },
+        isMobile: true,
+        hasTouch: true,
+        userAgent: "iPhone",
+      });
+      await fakeVisualViewport(page, 390, 844);
+      let submissions = 0;
+      await page.route("**/api/v1/orbs/frontend-fixture-orb/messages/*", async (route) => {
+        if (route.request().method() !== "PUT") return route.continue();
+        submissions += 1;
+        await route.fulfill({
+          status: 503,
+          json: {
+            error: { code: "unavailable", message: "Send probe unavailable", retryable: true },
+          },
+        });
+      });
+      try {
+        const composer = page.locator(".composer");
+        const input = composer.getByRole("textbox", { name: "Message the orb", exact: true });
+        const send = composer.getByRole("button", { name: "Send message" });
+        const write = composer.getByRole("button", { name: "Write message" });
+        const padding = () =>
+          composer.evaluate((element) =>
+            parseFloat(element.ownerDocument.defaultView.getComputedStyle(element).paddingBottom),
+          );
+        await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb", composer);
+        const baseline = await padding();
+        await write.tap();
+        await input.fill("retain this draft until acceptance");
+        await page.evaluate("window.setVisualViewport(450, 20)");
+        await expectPage.poll(padding).toBe(60);
+        await expectPage(send).toBeEnabled();
+        const box = await send.evaluate((element) => {
+          const { x, y, width, height } = element.getBoundingClientRect();
+          return { x, y, width, height };
+        });
+        const x = box.x + box.width / 2;
+        const y = box.y + box.height / 2;
+        if (pointer === "mouse") {
+          await page.mouse.move(x, y);
+          await page.mouse.down();
+          // Native blur/focus defaults run before mouseup; do not let a locator
+          // retry against the moved button hide a lost original-coordinate click.
+          await expectPage(input).toBeFocused();
+          expectPage(await send.boundingBox()).toEqual(box);
+          expectPage(submissions).toBe(0);
+          await page.mouse.up();
+        } else {
+          await page.touchscreen.tap(x, y);
+        }
+        await expectPage(composer.getByRole("status")).toContainText("Send probe unavailable");
+        expectPage(submissions).toBe(1);
+        await expectPage(input).toBeFocused();
+        await expectPage.poll(padding).toBe(60);
+        await expectPage(input).toHaveValue("retain this draft until acceptance");
+
+        if (pointer === "mouse") {
+          // Press-and-drag away must not submit on pointerdown.
+          await page.mouse.move(x, y);
+          await page.mouse.down();
+          expectPage(submissions).toBe(1);
+          await page.mouse.move(10, 10);
+          await page.mouse.up();
+          expectPage(submissions).toBe(1);
+          // Keyboard activation still uses the native click path.
+          await send.focus();
+          await send.press("Enter");
+          await expectPage.poll(() => submissions).toBe(2);
+          await expectPage(send).toBeEnabled();
+        }
+
+        // Genuine blur still removes clearance; folding still retains the draft.
+        await input.focus();
+        await expectPage.poll(padding).toBe(60);
+        await input.evaluate((element) => element.blur());
+        await expectPage.poll(padding).toBe(baseline);
+        await input.focus();
+        await composer.getByRole("button", { name: "Fold editor" }).tap();
+        await expectPage(write).toBeVisible();
+        await expectPage.poll(padding).toBe(baseline);
+        await write.tap();
+        await expectPage(input).toHaveValue("retain this draft until acceptance");
+        expectPage(submissions).toBe(pointer === "mouse" ? 2 : 1);
+      } finally {
+        await closeRoutedPage(page);
+      }
+    },
+  );
+
+  it.each([
+    ["iPhone", "iPhone", 390, 60],
+    ["Android", "Linux", 390, 0],
+    ["iPad", "MacIntel", 1180, 0],
+  ] as const)(
+    "reserves accessory space only for a focused iOS phone keyboard · %s",
+    async (userAgent, platform, width, inset) => {
+      const page = await browser.newPage({
+        viewport: { width, height: 844 },
+        isMobile: true,
+        hasTouch: true,
+      });
+      await fakeVisualViewport(page, width, 844);
+      await page.addInitScript(
+        ({ userAgent, platform }) => {
+          Object.defineProperties(navigator, {
+            userAgent: { value: userAgent, configurable: true },
+            platform: { value: platform, configurable: true },
+            maxTouchPoints: { value: 5, configurable: true },
+          });
+        },
+        { userAgent, platform },
+      );
+      try {
+        const composer = page.locator(".composer");
+        const input = composer.getByRole("textbox", { name: "Message the orb", exact: true });
+        await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb", composer);
+        if (width <= 600) await composer.getByRole("button", { name: "Write message" }).tap();
+        await input.fill("first line\nsecond line\nthird line\nfourth line");
+        const padding = () =>
+          composer.evaluate((element) =>
+            parseFloat(element.ownerDocument.defaultView.getComputedStyle(element).paddingBottom),
+          );
+        const baseline = await padding();
+        await page.evaluate("window.setVisualViewport(450, 20)");
+        await expectPage.poll(padding).toBe(inset || baseline);
+        await expectPage(input).toBeFocused();
+        const bounds = await composer.evaluate((element) => ({
+          bottom: element.getBoundingClientRect().bottom,
+          editorBottom: element.querySelector(".composer-input").getBoundingClientRect().bottom,
+        }));
+        expectPage(bounds.bottom).toBe(470);
+        if (inset) expectPage(bounds.editorBottom).toBeLessThanOrEqual(470 - inset);
+        await page.evaluate("window.setVisualViewport(200, 30, 2)");
+        await expectPage(page.locator(".app")).toHaveCSS("height", "450px");
+        await expectPage.poll(padding).toBe(inset || baseline);
+        await input.evaluate((element) => element.blur());
+        await expectPage.poll(padding).toBe(baseline);
+        await input.focus();
+        await expectPage.poll(padding).toBe(inset || baseline);
+        await page.evaluate("window.setVisualViewport(844, 0)");
+        await expectPage.poll(padding).toBe(baseline);
+        await expectPage(input).toHaveValue("first line\nsecond line\nthird line\nfourth line");
+        expectPage(await page.evaluate("window.scrollY")).toBe(0);
+      } finally {
+        await page.close();
+      }
+    },
+  );
+
   it("owns phone scrolling in one viewport through keyboard resize and pan events", async () => {
     const page = await browser.newPage({
       viewport: { width: 390, height: 844 },
