@@ -92,10 +92,6 @@ When I ask you for a plan, just give it to me, don't put it in an HTML or someth
 
 Don't overbuild, neither in production nor in test code!
 
-# Disk space
-
-Monitor disk space when you're doing stuff that might consume a lot. Docker in particular can use a lot of disk very quickly, and once you run out of disk you're hard-blocked!
-
 # Babysitting PRs
 
 When the user asks you to babysit a PR:
