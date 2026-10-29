@@ -1883,3 +1883,20 @@ These automated checks are synthetic browser qualification. On 2026-10-29 PDT,
 the user confirmed typing and Send on the reported physical iPhone preview
 (“It's perfect!”). Rotation, broader Safari/home-screen, iPad and Android coverage
 remain pending in `TODO.md`; no deployment is established.
+
+## Node 26.13.0 LTS qualification (2026-10-28; local, undeployed)
+
+Based on `9e2a5d85`: Node 26.13.0 / npm 11.20.0 / ABI 147; only typings 26.6.6 and required undici-types 8.9.0 change npm resolutions.
+Official signed manifest verified with Richard Lau's key `C82FA3AE1CBEDC6BE46B9360C43CEC45C17AB93C`; archive checksum matches.
+Clean `npm ci` reports zero vulnerabilities; full workspace/E2E typecheck, lint and web build pass, retaining existing lint/chunk warnings.
+Tests-first pin contracts: RED on old pins, then 25 Python + 10 TS pass.
+Two test-only annotations use `webcrypto.JsonWebKey` after Node 26 removed the direct crypto type export.
+Focused issuer/PTY/Claude/Durable tests pass 64/64.
+Offline network-namespace PTY source rebuild uses matching installed headers; real TTY/output/resize/exit proof and manager tests (5/5) pass.
+Full infra, before the additional browser contract: 120 Node + 236 Python + 34 native-guest cases and filesystem checks pass.
+Separate CI prerequisite: select installed lock-bundled Chromium, export/alias its path and log its version in both functional workflows.
+This avoids the independent [Chromium Event Timing CHECK crash](https://github.com/schani/pi-orb/actions/runs/40751943067/job/123040663268), [reverted upstream](https://github.com/chromium/chromium/commit/158b9c164108cdbef03a3e21db318cee80800d42); historical binary version is unknown. WebKit/APIs/assertions are unchanged.
+Exact browser-install block contracts: RED, then 26 combined browser/pin Python cases pass. Receipts: `.context/node26-evidence/` in the isolated worktree.
+Exact committed-head full unit/DST, browser/runtime E2E and image CI remain pending; the local Docker daemon is verified running.
+Fresh native GCP acceptance/retained-workspace gates remain required before production release; none was run or published.
+Incident/source limits: `docs/postmortems/2026-10-28-node-wasm-wrapper-lifetime.md`.
