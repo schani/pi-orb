@@ -1,0 +1,301 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90m/workspace/repo[39m
+
+ [32m✓[39m apps/web/src/components/HistoryView.test.tsx [2m([22m[2m80 tests[22m[2m)[22m[32m 233[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/ToolActivity.test.tsx [2m([22m[2m35 tests[22m[2m)[22m[32m 85[2mms[22m[39m
+ [32m✓[39m apps/web/src/styles.contract.test.ts [2m([22m[2m33 tests[22m[2m)[22m[32m 42[2mms[22m[39m
+ [32m✓[39m apps/web/src/pages/outbound.dst.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 985[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/chart-spec.test.ts [2m([22m[2m56 tests[22m[2m)[22m[32m 237[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/detail-loader.dst.test.ts [2m([22m[2m23 tests[22m[2m)[22m[32m 40[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/api.test.ts [2m([22m[2m24 tests[22m[2m)[22m[32m 65[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/project-orbs.test.ts [2m([22m[2m19 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+[90mstdout[2m | apps/web/src/components/lazy-detail-owner.test.tsx[2m > [22m[2mstarts only the surviving StrictMode detail effect's request
+[22m[39mStrictMode owner/request trace [ [32m'owner:1'[39m, [32m'cleanup:1'[39m, [32m'owner:2'[39m ]
+
+[90mstdout[2m | apps/web/src/components/lazy-detail-owner.test.tsx[2m > [22m[2mstarts only the surviving StrictMode detail effect's request
+[22m[39mdisplay detail {
+  orbId: [32m'orb'[39m,
+  recordId: [32m'one'[39m,
+  detailKey: [32m'one:0'[39m,
+  outcome: [32m'stored'[39m,
+  bytes: [33m1376[39m
+}
+
+[90mstdout[2m | apps/web/src/components/lazy-detail-owner.test.tsx[2m > [22m[2mdefers uncached reads until fresh metadata, then wakes without remount (image=false)
+[22m[39mdisplay detail {
+  orbId: [32m'orb'[39m,
+  recordId: [32m'one'[39m,
+  detailKey: [32m'one:0'[39m,
+  outcome: [32m'stored'[39m,
+  bytes: [33m1376[39m
+}
+
+[90mstdout[2m | apps/web/src/components/lazy-detail-owner.test.tsx[2m > [22m[2mdefers uncached reads until fresh metadata, then wakes without remount (image=true)
+[22m[39mdisplay image {
+  orbId: [32m'orb'[39m,
+  recordId: [32m'one'[39m,
+  detailKey: [32m'one:0'[39m,
+  imageIndex: [33m0[39m,
+  sessionId: [32m'session'[39m,
+  outcome: [32m'miss'[39m
+}
+
+[90mstdout[2m | apps/web/src/components/lazy-detail-owner.test.tsx[2m > [22m[2mdefers uncached reads until fresh metadata, then wakes without remount (image=true)
+[22m[39mdisplay image {
+  orbId: [32m'orb'[39m,
+  recordId: [32m'one'[39m,
+  detailKey: [32m'one:0'[39m,
+  imageIndex: [33m0[39m,
+  sessionId: [32m'session'[39m,
+  outcome: [32m'stored'[39m,
+  bytes: [33m5[39m,
+  cacheBytes: [33m923[39m
+}
+
+[90mstdout[2m | apps/web/src/components/lazy-detail-owner.test.tsx[2m > [22m[2mrenders immutable cache hits without metadata authority (image=true)
+[22m[39mdisplay image {
+  orbId: [32m'orb'[39m,
+  recordId: [32m'one'[39m,
+  detailKey: [32m'one:0'[39m,
+  imageIndex: [33m0[39m,
+  sessionId: [32m'session'[39m,
+  outcome: [32m'hit'[39m,
+  bytes: [33m6[39m
+}
+
+[90mstdout[2m | apps/web/src/components/lazy-detail-owner.test.tsx[2m > [22m[2mdoes not reuse or publish an old owner's pending response (image=false)
+[22m[39mdisplay detail {
+  orbId: [32m'orb'[39m,
+  recordId: [32m'one'[39m,
+  detailKey: [32m'one:0'[39m,
+  outcome: [32m'stored'[39m,
+  bytes: [33m1376[39m
+}
+
+[90mstdout[2m | apps/web/src/components/lazy-detail-owner.test.tsx[2m > [22m[2mdoes not reuse or publish an old owner's pending response (image=true)
+[22m[39mdisplay image {
+  orbId: [32m'orb'[39m,
+  recordId: [32m'one'[39m,
+  detailKey: [32m'one:0'[39m,
+  imageIndex: [33m0[39m,
+  sessionId: [32m'session'[39m,
+  outcome: [32m'miss'[39m
+}
+
+[90mstdout[2m | apps/web/src/components/lazy-detail-owner.test.tsx[2m > [22m[2mdoes not reuse or publish an old owner's pending response (image=true)
+[22m[39mdisplay image {
+  orbId: [32m'orb'[39m,
+  recordId: [32m'one'[39m,
+  detailKey: [32m'one:0'[39m,
+  imageIndex: [33m0[39m,
+  sessionId: [32m'session'[39m,
+  outcome: [32m'miss'[39m
+}
+
+[90mstdout[2m | apps/web/src/components/lazy-detail-owner.test.tsx[2m > [22m[2mdoes not reuse or publish an old owner's pending response (image=true)
+[22m[39mdisplay image {
+  orbId: [32m'orb'[39m,
+  recordId: [32m'one'[39m,
+  detailKey: [32m'one:0'[39m,
+  imageIndex: [33m0[39m,
+  sessionId: [32m'session'[39m,
+  outcome: [32m'stored'[39m,
+  bytes: [33m3[39m,
+  cacheBytes: [33m921[39m
+}
+
+[90mstdout[2m | apps/web/src/components/lazy-detail-owner.test.tsx[2m > [22m[2mstarts cold owned reads before the next task (image=false)
+[22m[39mdisplay detail {
+  orbId: [32m'orb'[39m,
+  recordId: [32m'one'[39m,
+  detailKey: [32m'one:0'[39m,
+  outcome: [32m'stored'[39m,
+  bytes: [33m1376[39m
+}
+
+[90mstdout[2m | apps/web/src/components/lazy-detail-owner.test.tsx[2m > [22m[2mstarts cold owned reads before the next task (image=true)
+[22m[39mdisplay image {
+  orbId: [32m'orb'[39m,
+  recordId: [32m'one'[39m,
+  detailKey: [32m'one:0'[39m,
+  imageIndex: [33m0[39m,
+  sessionId: [32m'session'[39m,
+  outcome: [32m'miss'[39m
+}
+
+[90mstdout[2m | apps/web/src/components/lazy-detail-owner.test.tsx[2m > [22m[2mstarts cold owned reads before the next task (image=true)
+[22m[39mdisplay image {
+  orbId: [32m'orb'[39m,
+  recordId: [32m'one'[39m,
+  detailKey: [32m'one:0'[39m,
+  imageIndex: [33m0[39m,
+  sessionId: [32m'session'[39m,
+  outcome: [32m'stored'[39m,
+  bytes: [33m4[39m,
+  cacheBytes: [33m922[39m
+}
+
+[90mstdout[2m | apps/web/src/components/lazy-detail-owner.test.tsx[2m > [22m[2minvalidation fences pending publication (image=true)
+[22m[39mdisplay image {
+  orbId: [32m'orb'[39m,
+  recordId: [32m'one'[39m,
+  detailKey: [32m'one:0'[39m,
+  imageIndex: [33m0[39m,
+  sessionId: [32m'session'[39m,
+  outcome: [32m'miss'[39m
+}
+
+[90mstdout[2m | apps/web/src/components/lazy-detail-owner.test.tsx[2m > [22m[2minvalidation fences pending publication (image=true)
+[22m[39mdisplay image {
+  orbId: [32m'orb'[39m,
+  recordId: [32m'one'[39m,
+  detailKey: [32m'one:0'[39m,
+  imageIndex: [33m0[39m,
+  sessionId: [32m'session'[39m,
+  outcome: [32m'stale_epoch'[39m
+}
+
+[90mstdout[2m | apps/web/src/components/lazy-detail-owner.test.tsx[2m > [22m[2mlive identities (newFirst=false)
+[22m[39mlive detail { orbId: [32m'orb'[39m, blockId: [32m'other-block'[39m, outcome: [32m'completed'[39m }
+
+[90mstdout[2m | apps/web/src/components/lazy-detail-owner.test.tsx[2m > [22m[2mlive identities (newFirst=true)
+[22m[39mlive detail { orbId: [32m'orb'[39m, blockId: [32m'other-block'[39m, outcome: [32m'completed'[39m }
+
+[90mstdout[2m | apps/web/src/components/lazy-detail-owner.test.tsx[2m > [22m[2msession ownership (newFirst=false)
+[22m[39mdisplay detail {
+  orbId: [32m'orb'[39m,
+  recordId: [32m'one'[39m,
+  detailKey: [32m'one:0'[39m,
+  outcome: [32m'stored'[39m,
+  bytes: [33m1406[39m
+}
+
+[90mstdout[2m | apps/web/src/components/lazy-detail-owner.test.tsx[2m > [22m[2msession ownership (newFirst=true)
+[22m[39mdisplay detail {
+  orbId: [32m'orb'[39m,
+  recordId: [32m'one'[39m,
+  detailKey: [32m'one:0'[39m,
+  outcome: [32m'stored'[39m,
+  bytes: [33m1406[39m
+}
+
+ [32m✓[39m apps/web/src/components/lazy-detail-owner.test.tsx [2m([22m[2m15 tests[22m[2m)[22m[32m 27[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/live-cache.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 131[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/live-cache.dst.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 428[2mms[22m[39m
+   [33m[2m✓[22m[39m DST: half-open offline/online recovers a parent-closed assistant suffix despite an empty inbox[33m 426[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/orb-load.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/usage.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/HistoryView-pairing.test.tsx [2m([22m[2m10 tests[22m[2m)[22m[32m 69[2mms[22m[39m
+ [32m✓[39m apps/web/src/testkit/mock-backend.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 139[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/use-history-tail.test.ts [2m([22m[2m23 tests[22m[2m)[22m[32m 24[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/claude-auth-entry.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 169[2mms[22m[39m
+ [32m✓[39m apps/web/src/pages/OrbPage.test.ts [2m([22m[2m37 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m apps/web/src/pages/compaction.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/dashboard-search-source.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/inbox-poller.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/queued-messages.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/central-streaming.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 193[2mms[22m[39m
+ [32m✓[39m apps/web/src/pages/live-output.test.ts [2m([22m[2m19 tests[22m[2m)[22m[32m 157[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/transcript-cache.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/use-visual-viewport.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/claude-auth.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/safari-links.test.ts [2m([22m[2m42 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/image-cache.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/HistoryView-tail.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[32m 91[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/OrbIndex.test.tsx [2m([22m[2m8 tests[22m[2m)[22m[32m 32[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/ClaudeAuth.test.tsx [2m([22m[2m12 tests[22m[2m)[22m[32m 23[2mms[22m[39m
+ [32m✓[39m apps/web/src/pages/agent-settings.dst.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 183[2mms[22m[39m
+ [32m✓[39m apps/web/src/pages/transcript-cache.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/dev-console-debug.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/claude-consent-window.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/navigation.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m apps/web/src/pages/transcript-cache.dst.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 38[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/project-orb-tree.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 33[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/detail-owner.dst.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 33[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/Composer.test.tsx [2m([22m[2m11 tests[22m[2m)[22m[32m 34[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/HistoryView.delivery-status.test.tsx [2m([22m[2m20 tests[22m[2m)[22m[32m 92[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/ActivityHeadline.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[32m 23[2mms[22m[39m
+ [32m✓[39m apps/web/src/pages/OrbPage.central-input.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 115[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/StateTile.test.tsx [2m([22m[2m23 tests[22m[2m)[22m[32m 21[2mms[22m[39m
+ [32m✓[39m apps/web/src/install-assets.contract.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/AppSearch.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[32m 19[2mms[22m[39m
+ [32m✓[39m apps/web/src/pages/output-handoff.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 34[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/favicon.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/OrbShareButton.test.tsx [2m([22m[2m7 tests[22m[2m)[22m[32m 33[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/inbox-poller.dst.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 17[2mms[22m[39m
+ [32m✓[39m apps/web/src/pages/OrbPage.pending-abort.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/share-current-page.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/HistoryView.delivery.test.tsx [2m([22m[2m1 test[22m[2m)[22m[32m 32[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/orb-file-drop.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/DetailBody.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[32m 36[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/scroll-pin.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/DisplayHistory.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[32m 48[2mms[22m[39m
+ [32m✓[39m apps/web/src/pages/lazy-detail-handoff.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/app-search.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/SubagentRail.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/turn-notifications.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m apps/web/src/pages/reasoning-visibility.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/orb-alert.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m apps/web/src/pages/OrbPage.composer-ack.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m apps/web/src/production-fields.contract.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 21[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/terminal-layout.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/composer-draft.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m apps/web/src/pages/agent-settings.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/session.dst.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 70[2mms[22m[39m
+ [32m✓[39m apps/web/src/pages/orb-header-settings.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/history-refresh.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/detail-cache.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/create-orb-request.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 48[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/command-options.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m apps/web/src/pages/orb-share.contract.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/HistoryView.subscription.test.tsx [2m([22m[2m1 test[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/mcp-form.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/activity-headline.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/usage-fixture.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 68[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/HostedFiles.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[32m 28[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/HarnessIcon.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/OrbResourceWarnings.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[32m 31[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/masonry.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/ProjectConfigModal.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 22[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/MarkdownCodeBlock.test.tsx [2m([22m[2m11 tests[22m[2m)[22m[32m 61[2mms[22m[39m
+ [32m✓[39m apps/web/src/App.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/Icons.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/ProjectMcpSettings.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/MermaidDiagram.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[32m 44[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/claude-auth-api.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 54[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/session.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/copy-to-clipboard.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/OrbNotice.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/UsageOrbRankings.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/settings-fallback.test.tsx [2m([22m[2m1 test[22m[2m)[22m[32m 31[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/ChatMarkdown.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 37[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/LogoutButton.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/history-tail.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/project-deletion.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/ProjectInstructions.test.tsx [2m([22m[2m1 test[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/composer-mode.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/OrbTerminal.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/OrbFailureBanner.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/SessionRibbon.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/ConfigTabs.test.tsx [2m([22m[2m1 test[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/object-url.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/page-title.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/uuid.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/terminal-copy.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/send-shortcut.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m apps/web/src/components/TextFieldFrame.test.tsx [2m([22m[2m1 test[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/mermaid-render.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m apps/web/src/testkit/vite-config.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 728[2mms[22m[39m
+   [33m[2m✓[22m[39m keeps the production JavaScript and CSS browser targets[33m 726[2mms[22m[39m
+ [32m✓[39m apps/web/src/lib/auth-navigation.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m apps/web/src/pages/CreateOrbPage.test.tsx [2m([22m[2m1 test[22m[2m)[22m[32m 37[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m116 passed[39m[22m[90m (116)[39m
+[2m      Tests [22m [1m[32m954 passed[39m[22m[90m (954)[39m
+[2m   Start at [22m 00:55:44
+[2m   Duration [22m 63.10s[2m (import 82%, tests 12%, transform 5%, worker 1%)[22m
+
+[2m     Import [22m [33m410 modules were evaluated 581 times[39m[2m · 40.41s total, 82% of tracked time[22m
+[2m            [22m [2m~11.89s faster with [22m[33misolate: false[39m[2m — shared modules are evaluated once per worker instead of once per file[22m
+[2m            [22m [2mlearn more: https://vitest.dev/guide/improving-performance#test-isolation[22m
+

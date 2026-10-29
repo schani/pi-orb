@@ -1,0 +1,4 @@
+e2e/frontend-mobile.e2e.test.ts(1515,19): error TS18047: 'box' is possibly 'null'.
+e2e/frontend-mobile.e2e.test.ts(1515,27): error TS18047: 'box' is possibly 'null'.
+e2e/frontend-mobile.e2e.test.ts(1516,19): error TS18047: 'box' is possibly 'null'.
+e2e/frontend-mobile.e2e.test.ts(1516,27): error TS18047: 'box' is possibly 'null'.

@@ -1,0 +1,109 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90m/workspace/repo[39m
+
+ [31m❯[39m apps/web/src/lib/dev-console-debug.test.ts [2m([22m[2m7 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 22[2mms[22m[39m
+   [31m❯[39m DevConsoleDebug [2m(7)[22m
+     [32m✓[39m clears principal-bound metadata[32m 3[2mms[22m[39m
+     [32m✓[39m installs an idempotent read-only public API[32m 2[2mms[22m[39m
+     [32m✓[39m bounds and strictly projects trace metadata[32m 2[2mms[22m[39m
+     [32m✓[39m records content-free pin transition geometry[32m 0[2mms[22m[39m
+[31m     [31m×[31m sanitizes content-free viewport resume geometry[39m[32m 10[2mms[22m[39m
+     [32m✓[39m returns detached dumps and scans current order and inbox evidence on demand[32m 2[2mms[22m[39m
+     [32m✓[39m lets only the current owner clear the snapshot provider[32m 1[2mms[22m[39m
+ [31m❯[39m apps/web/src/lib/use-visual-viewport.test.ts [2m([22m[2m13 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 24[2mms[22m[39m
+   [31m❯[39m followVisualViewport [2m(13)[22m
+[31m     [31m×[31m bounds the accessory reserve for iPhone / iPhone / 5 touch points[39m[32m 15[2mms[22m[39m
+     [32m✓[39m bounds the accessory reserve for iPad / iPad / 5 touch points[32m 1[2mms[22m[39m
+     [32m✓[39m bounds the accessory reserve for desktop / MacIntel / 5 touch points[32m 1[2mms[22m[39m
+     [32m✓[39m bounds the accessory reserve for desktop / MacIntel / 0 touch points[32m 1[2mms[22m[39m
+     [32m✓[39m bounds the accessory reserve for Android / Linux / 5 touch points[32m 0[2mms[22m[39m
+     [32m✓[39m pins the app box to the visual viewport through resize and pan edges[32m 0[2mms[22m[39m
+     [32m✓[39m resamples missed viewport changes on visible visibilitychange without a resize or scroll[32m 1[2mms[22m[39m
+     [32m✓[39m resamples missed viewport changes on visible pageshow without a resize or scroll[32m 0[2mms[22m[39m
+     [32m✓[39m resamples missed viewport changes on visible focus without a resize or scroll[32m 1[2mms[22m[39m
+     [32m✓[39m keeps the existing layout during zoomed or invalid resume measurements[32m 1[2mms[22m[39m
+     [32m✓[39m keeps the existing layout while pinch-zoomed or reporting no height[32m 0[2mms[22m[39m
+     [32m✓[39m follows the window when no visual viewport exists[32m 0[2mms[22m[39m
+     [32m✓[39m removes its properties and stops listening on cleanup[32m 0[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 2 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m apps/web/src/lib/dev-console-debug.test.ts[2m > [22mDevConsoleDebug[2m > [22msanitizes content-free viewport resume geometry
+[31m[1mAssertionError[22m: expected [ { viewportHeight: 120, …(2) }, …(3) ] to deeply equal [ { viewportHeight: 120, …(2) }, …(3) ][39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  [[22m
+[2m    {[22m
+[2m      "viewportHeight": 120,[22m
+[32m-     "viewportLayoutHeight": 120,[39m
+[31m+     "viewportLayoutHeight": undefined,[39m
+[2m      "viewportOffsetTop": 120,[22m
+[2m    },[22m
+[2m    {[22m
+[2m      "viewportHeight": 0,[22m
+[32m-     "viewportLayoutHeight": 0,[39m
+[31m+     "viewportLayoutHeight": undefined,[39m
+[2m      "viewportOffsetTop": 0,[22m
+[2m    },[22m
+[2m    {[22m
+[2m      "viewportHeight": 0,[22m
+[32m-     "viewportLayoutHeight": 0,[39m
+[31m+     "viewportLayoutHeight": undefined,[39m
+[2m      "viewportOffsetTop": 0,[22m
+[2m    },[22m
+[2m    {[22m
+[2m      "viewportHeight": 0,[22m
+[32m-     "viewportLayoutHeight": 0,[39m
+[31m+     "viewportLayoutHeight": undefined,[39m
+[2m      "viewportOffsetTop": 0,[22m
+[2m    },[22m
+[2m  ][22m
+
+[36m [2m❯[22m apps/web/src/lib/dev-console-debug.test.ts:[2m102:7[22m[39m
+    [90m100|[39m         viewportOffsetTop,
+    [90m101|[39m       })),
+    [90m102|[39m     ).toEqual([
+    [90m   |[39m       [31m^[39m
+    [90m103|[39m       { viewportHeight: 120, viewportLayoutHeight: 120, viewportOffset…
+    [90m104|[39m       { viewportHeight: 0, viewportLayoutHeight: 0, viewportOffsetTop:…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m apps/web/src/lib/use-visual-viewport.test.ts[2m > [22mfollowVisualViewport[2m > [22mbounds the accessory reserve for iPhone / iPhone / 5 touch points
+[31m[1mAssertionError[22m: expected [ { seq: 1, …(5) }, { seq: 2, …(5) } ] to match object [ { viewportHeight: 600, …(2) }, …(1) ]
+(8 matching properties omitted from actual)[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  [[22m
+[2m    {[22m
+[2m      "viewportHeight": 600,[22m
+[32m-     "viewportLayoutHeight": 1024,[39m
+[2m      "viewportOffsetTop": 0,[22m
+[2m    },[22m
+[2m    {[22m
+[2m      "viewportHeight": 1024,[22m
+[32m-     "viewportLayoutHeight": 1024,[39m
+[2m      "viewportOffsetTop": 0,[22m
+[2m    },[22m
+[2m  ][22m
+
+[36m [2m❯[22m apps/web/src/lib/use-visual-viewport.test.ts:[2m63:46[22m[39m
+    [90m 61|[39m       );
+    [90m 62|[39m       if (inset)
+    [90m 63|[39m         expect(devConsoleDebug.dump().trace).toMatchObject([
+    [90m   |[39m                                              [31m^[39m
+    [90m 64|[39m           { viewportHeight: 600, viewportLayoutHeight: 1024, viewportO…
+    [90m 65|[39m           { viewportHeight: 1024, viewportLayoutHeight: 1024, viewport…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m2 failed[39m[22m[90m (2)[39m
+[2m      Tests [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m18 passed[39m[22m[90m (20)[39m
+[2m   Start at [22m 00:57:49
+[2m   Duration [22m 820ms[2m (import 70%, transform 20%, tests 8%, worker 1%)[22m
+

@@ -1,0 +1,228 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90m/workspace/repo[39m
+
+[90mstdout[2m | e2e/frontend-mobile.e2e.test.ts[2m > [22m[2mphone frontend · chromium[2m > [22m[2mkeeps Send under the original pointer with accessory clearance · touch
+[22m[39m6:01:03 PM [vite] (client) hmr update /src/components/Composer.tsx
+
+ [31m❯[39m [30m[43m frontend [49m[39m e2e/frontend-mobile.e2e.test.ts [2m([22m[2m132 tests[22m[2m | [22m[31m4 failed[39m[2m | [22m[33m128 skipped[39m[2m)[22m[33m 41796[2mms[22m[39m
+   [31m❯[39m phone frontend · chromium [2m(66)[22m
+     [2m[90m↓[39m[22m keeps required GitHub login visible at the transcript tail at 1280px
+     [2m[90m↓[39m[22m keeps required GitHub login visible at the transcript tail at 320px
+     [2m[90m↓[39m[22m fills dashboard width with one column or equal masonry columns at 320px
+     [2m[90m↓[39m[22m fills dashboard width with one column or equal masonry columns at 390px
+     [2m[90m↓[39m[22m fills dashboard width with one column or equal masonry columns at 402px
+     [2m[90m↓[39m[22m fills dashboard width with one column or equal masonry columns at 600px
+     [2m[90m↓[39m[22m fills dashboard width with one column or equal masonry columns at 631px
+     [2m[90m↓[39m[22m fills dashboard width with one column or equal masonry columns at 632px
+     [2m[90m↓[39m[22m fills dashboard width with one column or equal masonry columns at 1280px
+     [2m[90m↓[39m[22m wraps assistant failure text inside the phone transcript at 320px
+     [2m[90m↓[39m[22m wraps assistant failure text inside the phone transcript at 390px
+     [2m[90m↓[39m[22m keeps the reading face and zoom-safe input typography at 1280 px with touch=false
+     [2m[90m↓[39m[22m keeps the reading face and zoom-safe input typography at 820 px with touch=true
+     [2m[90m↓[39m[22m keeps the reading face and zoom-safe input typography at 390 px with touch=true
+     [2m[90m↓[39m[22m keeps the reading face and zoom-safe input typography at 320 px with touch=false
+     [2m[90m↓[39m[22m leaves tablet-width touch focus and document position alone on tab return
+     [2m[90m↓[39m[22m uses the phone side rail at 320px without changing desktop composition
+     [2m[90m↓[39m[22m uses the phone side rail at 390px without changing desktop composition
+     [2m[90m↓[39m[22m uses the phone side rail at 600px without changing desktop composition
+     [2m[90m↓[39m[22m keeps modal close contrast through keyboard and hover focus
+     [2m[90m↓[39m[22m keeps modal closes in the corner and message/command composer geometry fixed at 1280px
+     [2m[90m↓[39m[22m keeps modal closes in the corner and message/command composer geometry fixed at 390px
+     [2m[90m↓[39m[22m keeps modal closes in the corner and message/command composer geometry fixed at 320px
+     [2m[90m↓[39m[22m follows the initial phone tail while default-open image details arrive
+     [2m[90m↓[39m[22m preserves reader position after wheel intent and content growth
+     [2m[90m↓[39m[22m preserves reader position after pointer intent and content growth
+     [2m[90m↓[39m[22m preserves reader position after PageUp intent and content growth
+     [2m[90m↓[39m[22m preserves reader position after Home intent and content growth
+     [2m[90m↓[39m[22m preserves reader position after ArrowUp intent and content growth
+     [2m[90m↓[39m[22m preserves reader position after Shift+Space intent and content growth
+     [2m[90m↓[39m[22m preserves reader position after focus intent and content growth
+     [2m[90m↓[39m[22m keeps tail intent after a no-op End key at 390px
+     [2m[90m↓[39m[22m keeps tail intent after a no-op End key at 1280px
+     [2m[90m↓[39m[22m preserves cancelled touch pan and momentum through growth (scroll delivered: false)
+     [2m[90m↓[39m[22m preserves cancelled touch pan and momentum through growth (scroll delivered: true)
+     [2m[90m↓[39m[22m keeps tail during a stationary pointer with inside release
+     [2m[90m↓[39m[22m keeps tail during a stationary pointer with outside release
+     [2m[90m↓[39m[22m keeps tail during a stationary pointer with cancel release
+     [2m[90m↓[39m[22m keeps tail when a stationary pointer precedes the auto-scroll event
+     [2m[90m↓[39m[22m keeps tail after no-op wheel at 390px (0, 500)
+     [2m[90m↓[39m[22m keeps tail after no-op wheel at 1280px (0, 500)
+     [2m[90m↓[39m[22m keeps tail after no-op wheel at 390px (500, 0)
+     [2m[90m↓[39m[22m keeps tail after no-op wheel at 1280px (500, 0)
+     [2m[90m↓[39m[22m keeps tail after no-op wheel at 390px (0, 0)
+     [2m[90m↓[39m[22m keeps tail when clamping precedes resize (scroll delivered: false)
+     [2m[90m↓[39m[22m keeps tail when clamping precedes resize (scroll delivered: true)
+     [2m[90m↓[39m[22m does not write phone scroll position during unrelated polling renders
+     [2m[90m↓[39m[22m keeps phone transcript pixels after a native wheel scroll round trip
+[31m     [31m×[31m keeps Send under the original pointer with accessory clearance · mouse[39m[33m 8723[2mms[22m[39m
+[31m     [31m×[31m keeps Send under the original pointer with accessory clearance · touch[39m[33m 8161[2mms[22m[39m
+     [2m[90m↓[39m[22m reserves accessory space only for a focused iOS phone keyboard · iPhone
+     [2m[90m↓[39m[22m reserves accessory space only for a focused iOS phone keyboard · Android
+     [2m[90m↓[39m[22m reserves accessory space only for a focused iOS phone keyboard · iPad
+     [2m[90m↓[39m[22m owns phone scrolling in one viewport through keyboard resize and pan events
+     [2m[90m↓[39m[22m keeps the iPad desktop layout inside a shrunken, panned visual viewport
+     [2m[90m↓[39m[22m resamples iPad viewport geometry on visibilitychange without resize or scroll events
+     [2m[90m↓[39m[22m resamples iPad viewport geometry on pageshow without resize or scroll events
+     [2m[90m↓[39m[22m resamples iPad viewport geometry on focus without resize or scroll events
+     [2m[90m↓[39m[22m hands MCP connect to a separate browser before starting cookie-bound consent (launch failure: false)
+     [2m[90m↓[39m[22m hands MCP add to a separate browser before starting cookie-bound consent (launch failure: false)
+     [2m[90m↓[39m[22m hands MCP connect to a separate browser before starting cookie-bound consent (launch failure: true)
+     [2m[90m↓[39m[22m hands MCP add to a separate browser before starting cookie-bound consent (launch failure: true)
+     [2m[90m↓[39m[22m hands Claude consent to Safari without opening an in-app tab
+     [2m[90m↓[39m[22m opens external transcript links in Safari only from an iOS home-screen app (standalone true)
+     [2m[90m↓[39m[22m opens external transcript links in Safari only from an iOS home-screen app (standalone false)
+     [2m[90m↓[39m[22m aborts only from the collapsed phone pad and retains the draft
+   [31m❯[39m phone frontend · webkit [2m(66)[22m
+     [2m[90m↓[39m[22m keeps required GitHub login visible at the transcript tail at 1280px
+     [2m[90m↓[39m[22m keeps required GitHub login visible at the transcript tail at 320px
+     [2m[90m↓[39m[22m fills dashboard width with one column or equal masonry columns at 320px
+     [2m[90m↓[39m[22m fills dashboard width with one column or equal masonry columns at 390px
+     [2m[90m↓[39m[22m fills dashboard width with one column or equal masonry columns at 402px
+     [2m[90m↓[39m[22m fills dashboard width with one column or equal masonry columns at 600px
+     [2m[90m↓[39m[22m fills dashboard width with one column or equal masonry columns at 631px
+     [2m[90m↓[39m[22m fills dashboard width with one column or equal masonry columns at 632px
+     [2m[90m↓[39m[22m fills dashboard width with one column or equal masonry columns at 1280px
+     [2m[90m↓[39m[22m wraps assistant failure text inside the phone transcript at 320px
+     [2m[90m↓[39m[22m wraps assistant failure text inside the phone transcript at 390px
+     [2m[90m↓[39m[22m keeps the reading face and zoom-safe input typography at 1280 px with touch=false
+     [2m[90m↓[39m[22m keeps the reading face and zoom-safe input typography at 820 px with touch=true
+     [2m[90m↓[39m[22m keeps the reading face and zoom-safe input typography at 390 px with touch=true
+     [2m[90m↓[39m[22m keeps the reading face and zoom-safe input typography at 320 px with touch=false
+     [2m[90m↓[39m[22m leaves tablet-width touch focus and document position alone on tab return
+     [2m[90m↓[39m[22m uses the phone side rail at 320px without changing desktop composition
+     [2m[90m↓[39m[22m uses the phone side rail at 390px without changing desktop composition
+     [2m[90m↓[39m[22m uses the phone side rail at 600px without changing desktop composition
+     [2m[90m↓[39m[22m keeps modal close contrast through keyboard and hover focus
+     [2m[90m↓[39m[22m keeps modal closes in the corner and message/command composer geometry fixed at 1280px
+     [2m[90m↓[39m[22m keeps modal closes in the corner and message/command composer geometry fixed at 390px
+     [2m[90m↓[39m[22m keeps modal closes in the corner and message/command composer geometry fixed at 320px
+     [2m[90m↓[39m[22m follows the initial phone tail while default-open image details arrive
+     [2m[90m↓[39m[22m preserves reader position after wheel intent and content growth
+     [2m[90m↓[39m[22m preserves reader position after pointer intent and content growth
+     [2m[90m↓[39m[22m preserves reader position after PageUp intent and content growth
+     [2m[90m↓[39m[22m preserves reader position after Home intent and content growth
+     [2m[90m↓[39m[22m preserves reader position after ArrowUp intent and content growth
+     [2m[90m↓[39m[22m preserves reader position after Shift+Space intent and content growth
+     [2m[90m↓[39m[22m preserves reader position after focus intent and content growth
+     [2m[90m↓[39m[22m keeps tail intent after a no-op End key at 390px
+     [2m[90m↓[39m[22m keeps tail intent after a no-op End key at 1280px
+     [2m[90m↓[39m[22m preserves cancelled touch pan and momentum through growth (scroll delivered: false)
+     [2m[90m↓[39m[22m preserves cancelled touch pan and momentum through growth (scroll delivered: true)
+     [2m[90m↓[39m[22m keeps tail during a stationary pointer with inside release
+     [2m[90m↓[39m[22m keeps tail during a stationary pointer with outside release
+     [2m[90m↓[39m[22m keeps tail during a stationary pointer with cancel release
+     [2m[90m↓[39m[22m keeps tail when a stationary pointer precedes the auto-scroll event
+     [2m[90m↓[39m[22m keeps tail after no-op wheel at 390px (0, 500)
+     [2m[90m↓[39m[22m keeps tail after no-op wheel at 1280px (0, 500)
+     [2m[90m↓[39m[22m keeps tail after no-op wheel at 390px (500, 0)
+     [2m[90m↓[39m[22m keeps tail after no-op wheel at 1280px (500, 0)
+     [2m[90m↓[39m[22m keeps tail after no-op wheel at 390px (0, 0)
+     [2m[90m↓[39m[22m keeps tail when clamping precedes resize (scroll delivered: false)
+     [2m[90m↓[39m[22m keeps tail when clamping precedes resize (scroll delivered: true)
+     [2m[90m↓[39m[22m does not write phone scroll position during unrelated polling renders
+     [2m[90m↓[39m[22m keeps phone transcript pixels after a native wheel scroll round trip
+[31m     [31m×[31m keeps Send under the original pointer with accessory clearance · mouse[39m[33m 13780[2mms[22m[39m
+[31m     [31m×[31m keeps Send under the original pointer with accessory clearance · touch[39m[33m 7214[2mms[22m[39m
+     [2m[90m↓[39m[22m reserves accessory space only for a focused iOS phone keyboard · iPhone
+     [2m[90m↓[39m[22m reserves accessory space only for a focused iOS phone keyboard · Android
+     [2m[90m↓[39m[22m reserves accessory space only for a focused iOS phone keyboard · iPad
+     [2m[90m↓[39m[22m owns phone scrolling in one viewport through keyboard resize and pan events
+     [2m[90m↓[39m[22m keeps the iPad desktop layout inside a shrunken, panned visual viewport
+     [2m[90m↓[39m[22m resamples iPad viewport geometry on visibilitychange without resize or scroll events
+     [2m[90m↓[39m[22m resamples iPad viewport geometry on pageshow without resize or scroll events
+     [2m[90m↓[39m[22m resamples iPad viewport geometry on focus without resize or scroll events
+     [2m[90m↓[39m[22m hands MCP connect to a separate browser before starting cookie-bound consent (launch failure: false)
+     [2m[90m↓[39m[22m hands MCP add to a separate browser before starting cookie-bound consent (launch failure: false)
+     [2m[90m↓[39m[22m hands MCP connect to a separate browser before starting cookie-bound consent (launch failure: true)
+     [2m[90m↓[39m[22m hands MCP add to a separate browser before starting cookie-bound consent (launch failure: true)
+     [2m[90m↓[39m[22m hands Claude consent to Safari without opening an in-app tab
+     [2m[90m↓[39m[22m opens external transcript links in Safari only from an iOS home-screen app (standalone true)
+     [2m[90m↓[39m[22m opens external transcript links in Safari only from an iOS home-screen app (standalone false)
+     [2m[90m↓[39m[22m aborts only from the collapsed phone pad and retains the draft
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 4 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m [30m[43m frontend [49m[39m e2e/frontend-mobile.e2e.test.ts[2m > [22mphone frontend · chromium[2m > [22mkeeps Send under the original pointer with accessory clearance · mouse
+[31m[1mError[22m: expect(locator).toBeFocused() failed
+
+Locator:  locator('.composer').getByRole('textbox', { name: 'Message the orb', exact: true })
+Expected: focused
+Received: inactive
+Timeout:  5000ms
+
+Call log:
+  - Expect "toBeFocused" locator('.composer').getByRole('textbox', { name: 'Message the orb', exact: true }) with timeout 5000ms
+  - waiting for locator('.composer').getByRole('textbox', { name: 'Message the orb', exact: true })
+    14 × locator resolved to <textarea rows="4" class="composer-input" data-block-caret="false" aria-label="Message the orb">retain this draft until acceptance</textarea>
+       - unexpected value "inactive"
+[39m
+[90m [2m❯[22m captureRawStack node_modules/playwright-core/lib/coreBundle.js:[2m9282:17[22m[39m
+[90m [2m❯[22m callMatcherAsStep node_modules/playwright/lib/matchers/expect.js:[2m13316:57[22m[39m
+[90m [2m❯[22m Object.toBeFocused node_modules/playwright/lib/matchers/expect.js:[2m13308:23[22m[39m
+[36m [2m❯[22m e2e/frontend-mobile.e2e.test.ts:[2m1522:35[22m[39m
+    [90m1520|[39m           await page.mouse.move(x, y);
+    [90m1521|[39m           await page.mouse.down();
+    [90m1522|[39m           // Native blur/focus defaults run before mouseup; do not let…
+    [90m   |[39m                                   [31m^[39m
+    [90m1523|[39m           // retry against the moved button hide a lost original-coord…
+    [90m1524|[39m           await expectPage(input).toBeFocused();
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m [30m[43m frontend [49m[39m e2e/frontend-mobile.e2e.test.ts[2m > [22mphone frontend · chromium[2m > [22mkeeps Send under the original pointer with accessory clearance · touch
+[41m[1m FAIL [22m[49m [30m[43m frontend [49m[39m e2e/frontend-mobile.e2e.test.ts[2m > [22mphone frontend · webkit[2m > [22mkeeps Send under the original pointer with accessory clearance · touch
+[31m[1mError[22m: expect(locator).toContainText(expected) failed
+
+Locator: locator('.composer').getByRole('status')
+Expected substring: "Send probe unavailable"
+Timeout: 5000ms
+Error: element(s) not found
+
+Call log:
+  - Expect "toContainText" locator('.composer').getByRole('status') with timeout 5000ms
+  - waiting for locator('.composer').getByRole('status')
+[39m
+[90m [2m❯[22m captureRawStack node_modules/playwright-core/lib/coreBundle.js:[2m9282:17[22m[39m
+[90m [2m❯[22m callMatcherAsStep node_modules/playwright/lib/matchers/expect.js:[2m13316:57[22m[39m
+[90m [2m❯[22m Object.toContainText node_modules/playwright/lib/matchers/expect.js:[2m13308:23[22m[39m
+[36m [2m❯[22m e2e/frontend-mobile.e2e.test.ts:[2m1529:56[22m[39m
+    [90m1527|[39m           await page.mouse.up();
+    [90m1528|[39m         } else {
+    [90m1529|[39m           await page.touchscreen.tap(x, y);
+    [90m   |[39m                                                        [31m^[39m
+    [90m1530|[39m         }
+    [90m1531|[39m         await expectPage(composer.getByRole("status")).toContainText("…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m [30m[43m frontend [49m[39m e2e/frontend-mobile.e2e.test.ts[2m > [22mphone frontend · webkit[2m > [22mkeeps Send under the original pointer with accessory clearance · mouse
+[31m[1mError[22m: expect(locator).toBeVisible() failed
+
+Locator: locator('.composer').getByRole('button', { name: 'Write message' })
+Expected: visible
+Timeout: 5000ms
+Error: element(s) not found
+
+Call log:
+  - Expect "toBeVisible" locator('.composer').getByRole('button', { name: 'Write message' }) with timeout 5000ms
+  - waiting for locator('.composer').getByRole('button', { name: 'Write message' })
+[39m
+[90m [2m❯[22m captureRawStack node_modules/playwright-core/lib/coreBundle.js:[2m9282:17[22m[39m
+[90m [2m❯[22m callMatcherAsStep node_modules/playwright/lib/matchers/expect.js:[2m13316:57[22m[39m
+[90m [2m❯[22m Object.toBeVisible node_modules/playwright/lib/matchers/expect.js:[2m13308:23[22m[39m
+[36m [2m❯[22m e2e/frontend-mobile.e2e.test.ts:[2m1557:33[22m[39m
+    [90m1555|[39m         await input.evaluate((element) => element.blur());
+    [90m1556|[39m         await expectPage.poll(padding).toBe(baseline);
+    [90m1557|[39m         await input.focus();
+    [90m   |[39m                                 [31m^[39m
+    [90m1558|[39m         await composer.getByRole("button", { name: "Fold editor" }).ta…
+    [90m1559|[39m         await expectPage(write).toBeVisible();
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m4 failed[39m[22m[2m | [22m[33m128 skipped[39m[90m (132)[39m
+[2m   Start at [22m 18:00:47
+[2m   Duration [22m 43.15s[2m (tests 97%, import 2%, transform 1%)[22m
+

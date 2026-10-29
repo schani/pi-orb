@@ -1,0 +1,126 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90m/workspace/repo[39m
+
+ [31m❯[39m apps/web/src/styles.contract.test.ts [2m([22m[2m33 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 48[2mms[22m[39m
+   [32m✓[39m hides a failed chart canvas while retaining its mount target[32m 2[2mms[22m[39m
+   [32m✓[39m renders reasoning Markdown without inheriting literal pre-wrap whitespace[32m 0[2mms[22m[39m
+   [32m✓[39m colors only the owning child header by state, leaving completion neutral[32m 1[2mms[22m[39m
+   [32m✓[39m uses the error signal for activity headline failure and manual Retry[32m 0[2mms[22m[39m
+   [32m✓[39m orb alerts [2m(1)[22m
+     [32m✓[39m keeps long plain text inside a phone-width reverse band without coloring the orb row[32m 1[2mms[22m[39m
+   [32m✓[39m gives Files the same enclosure and summary geometry as Subagents[32m 1[2mms[22m[39m
+   [32m✓[39m subagent roster [2m(1)[22m
+     [32m✓[39m has no nested disclosure-marker or identity-only styles[32m 0[2mms[22m[39m
+   [32m✓[39m composer typography [2m(1)[22m
+     [32m✓[39m inherits the transcript face with zoom-safe phone and touch input sizes[32m 3[2mms[22m[39m
+   [32m✓[39m bundled typography [2m(1)[22m
+     [32m✓[39m separates quasi-proportional reading text from fixed-cell code[32m 4[2mms[22m[39m
+   [32m✓[39m shared text fields [2m(2)[22m
+     [32m✓[39m overlays shared crop marks without changing field spacing[32m 6[2mms[22m[39m
+     [32m✓[39m uses a neutral highlight on every paper surface[32m 0[2mms[22m[39m
+   [32m✓[39m dashboard layout contract [2m(7)[22m
+     [32m✓[39m uses icon-only creation without a bottom text action[32m 1[2mms[22m[39m
+     [32m✓[39m positions project boxes absolutely for masonry placement[32m 1[2mms[22m[39m
+     [32m✓[39m rules the board from the totals strip to the bottom-pinned footer[32m 1[2mms[22m[39m
+     [32m✓[39m gives the project name 18px and the orb name 14px on their own lines[32m 1[2mms[22m[39m
+     [32m✓[39m keeps every dashboard orb entry on its line grid behind its state hue[32m 1[2mms[22m[39m
+     [32m✓[39m uses the stopped gray hue for sleeping rows without overriding selected fill[32m 0[2mms[22m[39m
+     [32m✓[39m inverts the selected find row and underlines the matched text[32m 0[2mms[22m[39m
+   [32m✓[39m orb workspace layout contract [2m(13)[22m
+     [32m✓[39m uses gutter-free inverted user paper and plain white orb paper[32m 1[2mms[22m[39m
+     [32m✓[39m keeps correspondence on gray paper with wrapping literal text, sender, and failures[32m 1[2mms[22m[39m
+     [32m✓[39m scrolls wide tables instead of breaking words to squeeze columns[32m 0[2mms[22m[39m
+     [32m✓[39m gives boxed code and text the same gray background as inline code[32m 0[2mms[22m[39m
+     [32m✓[39m carries viewport height through the app to the bottom-pinned composer[32m 1[2mms[22m[39m
+     [32m✓[39m keeps the project index beside the transcript with plain hover rows[32m 2[2mms[22m[39m
+     [32m✓[39m keeps stacked project actions and headers on the existing grid[32m 1[2mms[22m[39m
+     [32m✓[39m retains the diagnostic gutter and keeps queue state visible[32m 1[2mms[22m[39m
+     [32m✓[39m overlays a full-width headerless terminal below the header and active-child rail[32m 3[2mms[22m[39m
+     [32m✓[39m uses one rail-row geometry for reasoning and every tool category[32m 2[2mms[22m[39m
+     [32m✓[39m balances isolated activity rows with prose without separating adjacent rail rows[32m 0[2mms[22m[39m
+     [32m✓[39m indents expanded subagent receipts, including errors, past the rail on desktop and phones[32m 0[2mms[22m[39m
+     [32m✓[39m contains inline tool images without cropping and keeps the viewer monochrome[32m 1[2mms[22m[39m
+   [32m✓[39m gives owner skill disclosures and the add action phone touch targets[32m 1[2mms[22m[39m
+[31m   [31m×[31m reserves native keyboard chrome only for the focused phone editor[39m[32m 8[2mms[22m[39m
+ [31m❯[39m apps/web/src/lib/use-visual-viewport.test.ts [2m([22m[2m13 tests[22m[2m | [22m[31m6 failed[39m[2m)[22m[32m 51[2mms[22m[39m
+   [31m❯[39m followVisualViewport [2m(13)[22m
+[31m     [31m×[31m bounds the accessory reserve for iPhone / iPhone / 5 touch points[39m[32m 25[2mms[22m[39m
+[31m     [31m×[31m bounds the accessory reserve for iPad / iPad / 5 touch points[39m[32m 2[2mms[22m[39m
+[31m     [31m×[31m bounds the accessory reserve for desktop / MacIntel / 5 touch points[39m[32m 5[2mms[22m[39m
+[31m     [31m×[31m bounds the accessory reserve for desktop / MacIntel / 0 touch points[39m[32m 2[2mms[22m[39m
+[31m     [31m×[31m bounds the accessory reserve for Android / Linux / 5 touch points[39m[32m 1[2mms[22m[39m
+[31m     [31m×[31m pins the app box to the visual viewport through resize and pan edges[39m[32m 4[2mms[22m[39m
+     [32m✓[39m resamples missed viewport changes on visible visibilitychange without a resize or scroll[32m 5[2mms[22m[39m
+     [32m✓[39m resamples missed viewport changes on visible pageshow without a resize or scroll[32m 1[2mms[22m[39m
+     [32m✓[39m resamples missed viewport changes on visible focus without a resize or scroll[32m 1[2mms[22m[39m
+     [32m✓[39m keeps the existing layout during zoomed or invalid resume measurements[32m 1[2mms[22m[39m
+     [32m✓[39m keeps the existing layout while pinch-zoomed or reporting no height[32m 1[2mms[22m[39m
+     [32m✓[39m follows the window when no visual viewport exists[32m 0[2mms[22m[39m
+     [32m✓[39m removes its properties and stops listening on cleanup[32m 0[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 7 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m apps/web/src/styles.contract.test.ts[2m > [22mreserves native keyboard chrome only for the focused phone editor
+[31m[1mAssertionError[22m: missing CSS rule .composer:has(.composer-input:focus): expected null not to be null[39m
+[36m [2m❯[22m rule apps/web/src/styles.contract.test.ts:[2m9:53[22m[39m
+    [90m  7|[39m   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    [90m  8|[39m   const match = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(source);
+    [90m  9|[39m   expect(match, `missing CSS rule ${selector}`).not.toBeNull();
+    [90m   |[39m                                                     [31m^[39m
+    [90m 10|[39m   return match?.[1] ?? "";
+    [90m 11|[39m }
+[90m [2m❯[22m apps/web/src/styles.contract.test.ts:[2m477:10[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m apps/web/src/lib/use-visual-viewport.test.ts[2m > [22mfollowVisualViewport[2m > [22mbounds the accessory reserve for iPhone / iPhone / 5 touch points
+[41m[1m FAIL [22m[49m apps/web/src/lib/use-visual-viewport.test.ts[2m > [22mfollowVisualViewport[2m > [22mbounds the accessory reserve for iPad / iPad / 5 touch points
+[41m[1m FAIL [22m[49m apps/web/src/lib/use-visual-viewport.test.ts[2m > [22mfollowVisualViewport[2m > [22mbounds the accessory reserve for desktop / MacIntel / 5 touch points
+[41m[1m FAIL [22m[49m apps/web/src/lib/use-visual-viewport.test.ts[2m > [22mfollowVisualViewport[2m > [22mbounds the accessory reserve for desktop / MacIntel / 0 touch points
+[41m[1m FAIL [22m[49m apps/web/src/lib/use-visual-viewport.test.ts[2m > [22mfollowVisualViewport[2m > [22mbounds the accessory reserve for Android / Linux / 5 touch points
+[31m[1mAssertionError[22m: expected undefined to be '0px' // Object.is equality[39m
+
+[32m- Expected:[39m
+"0px"
+
+[31m+ Received:[39m
+undefined
+
+[36m [2m❯[22m apps/web/src/lib/use-visual-viewport.test.ts:[2m47:58[22m[39m
+    [90m 45|[39m     const stop = followVisualViewport(style, host);
+    [90m 46|[39m     move(950, 0); // Browser chrome alone is not a software keyboard.
+    [90m 47|[39m     expect(properties.get("--keyboard-accessory-inset")).toBe("0px");
+    [90m   |[39m                                                          [31m^[39m
+    [90m 48|[39m     move(600, 0);
+    [90m 49|[39m     expect(properties.get("--keyboard-accessory-inset")).toBe(`${inset…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m apps/web/src/lib/use-visual-viewport.test.ts[2m > [22mfollowVisualViewport[2m > [22mpins the app box to the visual viewport through resize and pan edges
+[31m[1mAssertionError[22m: expected { …(2) } to deeply equal { …(3) }[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  {[22m
+[32m-   "--keyboard-accessory-inset": "0px",[39m
+[2m    "--visual-viewport-height": "1024px",[22m
+[2m    "--visual-viewport-top": "0px",[22m
+[2m  }[22m
+
+[36m [2m❯[22m apps/web/src/lib/use-visual-viewport.test.ts:[2m67:44[22m[39m
+    [90m 65|[39m     const { properties, style, host, move } = harness({ visual: true }…
+    [90m 66|[39m     followVisualViewport(style, host);
+    [90m 67|[39m     expect(Object.fromEntries(properties)).toEqual({
+    [90m   |[39m                                            [31m^[39m
+    [90m 68|[39m       "--visual-viewport-height": "1024px",
+    [90m 69|[39m       "--visual-viewport-top": "0px",
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m2 failed[39m[22m[90m (2)[39m
+[2m      Tests [22m [1m[31m7 failed[39m[22m[2m | [22m[1m[32m39 passed[39m[22m[90m (46)[39m
+[2m   Start at [22m 00:52:36
+[2m   Duration [22m 704ms[2m (transform 39%, tests 37%, import 19%, worker 5%)[22m
+

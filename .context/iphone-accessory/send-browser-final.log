@@ -1,0 +1,28 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90m/workspace/repo[39m
+
+ [32m✓[39m [30m[43m frontend [49m[39m e2e/frontend-mobile.e2e.test.ts [2m([22m[2m132 tests[22m[2m | [22m[33m116 skipped[39m[2m)[22m[33m 58996[2mms[22m[39m
+   [32m✓[39m phone frontend · chromium [2m(66)[22m
+     [33m[2m✓[22m[39m uses the phone side rail at 320px without changing desktop composition[33m 4834[2mms[22m[39m
+     [33m[2m✓[22m[39m uses the phone side rail at 390px without changing desktop composition[33m 4115[2mms[22m[39m
+     [33m[2m✓[22m[39m uses the phone side rail at 600px without changing desktop composition[33m 4036[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps Send under the original pointer with accessory clearance · mouse[33m 3646[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps Send under the original pointer with accessory clearance · touch[33m 3468[2mms[22m[39m
+     [33m[2m✓[22m[39m reserves accessory space only for a focused iOS phone keyboard · iPhone[33m 2971[2mms[22m[39m
+     [33m[2m✓[22m[39m reserves accessory space only for a focused iOS phone keyboard · Android[33m 2905[2mms[22m[39m
+     [33m[2m✓[22m[39m reserves accessory space only for a focused iOS phone keyboard · iPad[33m 3469[2mms[22m[39m
+   [32m✓[39m phone frontend · webkit [2m(66)[22m
+     [33m[2m✓[22m[39m uses the phone side rail at 320px without changing desktop composition[33m 7651[2mms[22m[39m
+     [33m[2m✓[22m[39m uses the phone side rail at 390px without changing desktop composition[33m 4253[2mms[22m[39m
+     [33m[2m✓[22m[39m uses the phone side rail at 600px without changing desktop composition[33m 3918[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps Send under the original pointer with accessory clearance · mouse[33m 2620[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps Send under the original pointer with accessory clearance · touch[33m 2507[2mms[22m[39m
+     [33m[2m✓[22m[39m reserves accessory space only for a focused iOS phone keyboard · iPhone[33m 2245[2mms[22m[39m
+     [33m[2m✓[22m[39m reserves accessory space only for a focused iOS phone keyboard · Android[33m 2194[2mms[22m[39m
+     [33m[2m✓[22m[39m reserves accessory space only for a focused iOS phone keyboard · iPad[33m 2385[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m16 passed[39m[22m[2m | [22m[33m116 skipped[39m[90m (132)[39m
+[2m   Start at [22m 18:04:35
+[2m   Duration [22m 60.13s[2m (tests 98%, import 2%)[22m
+

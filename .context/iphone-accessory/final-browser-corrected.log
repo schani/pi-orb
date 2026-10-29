@@ -1,0 +1,18 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90m/workspace/repo[39m
+
+ [32m✓[39m [30m[43m frontend [49m[39m e2e/frontend-mobile.e2e.test.ts [2m([22m[2m128 tests[22m[2m | [22m[33m122 skipped[39m[2m)[22m[33m 16886[2mms[22m[39m
+   [32m✓[39m phone frontend · chromium [2m(64)[22m
+     [33m[2m✓[22m[39m reserves accessory space only for a focused iOS phone keyboard · iPhone[33m 3419[2mms[22m[39m
+     [33m[2m✓[22m[39m reserves accessory space only for a focused iOS phone keyboard · Android[33m 2778[2mms[22m[39m
+     [33m[2m✓[22m[39m reserves accessory space only for a focused iOS phone keyboard · iPad[33m 2746[2mms[22m[39m
+   [32m✓[39m phone frontend · webkit [2m(64)[22m
+     [33m[2m✓[22m[39m reserves accessory space only for a focused iOS phone keyboard · iPhone[33m 2425[2mms[22m[39m
+     [33m[2m✓[22m[39m reserves accessory space only for a focused iOS phone keyboard · Android[33m 2122[2mms[22m[39m
+     [33m[2m✓[22m[39m reserves accessory space only for a focused iOS phone keyboard · iPad[33m 2231[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m6 passed[39m[22m[2m | [22m[33m122 skipped[39m[90m (128)[39m
+[2m   Start at [22m 00:59:06
+[2m   Duration [22m 18.03s[2m (tests 94%, import 5%, transform 1%)[22m
+

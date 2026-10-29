@@ -1,0 +1,207 @@
+none {
+  "events": [
+    {
+      "type": "pointerdown",
+      "target": "Send message",
+      "defaultPrevented": false,
+      "button": 0,
+      "at": 1671,
+      "sendY": 366
+    },
+    {
+      "type": "touchstart",
+      "target": "Send message",
+      "defaultPrevented": false,
+      "at": 1672,
+      "sendY": 366
+    },
+    {
+      "type": "pointerup",
+      "target": "Send message",
+      "defaultPrevented": false,
+      "button": 0,
+      "at": 1672,
+      "sendY": 366
+    },
+    {
+      "type": "touchend",
+      "target": "Send message",
+      "defaultPrevented": false,
+      "at": 1673,
+      "sendY": 366
+    },
+    {
+      "type": "mousedown",
+      "target": "Send message",
+      "defaultPrevented": false,
+      "button": 0,
+      "at": 1674,
+      "sendY": 366
+    },
+    {
+      "type": "blur",
+      "target": "composer-input",
+      "defaultPrevented": false,
+      "at": 1674,
+      "sendY": 426
+    },
+    {
+      "type": "focus",
+      "target": "Send message",
+      "defaultPrevented": false,
+      "at": 1676,
+      "sendY": 426
+    },
+    {
+      "type": "mouseup",
+      "target": "Fold editor",
+      "defaultPrevented": false,
+      "button": 0,
+      "at": 1676,
+      "sendY": 426
+    },
+    {
+      "type": "click",
+      "target": "composer-phone-rail",
+      "defaultPrevented": false,
+      "button": 0,
+      "at": 1676,
+      "sendY": 426
+    }
+  ],
+  "focused": "icon-button composer-send",
+  "sendY": 426
+}
+pointer {
+  "events": [
+    {
+      "type": "pointerdown",
+      "target": "Send message",
+      "defaultPrevented": false,
+      "button": 0,
+      "at": 1565,
+      "sendY": 366
+    },
+    {
+      "type": "touchstart",
+      "target": "Send message",
+      "defaultPrevented": false,
+      "at": 1567,
+      "sendY": 366
+    },
+    {
+      "type": "pointerup",
+      "target": "Send message",
+      "defaultPrevented": false,
+      "button": 0,
+      "at": 1567,
+      "sendY": 366
+    },
+    {
+      "type": "touchend",
+      "target": "Send message",
+      "defaultPrevented": false,
+      "at": 1567,
+      "sendY": 366
+    }
+  ],
+  "focused": "composer-input",
+  "sendY": 366
+}
+mouse {
+  "events": [
+    {
+      "type": "pointerdown",
+      "target": "Send message",
+      "defaultPrevented": false,
+      "button": 0,
+      "at": 1501,
+      "sendY": 366
+    },
+    {
+      "type": "touchstart",
+      "target": "Send message",
+      "defaultPrevented": false,
+      "at": 1503,
+      "sendY": 366
+    },
+    {
+      "type": "pointerup",
+      "target": "Send message",
+      "defaultPrevented": false,
+      "button": 0,
+      "at": 1503,
+      "sendY": 366
+    },
+    {
+      "type": "touchend",
+      "target": "Send message",
+      "defaultPrevented": false,
+      "at": 1503,
+      "sendY": 366
+    },
+    {
+      "type": "mousedown",
+      "target": "Send message",
+      "defaultPrevented": false,
+      "button": 0,
+      "at": 1504,
+      "sendY": 366
+    },
+    {
+      "type": "mouseup",
+      "target": "Send message",
+      "defaultPrevented": false,
+      "button": 0,
+      "at": 1505,
+      "sendY": 366
+    },
+    {
+      "type": "click",
+      "target": "Send message",
+      "defaultPrevented": false,
+      "button": 0,
+      "at": 1505,
+      "sendY": 366
+    }
+  ],
+  "focused": "composer-input",
+  "status": "request rejected (enqueue_failed): unavailable: probe",
+  "sendY": 366
+}
+both {
+  "events": [
+    {
+      "type": "pointerdown",
+      "target": "Send message",
+      "defaultPrevented": false,
+      "button": 0,
+      "at": 1561,
+      "sendY": 366
+    },
+    {
+      "type": "touchstart",
+      "target": "Send message",
+      "defaultPrevented": false,
+      "at": 1562,
+      "sendY": 366
+    },
+    {
+      "type": "pointerup",
+      "target": "Send message",
+      "defaultPrevented": false,
+      "button": 0,
+      "at": 1563,
+      "sendY": 366
+    },
+    {
+      "type": "touchend",
+      "target": "Send message",
+      "defaultPrevented": false,
+      "at": 1563,
+      "sendY": 366
+    }
+  ],
+  "focused": "composer-input",
+  "sendY": 366
+}
