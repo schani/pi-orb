@@ -75,3 +75,31 @@ For a DST failure, replay the recorded trace from `test-failures/` (`DST_REPLAY=
 ## Observability
 
 For every feature, before it ships, ask: **if something goes wrong with this feature in the field, what observability will we wish we had?** Then implement that observability as part of the feature, not as a follow-up. Concretely: decisions taken by autonomous machinery (reconcilers, boot hooks, guards) must be reconstructable afterwards from durable, queryable places — the `lifecycle:` event log, replicated history records, persisted columns — never only from ephemeral process stdout or guest logs; and outcomes that affect the user must be visible to the user in the product, not just to operators — a guard that declines silently is invisible at exactly the moment someone asks "why did nothing happen?". Respect the noise rules in `docs/lifecycle.md`: edges, not levels; a healthy fleet logs nothing.
+
+# Tests and telemetry
+
+Always write tests first, and make sure there is enough telemetry to judge success and diagnose failure.
+
+# Design proposals
+
+When I ask for design proposals, always use the existing pi-orb UI look&feel and design language, unless explicitly asked not to. Produce an HTML and share that with me.
+
+# Plans
+
+When I ask you for a plan, just give it to me, don't put it in an HTML or something, unless I ask for that.
+
+# Keep it simple
+
+Don't overbuild, neither in production nor in test code!
+
+# Disk space
+
+Monitor disk space when you're doing stuff that might consume a lot. Docker in particular can use a lot of disk very quickly, and once you run out of disk you're hard-blocked!
+
+# Babysitting PRs
+
+When the user asks you to babysit a PR:
+
+- Make sure the PR only includes files that are actually needed.
+- Monitor CI. If it fails, fix it.
+- Once CI is green, merge the PR.
