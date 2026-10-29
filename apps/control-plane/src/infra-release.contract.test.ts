@@ -739,7 +739,7 @@ print(json.dumps(inspect(api, '${selected}').value))
     expect(calls).toContain("--wait");
   });
 
-  it("skips smoke and preserves a failed apply status", () => {
+  it("skips smoke and retains the global lock after a failed apply", () => {
     const { root, log } = makeFixture();
     const result = spawnSync(join(root, "infra/release.sh"), ["--yes"], {
       encoding: "utf8",
@@ -753,11 +753,13 @@ print(json.dumps(inspect(api, '${selected}').value))
       },
     });
 
-    expect(result.status).toBe(7);
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain("lock retained: retirement, migration or apply is uncertain");
     const calls = readFileSync(log, "utf8");
+    expect(calls).toMatch(/tofu:.* apply /);
     expect(calls).not.toContain("deploy:");
     expect(calls).not.toContain("smoke");
-    expect(calls).toContain("gcloud:storage rm");
+    expect(calls).not.toContain("gcloud:storage rm");
   });
 
   it("refuses a saved plan that changes the database or its credentials", () => {
@@ -781,7 +783,7 @@ print(json.dumps(inspect(api, '${selected}').value))
     expect(calls).not.toContain("smoke");
   });
 
-  it("releases the global lock when apply is interrupted", () => {
+  it("retains the global lock when apply is interrupted", () => {
     const { root, log } = makeFixture();
     const result = spawnSync(join(root, "infra/release.sh"), ["--yes"], {
       encoding: "utf8",
@@ -795,11 +797,13 @@ print(json.dumps(inspect(api, '${selected}').value))
       },
     });
 
-    expect(result.status).toBe(143);
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain("lock retained: retirement, migration or apply is uncertain");
     const calls = readFileSync(log, "utf8");
+    expect(calls).toMatch(/tofu:.* apply /);
     expect(calls).not.toContain("deploy:");
     expect(calls).not.toContain("smoke");
-    expect(calls).toContain("gcloud:storage rm");
+    expect(calls).not.toContain("gcloud:storage rm");
   });
 
   it("refuses release before build when the foundation is not applied", () => {

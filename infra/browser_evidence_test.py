@@ -126,8 +126,21 @@ class BrowserEvidenceTest(unittest.TestCase):
         self.assertIn('run: npm run test:e2e:install', workflow_steps['Install pinned browser engines and system dependencies'])
         full = workflow_steps['Run end-to-end test']
         self.assertIn('DEBUG: pw:browser', full)
-        self.assertIn('run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project frontend --project provider --project postgres --shard=${{ matrix.shard }}/4', full)
-        self.assertEqual(len(re.findall(r'^        run: (?:node scripts/local-fake-provider.mjs -- )?npm run test:e2e --', body, re.M)), 1)
+        self.assertIn('node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project frontend --project provider --project postgres --shard=${{ matrix.shard }}/4', full)
+        self.assertEqual(len(re.findall(r'^          node scripts/local-fake-provider.mjs -- npm run test:e2e --', body, re.M)), 1)
+
+    def test_e2e_selects_and_reports_the_installed_playwright_chromium_before_tests(self):
+        full = steps('e2e.yml')['Run end-to-end test']
+        commands = (
+            'export PLAYWRIGHT_CHROMIUM_EXECUTABLE="$(node -e \'process.stdout.write(require("@playwright/test").chromium.executablePath())\')"',
+            '"$PLAYWRIGHT_CHROMIUM_EXECUTABLE" --version',
+            'node scripts/local-fake-provider.mjs -- npm run test:e2e --',
+        )
+        for command in commands:
+            self.assertIn(command, full)
+        positions = [full.index(command) for command in commands]
+        self.assertEqual(positions, sorted(positions))
+        self.assertNotIn('/usr/bin/chromium', full)
 
     def test_lazy_return_owns_and_preserves_failure_evidence(self):
         source = (ROOT / 'e2e/lazy-transcript-frontend.e2e.test.ts').read_text()

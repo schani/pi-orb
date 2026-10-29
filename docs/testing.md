@@ -1840,3 +1840,11 @@ exposed changing same-bearer fixture expiry. An advancing-clock RED reproduced t
 missing generation; a stable fixture grant passes unchanged diagnostics assertions.
 No product fix is claimed. Evidence: `.context/ci-second-failure/` and
 `docs/postmortems/2026-10-25-codex-fixture-grant-expiry.md`.
+
+## PostgreSQL 17 PR qualification (2026-10-29; local corrections, CI pending)
+
+Decision: E2E CI exports and reports locked Playwright Chromium for launchers honoring that
+selection; direct system launchers are unchanged. Status assertions target their owning region;
+release contracts preserve uncertain-apply lock retention. Local scoped checks and all 102 unchanged
+frontend-session cases pass (360.71s, owned-worker exit 0); exact-head CI remains required. Evidence/attribution limits:
+`docs/postmortems/2026-10-29-pg17-ci-qualification.md`.
