@@ -214,8 +214,6 @@ export type HistorySearchMatch = Omit<HistorySearchHit, "orbUrl">;
 
 export interface HistorySearchPage {
   readonly hits: HistorySearchMatch[];
-  readonly documentCount: number;
-  readonly candidateCount: number;
 }
 
 /**

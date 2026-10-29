@@ -21,6 +21,7 @@ import {
   waitFor,
   waitForPostgres,
 } from "./harness.ts";
+import { ensurePostgresImage, POSTGRES_IMAGE } from "./postgres-image.ts";
 import {
   CROSS_AXIS_CASES,
   issuedDeviceLoginChallenge,
@@ -158,6 +159,7 @@ for (const composition of CROSS_AXIS_CASES) {
         });
         let databaseUrl: string | undefined;
         if (!local) {
+          await ensurePostgresImage();
           await docker(["network", "create", network]);
           networkCreated = true;
           await docker([
@@ -173,7 +175,7 @@ for (const composition of CROSS_AXIS_CASES) {
             "POSTGRES_DB=pi_orb",
             "-p",
             "127.0.0.1::5432",
-            "postgres:17",
+            POSTGRES_IMAGE,
           ]);
           pgStarted = true;
           await waitForPostgres(pgName, "pi-orb", "pi_orb");

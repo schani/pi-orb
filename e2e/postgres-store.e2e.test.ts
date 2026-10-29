@@ -12,6 +12,7 @@ import { openThrowawayPostgres } from "../apps/control-plane/src/testkit/postgre
 import { storeContractTests } from "../apps/control-plane/src/testkit/store-contract.ts";
 import { parseDockerLoopbackPort } from "./docker-port.ts";
 import { docker, waitForPostgres } from "./harness.ts";
+import { ensurePostgresImage, POSTGRES_IMAGE } from "./postgres-image.ts";
 
 /**
  * The store contract against a real PostgreSQL server, over the node-postgres
@@ -19,8 +20,8 @@ import { docker, waitForPostgres } from "./harness.ts";
  * node-postgres would encode differently; see
  * `docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md`.
  *
- * `PI_ORB_TEST_DATABASE_URL` (a throwaway database; each test drops and
- * recreates schema `public`) replaces the container. The Docker-free
+ * `PI_ORB_TEST_DATABASE_URL` (a throwaway database; each test owns an
+ * isolated schema, preserving the public extension) replaces the container. The Docker-free
  * `PI_ORB_E2E_BACKEND=process` gate skips this file unless that variable
  * supplies a server.
  */
@@ -38,6 +39,7 @@ if (providedUrl === "" && PROCESS_BACKEND) {
   });
 } else {
   if (providedUrl === "") {
+    beforeAll(ensurePostgresImage, 600_000);
     beforeAll(async () => {
       containerId = await docker([
         "create",
@@ -51,7 +53,7 @@ if (providedUrl === "" && PROCESS_BACKEND) {
         "POSTGRES_DB=pi_orb",
         "-p",
         "127.0.0.1::5432",
-        "postgres:17",
+        POSTGRES_IMAGE,
       ]);
       await docker(["start", containerId]);
       const port = parseDockerLoopbackPort(await docker(["port", containerId, "5432/tcp"]));

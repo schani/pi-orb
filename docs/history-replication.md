@@ -532,4 +532,4 @@ Lifecycle transitions use `state_version` compare-and-swap, increment it, and up
 
 Keep the first migration as one hand-written `001_initial.sql`. The `pg` adapter executes migrations and repository operations with explicit `BEGIN`/`COMMIT`/`ROLLBACK`, wrapping every driver call in `ResultAsync.fromThrowable`.
 
-Committed public history is also searchable without waking compute through a PostgreSQL-maintained GIN expression index on `history_records.record`; source writes require no search maintenance. Exact query-time BM25, eligibility, privacy and cost: `docs/history-search.md`.
+Committed public history is also searchable without waking compute through a native pg_textsearch BM25 expression index on `history_search_public_text(record)`; source writes require no application search maintenance. Eligibility, privacy and ranking: `docs/history-search.md`.

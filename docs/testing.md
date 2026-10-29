@@ -1581,7 +1581,7 @@ The implemented E2E test (`e2e/`, run with `npm run test:e2e`) drives the full e
 **Store-substrate rule (decided 2026-08-11, from `docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md`).** PGlite shares the migrations and the store SQL with production, but **not** the driver — and parameter binding lives in the driver. node-postgres encodes a query parameter from the JavaScript *value* (a JS array becomes a PostgreSQL array literal, a plain object becomes JSON); PGlite encodes from the parameter *OID* the server reports. A message-content array bound to a `jsonb` column therefore passed every PGlite store test and failed 100% of enqueues in production with SQLSTATE 22P02. Two rules follow:
 
 - **Structured query parameters declare their intent.** `jsonParam()` for a `json`/`jsonb` column and `arrayParam()` for a PostgreSQL array (`apps/control-plane/src/adapters/pg/client.ts`); each client unwraps them for its own driver. A shared prepare step guards every driver call in both clients — including transaction-scoped queries — and rejects a remaining bare array or bare plain object with a non-retryable `invariant` `StoreError` naming the placeholder, so the hazard fails identically under PGlite, the in-memory tests, and real PostgreSQL. `apps/control-plane/src/adapters/pg/client.test.ts` covers the prepare/guard/classification logic as pure functions.
-- **The store contract runs on both drivers.** `apps/control-plane/src/testkit/store-contract.ts` takes the raw client as part of its subject and asserts the `jsonb` round trip plus the guard. `apps/control-plane/src/adapters/pg/stores.test.ts` runs it on PGlite in the default unit run; `e2e/postgres-store.e2e.test.ts` provisions `postgres:16` and runs the identical contract over node-postgres in `npm run test:e2e`; `PI_ORB_TEST_DATABASE_URL=postgres://… npx vitest run apps/control-plane/src/adapters/pg` runs it from the unit suite against any throwaway database (each test drops and recreates schema `public`). Verified by reintroducing the bug: 6 of 15 contract tests fail on the real server while PGlite stays green.
+- **The store contract runs on both drivers.** `apps/control-plane/src/testkit/store-contract.ts` takes the raw client as part of its subject and asserts the `jsonb` round trip plus the guard. `apps/control-plane/src/adapters/pg/stores.test.ts` runs it on PGlite in the default unit run; `e2e/postgres-store.e2e.test.ts` provisions the pinned PostgreSQL 17.11/`pg_textsearch` 1.3.1 image (`infra/postgres-test/Dockerfile`) and runs the identical contract over node-postgres in `npm run test:e2e`; `PI_ORB_TEST_DATABASE_URL=postgres://… npx vitest run apps/control-plane/src/adapters/pg` runs it from the unit suite against an owned throwaway schema with the extension in `public`. Verified by reintroducing the bug: 6 of 15 contract tests fail on the real server while PGlite stays green.
 
 **Migration lock-acquisition regression (2026-10-13):** `apps/control-plane/src/adapters/pg/history-migration.contract.ts` runs 044 through the real runner with an owned schema and two sessions (three for mixed readers). A test-only schema-local `pg_sleep` shadow, with explicit `pg_catalog` last in search_path, gates backoff on an owned advisory lock. Live lock inspection asserts neither pair-table lock remains held or queued after contention rollback. Five cases cover both reader orders, inverse-order record SELECT during backoff, 119-backoff exhaustion and ledger rollback; verify types, data, constraints and ledger. No timing sleeps, detector/victim assumptions or production hooks. Registered in `history-migration.postgres.test.ts` via `PI_ORB_TEST_DATABASE_URL` and `e2e/postgres-store.e2e.test.ts`. PGlite cannot establish relation-lock behavior. Earlier two-session RED/GREEN alone was insufficient: a preserved three-session probe disproved blocking ordered locking before the NOWAIT correction. Evidence and qualification limits: `docs/postmortems/2026-10-13-history-migration-deadlock.md`.
 
@@ -1731,25 +1731,58 @@ checks. Local heavy phases were serialized across the dependency worktrees.
 CI owns the full unit/DST suite, runtime E2E and container builds; native cloud-image,
 acceptance and retained-workspace qualification have not run. No deployment.
 
-## Index-only history search (2026-10-22; local, undeployed)
+## History extractor/migration qualification (2026-10-22; local, undeployed)
 
-Shared PostgreSQL 16/PGlite contracts verify public-text privacy, lossless source JSON,
-Unicode/long-token queries, exact scoped BM25, rank-before-limit, GIN expression access,
-and existing/future source-only insertion. Native lock-order cases run migration
-044 before 049 and assert index/ledger commit or rollback. Application contracts cover
-owner binding, typed native objects/errors, HTTP and CLI dispatch. Existing process
-E2Es search a committed native alert and a stopped orb through its sibling's CLI.
+Historical PostgreSQL 16/PGlite qualification covered public-text privacy, lossless
+source JSON and source-only insertion. Lock-order fixtures ran migration 044 before
+049 and checked index/ledger commit or rollback. Application contracts covered owner
+binding, typed objects/errors, HTTP and CLI dispatch; process E2Es searched a committed
+native alert and a stopped orb through its sibling's CLI.
 
 First local failures were deterministic: primitive JSON driver binding required a
 query-object envelope; public delivery/child-notice selection and JavaScript whitespace
-trimming required extraction corrections; historical fixtures that intentionally skip
-044 must also skip its dependent index. The lock-order fixture instead runs both actual
-migrations. Tests preceded these corrections; assertions and timeouts were not weakened.
+trimming required extraction corrections; historical fixtures that intentionally skipped
+044 also needed to skip its dependent index. The lock-order fixture instead ran both
+actual migrations. Tests preceded these corrections; assertions and timeouts were not weakened.
 Logs and source manifests remain in `/workspace/history-search-index-evidence/` and
 `/tmp/search-index-rewrite-*.log`. An initial selector skipped the CLI case; its first
 executed run passed. This is isolated fixture evidence, not production qualification.
 
 Design and cost: `docs/history-search.md`.
+
+## Native history search 1.3.1 (2026-10-29, PDT; local, undeployed)
+
+Private receipts: `$HOME/.local/share/pi-orb/native-search-validation/qualification13/`; `public-summary.json` is allowlisted. Corpus, queries, raw plans and logs stay out of Git. Vendor fixes are assumed, not verified (`docs/history-search.md`).
+Freeze source before preparation; bind runner/extractor/query and logical-dataset hashes to receipts, record every attempt, retain failures, and require zero failed samples for aggregate qualification. Never overwrite a failed attempt or resume it as success. The 2 s statement timeout is a local benchmark budget, not an application/GCP deadline, product SLO or feature-shipping gate.
+The 1.3.1/1.5.1 comparison uses identical logical data/catalog: 208,143 records, 357 orbs, 13 projects, 22 queries, 462 cases, limits 1/10/50, three warm repetitions and a 2 s deadline. All 1,386 warm executions on each version passed with actual ordered BM25 EXPLAIN plans and matching hit counts, not a ranking-parity assertion.
+Read-only extractor metadata audit confirms identical migration 049 bytes and all three public-function bodies, signatures and strict/immutable/parallel-safe flags. Aggregate function-definition MD5s differ only because `SET search_path FROM CURRENT` captured `"$user", public` on 1.5.1 versus `public, pg_catalog` on 1.3.1; neither database has a role-named schema (`extractor-metadata-audit.json`).
+Queries used one CPU, builds two; `shared_buffers=512MiB`, extension `memory_limit=256MiB`, `work_mem=32MiB`; VM memory was uncapped (~15 GiB), not 512 MiB total.
+
+Warm p95 (ms):
+
+| Version | User | Project | Orb broad | Orb narrow | Other user | Index only |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1.3.1 | 707.75 | 317.89 | 166.81 | 117.88 | 115.30 | 110.30 |
+| 1.5.1 | 984.04 | 373.63 | 148.34 | 116.38 | 113.98 | 100.16 |
+
+Index build: 127.311 s / 78,094,336 bytes versus 123.718 s / 78,979,072 bytes. PostgreSQL-process-cold: 755.35 ms versus 763.53 ms, N=1 each; OS cache was **not** dropped.
+Owner/project/orb, Pi ancestry, private-text and deletion-eligibility fixtures pass. Post-build full-scoped Claude SQL against the expression index passes 12 ordinary read/write/delete, commit and rollback assertions; fixture cleanup preserves the source hash.
+An owned-container SIGKILL produced observed WAL redo start/completion; committed/rolled-back fixture IDs passed positive/negative checks. Native recovery samples passed **4/4: one before, three after the crash**. Index validity and source count/hash were unchanged; checkpoint resume left the first checkpoint bytes unchanged.
+Four concurrent readers attempted 80 reads: 71 passed, nine common-term/user-scope reads failed with SQLSTATE 57014 at 2 s. All 20 tiny writes passed (insert p95 2.60 ms). **Aggregate gate: negative solely for these nine timeouts**, not fully green qualification or a contention SLO pass.
+1.5.1 also had nine timeouts; matching counts do not establish matching causes. Original failed samples lack CPU/wait deltas; their exact costs and the 1.5.1 cause remain unknown. A separate read-only diagnostic reproduced one representative 1.3.1 failed query at unchanged 1 CPU / 2 s: one reader passed in 721.1 ms with 698.8 ms scheduler CPU; four barrier-synchronized readers each received 486.7–490.4 ms CPU plus 1,517.3–1,526.3 ms runqueue wait and all timed out (57014) in 2,004.8–2,015.6 ms.
+This establishes the representative reproduction's one-CPU capacity/runqueue mechanism, not retroactive measurements of the original nine. Workers plus observer used 99.4% of one CPU (observer 59 ms, ~3%); all 376 four-reader activity observations were active without sampled lock/I/O waits, and backends were idle afterward. `diagnostic.json`/`diagnostic-summary.json` preserve evidence separately; frozen `benchmark.py`, original samples, timeout and negative gate remain unchanged.
+Initial prepare (15:03:43–15:06:17 PDT) exited 1: `runner changed while preparing` (`15e0c47…` → `05622cfd…`) while the index build was in flight, before query samples. The failed receipt/log remain; `initial-prepare-provenance.json` labels the hash-matching pre-edit source as reconstructed, not retained. This was a diagnosed harness edit, not an engine flake.
+Correction: freeze source **before** separate `prepare-frozen` (15:07:06–15:07:32 PDT, exit 0), reusing the same owned index/build receipt, extractor and snapshot SQL. Manifest runner SHA-256 `05622cfd33ff06443de38b1b9571c9474c78488d7e04eb32461fe6248e2f8134` matches frozen/current source; the ~26 s preparation reused the **127.311 s** build, not a new 26 s build. `qualification-summary.json` records 35/35 private harness unit tests (33 in `unit-tests-final.log`, two in `unit-tests-diagnostic.log`); the original failure remains recorded and aggregate qualification remains negative.
+This benchmark did not qualify VM reboot, a bounded-memory production profile, ingestion/compaction stress or hosted behavior. No production mutation occurred.
+The 1.5.1 spill/force-merge fix ([PR 540](https://github.com/timescale/pg_textsearch/pull/540)) is not a 1.3.1 defect: later nonblocking spills ([PR 517](https://github.com/timescale/pg_textsearch/pull/517)) introduced it; 1.3.1 serializes under the lock.
+
+## Native history search implementation (2026-10-29, PDT; local, undeployed)
+
+CI/native E2E fixtures build pinned PostgreSQL **17.11** with upstream `pg_textsearch` **1.3.1**; native contracts assert the installed version. PGlite uses package **0.0.13**, embedding **1.5.1**, not native-version parity. Eight shared search contracts verify privacy/eligibility, native ranking/tokenization and source-only DML; actual `EXPLAIN (ANALYZE)` must execute the BM25 index with ordered `<@>` access.
+Focused search/migration fixtures pass **15/15** (14 native, one PGlite), including eight shared search contracts; focused PGlite/domain/SQL/backfill fixtures pass **59/59**. Memory/disk extension-registration smokes and native/PGlite composed-drain checks pass **6/6**. Run both constructor variants after typechecking: a type-correct call can still select the wrong runtime overload.
+The first root invocation hit the harness's **300 s** wall-clock budget. Its deterministic memory-PGlite failures came from `new PGlite(undefined, options)` ignoring extension options; the corrected options object sets `dataDir: "memory://"`. Six registration/composed-drain cases then passed focused qualification.
+All **692** catalogued root test files were qualified across **two batches**, not one complete green full-suite run. The corrected serial invocation hit the outer **1,700 s** wall-clock cutoff after 690 completed files, including one failed file; neither cutoff was a Vitest test timeout. Four assertions in the shared Google identity migration fixture had a stale strict `followingMigrations` array, although the actual migrations succeeded. The only source correction between batches appended migration 052 to that expectation; production code was unchanged. The second batch passed that corrected file and the two remaining files, with no missing files or failures after correction. Post-root native/PGlite/remaining-migration checks passed **42/42** (19 + 19 + 4). Vitest timeouts and assertions were not weakened. The aggregate receipt is `native-feature-contracts/root-two-batch-qualification.json` beneath the private evidence root below; both interrupted runs and original failures remain retained.
+A separate infrastructure invocation inherited private-artifact `umask 077`; `dpkg-deb` rejected fixture control-directory mode 0700. Test commands now use `umask 022`; private evidence remains protected. First failures, focused logs and frozen source receipts remain under `$HOME/.local/share/pi-orb/native-search-validation/` (`logs/`, `receipts/`, `native-feature-contracts/`). The 35 private benchmark-harness tests above are separate from application-suite qualification. Corpus, queries, credentials and raw plans stay out of Git.
 
 ## Durable process artifact retries (2026-10-23; local, undeployed)
 

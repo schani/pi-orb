@@ -12,14 +12,24 @@ export async function openThrowawayPostgres(
   const url = new URL(connectionString);
   const schema = `test_${randomUUID().replaceAll("-", "")}`;
   const admin = new PgClient(connectionString);
-  const created = await admin.query(`CREATE SCHEMA "${schema}"`);
+  const created = await admin.transaction(async (query) => {
+    const locked = await query(
+      "SELECT pg_advisory_xact_lock(hashtext('pi-orb:test:pg_textsearch'))",
+    );
+    if (locked.isErr()) return locked;
+    const installed = await query(
+      "CREATE EXTENSION IF NOT EXISTS pg_textsearch WITH SCHEMA public",
+    );
+    if (installed.isErr()) return installed;
+    return query(`CREATE SCHEMA "${schema}"`);
+  });
   if (created.isErr()) {
     await admin.end();
     created._unsafeUnwrap();
   }
   url.searchParams.set(
     "options",
-    `${url.searchParams.get("options") ?? ""} -c search_path=${schema}`.trim(),
+    `${url.searchParams.get("options") ?? ""} -c search_path=${schema},public`.trim(),
   );
   class SubjectClient extends PgClient {
     override end() {
@@ -50,7 +60,7 @@ export async function assertProjectDeletionFence<T, E extends { code: string }>(
   );
   const peerUrl = new URL(connectionString);
   const applicationName = `audit-${randomUUID()}`;
-  peerUrl.searchParams.set("options", `-c search_path=${schema}`);
+  peerUrl.searchParams.set("options", `-c search_path=${schema},public`);
   peerUrl.searchParams.set("application_name", applicationName);
   const peer = new PgClient(peerUrl.toString());
   let release!: () => void;

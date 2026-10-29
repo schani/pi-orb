@@ -49,6 +49,7 @@ import {
   waitForPostgres,
 } from "./harness.ts";
 import { holdModelStream } from "./held-model-stream.ts";
+import { ensurePostgresImage, POSTGRES_IMAGE } from "./postgres-image.ts";
 import { runTerminal } from "./terminal-client.ts";
 import { FailureEvidence } from "./testkit/failure-evidence.ts";
 import { UploadContinuationPhases } from "./testkit/upload-continuation-phases.ts";
@@ -686,6 +687,7 @@ beforeAll(async () => {
     return;
   }
 
+  await ensurePostgresImage();
   await docker(["network", "create", NETWORK]);
 
   await docker([
@@ -701,7 +703,7 @@ beforeAll(async () => {
     "POSTGRES_DB=pi_orb",
     "-p",
     "127.0.0.1::5432",
-    "postgres:17",
+    POSTGRES_IMAGE,
   ]);
   await waitForPostgres(PG_CONTAINER, "pi-orb", "pi_orb");
   const pgPort = parseDockerLoopbackPort(await docker(["port", PG_CONTAINER, "5432/tcp"]));

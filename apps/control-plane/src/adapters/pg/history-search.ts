@@ -3,11 +3,14 @@ import type { StoreError } from "../../domain/errors.ts";
 import type { HistorySearchPage, HistorySearchParams } from "../../domain/ports.ts";
 import { jsonParam, type PostgreSQLClient } from "./client.ts";
 
-/** One statement snapshot; corpus lengths require parsing all eligible public source records. */
+/** Eligibility is evaluated inside the ordered scan, before the native top-k limit. */
 export const HISTORY_SEARCH_SQL = `
 WITH RECURSIVE
 query_terms AS MATERIALIZED (
-  SELECT DISTINCT unnest(history_search_tokens(history_search_safe_json($4::json) ->> 'query')) AS term
+  SELECT part[1] AS term FROM regexp_matches(
+    lower(normalize(history_search_safe_json($4::json) ->> 'query',NFKC) COLLATE "C.utf8"),
+    '[[:alnum:]]+', 'g'
+  ) AS matched(part)
 ),
 scope AS MATERIALIZED (
   SELECT o.id AS orb_id, o.harness, o.replication_cursor, o.harness_session_id,
@@ -25,55 +28,26 @@ chain AS (
   SELECT h.orb_id,h.record_id,h.parent_id FROM history_records h JOIN chain c
     ON c.orb_id=h.orb_id AND c.parent_id=h.record_id
 ),
-public_documents AS MATERIALIZED (
-  SELECT h.orb_id,h.record_id,normalize(history_search_public_text(h.record),NFKC) AS public_text
-  FROM history_records h JOIN scope s ON s.orb_id=h.orb_id
-  WHERE s.harness='claude' OR EXISTS (
-    SELECT 1 FROM chain c WHERE c.orb_id=h.orb_id AND c.record_id=h.record_id
-  )
-),
-tokenized AS MATERIALIZED (
-  SELECT *,history_search_tokens(public_text) AS tokens FROM public_documents
-),
-eligible AS MATERIALIZED (
-  SELECT *,cardinality(tokens) AS dl FROM tokenized WHERE cardinality(tokens)>0
-),
-stats AS (
-  SELECT count(*)::integer AS document_count,avg(dl)::double precision AS avgdl FROM eligible
-),
-term_candidates AS MATERIALIZED (
-  SELECT h.orb_id,h.record_id FROM history_records h JOIN scope s ON s.orb_id=h.orb_id
-  WHERE history_search_keys(h.record) && ARRAY(SELECT md5(term) FROM query_terms)
-),
-tf AS MATERIALIZED (
-  SELECT c.orb_id,c.record_id,e.dl,t.term,count(*)::double precision AS tf
-  FROM term_candidates c JOIN eligible e USING(orb_id,record_id)
-  CROSS JOIN LATERAL unnest(e.tokens) t(term) JOIN query_terms q ON q.term=t.term
-  GROUP BY c.orb_id,c.record_id,e.dl,t.term
-),
-df AS (
-  SELECT term,count(*)::double precision AS df FROM tf GROUP BY term
-),
-ranked AS (
-  SELECT tf.orb_id,tf.record_id,sum(ln(1.0+(s.document_count-df.df+0.5)/(df.df+0.5))
-    *tf.tf*2.2/(tf.tf+1.2*(0.25+0.75*tf.dl/s.avgdl))) AS score
-  FROM tf JOIN df USING(term) CROSS JOIN stats s
-  GROUP BY tf.orb_id,tf.record_id
-  ORDER BY score DESC,tf.orb_id::text COLLATE "C",tf.record_id COLLATE "C"
+ranked AS MATERIALIZED (
+  SELECT h.orb_id,h.record_id,history_search_public_text(h.record)
+    OPERATOR(public.<@>) public.to_bm25query(history_search_safe_json($4::json) ->> 'query','history_records_search_idx') AS distance
+  FROM history_records h
+  WHERE h.orb_id IN (SELECT orb_id FROM scope WHERE harness='claude')
+    OR (h.orb_id,h.record_id) IN (SELECT orb_id,record_id FROM chain)
+  ORDER BY distance
   LIMIT $5
 )
-SELECT stats.document_count,
-       (SELECT count(*)::integer FROM (SELECT DISTINCT orb_id,record_id FROM tf) matches) AS candidate_count,
-       r.orb_id,r.record_id,r.score,s.harness_session_id,s.name,s.project_name,
+SELECT r.orb_id,r.record_id,-r.distance AS score,s.harness_session_id,s.name,s.project_name,
        substring(e.public_text FROM greatest(1,least(coalesce(location.first_match,1)-100,length(e.public_text)-249)) FOR 250) AS snippet
-FROM stats
-LEFT JOIN ranked r ON true
-LEFT JOIN scope s ON s.orb_id=r.orb_id
-LEFT JOIN eligible e ON e.orb_id=r.orb_id AND e.record_id=r.record_id
+FROM ranked r
+JOIN scope s ON s.orb_id=r.orb_id
+JOIN history_records h ON h.orb_id=r.orb_id AND h.record_id=r.record_id
+CROSS JOIN LATERAL (SELECT history_search_public_text(h.record) AS public_text) e
 LEFT JOIN LATERAL (
   SELECT min(nullif(strpos(lower(e.public_text COLLATE "C.utf8"),term),0)) AS first_match FROM query_terms
 ) location ON true
-ORDER BY r.score DESC,r.orb_id::text COLLATE "C",r.record_id COLLATE "C"
+WHERE r.distance < 0
+ORDER BY r.distance
 `;
 
 export function searchHistory(
@@ -89,19 +63,15 @@ export function searchHistory(
       params.limit,
     ])
     .map(({ rows }) => ({
-      documentCount: Number(rows[0]?.["document_count"] ?? 0),
-      candidateCount: Number(rows[0]?.["candidate_count"] ?? 0),
-      hits: rows
-        .filter((row) => row["record_id"] != null)
-        .map((row) => ({
-          orbId: String(row["orb_id"]),
-          sessionId: String(row["harness_session_id"]),
-          recordId: String(row["record_id"]),
-          name: row["name"] == null ? null : String(row["name"]),
-          projectName: String(row["project_name"]),
-          snippet: String(row["snippet"]),
-          score: Number(row["score"]),
-        })),
+      hits: rows.map((row) => ({
+        orbId: String(row["orb_id"]),
+        sessionId: String(row["harness_session_id"]),
+        recordId: String(row["record_id"]),
+        name: row["name"] == null ? null : String(row["name"]),
+        projectName: String(row["project_name"]),
+        snippet: String(row["snippet"]),
+        score: Number(row["score"]),
+      })),
     }))
     .mapErr((error) => ({ ...error, message: "history search failed" }));
 }

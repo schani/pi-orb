@@ -36,9 +36,7 @@ function searchSetup(caller: Parameters<typeof createOrbAgentOperations>[2] = id
     snippet: "private snippet",
     score: 0.3,
   };
-  const search = vi
-    .spyOn(h.store, "searchHistory")
-    .mockReturnValue(okAsync({ hits: [hit], documentCount: 7, candidateCount: 3 }));
+  const search = vi.spyOn(h.store, "searchHistory").mockReturnValue(okAsync({ hits: [hit] }));
   const service = createOrbAgentOperations(task, h.deps, caller, {
     appOrigin: "https://app",
     appendAlert: () => okAsync({ recordId: "a", duplicate: false }),
@@ -78,9 +76,8 @@ describe("orb history search", () => {
     });
     for (const read of [getOrb, getProject]) expect(read).toHaveBeenCalledTimes(1);
     for (const effect of [pull, start, provision]) expect(effect).not.toHaveBeenCalled();
-    expect(s.log.mock.calls.flat().join(" ")).toMatch(
-      /scope=.*documents=7.*candidates=3.*hits=1.*durationMs=/,
-    );
+    expect(s.log.mock.calls.flat().join(" ")).toMatch(/scope=.*hits=1.*durationMs=/);
+    expect(s.log.mock.calls.flat().join(" ")).not.toMatch(/history_records_search_idx/);
     expect(s.log.mock.calls.flat().join(" ")).not.toMatch(/needle|private/i);
     if (scope === undefined) {
       const list = vi.spyOn(s.store, "listProjectsByOwner");

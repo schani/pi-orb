@@ -15,7 +15,7 @@ def steps(workflow):
 class BrowserEvidenceTest(unittest.TestCase):
     def test_durable_qualification_covers_final_source_without_deployment(self):
         ci = (ROOT / '.github/workflows/ci.yml').read_text()
-        for value in ('postgres:17', 'PI_ORB_TEST_DATABASE_URL:', 'PI_ORB_DURABLE_PG_TEST_URL:'):
+        for value in ('infra/postgres-test/Dockerfile', 'PI_ORB_TEST_DATABASE_URL:', 'PI_ORB_DURABLE_PG_TEST_URL:'):
             self.assertIn(value, ci)
         self.assertIn('vitest run --maxWorkers=1 --no-file-parallelism', ci)
         self.assertIn('npm run test:infra', ci)
@@ -29,6 +29,28 @@ class BrowserEvidenceTest(unittest.TestCase):
             self.assertIn(value, qualification)
         for value in ('id-token: write', 'google-github-actions', 'infra/release.sh'):
             self.assertNotIn(value, qualification)
+
+    def test_postgres_fixtures_match_cloud_sql_extension(self):
+        dockerfile = ROOT / 'infra/postgres-test/Dockerfile'
+        self.assertTrue(dockerfile.exists())
+        source = dockerfile.read_text()
+        for value in (
+            'postgres:17.11-bookworm@sha256:839fbb5a4942a7758dd93e18b42ea5649807491a0545b5eeeb8f0b8bb11857a5',
+            'pg_textsearch-1.3.1.tar.gz',
+            '5d49f047c7e926a99f863d8af9d7800b9989ebb84c42f827ad81dac746a0b9e8',
+            'shared_preload_libraries=pg_textsearch',
+        ):
+            self.assertIn(value, source)
+        ci = steps('ci.yml')
+        self.assertIn('docker build', ci['Start PostgreSQL qualification fixture'])
+        self.assertIn('docker run', ci['Start PostgreSQL qualification fixture'])
+        self.assertIn('pg_isready', ci['Start PostgreSQL qualification fixture'])
+        self.assertIn('docker logs', ci['Collect PostgreSQL qualification evidence'])
+        self.assertIn('docker rm', ci['Collect PostgreSQL qualification evidence'])
+        for name in ('postgres-store', 'full-slice', 'cross-axis'):
+            fixture = (ROOT / f'e2e/{name}.e2e.test.ts').read_text()
+            self.assertIn('ensurePostgresImage', fixture)
+            self.assertNotIn('"postgres:17"', fixture)
 
     def test_durable_failure_evidence_is_explicit_and_captures_stderr(self):
         process = steps('durable-qualification.yml')['Upload failure evidence']

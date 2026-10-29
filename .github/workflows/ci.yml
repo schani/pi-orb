@@ -59,18 +59,6 @@ jobs:
   checks:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: qualification
-          POSTGRES_PASSWORD: qualification
-          POSTGRES_DB: qualification
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U qualification -d qualification"
-          --health-interval 5s --health-timeout 5s --health-retries 12
     env:
       PI_ORB_TEST_DATABASE_URL: postgres://qualification:qualification@127.0.0.1:5432/qualification
       PI_ORB_DURABLE_PG_TEST_URL: postgres://qualification:qualification@127.0.0.1:5432/qualification
@@ -107,6 +95,23 @@ jobs:
           unzip -q "$archive" tofu -d "$RUNNER_TEMP/tofu-bin"
           echo "$RUNNER_TEMP/tofu-bin" >> "$GITHUB_PATH"
 
+      - name: Start PostgreSQL qualification fixture
+        run: |
+          set -euo pipefail
+          docker build -f infra/postgres-test/Dockerfile -t pi-orb-postgres-test:17.11-textsearch1.3.1 .
+          docker run --detach --name qualification-postgres \
+            -e POSTGRES_USER=qualification -e POSTGRES_PASSWORD=qualification -e POSTGRES_DB=qualification \
+            -p 127.0.0.1:5432:5432 pi-orb-postgres-test:17.11-textsearch1.3.1
+          for attempt in $(seq 1 60); do
+            if docker exec qualification-postgres pg_isready -h 127.0.0.1 -U qualification -d qualification; then
+              docker exec qualification-postgres psql -U qualification -d qualification -v ON_ERROR_STOP=1 \
+                -c "SELECT version(), current_setting('shared_preload_libraries'); SELECT default_version FROM pg_available_extensions WHERE name = 'pg_textsearch';"
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+
       - name: Test foundation contracts
         run: infra/foundation/test-tofu.sh
 
@@ -118,6 +123,22 @@ jobs:
 
       - name: Test
         run: npx vitest run --maxWorkers=1 --no-file-parallelism && npm run test:infra
+
+      - name: Collect PostgreSQL qualification evidence
+        if: always()
+        run: |
+          docker logs qualification-postgres > "$RUNNER_TEMP/postgres-qualification.log" 2>&1 || true
+          docker inspect qualification-postgres >> "$RUNNER_TEMP/postgres-qualification.log" 2>&1 || true
+          docker rm -fv qualification-postgres || true
+
+      - name: Upload PostgreSQL qualification evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node 24)
+        with:
+          name: postgres-qualification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/postgres-qualification.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload deterministic failure traces
         if: failure()
