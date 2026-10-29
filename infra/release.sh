@@ -115,7 +115,7 @@ cleanup() {
   fi
   if [ "$REMOTE_LOCK_HELD" = true ]; then
     if [ "$KEEP_REMOTE_LOCK" = true ]; then
-      echo "release: lock retained: retirement or migration is uncertain; inspect the recorded stage/job before unlocking $REMOTE_LOCK_URL" >&2
+      echo "release: lock retained: retirement, migration or apply is uncertain; inspect the recorded stage/job before unlocking $REMOTE_LOCK_URL" >&2
       status=1
     elif [ -z "$REMOTE_LOCK_GENERATION" ] || ! gcloud storage rm "$REMOTE_LOCK_URL" --if-generation-match="$REMOTE_LOCK_GENERATION" --quiet >/dev/null; then
       echo "release: lock cleanup failed: $REMOTE_LOCK_URL; verify ownership before removing it" >&2
@@ -227,6 +227,11 @@ plan_and_guard() {
   if ! jq -e -f "$INFRA/check-database-plan.jq" "$WORK_DIR/plan.json" >/dev/null; then
     echo 'release refused: saved plan does not preserve the database and its credentials' >&2; return 1
   fi
+  if jq -e '.resource_changes[]? | select(.address == "google_sql_database_instance.pi_orb") | .change.actions == ["update"]' "$WORK_DIR/plan.json" >/dev/null; then
+    local message='Database plan accepted: PostgreSQL 16 -> 17 in-place upgrade; maintenance outage expected'
+    echo "release: $message"
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then printf '%s\n' "$message" >> "$GITHUB_STEP_SUMMARY"; fi
+  fi
 }
 
 if [ -z "$VALIDATE" ]; then
@@ -296,6 +301,7 @@ if [ -z "$VALIDATE" ]; then
   gcloud run jobs delete "$migration_job" --project="$PROJECT" --region="$REGION" --quiet
   if [ "$FIRST_CONSOLIDATION" = false ]; then state check-previous; fi
   stage apply
+  KEEP_REMOTE_LOCK=true
   release_run_child tofu -chdir="$INFRA" apply -input=false "$WORK_DIR/release.tfplan"
   KEEP_REMOTE_LOCK=false
 fi

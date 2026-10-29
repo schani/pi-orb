@@ -371,7 +371,7 @@ describe("orb native file drop", () => {
         "alt",
         "pasted attachment",
       );
-      await expectPage(page.getByRole("status")).toContainText(
+      await expectPage(page.locator('.orb-drop-feedback[role="status"]')).toContainText(
         "Non-images can only be uploaded as files to the orb.",
       );
       await expectPage(draft).toHaveValue("Unsent draft");

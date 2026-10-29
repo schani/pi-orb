@@ -25,7 +25,10 @@ it("runs four isolated serial E2E shards without cancelling siblings or losing f
   expect(source).toContain("  workflow_dispatch:\n");
   expect(source).toContain("timeout-minutes: 40");
   expect(normalRun).toContain(
-    `run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project frontend --project provider --project postgres --shard=\${{ matrix.shard }}/4`,
+    `run: |
+          export PLAYWRIGHT_CHROMIUM_EXECUTABLE="$(node -e 'process.stdout.write(require("@playwright/test").chromium.executablePath())')"
+          "$PLAYWRIGHT_CHROMIUM_EXECUTABLE" --version
+          node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project frontend --project provider --project postgres --shard=\${{ matrix.shard }}/4`,
   );
   expect(normalRun).not.toMatch(/--(?:maxWorkers|retry|passWithNoTests)/u);
   expect(
