@@ -56,6 +56,44 @@ class ConsolidationTest(unittest.TestCase):
                     unsafe[index]['change']['actions'] = actions
                     self.assertFalse(accepted(unsafe))
                 self.assertFalse(accepted(changes[:index] + changes[index + 1:]))
+                self.assertFalse(accepted(changes[:index] + changes[index + 1:] + [changes[1 if index == 0 else 0]]))
+
+        upgrade = json.loads(json.dumps(changes))
+        before = dict(database_version='POSTGRES_16', name='pi-orb',
+                      settings=[dict(tier='db-custom-1-3840', database_flags=[],
+                                     ip_configuration=[dict(private_network='network')],
+                                     backup_configuration=[dict(enabled=True)])])
+        after = dict(before, database_version='POSTGRES_17')
+        upgrade[0]['change'] = dict(actions=['update'], before=before, after=after, after_unknown={})
+        self.assertTrue(accepted(upgrade))
+        for version in ('POSTGRES_15', 'POSTGRES_16', 'POSTGRES_18', None):
+            unsafe = json.loads(json.dumps(upgrade))
+            unsafe[0]['change']['after']['database_version'] = version
+            self.assertFalse(accepted(unsafe))
+        for mutation in (
+            dict(actions=['delete', 'create']),
+            dict(before=dict(before, database_version='POSTGRES_15')),
+            dict(after=dict(after, name='replacement')),
+            dict(after_unknown=dict(database_version=True)),
+            dict(after_unknown=dict(settings=[dict(tier=True)])),
+        ):
+            with self.subTest(mutation=mutation):
+                unsafe = json.loads(json.dumps(upgrade))
+                unsafe[0]['change'].update(mutation)
+                self.assertFalse(accepted(unsafe))
+        for settings in (dict(tier='db-custom-2-7680'),
+                         dict(database_flags=[dict(name='log_connections', value='on')]),
+                         dict(ip_configuration=[dict(private_network='other')]),
+                         dict(backup_configuration=[dict(enabled=False)])):
+            unsafe = json.loads(json.dumps(upgrade))
+            unsafe[0]['change']['after']['settings'][0].update(settings)
+            self.assertFalse(accepted(unsafe))
+        for index in range(1, len(protected)):
+            unsafe = json.loads(json.dumps(upgrade))
+            unsafe[index]['change']['actions'] = ['update']
+            self.assertFalse(accepted(unsafe))
+        upgrade[0]['change'] = dict(actions=['no-op'], before=after, after=after)
+        self.assertTrue(accepted(upgrade))
 
     def test_issuer_resource_sizing(self):
         source = Path('infra/run.tf').read_text().split('resource "google_cloud_run_v2_service" "issuer" {', 1)[1]

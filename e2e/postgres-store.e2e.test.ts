@@ -51,7 +51,7 @@ if (providedUrl === "" && PROCESS_BACKEND) {
         "POSTGRES_DB=pi_orb",
         "-p",
         "127.0.0.1::5432",
-        "postgres:16",
+        "postgres:17",
       ]);
       await docker(["start", containerId]);
       const port = parseDockerLoopbackPort(await docker(["port", containerId, "5432/tcp"]));

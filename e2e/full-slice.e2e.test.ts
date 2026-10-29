@@ -701,7 +701,7 @@ beforeAll(async () => {
     "POSTGRES_DB=pi_orb",
     "-p",
     "127.0.0.1::5432",
-    "postgres:16",
+    "postgres:17",
   ]);
   await waitForPostgres(PG_CONTAINER, "pi-orb", "pi_orb");
   const pgPort = parseDockerLoopbackPort(await docker(["port", PG_CONTAINER, "5432/tcp"]));

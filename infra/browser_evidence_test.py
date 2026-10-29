@@ -15,7 +15,7 @@ def steps(workflow):
 class BrowserEvidenceTest(unittest.TestCase):
     def test_durable_qualification_covers_final_source_without_deployment(self):
         ci = (ROOT / '.github/workflows/ci.yml').read_text()
-        for value in ('postgres:16', 'PI_ORB_TEST_DATABASE_URL:', 'PI_ORB_DURABLE_PG_TEST_URL:'):
+        for value in ('postgres:17', 'PI_ORB_TEST_DATABASE_URL:', 'PI_ORB_DURABLE_PG_TEST_URL:'):
             self.assertIn(value, ci)
         self.assertIn('vitest run --maxWorkers=1 --no-file-parallelism', ci)
         self.assertIn('npm run test:infra', ci)

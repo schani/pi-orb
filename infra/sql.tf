@@ -3,7 +3,7 @@
 
 resource "google_sql_database_instance" "pi_orb" {
   name                = "pi-orb"
-  database_version    = "POSTGRES_16"
+  database_version    = "POSTGRES_17"
   region              = var.region
   deletion_protection = true
 

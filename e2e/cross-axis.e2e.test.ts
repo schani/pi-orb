@@ -173,7 +173,7 @@ for (const composition of CROSS_AXIS_CASES) {
             "POSTGRES_DB=pi_orb",
             "-p",
             "127.0.0.1::5432",
-            "postgres:16",
+            "postgres:17",
           ]);
           pgStarted = true;
           await waitForPostgres(pgName, "pi-orb", "pi_orb");

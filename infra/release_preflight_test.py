@@ -52,6 +52,25 @@ release_run_child gcloud run jobs create """ + migration
                 self.assertIn(diagnostic, summary.read_text())
         self.assertIn('KEEP_REMOTE_LOCK=true\n  release_run_child gcloud run jobs create', source)
 
+    def test_uncertain_apply_retains_release_lock(self):
+        source = Path("infra/release.sh").read_text()
+        apply = source.split('  stage apply\n', 1)[1].split('\nfi\n', 1)[0]
+        for child, status, retained in [("return 0", 0, "false"),
+                                        ("return 1", 1, "true"),
+                                        ("kill -TERM $$", 143, "true")]:
+            with self.subTest(child=child):
+                script = """set -eu
+KEEP_REMOTE_LOCK=false
+INFRA=infra
+WORK_DIR=/unused
+trap 'printf "retained=%s\\n" "$KEEP_REMOTE_LOCK"' EXIT
+trap 'exit 143' TERM
+release_run_child() { """ + child + "; }\n" + apply
+                result = subprocess.run(["bash", "-c", script], text=True,
+                                        capture_output=True, check=False)
+                self.assertEqual(result.returncode, status, result.stderr)
+                self.assertIn("retained=" + retained, result.stdout)
+
     def test_invalid_migration_override_fails_before_cloud_access(self):
         with tempfile.TemporaryDirectory() as directory:
             marker = Path(directory) / "cloud-called"
