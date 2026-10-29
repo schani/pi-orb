@@ -147,6 +147,8 @@ test("CLI seals code-mode's bounded image prelude", () => {
     "node_modules/@earendil-works/pi-codemode/dist/runtime/host.js",
     "node_modules/@earendil-works/pi-codemode/dist/declarations.js",
     "node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js",
+    "node_modules/@earendil-works/pi-codemode/dist/runtime/vm.js",
+    "node_modules/@earendil-works/pi-codemode/dist/runtime/vm.d.ts",
     "node_modules/@earendil-works/pi-codemode/dist/types.d.ts",
   ]) {
     mkdirSync(dirname(join(root, path)), { recursive: true });

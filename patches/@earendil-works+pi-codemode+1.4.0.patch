@@ -95,14 +95,15 @@ index c244f03..0268760 100644
  		}
  		const head = data.slice(0, 16);
 diff --git a/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js b/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js
-index eca6e30..6212e2f 100644
+index eca6e30..ccb7161 100644
 --- a/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js
 +++ b/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js
-@@ -23,7 +23,7 @@ async function main(data) {
+@@ -23,7 +23,8 @@ async function main(data) {
          data,
          wasm: data.wasm,
          post,
 -        shouldInterrupt: () => Atomics.load(interrupt, 0) !== 0,
++        onWasmMemory: (getBytes) => { data.getWasmMemoryBytes = getBytes; },
 +        shouldInterrupt: () => data.checkpoint?.() || Atomics.load(interrupt, 0) !== 0,
      });
      parentPort?.on("message", (message) => {
@@ -120,3 +121,27 @@ index 76b5c58..9d1c026 100644
      /**
       * Synchronously reserves capacity immediately before creating each worker, after loading wasm.
       * Throw to deny admission without starting a worker. Return a release callback, called once if
+diff --git a/node_modules/@earendil-works/pi-codemode/dist/runtime/vm.js b/node_modules/@earendil-works/pi-codemode/dist/runtime/vm.js
+--- a/node_modules/@earendil-works/pi-codemode/dist/runtime/vm.js
++++ b/node_modules/@earendil-works/pi-codemode/dist/runtime/vm.js
+@@ -142,6 +142,7 @@
+     if (clock)
+         clock.creating = false;
+     let disposed = false;
++    options.onWasmMemory?.(() => disposed ? 0 : vm._getExports().memory.buffer.byteLength);
+     /** Calls the script has issued, tools and globals; reported with every `idle`. */
+     let issued = 0;
+     /** Deterministic mode: the next result to apply, and results that arrived before it. */
+diff --git a/node_modules/@earendil-works/pi-codemode/dist/runtime/vm.d.ts b/node_modules/@earendil-works/pi-codemode/dist/runtime/vm.d.ts
+--- a/node_modules/@earendil-works/pi-codemode/dist/runtime/vm.d.ts
++++ b/node_modules/@earendil-works/pi-codemode/dist/runtime/vm.d.ts
+@@ -19,6 +19,8 @@
+     interruptBudget?: number;
+     post(message: WorkerToHostMessage): void;
+     shouldInterrupt(): boolean;
++    /** Publishes owned wasm capacity before guest execution; the getter returns zero after disposal. */
++    onWasmMemory?(getBytes: () => number): void;
+ }
+ export declare function startVm(options: StartVmOptions): Promise<VmSession>;
+ //# sourceMappingURL=vm.d.ts.map
+\ No newline at end of file

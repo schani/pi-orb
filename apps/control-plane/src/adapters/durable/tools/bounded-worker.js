@@ -14,11 +14,11 @@ const cpuCheckpoint = createCpuCheckpoint({
   ...workerData.extension,
   interrupt: workerData.interrupt,
 });
-// [current, peak] bytes of this isolate. External memory includes QuickJS's wasm memory.
+// [current, peak] V8 heap + external + owned QuickJS wasm capacity (omitted by Node 26).
 const memory = new Float64Array(workerData.extension?.memoryStats ?? new SharedArrayBuffer(16));
 workerData.checkpoint = () => {
   const heap = getHeapStatistics();
-  memory[0] = heap.used_heap_size + heap.external_memory;
+  memory[0] = heap.used_heap_size + heap.external_memory + (workerData.getWasmMemoryBytes?.() ?? 0);
   if (memory[0] > memory[1]) memory[1] = memory[0];
   return cpuCheckpoint();
 };

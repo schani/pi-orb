@@ -8,19 +8,19 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { err, ok, Result, ResultAsync } from "neverthrow";
 
-export const PIN = "5597120466a5785efb480428b0173d631ffb46fa";
+export const PIN = "a6e97a6057d4c323c341b41ea4be98b4fa59f575";
 export const FLING_INTEGRITY =
-  "sha512-OpjCWlRfDf7uvgYBHlNMzrAdSem7/iwe8T/K3wLaZqL/0XCf/vdNNn0yG+z4ELWhIEzmPz4UZZAYKhZ8xew84g==";
+  "sha512-bfgwsKB5NlW5aMtaz64ZZpFlFAZCwHyPhwKHlUXTKpCUfG9WF569ibc9HXq+pL627voYm8bp96HlBbYiudyUlA==";
 const boundary = (type, fn) => ResultAsync.fromThrowable(fn, () => ({ type }))();
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 
 export function validatePins(head, lock, installed) {
   const fling = lock?.packages?.["node_modules/flingit"];
   return head === PIN &&
-    installed === "0.0.70" &&
-    fling?.version === "0.0.70" &&
+    installed === "0.0.71" &&
+    fling?.version === "0.0.71" &&
     fling.integrity === FLING_INTEGRITY &&
-    fling.resolved === "https://registry.npmjs.org/flingit/-/flingit-0.0.70.tgz"
+    fling.resolved === "https://registry.npmjs.org/flingit/-/flingit-0.0.71.tgz"
     ? ok(undefined)
     : err({ type: "pin_mismatch" });
 }
@@ -295,7 +295,7 @@ const npmCodes = new Set(
     "ERESPONSETIMEOUT ETRANSFERTIMEOUT E401 E403 ENEEDAUTH EOTP CERT_HAS_EXPIRED " +
     "UNABLE_TO_VERIFY_LEAF_SIGNATURE DEPTH_ZERO_SELF_SIGNED_CERT SELF_SIGNED_CERT_IN_CHAIN " +
     "UNABLE_TO_GET_ISSUER_CERT_LOCALLY ERR_TLS_CERT_ALTNAME_INVALID EINTEGRITY EUSAGE " +
-    "ENOLOCK ELOCKVERIFY ERESOLVE EJSONPARSE ELIFECYCLE"
+    "ENOLOCK ELOCKVERIFY ERESOLVE EJSONPARSE ELIFECYCLE EBADENGINE"
   ).split(" "),
 );
 export function npmDiagnostic(output) {
@@ -399,7 +399,7 @@ export async function runLocalFake(command, env = process.env) {
   const evidence = resolve(env.PI_ORB_LOCAL_FAKE_EVIDENCE ?? `${root}-evidence`);
   const manifest = {
     pin: PIN,
-    fling: "0.0.70",
+    fling: "0.0.71",
     node: process.version,
     startedAt: new Date().toISOString(),
     ports: [3210, 5173],
@@ -488,7 +488,7 @@ export async function runLocalFake(command, env = process.env) {
       return JSON.parse(raw);
     });
     if (lock.isErr()) return lock;
-    const pinned = validatePins(head.value.trim(), lock.value, "0.0.70");
+    const pinned = validatePins(head.value.trim(), lock.value, "0.0.71");
     if (pinned.isErr()) return pinned;
     const project = await boundary("install_policy_read", async () =>
       JSON.parse(await fs.readFile(join(source, "package.json"), "utf8")),
@@ -512,7 +512,7 @@ export async function runLocalFake(command, env = process.env) {
     const verified = validatePins(head.value.trim(), lock.value, installed.value);
     if (verified.isOk()) {
       manifest.verifiedHead = PIN;
-      manifest.installedFling = "0.0.70";
+      manifest.installedFling = "0.0.71";
     }
     return verified;
   };

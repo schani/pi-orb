@@ -1884,7 +1884,7 @@ the user confirmed typing and Send on the reported physical iPhone preview
 (“It's perfect!”). Rotation, broader Safari/home-screen, iPad and Android coverage
 remain pending in `TODO.md`; no deployment is established.
 
-## Node 26.13.0 LTS qualification (2026-10-28; local, undeployed)
+## Node 26.13.0 LTS qualification (2026-10-28; updated 2026-10-29, undeployed)
 
 Based on `9e2a5d85`: Node 26.13.0 / npm 11.20.0 / ABI 147; only typings 26.6.6 and required undici-types 8.9.0 change npm resolutions.
 Official signed manifest verified with Richard Lau's key `C82FA3AE1CBEDC6BE46B9360C43CEC45C17AB93C`; archive checksum matches.
@@ -1897,6 +1897,9 @@ Full infra, before the additional browser contract: 120 Node + 236 Python + 34 n
 Separate CI prerequisite: select installed lock-bundled Chromium, export/alias its path and log its version in both functional workflows.
 This avoids the independent [Chromium Event Timing CHECK crash](https://github.com/schani/pi-orb/actions/runs/40751943067/job/123040663268), [reverted upstream](https://github.com/chromium/chromium/commit/158b9c164108cdbef03a3e21db318cee80800d42); historical binary version is unknown. WebKit/APIs/assertions are unchanged.
 Exact browser-install block contracts: RED, then 26 combined browser/pin Python cases pass. Receipts: `.context/node26-evidence/` in the isolated worktree.
-Exact committed-head full unit/DST, browser/runtime E2E and image CI remain pending; the local Docker daemon is verified running.
-Fresh native GCP acceptance/retained-workspace gates remain required before production release; none was run or published.
-Incident/source limits: `docs/postmortems/2026-10-28-node-wasm-wrapper-lifetime.md`.
+Exact head `ccee910a` is not green: [CI checks](https://github.com/schani/pi-orb/actions/runs/40815977698/job/123257002330) failed with 6,091 unit tests passing and one code-mode memory assertion failing; the control-plane image passed. All eight E2E/Durable shards failed fake-provider installation before tests; a single exact-pin reproduction confirms `EBADENGINE` from bundled `better-sqlite3@12.8.0` excluding Node 26.
+**Compatibility fixes (2026-10-29):** the sealed SDK exposes fresh owned Wasm capacity before guest callbacks; the worker adds it to heap + external without initial-capacity deduction. Native exported-module/QuickJS tests establish non-overlap on pinned Node 26 and reject future counter changes. Existing current/peak, aggregate telemetry, guest limits, memory thresholds and output limits remain unchanged. Pi package versions and application lockfile are unchanged.
+The fake-provider pin moves to `a6e97a6057d4c323c341b41ea4be98b4fa59f575` / `flingit@0.0.71` (fixture lock SHA-256 `c34d693f1b71d6ced47e9f8704d996c429ea9cd853ecc4340170961c36cc1c7f`), retaining strict engines and pinned integrity. The fixture's required dependency refresh includes SQLite, Hono, dotenv and esbuild. [Upstream PR 11](https://github.com/glideapps/fake-openai/pull/11) is draft/unmerged. `EBADENGINE` now survives bounded npm diagnostics; raw stderr remains excluded.
+Fresh clean Node 26 `npm ci` applies all three sealed patches and audits cleanly. Serial workspace/E2E typecheck, lint and web build pass; 44 memory/sandbox/DST + 23 patch-pipeline + 45 fake-provider + 26 Python pin/browser cases pass. The normal owned wrapper runs all three existing Durable process tests successfully on Node 26 with the new SDK/fixture; manifest records exit 0, unchanged ready identity and successful cleanup of both child groups. Ports 3210/5173 are free. Receipts: [private compatibility-fix archive](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/f80c5983-861b-49b6-9bb1-6683386edf7c/evidence/pr227-node26-compatibility-fixes.tgz), `.context/node26-evidence/compat-fix-final/`. Upstream/native SQLite and fixture-readiness proofs: the incident below.
+Full exact-new-head unit/DST, browser/runtime E2E and image CI are pending; earlier image or Node 24 process receipts do not qualify the compatibility fixes. Fresh native GCP acceptance/retained-workspace gates remain required before production release; none was run or published. No merge or deployment occurred.
+Evidence, source limits and compatibility mechanisms: `docs/postmortems/2026-10-28-node-wasm-wrapper-lifetime.md`.

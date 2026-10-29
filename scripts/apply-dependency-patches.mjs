@@ -30,7 +30,7 @@ const packages = [
     package: "node_modules/@earendil-works/pi-codemode",
     version: "1.4.0",
     patch: "@earendil-works+pi-codemode+1.4.0.patch",
-    sha: "1558d89f7352b7bea216a090fdbbaa50deb0e778bb65f4c0ae9aa785757d8978",
+    sha: "ea061d76229729c166606d292dadd124a8568d6cd147e4229dca77ac0102935a",
     files: {
       "node_modules/@earendil-works/pi-codemode/dist/declarations.js": [
         "00ab54f850a7412d029f8d9699fcb51b1346f3cb2c58e47b63f9189292ec260c",
@@ -44,9 +44,17 @@ const packages = [
         "2fc2886529c0a7e8a7c9ac16b7c96fb2bbf8d2dce562801c5a09d723a57ea6ca",
         "5a52984e773985827e45490c9fb60a6fe6ec2302a8e2cbc1ffda5d5cc9737d06",
       ],
+      "node_modules/@earendil-works/pi-codemode/dist/runtime/vm.js": [
+        "279c77a80ac3d6bc1f883b02a28d892608ff43cc0b7e91dbfa3aece218c7c47b",
+        "df58904095b3dec6f650b8f61c5ba174229cac78b25d63b2371bd0165c29aaa3",
+      ],
+      "node_modules/@earendil-works/pi-codemode/dist/runtime/vm.d.ts": [
+        "aeda524b2394743bc62418a4aca304f539a435d18cace78c2fa0bde7055d3777",
+        "5296466cd58637cec465dbdd6d52c371b71cac68efad3d5138191492bba6cc5a",
+      ],
       "node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js": [
         "22f72950eaaa7e7e3a816db5ce1203f2a685de0328ea097278fd74b11263d813",
-        "33c9418251b64423ee5e8fdb0fefecdb7346b203780150f8ed33a146ff2bf533",
+        "40eedef257ef12780278476255c35bc3bd2f1f234e60cd6788f34b97b740c176",
       ],
       "node_modules/@earendil-works/pi-codemode/dist/types.d.ts": [
         "988afeebcfd64ed6815c102dbd4e50ffe1d1c08dd32f80ba334701ff0403edc7",
