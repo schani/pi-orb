@@ -572,7 +572,7 @@ print(json.dumps(inspect(api, '${selected}').value))
     expect(result.stdout).toContain("generation 201");
     const calls = readFileSync(log, "utf8");
     expect(calls).toMatch(
-      /gcloud:storage cp[\s\S]*tofu:.* init[\s\S]*tofu:.* plan[\s\S]*\nbuild[\s\S]*tofu:.* plan[\s\S]*run jobs create[\s\S]*tofu:.* apply[\s\S]*deploy:[\s\S]*infra.release_retire wait[\s\S]*infra.release_state activate[\s\S]*smoke[\s\S]*wif-smoke[\s\S]*gcloud:storage rm/,
+      /gcloud:storage cp[\s\S]*tofu:.* init[\s\S]*tofu:.* plan[\s\S]*\nbuild[\s\S]*tofu:.* plan[\s\S]*run jobs create[\s\S]*tofu:.* apply[\s\S]*deploy:[\s\S]*infra.release_state request-retirement[\s\S]*infra.release_retire wait[\s\S]*infra.release_state activate[\s\S]*smoke[\s\S]*wif-smoke[\s\S]*gcloud:storage rm/,
     );
     expect(calls).toMatch(/npm:ci[\s\S]*npm:test\n[\s\S]*npm:run test:e2e[\s\S]*\nbuild\n/);
     expect(calls).not.toContain("docker:build");

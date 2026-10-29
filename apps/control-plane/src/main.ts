@@ -101,7 +101,11 @@ import { spawnOrb } from "./domain/orb-spawning.ts";
 import type { BrokerDeps, ControlPlaneDeps, SigningKeyDeps } from "./domain/ports.ts";
 import { getProjectSecretSnapshot } from "./domain/project-secrets.ts";
 import { cancelQueuedUserTurn } from "./domain/queued-turn-cancellation.ts";
-import { waitForReleaseActivation } from "./domain/release-activation.ts";
+import {
+  type ReleaseActivationReader,
+  waitForReleaseActivation,
+  watchReleaseRetirement,
+} from "./domain/release-activation.ts";
 import { resourceError } from "./domain/resources.ts";
 import { createSigningKeyBootstrapState, ensureActiveSigningKey } from "./domain/signing-keys.ts";
 import { UserScope } from "./domain/user-scope.ts";
@@ -123,6 +127,7 @@ import { registerIssuerRoutes } from "./http/issuer-routes.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
 import { MCP_OAUTH_CALLBACK, registerMcpOAuthRoutes } from "./http/mcp-oauth-routes.ts";
 import { registerMcpRoutes } from "./http/mcp-routes.ts";
+import { registerResponseDrain } from "./http/response-drain.ts";
 import { registerRoutes } from "./http/routes.ts";
 import { registerRuntimeRoutes } from "./http/runtime-routes.ts";
 import { registerWebAssets } from "./http/web-assets.ts";
@@ -195,6 +200,7 @@ export async function main(
   adapters: {
     mcpOAuthProtocol?: (callback: string) => McpOAuthProtocol;
     googleLoginProvider?: GoogleLoginProvider;
+    releaseActivationReader?: ReleaseActivationReader;
     requestPrincipalResolverFactory?: (
       task: SimulationTask,
       users: import("./domain/identity.ts").UserStore,
@@ -610,6 +616,8 @@ export async function main(
   }
 
   const app = Fastify({ logger: false });
+  const stop = new AbortController();
+  registerResponseDrain(app, stop.signal);
   const oauthNetwork = createMcpOAuthFetch();
   const mcpOAuth = new McpOAuth(
     database.mcpOAuth,
@@ -979,7 +987,7 @@ export async function main(
     logEvent(bootTask, "issuer-key-unavailable", { reason: lastFailure });
   };
 
-  const stop = new AbortController();
+  let signingKeyRepair = Promise.resolve();
   let appClosePromise: Promise<void> | null = null;
   let resourceClosePromise: Promise<void> | null = null;
   const closeApp = (): Promise<void> => {
@@ -991,18 +999,24 @@ export async function main(
   const closeResources = (): Promise<void> => {
     resourceClosePromise ??= (async () => {
       await closeApp();
+      await signingKeyRepair;
       const authorityClosed = await centralPlane.close();
       if (authorityClosed.isErr())
         bootTask.error("central agent close failed:", authorityClosed.error.message);
       if (hostProvider instanceof ProcessOrbHostProvider) await hostProvider.close();
       const closed = await database.close();
       if (closed.isErr()) bootTask.error("database close failed:", closed.error.message);
+      logEvent(bootTask, "control-plane-drained", {
+        generation: specGeneration,
+        agentsClosed: authorityClosed.isOk(),
+        databaseClosed: closed.isOk(),
+      });
     })();
     return resourceClosePromise;
   };
   const shutdown = (): void => {
     if (stop.signal.aborted) return;
-    bootTask.log("shutting down");
+    logEvent(bootTask, "control-plane-shutdown", { generation: specGeneration });
     process.off("message", e2eReconcileMessageHandler);
     process.off("message", e2eHistoryMessageHandler);
     stop.abort();
@@ -1023,16 +1037,20 @@ export async function main(
   if (listening === null) return;
   bootTask.log(`control plane listening on ${listening}`);
 
-  // Fire and forget: the socket is already accepting, and this repairs the
-  // issuer behind it (see `ensureSigningKeyInBackground`).
-  void ensureSigningKeyInBackground();
+  // Repair behind the listening socket, but join it before closing the database.
+  signingKeyRepair = ensureSigningKeyInBackground();
 
   // Background loops: same domain code as the simulations, on real time
   // (docs/history-replication.md, docs/lifecycle.md).
-  if (activationBucket !== "") {
+  const activationReader =
+    activationBucket === ""
+      ? undefined
+      : (adapters.releaseActivationReader ??
+        createReleaseActivationReader(activationBucket, createGcsTokenProvider()));
+  if (activationReader !== undefined) {
     const activated = await waitForReleaseActivation(
       new ControlPlaneTask("release-activation"),
-      createReleaseActivationReader(activationBucket, createGcsTokenProvider()),
+      activationReader,
       specGeneration,
       stop.signal,
       (status) => {
@@ -1041,13 +1059,14 @@ export async function main(
       },
     );
     if (!activated) {
+      shutdown();
       await closeResources();
       return;
     }
   }
   const runReconcileTask: ReconcileTaskRunner = (orbId, operation) =>
     operation(new ControlPlaneTask(`reconciler:${orbId}`));
-  const loops: readonly Promise<void>[] = [
+  const loops: Promise<void>[] = [
     pollLoop(new ControlPlaneTask("poller"), deps, stop.signal, (lane, operation) =>
       operation(new ControlPlaneTask(`poller:${lane}`)),
     ),
@@ -1062,6 +1081,18 @@ export async function main(
       stop.signal,
     ),
   ];
+  if (activationReader !== undefined) {
+    loops.push(
+      watchReleaseRetirement(
+        new ControlPlaneTask("release-retirement"),
+        activationReader,
+        specGeneration,
+        stop.signal,
+      ).then((retire) => {
+        if (retire) shutdown();
+      }),
+    );
+  }
   try {
     await Promise.all(loops);
   } catch (error) {

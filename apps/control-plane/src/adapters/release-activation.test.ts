@@ -14,18 +14,38 @@ describe("release activation GCS boundary", () => {
       );
       expect(init?.signal).toBeInstanceOf(AbortSignal);
       expect(init?.redirect).toBe("error");
-      return Response.json({ generation: 42 });
+      return Response.json({ generation: 42, retireThroughGeneration: 42 });
     });
-    expect((await reader.read(task, stop))._unsafeUnwrap()).toBe(42);
+    expect((await reader.read(task, stop))._unsafeUnwrap()).toEqual({
+      generation: 42,
+      retireThroughGeneration: 42,
+    });
   });
 
-  it.each([{}, { generation: -1 }, { generation: 0 }, { generation: "42" }, { generation: 1.5 }])(
-    "fails closed on an invalid authority record: %j",
-    async (body) => {
-      const reader = createReleaseActivationReader("bucket", auth, async () => Response.json(body));
-      expect((await reader.read(task, stop)).isErr()).toBe(true);
-    },
-  );
+  it.each([
+    {},
+    { generation: -1 },
+    { generation: 0 },
+    { generation: "42" },
+    { generation: 1.5 },
+    { generation: 42, retireThroughGeneration: -1 },
+    { generation: 42, retireThroughGeneration: "41" },
+    { generation: 42, retireThroughGeneration: 1.5 },
+    { generation: 42, retireThroughGeneration: null },
+  ])("fails closed on an invalid authority record: %j", async (body) => {
+    const reader = createReleaseActivationReader("bucket", auth, async () => Response.json(body));
+    expect((await reader.read(task, stop)).isErr()).toBe(true);
+  });
+
+  it("treats an absent cutoff as no retirement request", async () => {
+    const reader = createReleaseActivationReader("bucket", auth, async () =>
+      Response.json({ generation: 42 }),
+    );
+    expect((await reader.read(task, stop))._unsafeUnwrap()).toEqual({
+      generation: 42,
+      retireThroughGeneration: 0,
+    });
+  });
 
   it("treats missing authority as waiting, not permission to start", async () => {
     const reader = createReleaseActivationReader(

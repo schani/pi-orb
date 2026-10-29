@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from infra.release_state import Cloud, Result, SERVICES, activate, current_vars, fail, main, publish, recover, snapshot, summarize_service, validate_record
+from infra.release_state import Cloud, Result, SERVICES, activate, current_vars, fail, main, publish, recover, request_retirement, snapshot, summarize_service, validate_record
 
 IMAGE = "us-central1-docker.pkg.dev/test-project/pi-orb/control-plane@sha256:" + "a" * 64
 STAMP = "2026-09-09T12:00:00Z"
@@ -385,10 +385,61 @@ class ReleaseStateTest(unittest.TestCase):
         self.assertIsNone(activate(cloud, record()).error)
         self.assertEqual(cloud.writes[0][3], "7")
         self.assertEqual(cloud.writes[0][2]["generation"], 42)
+        self.assertEqual(cloud.writes[0][2]["retireThroughGeneration"], 41)
         cloud.writes.clear()
         cloud.authority["body"]["generation"] = 42
         self.assertIsNone(activate(cloud, record()).error)
         self.assertEqual(cloud.writes, [])
+
+    def test_retirement_request_preserves_activation_until_proof_then_keeps_cutoff(self):
+        cloud, value = FakeCloud(), record()
+        cloud.authority['body'].update(releaseId='prior-release', activatedAt=STAMP, retireThroughGeneration=39)
+        prior = copy.deepcopy(cloud.authority['body'])
+        value['retirement']['zeroes'] = {}
+        self.assertIsNone(request_retirement(cloud, value).error)
+        self.assertEqual(cloud.writes[0], ('pi-orb-tfstate-test-project', 'static-plane/releases/active.json',
+                                          {**prior, 'retireThroughGeneration': 41}, '7'))
+        cloud.authority = {'generation': '8', 'body': cloud.writes[0][2]}
+        cloud.writes.clear()
+        self.assertIsNone(request_retirement(cloud, value).error)
+        self.assertEqual(cloud.writes, [])
+        self.assertIsNotNone(activate(cloud, value).error)
+        self.assertEqual(cloud.writes, [])
+        value['retirement'] = record()['retirement']
+        self.assertIsNone(activate(cloud, value).error)
+        self.assertEqual(cloud.writes[0][3], '8')
+        self.assertEqual(cloud.writes[0][2]['retireThroughGeneration'], 41)
+        self.assertEqual(cloud.writes[0][2]['generation'], 42)
+
+    def test_retirement_request_and_activation_refuse_to_regress_or_revive_retired_generation(self):
+        for body in ({'generation': 43}, {'generation': 41, 'retireThroughGeneration': 42},
+                     {'generation': 41, 'retireThroughGeneration': True},
+                     {'generation': 41, 'retireThroughGeneration': -1}):
+            for action in (request_retirement, activate):
+                with self.subTest(body=body, action=action.__name__):
+                    cloud = FakeCloud()
+                    cloud.authority['body'] = body
+                    self.assertIsNotNone(action(cloud, record()).error)
+                    self.assertEqual(cloud.writes, [])
+
+    def test_retirement_request_rejects_changed_serving_identity_and_propagates_cas_failure(self):
+        cloud = FakeCloud()
+        cloud.changed = True
+        self.assertIsNotNone(request_retirement(cloud, record()).error)
+        self.assertEqual(cloud.writes, [])
+        cloud.changed = False
+        with patch.object(cloud, 'put', return_value=fail('conflict', 'object changed')):
+            self.assertEqual(request_retirement(cloud, record()).error.kind, 'conflict')
+
+    def test_generation_selection_stays_above_a_failed_releases_retirement_cutoff(self):
+        cloud = FakeCloud()
+        cloud.authority['body']['retireThroughGeneration'] = 47
+        with tempfile.TemporaryDirectory() as directory, patch('infra.release_state.Cloud', return_value=cloud):
+            path, variables = Path(directory) / 'release.json', Path(directory) / 'release.tfvars'
+            path.write_text(json.dumps(record()))
+            self.assertEqual(main(['release_state', 'generation', str(path), str(variables)]), 0)
+            self.assertEqual(json.loads(path.read_text())['artifacts']['deploy_generation'], 48)
+            self.assertIn('deploy_generation = 48\n', variables.read_text())
 
     def test_empty_process_inventory_still_requires_resource_retirement(self):
         value, cloud = record(), FakeCloud()
