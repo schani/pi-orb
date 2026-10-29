@@ -39,3 +39,18 @@ Final local lint (existing warnings), typecheck, infrastructure suite (120 Node,
 and 28 release contracts pass; logs/exit receipts remain under `$HOME/.local/share/pi-orb/pr226-finalization/`.
 No blind CI rerun, weakened assertion, raised timeout or application/prompt/schema/extension change.
 Fresh exact-head CI qualification remains required before merge; no deployment qualification is claimed.
+
+## Second qualification
+Head `fc36de79` passed all four E2E shards, four Durable shards and the image job.
+[CI 40918603598 / 123605422991](https://github.com/schani/pi-orb/actions/runs/40918603598/job/123605422991)
+reported 6,091 passed, nine skipped and one failure, `e2e/sharding.unit.test.ts:27`:
+its literal `run: node ...` expected the single-line workflow before managed-browser
+selection added a multiline run block.
+The unchanged-head failure reproduced locally. The contract now checks the exact
+export, version probe and unchanged supervisor/shard command together; no workflow changed.
+All 16 related unit tests, 31 browser/CI contracts and E2E typecheck pass; focused
+lint passes with two existing warnings. Repository-wide search
+found no other stale E2E run-block expectation; the remaining single-line contract
+checks the unchanged Durable workflow. The complete job log, RED/GREEN logs and
+artifact comparison remain under `$HOME/.local/share/pi-orb/pr226-ci-second-failure/`.
+All 19 artifact JSONs are byte-identical tracked fixtures; no new DST failure occurred.
