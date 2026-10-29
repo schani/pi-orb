@@ -4,7 +4,7 @@ const toMiB = (bytes: number) => Math.round((bytes / 1024 / 1024) * 10) / 10;
 
 interface LiveWorker {
   orbId: string | undefined;
-  /** bounded-worker.js writes [current, peak] isolate bytes: V8 heap used + external, which includes QuickJS wasm memory. */
+  /** bounded-worker.js writes [current, peak] bytes: V8 heap used + external + owned QuickJS wasm capacity. */
   stats: Float64Array;
 }
 const current = (worker: LiveWorker) => worker.stats[0] ?? 0;

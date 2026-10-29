@@ -168,6 +168,28 @@ no completed receipt was demonstrated. This monitoring performed no production
 mutation, replay or deletion. Periodic read-only monitoring resumes until the
 workflow's terminal outcome.
 
+## Final workflow outcome: post-rollout monitor failed
+
+The separate observation ends at 20:42:45 with `outcome=regression`; GitHub
+marks Deploy failed. The release transaction remains `validated`, not rolled
+back. All fourteen samples report health `ok`, the intended serving generation
+and SQL `RUNNABLE`, and no ingress 429. The monitor's cumulative log window
+contains one ERROR / HTTP 503 event, not fourteen separate failures.
+
+That request began at 20:30:30.931765 on revision `00077-v6l`: POST to the
+conversation-headline route for orb `1ccfa9fe-52cd-4ad8-ab3f-289b4b965864`,
+latency 1.554454158 seconds, trace `145b7c3c947bc29ce99c3b40f5067aba`.
+Nearby lifecycle evidence records `delete_requested` at 20:30:32.482494 and
+`stale_owner` at 20:30:32.490548; this timing does not prove the 503's cause.
+The monitor does not establish central inference or original-message delivery.
+No failed gate was waived, rerun, or treated as healthy release qualification.
+
+Retained evidence: [rollout-monitor artifact](https://github.com/schani/pi-orb/actions/runs/40928556779/artifacts/12930269149),
+`/tmp/pi-orb-prod-diag/rollout-final/rollout-monitor.json`,
+`rollout-observed-errors.json`, `headline-503-context.json`, and
+`deploy-final-failure.log` in that same private diagnostic directory. Monitoring
+stops at this terminal workflow outcome; no production mutation was performed.
+
 ## Evidence
 
 Authoritative evidence is Cloud SQL operation metadata, Cloud Audit Logs,

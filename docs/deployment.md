@@ -145,7 +145,7 @@ The synthetic native workload executes the genuine SDK with kernel-isolated fake
 - Infrastructure must be managed as code.
 - The IaC tool is OpenTofu. It manages only the static plane: VPC, firewall rules, Cloud Run, Cloud SQL, Artifact Registry, IAM. Per-orb VMs are dynamic resources created by `GceOrbHostProvider` through the GCE API at runtime and are never IaC resources.
 - OpenTofu state lives in GCS (versioned bucket `pi-orb-tfstate-playground-dev-6ae7`, prefix `static-plane`), decided 2026-08-01 after the original local state was lost with its working directory. The live deployment was adopted into the fresh remote state via import blocks (`infra/imports.tf`) — 17 imports, zero destroys — rather than torn down; the import blocks stay in the repo as the adoption record. Lesson encoded: local IaC state in an ephemeral checkout is how you lose it.
-- The control plane, orb runtime, shared protocol, and web UI will be written in TypeScript on Node.js 24.
+- The control plane, orb runtime, shared protocol, and web UI will be written in TypeScript on Node.js 26.13.0 LTS.
 - **Manual-release entry point (decided and implemented 2026-08-09):** operators deploy only through `infra/release.sh`, a single command that requires a clean selected commit on local branch `main` and composes the existing build/boot-gate/push, exact temporary OpenTofu plan/apply, mandatory exact-IAP reconciliation, drained-revision cleanup, and live smoke stages. Ordinary apply errors and interruption signals repair IAP with `infra/deploy.sh --iap-only` before returning failure. `umask 077` plus a mode-0700 temporary directory protects generated variables and the binary plan until they are deleted on exit. A generation-matched object in the static-plane state bucket serializes the whole transaction across workstations/runners; while holding it, the script clamps the next generation above the currently serving revision. A same-host lock fails earlier. A trap-bypassing process death can leave a stale GCS lock that requires operator verification before removal.
 - **Release cancellation waits for owned cleanup (corrected 2026-09-07):** each shell layer tracks its direct child, handles one termination signal, ignores duplicates, terminates the child and waits. The native build wrapper invokes the Node builder directly rather than adding an npm process that can exit before the builder's abort cleanup. A process-group SIGINT regression requires builder cleanup to finish before either wrapper exits (`docs/postmortems/2026-09-07-native-build-cancellation-cleanup.md`).
 - **Former maintenance drain (introduced 2026-09-06, retired 2026-09-09):** `--quiesce` disabled the browser and required explicit zero-instance metrics, with shell-trap restoration. It rejected the required `files` tag and had no restoration independent of the caller. The option, helper and tests are removed rather than promoted into unattended deployment. The retained rule is that deletion, log silence and elapsed time never prove old-process retirement; any future deliberate pause requires a verified independent restoration watchdog.
@@ -302,7 +302,7 @@ In priority order:
    same-repository `push`/`main` runs at the exact dispatched SHA; record run IDs
    and attempts. Accept only one matching push run per workflow, on its first
    attempt; reruns cannot mask an earlier failure. CI, E2E and Deploy are aligned
-   on `ubuntu-24.04` and Node `24.22.1`.
+   on `ubuntu-24.04` and Node `26.13.0`.
    This removes duplicate checks, not coverage. Failed or cancelled runs block;
    pending or missing runs must succeed within 60 minutes (65-minute job limit).
    Require the CI checks job and all four E2E jobs. Before the release lock,
@@ -885,7 +885,7 @@ not duplicate the deployment algorithm. The first-release policy is recorded in
 immutable dispatched SHA, verifies checkout equality, and creates local branch
 `main` at that exact SHA before authentication. The shared command requires a
 clean checkout and re-verifies trusted same-repository `push`/`main` qualification
-for the selected SHA before acquiring the release lock. Node 24.22.1, SDK 590.0.1 with its explicit beta component and checksum-verified
+for the selected SHA before acquiring the release lock. Node 26.13.0, SDK 590.0.1 with its explicit beta component and checksum-verified
 OpenTofu 1.13.2 are pinned; actions use immutable SHAs, the runner is Ubuntu 24.04,
 and provider lock files are read-only. The 240-minute job budget accommodates
 checks, fresh native acceptance, migration/apply and up to 75 minutes of retirement.

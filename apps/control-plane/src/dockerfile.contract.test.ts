@@ -17,7 +17,7 @@ describe("control-plane Dockerfile workspace contract", () => {
     expect(controlPlanePackage.dependencies?.["node-pty"]).toBe("1.1.0");
     const stages = dockerfile.split(/^FROM /m).slice(1);
     const dependencies = stages.find((stage) =>
-      stage.startsWith("node:24.22.1-bookworm-slim AS dependencies\n"),
+      stage.startsWith("node:26.13.0-bookworm-slim AS dependencies\n"),
     );
     expect(dependencies).toBeDefined();
     expect(dependencies).toMatch(
@@ -36,7 +36,7 @@ describe("control-plane Dockerfile workspace contract", () => {
   it("rebuilds PTYs offline using the matching installed Node headers", () => {
     const dependencies = dockerfile
       .split(/^FROM /m)
-      .find((stage) => stage.startsWith("node:24.22.1-bookworm-slim AS dependencies\n"));
+      .find((stage) => stage.startsWith("node:26.13.0-bookworm-slim AS dependencies\n"));
     const rebuild = dependencies?.match(/^RUN --network=none .*?(?=\n(?:\S|$))/ms)?.[0];
     expect(rebuild).toBeDefined();
     expect(rebuild).toMatch(

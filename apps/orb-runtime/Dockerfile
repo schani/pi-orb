@@ -1,11 +1,11 @@
-# Orb runtime image: Debian-based Node 24 with git,
+# Orb runtime image: Debian-based Node 26 with git,
 # Python 3, zip/unzip, the GitHub CLI, the Google Cloud CLI, and
 # Tailscale for tier-1 port exposure
 # (docs/ports.md). No systemd unit is enabled — the runtime process spawns
 # tailscaled itself, in userspace-networking mode, so the container needs
 # neither a TUN device nor NET_ADMIN. Build from the repository root:
 #   docker build -f apps/orb-runtime/Dockerfile -t pi-orb-runtime:dev .
-FROM node:24.22.1-bookworm-slim
+FROM node:26.13.0-bookworm-slim
 
 COPY infra/runtime_apt.sh /usr/local/bin/runtime-apt
 RUN chmod 755 /usr/local/bin/runtime-apt \
@@ -109,5 +109,5 @@ ENV RUSTUP_HOME=/workspace/home/.rustup
 ENV CARGO_HOME=/workspace/home/.cargo
 ENV PATH=/workspace/home/.cargo/bin:$PATH
 
-# Node 24 strips types natively; no build step.
+# Node 26 strips types natively; no build step.
 CMD ["node", "apps/orb-runtime/src/runtime-entry.ts"]

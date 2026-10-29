@@ -1,4 +1,4 @@
-import { createPublicKey, type JsonWebKey, verify } from "node:crypto";
+import { createPublicKey, verify, type webcrypto } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -89,7 +89,7 @@ async function verifyAgainstJwks(jwt: string, now: number): Promise<Record<strin
   const verified = verify(
     "sha256",
     Buffer.from(`${header}.${payload}`, "ascii"),
-    createPublicKey({ key: jwk as JsonWebKey, format: "jwk" }),
+    createPublicKey({ key: jwk as webcrypto.JsonWebKey, format: "jwk" }),
     Buffer.from(signature, "base64url"),
   );
   expect(verified, "signature did not verify against the served JWKS").toBe(true);

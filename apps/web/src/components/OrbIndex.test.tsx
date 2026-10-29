@@ -81,6 +81,19 @@ describe("stacked project index", () => {
     expect(html).toContain('class="ix-age">…</span>');
   });
 
+  it("keeps the archive closed when no orb is selected", () => {
+    const html = renderToStaticMarkup(
+      <IndexProject
+        {...props}
+        orbId={null}
+        list={{ items: [{ ...orb, state: "archived" }], error: null }}
+      />,
+    );
+    expect(html).toContain('class="project-archive"');
+    expect(html).not.toContain('open=""');
+    expect(html).not.toContain("aria-current");
+  });
+
   it("renders an expanded working tree with native selected links and a flat archive", () => {
     const child = { ...orb, id: "child", name: "Child", spawnedByOrb: orb.id };
     const archived = { ...orb, id: "archived", state: "archived" as const, spawnedByOrb: orb.id };

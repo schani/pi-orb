@@ -1,7 +1,7 @@
 # Synthetic Claude native acceptance
 
 No owner credentials, provider authorization, cloud resources or upstream model
-requests. Linux x86-64, Node 24, `sudo`, `unshare`, `setpriv`, `ip`, Git and OpenSSL
+requests. Linux x86-64, Node 26.13.0 LTS, `sudo`, `unshare`, `setpriv`, `ip`, Git and OpenSSL
 are required. Lack of namespace privileges fails closed; it is not a skipped gate.
 
 ```sh

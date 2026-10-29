@@ -1,4 +1,4 @@
-import { createHash, createPublicKey, type JsonWebKey, verify } from "node:crypto";
+import { createHash, createPublicKey, verify, type webcrypto } from "node:crypto";
 import { ID_TOKEN_PATH } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
@@ -384,7 +384,7 @@ describe("minted tokens verify against the served JWKS", () => {
       verify(
         "sha256",
         Buffer.from(`${header}.${payload}`, "ascii"),
-        createPublicKey({ key: jwk as JsonWebKey, format: "jwk" }),
+        createPublicKey({ key: jwk as webcrypto.JsonWebKey, format: "jwk" }),
         Buffer.from(signature, "base64url"),
       ),
     ).toBe(true);

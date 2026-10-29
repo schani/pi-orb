@@ -19,7 +19,7 @@ npm run native-image:build -- \
 Apply the foundation first (`infra/foundation/README.md`); its outputs supply
 the build subnet and service accounts.
 
-Required local tools are Node.js 24, npm, Git, tar, `ssh-keygen`, and an authenticated
+Required local tools are Node.js 26.13.0 LTS, npm, Git, tar, `ssh-keygen`, and an authenticated
 `gcloud`. The caller needs IAP SSH, Compute instance/disk/image
 create/inspect/delete, Logging viewer, image IAM publication, and
 `iam.serviceAccounts.actAs` permissions. The builder service account needs only

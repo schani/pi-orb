@@ -3228,6 +3228,16 @@ button.orb-phone-menu {
     display: none;
   }
 
+  .orb-page[data-empty] .orb-index {
+    display: block;
+    width: 100%;
+    border-right: 0;
+  }
+
+  .orb-page[data-empty] .orb-main {
+    display: none;
+  }
+
   .orb-header {
     position: relative;
     height: auto;
