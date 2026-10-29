@@ -16,7 +16,7 @@ export type Route =
   | { page: "projects"; focusedProjectId: string | null }
   | { page: "create_orb"; projectId: string }
   | { page: "mcp"; projectId: string }
-  | { page: "orb"; orbId: string }
+  | { page: "orb"; orbId: string | null }
   | { page: "usage" }
   | { page: "not_found" };
 
@@ -24,6 +24,7 @@ export function parseRoute(url: string): Route {
   const path = url.split(/[?#]/, 1)[0] ?? "";
   if (path === "/") return { page: "projects", focusedProjectId: null };
   if (path === "/usage") return { page: "usage" };
+  if (path === "/orbs") return { page: "orb", orbId: null };
   const id = (value: string): string | null => {
     try {
       return decodeURIComponent(value);

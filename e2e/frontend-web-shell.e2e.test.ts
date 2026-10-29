@@ -173,6 +173,170 @@ it("prioritizes running, sleeping, then other working projects ahead of empty/ar
   }
 });
 
+it.each([
+  { source: "click", open: false, existingArchive: true },
+  { source: "poll", open: false, existingArchive: true },
+  { source: "click", open: true, existingArchive: true },
+  { source: "poll", open: true, existingArchive: true },
+  { source: "poll", open: false, existingArchive: false },
+  { source: "click", open: false, existingArchive: false },
+  { source: "delete", open: false, existingArchive: true },
+  { source: "cancel", open: false, existingArchive: true },
+  { source: "reject", open: false, existingArchive: true },
+  { source: "pending", open: false, existingArchive: true },
+])(
+  "keeps archive disclosure state on $source (open=$open, existing=$existingArchive)",
+  async ({ source, open, existingArchive }) => {
+    const origin = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
+    const page = await browser.newPage();
+    await page.clock.install();
+    const project: ProjectView = {
+      id: "archival",
+      name: "Archival",
+      state: "active",
+      repositoryUrl: null,
+      createdAt: "2026-10-01T00:00:00Z",
+      updatedAt: "2026-10-01T00:00:00Z",
+    };
+    let selected: OrbView = {
+      id: "selected",
+      projectId: project.id,
+      harness: "pi",
+      name: "Selected",
+      state: "stopped",
+      stateVersion: 1,
+      stateChangedAt: project.createdAt,
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt,
+    };
+    const archived: OrbView = { ...selected, id: "old", name: "Old", state: "archived" };
+    let archiveRequests = 0;
+    let releaseMetadata = () => {};
+    const metadataGate = new Promise<void>((resolve) => {
+      releaseMetadata = resolve;
+    });
+    try {
+      await page.route("**/api/v1/projects", (route) =>
+        route.fulfill({ json: { items: [project] } }),
+      );
+      await page.route("**/api/v1/projects/archival/orbs", (route) =>
+        route.fulfill({ json: { items: [selected, ...(existingArchive ? [archived] : [])] } }),
+      );
+      await page.route("**/api/v1/orbs/selected", async (route) => {
+        if (source === "pending") await metadataGate;
+        await route.fulfill({ json: selected });
+      });
+      await page.route("**/api/v1/orbs/selected/history", (route) =>
+        route.fulfill({
+          json: { orbId: selected.id, session: null, records: [], cursor: null, headId: null },
+        }),
+      );
+      await page.route("**/api/v1/orbs/selected/archive", (route) => {
+        archiveRequests++;
+        if (source === "reject")
+          return route.fulfill({
+            status: 409,
+            json: { error: { code: "conflict", message: "Archive blocked", retryable: false } },
+          });
+        selected = { ...selected, state: "archiving" };
+        return route.fulfill({ json: selected });
+      });
+      await page.goto(`${origin}/orbs/selected`);
+      if (source === "pending")
+        await expectPage(page.locator(".orb-index")).toHaveAttribute("aria-busy", "true");
+      else await expectPage(page.locator(".orb-name")).toHaveText("Selected");
+      await expectPage(page.locator('.ix-row[aria-current="page"]')).toHaveCount(1);
+      const index = await page.locator(".orb-index").elementHandle();
+      const disclosure = page.locator(".project-archive");
+      if (existingArchive) {
+        await expectPage(disclosure).not.toHaveAttribute("open");
+        if (open) {
+          await disclosure.locator("summary").click();
+          await expectPage(disclosure).toHaveAttribute("open", "");
+        }
+      }
+      if (source === "click" || source === "cancel" || source === "reject") {
+        page.once(
+          "dialog",
+          (dialog) => void (source === "cancel" ? dialog.dismiss() : dialog.accept()),
+        );
+        await page.getByRole("button", { name: "Archive orb", exact: true }).click();
+        if (source === "reject")
+          await expectPage(page.getByText("Archive blocked", { exact: false })).toBeVisible();
+        else
+          await expectPage(page.locator(".orb-life-word")).toHaveText(
+            source === "cancel" ? "stopped" : "archiving",
+          );
+      } else {
+        selected = { ...selected, state: source === "delete" ? "deleting" : "archived" };
+      }
+      const refreshedList = page.waitForResponse("**/api/v1/projects/archival/orbs");
+      await page.clock.runFor(2000);
+      await (await refreshedList).finished();
+      if (source === "cancel" || source === "reject") {
+        expect(archiveRequests).toBe(source === "cancel" ? 0 : 1);
+        expect(page.url()).toBe(`${origin}/orbs/selected`);
+        await expectPage(page.locator(".orb-name")).toHaveText("Selected");
+        await expectPage(page.locator('.ix-row[aria-current="page"]')).toHaveCount(1);
+        await expectPage(disclosure).not.toHaveAttribute("open");
+        return;
+      }
+      await expectPage(disclosure.locator("summary")).toHaveText(
+        `archive · ${existingArchive ? 2 : 1}`,
+      );
+      if (source === "delete") {
+        await expectPage(page.getByText("Orb doesn't exist")).toBeVisible();
+        expect(page.url()).toBe(`${origin}/orbs/selected`);
+        return;
+      }
+      if (open) {
+        await expectPage(disclosure).toHaveAttribute("open", "");
+        expect(page.url()).toBe(`${origin}/orbs/selected`);
+        await expectPage(page.locator('.ix-row[aria-current="page"]')).toHaveCount(1);
+        // A user may collapse an already-selected archived orb without being navigated away.
+        await disclosure.locator("summary").click();
+        await expectPage(disclosure).not.toHaveAttribute("open");
+        await page.clock.runFor(2000);
+        expect(page.url()).toBe(`${origin}/orbs/selected`);
+      } else {
+        await expectPage(page).toHaveURL(`${origin}/orbs`);
+        await expectPage(disclosure).not.toHaveAttribute("open");
+        await expectPage(page.locator(".orb-main")).toBeEmpty();
+        await expectPage(page.locator(".orb-main")).not.toHaveAttribute("aria-busy", "true");
+        await expectPage(page.locator('[aria-current="page"]')).toHaveCount(0);
+        await expectPage(page).toHaveTitle("pi-orb");
+        expect(await index?.evaluate((node) => node.isConnected)).toBe(true);
+        if (source === "pending") {
+          const metadataResponse = page.waitForResponse("**/api/v1/orbs/selected");
+          releaseMetadata();
+          await (await metadataResponse).finished();
+          await page.clock.runFor(2000);
+          await expectPage(page.locator(".orb-main")).toBeEmpty();
+          await expectPage(page.locator(".orb-index")).toHaveAttribute("aria-busy", "false");
+        }
+        // The empty view remains navigable on phones, where a selected view hides the index.
+        await page.setViewportSize({ width: 390, height: 844 });
+        await expectPage(page.locator(".orb-index")).toBeVisible();
+        await disclosure.locator("summary").click();
+        await page.getByRole("link", { name: /Selected/ }).click();
+        await expectPage(page).toHaveURL(`${origin}/orbs/selected`);
+        await expectPage(page.locator(".orb-name")).toHaveText("Selected");
+      }
+      // A direct archived-orb load must reveal its row, not clear the selection.
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await page.reload();
+      await expectPage(page.locator(".orb-name")).toHaveText("Selected");
+      await expectPage(page.locator('.ix-row[aria-current="page"]')).toHaveCount(1);
+      await expectPage(disclosure).toHaveAttribute("open", "");
+      expect(page.url()).toBe(`${origin}/orbs/selected`);
+    } finally {
+      releaseMetadata();
+      await page.unrouteAll({ behavior: "wait" });
+      await page.close();
+    }
+  },
+);
+
 it("freezes dashboard project order after list loading, while polling metadata and resetting on reload", async () => {
   const origin = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
   const page = await browser.newPage();

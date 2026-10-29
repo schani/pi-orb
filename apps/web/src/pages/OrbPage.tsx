@@ -891,7 +891,7 @@ export function OrbHeaderSettings({
   );
 }
 
-export function OrbPage({ orbId, cache }: { orbId: string; cache: TranscriptCache }) {
+export function OrbPage({ orbId, cache }: { orbId: string | null; cache: TranscriptCache }) {
   const pageRef = useRef<HTMLDivElement>(null);
   const selectCurrentOrb = useRef<() => void>(() => {});
   useVisualViewport(pageRef);
@@ -913,6 +913,10 @@ export function OrbPage({ orbId, cache }: { orbId: string; cache: TranscriptCach
   const selectionRef = useRef({ loaded, conversationKey });
   selectionRef.current = { loaded, conversationKey };
   useLayoutEffect(() => {
+    if (orbId === null) {
+      setLoaded(null);
+      return;
+    }
     const selected = selectionRef.current;
     if (retainsOrbSelection(selected.loaded, orbId)) return;
     const generation =
@@ -949,21 +953,21 @@ export function OrbPage({ orbId, cache }: { orbId: string; cache: TranscriptCach
     });
     return load.cancel;
   }, [orbId, cache]);
-  const pending = loaded?.orbId !== orbId;
+  const pending = orbId !== null && loaded?.orbId !== orbId;
   return (
-    <div className="orb-page" ref={pageRef}>
+    <div className="orb-page" data-empty={orbId === null || undefined} ref={pageRef}>
       <OrbIndex
         onProjectChange={setProject}
         onSenderNamesChange={updateSenderNames}
-        projectId={loaded?.orb?.isOk() ? loaded.orb.value.projectId : null}
+        projectId={orbId !== null && loaded?.orb?.isOk() ? loaded.orb.value.projectId : null}
         orbId={orbId}
         pending={pending}
         onSelect={() => {
           if (!pending) selectCurrentOrb.current();
         }}
       />
-      {loaded === null ? (
-        <div className="orb-main" aria-busy="true" />
+      {orbId === null || loaded === null ? (
+        <div className="orb-main" aria-busy={pending} />
       ) : (
         <OrbConversation
           key={conversationKey}
