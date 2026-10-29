@@ -228,7 +228,7 @@ plan_and_guard() {
     echo 'release refused: saved plan does not preserve the database and its credentials' >&2; return 1
   fi
   if jq -e '.resource_changes[]? | select(.address == "google_sql_database_instance.pi_orb") | .change.actions == ["update"]' "$WORK_DIR/plan.json" >/dev/null; then
-    local message='Database plan accepted: PostgreSQL 16 -> 17 in-place upgrade; maintenance outage expected'
+    local message='Database plan accepted: cloudsql.enable_pg_textsearch -> on; database restart expected'
     echo "release: $message"
     if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then printf '%s\n' "$message" >> "$GITHUB_STEP_SUMMARY"; fi
   fi

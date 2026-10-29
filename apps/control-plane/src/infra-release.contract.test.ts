@@ -130,7 +130,13 @@ case "$*" in
   *" show -json "*)
     action=no-op
     if [ "\${MOCK_DATABASE_PLAN_STATUS:-}" = replace ]; then action=delete; fi
-    cat <<JSON
+    cat <<JSON | jq 'if env.MOCK_DATABASE_PLAN_STATUS == "preload" then
+      .resource_changes[0].change = {
+        actions: ["update"],
+        before: {database_version: "POSTGRES_17", name: "private-plan-marker", settings: [{database_flags: []}]},
+        after: {database_version: "POSTGRES_17", name: "private-plan-marker", settings: [{database_flags: [{name: "cloudsql.enable_pg_textsearch", value: "on"}]}]},
+        after_unknown: {}
+      } else . end'
 {"resource_changes":[
   {"address":"google_sql_database_instance.pi_orb","change":{"actions":["$action"]}},
   {"address":"google_sql_database.pi_orb","change":{"actions":["no-op"]}},
@@ -760,6 +766,32 @@ print(json.dumps(inspect(api, '${selected}').value))
     expect(calls).not.toContain("deploy:");
     expect(calls).not.toContain("smoke");
     expect(calls).not.toContain("gcloud:storage rm");
+  });
+
+  it("logs only the accepted preload change in output and the Actions summary", () => {
+    const { root, log } = makeFixture();
+    const summary = join(root, "summary.md");
+    const result = spawnSync(join(root, "infra/release.sh"), ["--yes"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CALL_LOG: log,
+        MOCK_DATABASE_PLAN_STATUS: "preload",
+        GITHUB_STEP_SUMMARY: summary,
+        PATH: `${join(root, "bin")}:${process.env.PATH}`,
+        PROJECT: "test-project",
+        TMPDIR: join(root, "tmp"),
+      },
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const message =
+      "Database plan accepted: cloudsql.enable_pg_textsearch -> on; database restart expected";
+    expect(result.stdout).toContain(message);
+    expect(readFileSync(summary, "utf8")).toContain(message);
+    expect(result.stdout + result.stderr + readFileSync(summary, "utf8")).not.toContain(
+      "private-plan-marker",
+    );
   });
 
   it("refuses a saved plan that changes the database or its credentials", () => {
