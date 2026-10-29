@@ -33,6 +33,7 @@ import { OrbFailureBanner } from "../components/OrbFailureBanner.tsx";
 import { OrbIndex } from "../components/OrbIndex.tsx";
 import { OrbNotice } from "../components/OrbNotice.tsx";
 import { OrbResourceWarnings } from "../components/OrbResourceWarnings.tsx";
+import { OrbShareButton, type ShareNotice } from "../components/OrbShareButton.tsx";
 import { OrbTerminal } from "../components/OrbTerminal.tsx";
 import {
   type DropZone,
@@ -1412,6 +1413,7 @@ function OrbConversation({
   const orbNameRef = useRef<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [phoneActions, setPhoneActions] = useState(false);
+  const [shareNotice, setShareNotice] = useState<ShareNotice | null>(null);
   const [renameText, setRenameText] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
   const [notifications, setNotifications] = useState<BrowserNotificationPermission>(() =>
@@ -2006,8 +2008,10 @@ function OrbConversation({
                 </button>
               </form>
             ) : (
-              <>
-                <span className="orb-name">{orb?.name ?? "untitled orb"}</span>
+              <span className="orb-name">{orb?.name ?? "untitled orb"}</span>
+            )}
+            <div className="orb-identity-actions">
+              {!renaming && (
                 <button
                   type="button"
                   className="icon-button"
@@ -2021,8 +2025,9 @@ function OrbConversation({
                 >
                   <Icon name="pen" />
                 </button>
-              </>
-            )}
+              )}
+              <OrbShareButton onNotice={setShareNotice} />
+            </div>
           </div>
           {glyph !== null && lifecycleWord !== null && (
             <span className="orb-life">
@@ -2102,6 +2107,11 @@ function OrbConversation({
           </div>
         </header>
         <div className="orb-header-scroll">
+          <div role={shareNotice?.error ? "alert" : "status"} aria-live="polite">
+            {shareNotice !== null && (
+              <OrbNotice error={shareNotice.error}>{shareNotice.message}</OrbNotice>
+            )}
+          </div>
           {orb?.actionRequired !== undefined && (
             <OrbNotice>
               {orb.actionRequired.type === "owner_login_required" ? (

@@ -1760,6 +1760,8 @@ body:has(.orb-page) {
 }
 
 .orb-name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   font-weight: 700;
@@ -3280,7 +3282,7 @@ button.orb-phone-menu {
   }
 
   .orb-header > .icon-button:not(.orb-phone-menu),
-  .orb-identity > .icon-button {
+  .orb-identity-actions > .icon-button {
     width: 44px;
     height: 44px;
   }
@@ -3445,7 +3447,16 @@ button.orb-phone-menu {
 }
 
 .orb-identity {
-  display: contents;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.orb-identity-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
 }
 .orb-settings {
   display: none;

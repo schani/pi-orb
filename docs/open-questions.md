@@ -223,3 +223,7 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 ## Owner skills and secrets surface — 83
 
 83. **Resolved (2026-10-26; user decision):** Settings tabs (proposal 1). A project secret wins over a same-named owner secret; an owner skill wins over a same-named repository skill; bundled skill names are rejected. Decisions and rejected proposals: `docs/owner-skills-secrets.md`.
+
+## Current-URL share access placement — 84
+
+84. **Partially resolved (2026-10-28; implemented locally, not deployed):** orb-title placement and icon-pair variant A are selected: flexible title, then icon-only pencil + connected-nodes Share right-aligned within the identity cell, before lifecycle state. Upload keeps its existing tray; connected nodes distinguish sharing from uploading. Only access on other pages, including the dashboard, remains undecided. Studies, unselected alternatives and rationale: [docs/web-ui.md](web-ui.md#current-url-sharing-decided-and-implemented-locally-2026-10-28-not-deployed).
