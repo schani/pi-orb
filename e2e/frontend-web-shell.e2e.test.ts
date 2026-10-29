@@ -103,7 +103,7 @@ it.each(["/", "/orbs/missing-orb"])(
   },
 );
 
-it("prioritizes running then sleeping projects in the sidebar across polls", async () => {
+it("prioritizes running, sleeping, then other working projects ahead of empty/archive-only projects across polls", async () => {
   const origin = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
   const page = await browser.newPage();
   await page.clock.install();
@@ -152,7 +152,7 @@ it("prioritizes running then sleeping projects in the sidebar across polls", asy
     await page.goto(`${origin}/orbs/missing-orb`);
     const sections = page.locator(".orb-index .ix-project");
     const names = sections.locator(".project-name");
-    await expectPage(names).toHaveText(["Idle", "Live", "Stopped", "Archive", "Empty", "Failed"]);
+    await expectPage(names).toHaveText(["Idle", "Live", "Stopped", "Failed", "Archive", "Empty"]);
     const stoppedSection = await page
       .getByRole("region", { name: "Stopped", exact: true })
       .elementHandle();
@@ -160,13 +160,13 @@ it("prioritizes running then sleeping projects in the sidebar across polls", asy
     lists.archive = [makeOrb("archive", "running")];
     lists.idle = [{ ...makeOrb("idle", "stopped"), sleepUntil: "2100-01-01T00:00:00Z" }];
     await page.clock.runFor(2000);
-    await expectPage(names).toHaveText(["Archive", "Live", "Stopped", "Idle", "Empty", "Failed"]);
+    await expectPage(names).toHaveText(["Archive", "Live", "Stopped", "Idle", "Failed", "Empty"]);
     expect(await stoppedSection?.evaluate((node) => node.isConnected)).toBe(true);
     lists.archive = [makeOrb("archive", "archived")];
     lists.stopped = [makeOrb("stopped", "stopped")];
     lists.idle = [{ ...makeOrb("idle", "running"), activity: "busy" }];
     await page.clock.runFor(2000);
-    await expectPage(names).toHaveText(["Idle", "Live", "Archive", "Stopped", "Empty", "Failed"]);
+    await expectPage(names).toHaveText(["Idle", "Live", "Stopped", "Failed", "Archive", "Empty"]);
   } finally {
     await page.unrouteAll({ behavior: "wait" });
     await page.close();
