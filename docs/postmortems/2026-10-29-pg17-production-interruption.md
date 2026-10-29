@@ -148,6 +148,26 @@ existing activation object. The decision and unchanged independent retirement
 proof are recorded in `docs/deployment.md`. This does not authorize deployment
 or claim to fix the separate database-client crash / cached agent-drain failure.
 
+## Renewed monitoring at 20:22–20:29 UTC
+
+The user requested continued monitoring. The old revision's active and idle
+counts both have explicit zeroes at 20:12:00; activation was published at
+20:12:45 for generation `1793299990`. New-revision polling is observed at
+20:22:06, the database remains runnable, and authenticated health returns 200.
+The bounded error query since 20:18 returns no ingress 429/5xx or ERROR entries.
+
+The release record finishes `validated` at 20:23:47, with all twelve gates passed
+and all four smoke fixtures recorded deleted. GitHub subsequently enters its
+separate fifteen-minute independent rollout observation; this is not yet a
+completed-workflow claim.
+
+The screenshot orb now returns resource-specific API 404 and is absent from
+its project's orb list. Its lifecycle records `deleted outcome=all_resources_removed`
+at 20:16:42.239854. Deletion does not establish delivery of the original message;
+no completed receipt was demonstrated. This monitoring performed no production
+mutation, replay or deletion. Periodic read-only monitoring resumes until the
+workflow's terminal outcome.
+
 ## Evidence
 
 Authoritative evidence is Cloud SQL operation metadata, Cloud Audit Logs,

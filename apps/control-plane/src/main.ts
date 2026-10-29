@@ -2,7 +2,6 @@ import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { type MockOpenAiConfig, readMockOpenAiEnv } from "@pi-orb/mock-openai";
 import {
@@ -128,6 +127,7 @@ import { registerIssuerRoutes } from "./http/issuer-routes.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
 import { MCP_OAUTH_CALLBACK, registerMcpOAuthRoutes } from "./http/mcp-oauth-routes.ts";
 import { registerMcpRoutes } from "./http/mcp-routes.ts";
+import { registerResponseDrain } from "./http/response-drain.ts";
 import { registerRoutes } from "./http/routes.ts";
 import { registerRuntimeRoutes } from "./http/runtime-routes.ts";
 import { registerWebAssets } from "./http/web-assets.ts";
@@ -617,20 +617,7 @@ export async function main(
 
   const app = Fastify({ logger: false });
   const stop = new AbortController();
-  const responseStreams = new Set<Readable>();
-  app.addHook("onSend", async (_request, _reply, payload) => {
-    if (payload instanceof Readable) {
-      if (stop.signal.aborted) payload.destroy();
-      else {
-        responseStreams.add(payload);
-        payload.once("close", () => responseStreams.delete(payload));
-      }
-    }
-    return payload;
-  });
-  app.addHook("preClose", async () => {
-    for (const stream of responseStreams) stream.destroy();
-  });
+  registerResponseDrain(app, stop.signal);
   const oauthNetwork = createMcpOAuthFetch();
   const mcpOAuth = new McpOAuth(
     database.mcpOAuth,

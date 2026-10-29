@@ -1929,3 +1929,22 @@ native memory-accounting cause. First-failure and contrast evidence remains in
 No full Docker E2E gate or hosted exact-head qualification is claimed; the orb has
 no running Docker daemon. The pull request's normal CI/E2E gates remain required
 before merge/deployment. No production mutation or deployment is included.
+
+**Oracle review correction:** source-stream close is not HTTP-response completion.
+A real TCP regression explicitly establishes source close with an unfinished
+response, then requires shutdown to destroy that response before its paused
+reader resumes. The source-tracking implementation fails this assertion; checking
+only the eventual incomplete client body did not distinguish it. A second
+controlled case exposes the old late-stream branch returning HTTP 500
+`ERR_STREAM_PREMATURE_CLOSE` instead of closing the retiring connection; the
+ordinary admitted-handler control still completes with HTTP 200. Tracking
+`reply.raw` until response close corrects both cases without changing agent or
+activation authority. Six focused files now pass **74 tests**; root typecheck
+and lint pass. The separate history/hosting/upload/assets/drain HTTP suite passes
+**64 tests across six files** (`/tmp/pi-orb-retirement-http-regressions.log`). The
+oracle's follow-up finds no remaining concrete blocker or worthwhile simplification.
+Preserved receipts: `/tmp/pi-orb-retirement-response-eof-red.log`,
+`/tmp/pi-orb-retirement-drain-contract-{red,strong-red,green}.log`,
+`/tmp/pi-orb-retirement-drain-typecheck.log`. The original broad run finished with
+5,882 passed, six failed and 42 skipped tests; the environment-sensitive failures
+above remain uncorrected, not waived or qualified by a rerun.
