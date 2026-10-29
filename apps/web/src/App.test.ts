@@ -27,6 +27,10 @@ describe("parseRoute", () => {
     expect(parseRoute("/usage/unknown")).toEqual({ page: "not_found" });
   });
 
+  it("recognizes the orb view without a selection", () => {
+    expect(parseRoute("/orbs")).toEqual({ page: "orb", orbId: null });
+  });
+
   it("recognizes explicit orb-creation intent URLs", () => {
     expect(parseRoute("/projects/project-1/orbs/new")).toEqual({
       page: "create_orb",

@@ -51,7 +51,7 @@ function IndexRow({
   onSelect,
 }: {
   orb: OrbView;
-  orbId: string;
+  orbId: string | null;
   pending: boolean;
   now: number;
   onSelect: () => void;
@@ -67,6 +67,7 @@ function IndexRow({
       onClick={(event) => {
         if (
           !event.defaultPrevented &&
+          orbId !== null &&
           shouldAcknowledgeSelection(orbId, orb.id, event, document.visibilityState === "visible")
         )
           onSelect();
@@ -96,7 +97,7 @@ export function IndexProject({
   project: ProjectView;
   list: OrbList;
   orbOrder: OrbOrderCache;
-  orbId: string;
+  orbId: string | null;
   pending: boolean;
   now: number;
   onChanged: (project: ProjectView) => void;
@@ -105,10 +106,22 @@ export function IndexProject({
 }) {
   const shelves = splitProjectOrbs(list.items ?? [], orbOrder);
   const currentArchived = shelves.archive.some((orb) => orb.id === orbId);
+  const currentWorking = shelves.working.some((orb) => orb.id === orbId);
+  const currentDeleting = shelves.archive.some(
+    (orb) => orb.id === orbId && orb.state === "deleting",
+  );
+  const previousSelection = useRef({ orbId, currentArchived, currentWorking });
   const [archiveOpen, setArchiveOpen] = useState(currentArchived);
   useEffect(() => {
-    if (currentArchived) setArchiveOpen(true);
-  }, [currentArchived]);
+    const previous = previousSelection.current;
+    previousSelection.current = { orbId, currentArchived, currentWorking };
+    if (!currentArchived) return;
+    if (previous.orbId === orbId && previous.currentWorking && !currentDeleting && !archiveOpen) {
+      navigate("/orbs");
+    } else if (previous.orbId !== orbId || !previous.currentArchived) {
+      setArchiveOpen(true);
+    }
+  }, [orbId, currentArchived, currentWorking, currentDeleting, archiveOpen]);
   const rows = (orbs: OrbView[]) =>
     orbs.map((orb) => (
       <IndexRow
@@ -168,7 +181,7 @@ export function OrbIndex({
   onSelect,
 }: {
   projectId: string | null;
-  orbId: string;
+  orbId: string | null;
   pending: boolean;
   onProjectChange: (project: { id: string; name: string } | null) => void;
   onSenderNamesChange?: (names: ReadonlyMap<string, string | null>) => void;
@@ -245,6 +258,7 @@ export function OrbIndex({
       id: `orb-index:${orbId}`,
       onActivate: (item: AppSearchItem) => {
         if (
+          orbId !== null &&
           item.href === `/orbs/${encodeURIComponent(orbId)}` &&
           document.visibilityState === "visible"
         )
