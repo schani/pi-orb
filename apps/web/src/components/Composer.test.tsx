@@ -5,8 +5,8 @@ import { Composer } from "./Composer.tsx";
 
 let input: TextareaHTMLAttributes<HTMLTextAreaElement>;
 vi.mock("./TextFieldFrame.tsx", () => ({
-  TextFieldFrame: ({ children }: { children: ReactElement[] }) => {
-    input = children[0]?.props as TextareaHTMLAttributes<HTMLTextAreaElement>;
+  TextFieldFrame: ({ children }: { children: ReactElement }) => {
+    input = children.props as TextareaHTMLAttributes<HTMLTextAreaElement>;
     return children;
   },
 }));
@@ -36,6 +36,12 @@ function render(
 }
 
 describe("Composer", () => {
+  it("renders a native textarea without a caret overlay or mirror", () => {
+    const markup = render("message");
+    expect(markup).not.toContain("composer-caret");
+    expect(markup).not.toContain("data-block-caret");
+  });
+
   it.each(["!", "Backspace"])("does not consume %s at the start of a message", (key) => {
     render("message");
     const preventDefault = vi.fn();

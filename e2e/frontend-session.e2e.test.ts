@@ -77,7 +77,6 @@ async function expectTextFieldCropMarks(page: Page, scope = page.locator("body")
         background: style.backgroundColor,
         caret: style.caretColor,
         color: style.color,
-        customCaret: element.classList.contains("composer-input"),
         cropBounds: {
           bottom: frameBox.bottom - Number.parseFloat(marks.bottom),
           left: frameBox.left + Number.parseFloat(marks.left),
@@ -99,7 +98,7 @@ async function expectTextFieldCropMarks(page: Page, scope = page.locator("body")
     expectPage(focused).not.toBeNull();
     expectPage(focused?.background).toBe("rgb(255, 255, 255)");
     expectPage(focused?.color).toBe("rgb(0, 0, 0)");
-    expectPage(focused?.caret).toBe(focused?.customCaret ? "rgba(0, 0, 0, 0)" : "rgb(0, 0, 0)");
+    expectPage(focused?.caret).toBe("rgb(0, 0, 0)");
     expectPage(focused?.gradientCount).toBe(8);
     expectPage(focused?.center).toBe("rgba(0, 0, 0, 0)");
     expectPage(focused?.pointerEvents).toBe("none");
@@ -2708,12 +2707,6 @@ describe("frontend-only browser behavior", () => {
       const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
       await expectPage(composer).toBeVisible();
       await expectTextFieldCropMarks(page, page.locator(".composer"));
-      const blockCaret = page.locator(".composer-caret");
-      await composer.focus();
-      await expectPage(composer).toHaveAttribute("data-block-caret", "true");
-      await expectPage(blockCaret).toBeVisible();
-      await expectPage(blockCaret).toHaveCSS("background-color", "rgb(255, 255, 255)");
-      await expectPage(blockCaret).toHaveCSS("mix-blend-mode", "difference");
       await page.getByRole("button", { name: "Rename orb" }).click();
       await expectTextFieldCropMarks(page, page.locator(".orb-rename-form"));
     } finally {
@@ -5034,61 +5027,40 @@ describe("frontend-only browser behavior", () => {
     await page.close();
   });
 
-  it("keeps full-cell composer and terminal carets aligned during native editing", async () => {
-    const page = await browser.newPage({ reducedMotion: "reduce" });
-    await page.goto(`${origin}${ORB_PATH}`);
-    const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
-    const caret = page.locator(".composer-caret");
-    await composer.fill("abc\ndef");
-    await expectPage(caret).toBeVisible();
-    await expectPage(caret).toHaveCSS("height", "20px");
-    const position = () =>
-      caret.evaluate((element) => ({
-        left: Number.parseFloat(element.style.left),
-        top: Number.parseFloat(element.style.top),
-      }));
-    const end = await position();
-    expectPage(end.top).toBe(20);
-    await composer.press("Home");
-    await expectPage.poll(position).toEqual({ left: 0, top: 20 });
-    await composer.press("ArrowUp");
-    await expectPage.poll(position).toEqual({ left: 0, top: 0 });
-    await composer.press("Shift+ArrowRight");
-    await expectPage(caret).toBeHidden();
-    await composer.press("ArrowRight");
-    await expectPage(caret).toBeVisible();
+  it("uses the native composer caret during editing and preserves terminal metrics", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}${ORB_PATH}`);
+      const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
+      await composer.fill("abc\ndef");
+      await expectPage(composer).toBeFocused();
+      await expectPage(composer).toHaveCSS("caret-color", "rgb(0, 0, 0)");
+      await expectPage(page.locator(".composer-caret, .composer-caret-mirror")).toHaveCount(0);
+      await expectPage(composer).not.toHaveAttribute("data-block-caret");
+      const selection = () =>
+        composer.evaluate((element) => [element.selectionStart, element.selectionEnd]);
+      await composer.press("Home");
+      expectPage(await selection()).toEqual([4, 4]);
+      await composer.press("ArrowUp");
+      expectPage(await selection()).toEqual([0, 0]);
+      await composer.press("Shift+ArrowRight");
+      expectPage(await selection()).toEqual([0, 1]);
+      await composer.press("x");
+      await expectPage(composer).toHaveValue("xbc\ndef");
+      await composer.dispatchEvent("compositionstart");
+      await expectPage(composer).toHaveCSS("caret-color", "rgb(0, 0, 0)");
+      await composer.dispatchEvent("compositionend");
+      await expectPage(composer).toHaveCSS("caret-color", "rgb(0, 0, 0)");
 
-    await composer.dispatchEvent("compositionstart");
-    await expectPage(caret).toBeHidden();
-    await expectPage(composer).toHaveAttribute("data-block-caret", "false");
-    await composer.dispatchEvent("compositionend");
-    await expectPage(caret).toBeVisible();
-
-    await composer.fill("x".repeat(400));
-    await composer.evaluate((element) => {
-      element.style.width = "160px";
-    });
-    await expectPage.poll(async () => (await position()).top).toBeGreaterThan(0);
-    await composer.evaluate((element) => {
-      element.setSelectionRange(0, 0);
-      element.scrollTop = 0;
-      element.dispatchEvent(new Event("scroll"));
-    });
-    await expectPage.poll(position).toEqual({ left: 0, top: 0 });
-    await composer.fill(Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n"));
-    await composer.press("ArrowLeft");
-    await composer.press("ArrowRight");
-    await expectPage(caret).toBeVisible();
-    expectPage((await position()).top).toBeLessThan(80);
-
-    await page.getByRole("button", { name: "Open terminal", exact: true }).click();
-    await expectPage(caret).toBeHidden();
-    const terminalCursor = page.locator(".term-cursor").first();
-    await expectPage(terminalCursor).toBeAttached();
-    const terminal = page.locator(".orb-terminal-emulator.wterm");
-    await expectPage(terminal).toHaveCSS("font-size", "13px");
-    await expectPage(terminal).toHaveCSS("--term-row-height", "20px");
-    await page.close();
+      await page.getByRole("button", { name: "Open terminal", exact: true }).click();
+      const terminalCursor = page.locator(".term-cursor").first();
+      await expectPage(terminalCursor).toBeAttached();
+      const terminal = page.locator(".orb-terminal-emulator.wterm");
+      await expectPage(terminal).toHaveCSS("font-size", "13px");
+      await expectPage(terminal).toHaveCSS("--term-row-height", "20px");
+    } finally {
+      await page.close();
+    }
   });
 
   it("serves a public shell without starting login until requested", async () => {

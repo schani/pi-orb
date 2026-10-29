@@ -11,7 +11,6 @@ import {
   useState,
 } from "react";
 import { usePhoneLayout } from "../lib/use-phone-layout.ts";
-import { ComposerCaret } from "./ComposerCaret.tsx";
 import {
   type CommandOption,
   type ComposerCommandAction,
@@ -417,7 +416,6 @@ export function Composer({
             }
             rows={4}
           />
-          <ComposerCaret inputRef={inputRef} text={text} />
         </TextFieldFrame>
         <div className="composer-phone-rail">
           <button

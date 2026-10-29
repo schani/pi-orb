@@ -302,8 +302,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         const typography = await page.locator(".orb-main").evaluate((main) => {
           const input = main.querySelector(".composer-input");
           const prose = main.querySelector(".rec-orb .chat-markdown");
-          const mirror = main.querySelector(".composer-caret-mirror");
-          return [input, prose, mirror].map((element) => {
+          return [input, prose].map((element) => {
             if (!element) return null;
             const style = element.ownerDocument.defaultView?.getComputedStyle(element);
             if (!style) return null;
@@ -359,7 +358,11 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
           await session.detach();
         }
         expectPage(typography[1]).toEqual({ ...typography[0], size: "13px" });
-        expectPage(typography[2]).toEqual(typography[0]);
+        await composer.focus();
+        await expectPage(composer).toBeFocused();
+        await expectPage(composer).toHaveCSS("caret-color", "rgb(0, 0, 0)");
+        await expectPage(page.locator(".composer-caret, .composer-caret-mirror")).toHaveCount(0);
+        await expectPage(composer).not.toHaveAttribute("data-block-caret");
       } finally {
         await page.close();
       }
@@ -741,7 +744,6 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
             const prefix = line.querySelector(":scope > .composer-prefix");
             const editor = line.querySelector(":scope > .composer-editor");
             const input = editor?.querySelector("textarea");
-            const caret = editor?.querySelector(".composer-caret");
             const composer = line.closest(".composer");
             const picker = composer?.querySelector(".command-picker");
             const view = line.ownerDocument.defaultView;
@@ -759,11 +761,9 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
             const editorBox = editor.getBoundingClientRect();
             const composerBox = composer.getBoundingClientRect();
             const pickerBox = picker?.getBoundingClientRect();
-            const caretBox = caret?.getBoundingClientRect();
             const gap = Number.parseFloat(view.getComputedStyle(line).columnGap);
             const prefixTextBox = prefixRange.getBoundingClientRect();
             return {
-              caretLeft: caretBox?.left ?? null,
               prefixTrackWidth: prefixBox.width,
               prefixTextRight: prefixTextBox.right,
               editorLeft: editorBox.left,
@@ -788,7 +788,6 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
           expectPage(geometry?.prefixTextRight).toBeLessThanOrEqual(geometry?.editorLeft ?? 0);
           expectPage(geometry?.selectionStart).toBe(0);
           expectPage(geometry?.selectionEnd).toBe(0);
-          if (!phone) expectPage(geometry?.caretLeft).toBeCloseTo(original.caretLeft ?? 0, 5);
         };
 
         const messageGeometry = await measureComposer(">");
@@ -798,18 +797,6 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         expectPage(messageGeometry.gap).toBeLessThanOrEqual(9);
         expectPage(messageGeometry.prefixTextRight).toBeLessThanOrEqual(messageGeometry.editorLeft);
 
-        // Suppress native selection notifications: normalization must update the
-        // caret without depending on a later browser selection-event schedule.
-        const selectionGate = await input.evaluateHandle((element) => {
-          const gate = new AbortController();
-          const hold = (event: Event) => event.stopImmediatePropagation();
-          for (const type of ["select", "selectionchange"])
-            element.ownerDocument.addEventListener(type, hold, {
-              capture: true,
-              signal: gate.signal,
-            });
-          return gate;
-        });
         if (phone) {
           await composer.getByRole("button", { name: "Fold editor" }).tap();
           const collapsed = composer.locator(".composer-open");
@@ -849,8 +836,6 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         );
         await input.press("Escape");
         expectStableEditor(await measureComposer(">"), messageGeometry);
-        await selectionGate.evaluate((gate) => gate.abort());
-        await selectionGate.dispose();
 
         const sent = `composer geometry ${width} ${randomUUID()}`;
         const submitted = page.waitForRequest(

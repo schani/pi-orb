@@ -1348,9 +1348,7 @@ button.personal-instructions-gear {
 @media (max-width: 600px), (any-pointer: coarse) {
   input,
   textarea,
-  select,
-  .composer-caret-mirror,
-  .composer-caret {
+  select {
     font-size: 16px;
   }
 }
@@ -2883,29 +2881,8 @@ pre,
   }
 }
 
-.composer-caret {
-  display: inline-block;
-  width: 1ch;
-  height: var(--row);
-  background: var(--k);
-  vertical-align: bottom;
-  animation: cursor-blink 1.06s steps(1, end) infinite;
-}
-
-@keyframes cursor-blink {
-  0%,
-  50% {
-    opacity: 1;
-  }
-  50.01%,
-  100% {
-    opacity: 0;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .bit-register-frames,
-  .composer-caret {
+  .bit-register-frames {
     animation: none;
   }
 }
@@ -2996,41 +2973,6 @@ pre,
 
 .composer-prefix {
   text-align: right;
-}
-
-.composer-editor {
-  position: relative;
-  min-width: 0;
-  background: var(--w);
-  isolation: isolate;
-}
-
-.composer-caret-mirror {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 0;
-  overflow: hidden;
-  visibility: hidden;
-  pointer-events: none;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
-  line-height: var(--row);
-}
-
-.composer-caret {
-  position: absolute;
-  pointer-events: none;
-  background: var(--w);
-  mix-blend-mode: difference;
-}
-
-.composer-caret[hidden] {
-  display: none;
-}
-
-.composer-input[data-block-caret="true"] {
-  caret-color: transparent;
 }
 
 .composer-input {
@@ -3423,14 +3365,6 @@ button.orb-phone-menu {
     padding: 12px 0;
     resize: none;
     line-height: 20px;
-  }
-
-  .composer-input[data-block-caret="true"] {
-    caret-color: var(--k);
-  }
-
-  .composer-caret {
-    display: none;
   }
 
   .composer-phone-rail {

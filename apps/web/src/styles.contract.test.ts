@@ -96,6 +96,13 @@ describe("subagent roster", () => {
 });
 
 describe("composer typography", () => {
+  it("leaves the native composer caret visible without an overlay", () => {
+    expect(rule("input:focus,\ntextarea:focus")).toContain("caret-color: var(--k)");
+    expect(css).not.toContain(".composer-caret");
+    expect(css).not.toContain("data-block-caret");
+    expect(css).not.toContain("caret-color: transparent");
+  });
+
   it("inherits the transcript face with zoom-safe phone and touch input sizes", () => {
     expect(rule("body")).toContain("font-family: var(--text)");
     expect(rule("body")).toContain("font-size: var(--text-size)");
@@ -108,7 +115,7 @@ describe("composer typography", () => {
       expect(declarations, selector).not.toMatch(/font(?:-family)?\s*:/);
     }
     expect(css).toMatch(
-      /@media \(max-width: 600px\), \(any-pointer: coarse\)\s*\{\s*input,\s*textarea,\s*select,\s*\.composer-caret-mirror,\s*\.composer-caret\s*\{\s*font-size: 16px;/,
+      /@media \(max-width: 600px\), \(any-pointer: coarse\)\s*\{\s*input,\s*textarea,\s*select\s*\{\s*font-size: 16px;/,
     );
     const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
     expect(html).toContain("width=device-width, initial-scale=1");
