@@ -1859,6 +1859,27 @@ and 26 passing offline tests.
 Deploy 40928556779 validated the release but failed its separate rollout monitor;
 receipts and analysis: `docs/postmortems/2026-10-29-pg17-production.md`.
 
+**Headline persistence correction (approved 2026-10-29; locally qualified, undeployed):**
+HTTP invalidation/store-error outcomes and safe telemetry follow
+`docs/activity-headlines.md`. Evidence: `$HOME/.local/share/pi-orb/pg17-production-20261029/headline-fix/summary.md`
+and adjacent logs. `npm ci` passed; `green-focused-final.log` passed 93/93 tests
+in seven files, including the fresh deterministic DST campaign;
+`green-store-headlines.log` passed four existing PGlite headline contracts
+(90 filtered skips); `green-store-authority.log` passed one existing
+missing-source/session/deletion-fence contract (93 filtered skips; all exit 0). After merging main `744736d0`, typecheck and lint passed
+(454 existing warnings, 91 infos); diff check passed.
+
+Tests-first `red.log` records 11 failures. `red-replay.log` reproduces the original
+DST failure before the production fix. Post-fix, the original trace passes the
+formerly failing assertion but exhausts at a previously unreachable verification
+read (`postfix-replay-trace-exhausted.log`): **not a passing replay**. The original
+trace is retained. `green-focused.log` was interrupted by the tool's 200-second
+budget while the entire existing stores file was active, with no assertion
+failure reported; it is **not a passing aggregate suite**. No real-network
+PostgreSQL 17, browser or full-gate qualification is claimed. Fresh exact-head PR
+CI remains pending; the original production cause is unproven and monitor failure
+unwaived.
+
 ## iPhone floating accessory reserve (2026-10-28; local, undeployed)
 
 Tests-first evidence: `.context/iphone-accessory/` (unit/browser RED then GREEN;

@@ -8,6 +8,7 @@ import type { SimulationTask } from "determined";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import type { ActivityHeadlineRef, StoredActivityHeadline } from "./activity-headline-store.ts";
 import { sleepResult, withDeadline } from "./dst.ts";
+import type { StoreError } from "./errors.ts";
 import { logOrbEvent } from "./log.ts";
 import type {
   ActivityHeadlineFailureDiagnostics,
@@ -21,11 +22,18 @@ export type ActivityHeadlineError = {
     | "orb_missing"
     | "detail_missing"
     | "invalid_session"
+    | "invalidated"
     | "ineligible"
     | "unavailable"
     | "cancelled";
   readonly stage: "source" | "inference" | "persistence";
+  /** Persistence failures retain the store's retry policy. */
+  readonly retryable?: boolean;
 };
+
+export function isActivityHeadlineRetryable(error: ActivityHeadlineError): boolean {
+  return error.retryable ?? (error.type === "unavailable" || error.type === "cancelled");
+}
 
 /** Each request owns its budget and inference. Atomic insertion, not shared work, selects a winner. */
 export function generateActivityHeadline(
@@ -43,6 +51,9 @@ export function generateActivityHeadline(
   let attempts = 0;
   let diagnostics: ActivityHeadlineFailureDiagnostics = {};
   let failureStage: string | undefined;
+  let persistenceOutcome: "stored" | "invalidated" | "store_error" | undefined;
+  let storeErrorCode: StoreError["code"] | undefined;
+  let sqlState: string | undefined;
   let termination:
     | "succeeded"
     | "retry_exhausted"
@@ -53,6 +64,9 @@ export function generateActivityHeadline(
     attempts,
     termination,
     failure_stage: failureStage,
+    persistence_outcome: persistenceOutcome,
+    store_error_code: storeErrorCode,
+    sql_state: sqlState !== undefined && /^[0-9A-Z]{5}$/u.test(sqlState) ? sqlState : undefined,
     provider_reason: diagnostics.reason,
     provider_status: diagnostics.providerStatus,
     provider_transport: diagnostics.transport,
@@ -230,9 +244,20 @@ export function generateActivityHeadline(
       if (stop !== null) return err(stop);
       const candidate = { ...ref, headline: generated.value, generatedAt: task.wallNow() };
       const stored = await deps.store.putActivityHeadlineIfAbsent(task, candidate);
+      persistenceOutcome = stored.isErr()
+        ? "store_error"
+        : stored.value === null
+          ? "invalidated"
+          : "stored";
+      if (stored.isErr()) {
+        storeErrorCode = stored.error.code;
+        sqlState = stored.error.sqlState;
+      }
       stop = stopped();
       if (stop !== null) return err(stop);
-      if (stored.isErr() || stored.value === null) return err({ type: "unavailable", stage });
+      if (stored.isErr())
+        return err({ type: "unavailable", stage, retryable: stored.error.retryable });
+      if (stored.value === null) return err({ type: "invalidated", stage });
       winner =
         stored.value.headline === candidate.headline &&
         stored.value.generatedAt === candidate.generatedAt;
@@ -276,6 +301,7 @@ export function generateActivityHeadline(
         correlation: correlationId,
         stage: error.stage,
         outcome: error.type,
+        retryable: isActivityHeadlineRetryable(error),
         model: "gpt-6-luna",
         winner: false,
         ...diagnosticFields(),

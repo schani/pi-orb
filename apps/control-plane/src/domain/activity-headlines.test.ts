@@ -90,6 +90,7 @@ describe("activity headlines", () => {
       correlation: "cache-failure",
       stage: "source",
       outcome: "unavailable",
+      retryable: "true",
       model: "gpt-6-luna",
       winner: "false",
       attempts: "0",
@@ -143,6 +144,7 @@ describe("activity headlines", () => {
       winner: "true",
       attempts: "1",
       termination: "succeeded",
+      persistence_outcome: "stored",
       generated_at: expect.stringMatching(/^\d+$/),
       elapsed_ms: expect.stringMatching(/^\d+(\.\d+)?$/),
     });
@@ -409,6 +411,92 @@ describe("activity headlines", () => {
     expect((await generateActivityHeadline(task, h.deps, headlineRef)).isOk()).toBe(true);
     expect(write).toHaveBeenCalledTimes(2);
   });
+  it("a fenced persistence result is invalidated, not an outage", async () => {
+    const task = new HeadlineLogTask("fenced persistence", false);
+    const h = makeHarness();
+    await seedHeadline(task, h);
+    vi.spyOn(h.store, "putActivityHeadlineIfAbsent").mockReturnValueOnce(okAsync(null));
+    const result = await generateActivityHeadline(task, h.deps, headlineRef);
+    expect(result._unsafeUnwrapErr()).toEqual({ type: "invalidated", stage: "persistence" });
+    expect((await h.store.readActivityHeadline(task, headlineRef))._unsafeUnwrap()).toBeNull();
+    expect(task.lines).toHaveLength(1);
+    expect(fields(task.lines[0])).toMatchObject({
+      outcome: "invalidated",
+      persistence_outcome: "invalidated",
+      retryable: "false",
+      termination: "not_retriable",
+    });
+    expect(task.lines.join("\n")).not.toMatch(/store_error_code|sql_state|PRIVATE/);
+  });
+  it.each([
+    { code: "unavailable" as const, retryable: true, sqlState: "08006" },
+    { code: "invariant" as const, retryable: false, sqlState: "42P01" },
+    { code: "corruption" as const, retryable: false, sqlState: "23503" },
+    { code: "unavailable" as const, retryable: true, sqlState: "PRIVATE_SQL_CANARY" },
+  ])("persistence errors retain only safe diagnostics: %j", async (error) => {
+    const task = new HeadlineLogTask("persistence diagnostics", false);
+    const h = makeHarness();
+    await seedHeadline(task, h);
+    vi.spyOn(h.store, "putActivityHeadlineIfAbsent").mockReturnValueOnce(
+      errAsync({ type: "store_error", message: "PRIVATE_SQL_MESSAGE", ...error }),
+    );
+    const result = await generateActivityHeadline(task, h.deps, headlineRef);
+    expect(result._unsafeUnwrapErr()).toEqual({
+      type: "unavailable",
+      stage: "persistence",
+      retryable: error.retryable,
+    });
+    expect(task.lines).toHaveLength(1);
+    expect(fields(task.lines[0])).toMatchObject({
+      outcome: "unavailable",
+      persistence_outcome: "store_error",
+      store_error_code: error.code,
+      retryable: String(error.retryable),
+    });
+    if (error.sqlState !== "PRIVATE_SQL_CANARY")
+      expect(fields(task.lines[0])).toHaveProperty("sql_state", error.sqlState);
+    else expect(fields(task.lines[0])).not.toHaveProperty("sql_state");
+    expect(task.lines.join("\n")).not.toMatch(/PRIVATE/);
+    expect((await h.store.readActivityHeadline(task, headlineRef))._unsafeUnwrap()).toBeNull();
+  });
+  it.each(["cancel", "expiry"] as const)(
+    "retains persistence provenance when %s wins response publication",
+    async (stop) => {
+      for (const fenced of [true, false]) {
+        const task = new HeadlineLogTask("late persistence", false);
+        const h = makeHarness();
+        await seedHeadline(task, h);
+        const controller = new AbortController();
+        vi.spyOn(h.store, "putActivityHeadlineIfAbsent").mockImplementationOnce(() => {
+          if (stop === "cancel") controller.abort();
+          else vi.spyOn(task, "monotonicNow").mockReturnValue(Number.MAX_SAFE_INTEGER);
+          return fenced
+            ? okAsync(null)
+            : errAsync({
+                type: "store_error",
+                code: "unavailable",
+                message: "PRIVATE_SQL_MESSAGE",
+                retryable: true,
+                sqlState: "08006",
+              });
+        });
+        const result = await generateActivityHeadline(task, h.deps, headlineRef, {
+          signal: controller.signal,
+        });
+        expect(result._unsafeUnwrapErr()).toEqual({
+          type: stop === "cancel" ? "cancelled" : "unavailable",
+          stage: "persistence",
+        });
+        expect(task.lines).toHaveLength(1);
+        expect(fields(task.lines[0])).toMatchObject({
+          persistence_outcome: fenced ? "invalidated" : "store_error",
+          termination: stop === "cancel" ? "cancelled" : "deadline_exceeded",
+        });
+        if (!fenced) expect(fields(task.lines[0])).toHaveProperty("sql_state", "08006");
+        expect(task.lines.join("\n")).not.toContain("PRIVATE");
+      }
+    },
+  );
   it("bulk enrichment never infers and cache failure preserves browseable null markers", async () => {
     const task = new HeadlineLogTask("enrich", false);
     const h = makeHarness();

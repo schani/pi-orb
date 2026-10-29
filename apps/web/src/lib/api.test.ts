@@ -35,6 +35,27 @@ describe("activity headline HTTP", () => {
       )._unsafeUnwrap(),
     ).toEqual({ headline: "" });
   });
+  it("preserves a nonretryable headline invalidation conflict", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: { code: "conflict", message: "headline source changed", retryable: false },
+          }),
+          { status: 409 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const result = await getActivityHeadline("o", "r", "k", "s", new AbortController().signal);
+    expect(result._unsafeUnwrapErr()).toEqual({
+      type: "http",
+      status: 409,
+      code: "conflict",
+      message: "headline source changed",
+      retryable: false,
+    });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
   it("fences a headline body held across logout", async () => {
     let release!: (value: unknown) => void;
     let entered!: () => void;

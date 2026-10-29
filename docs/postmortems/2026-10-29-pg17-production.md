@@ -68,7 +68,7 @@ reported `stage=persistence`, `outcome=unavailable`, `termination=not_retriable`
 and about 1,540 ms elapsed.
 
 **Leading explanation, not proven cause:** deletion wins the persistence fence,
-and the SQL adapter returns `null`. The source supports this path:
+and the SQL adapter returns `null`. The deployed source supports this path:
 
 - `apps/control-plane/src/adapters/pg/store.ts:438–446` returns `null` when
   the locked orb is deleting (also for other invalidated authority).
@@ -82,10 +82,17 @@ Telemetry cannot distinguish `null` from a store error. SQLSTATE is unknown.
 The retained SQL-error metadata query reports `matchingSqlErrorRows: 0` for
 20:30:25–20:30:37Z (13:30:25–13:30:37 PDT), limit 100. This bounded absence is
 not proof of the persistence outcome or absence of a database error.
-No PostgreSQL 17 defect is established, and no race fix is claimed.
+No PostgreSQL 17 defect or historical persistence cause is established.
 
-The unwaived actionable blocker is recorded only in `TODO.md`; investigation
-and correction require user approval outside the PG17-only scope.
+**Decision (2026-10-29, PDT):** the user approved focused investigation and
+correction. The local correction separates expected persistence invalidation
+from real store errors and adds safe completion diagnostics
+(`docs/activity-headlines.md`). Focused local tests, PGlite contracts and static
+checks pass; fresh exact-head PR CI remains **pending**. Qualification receipts
+and replay/suite limits are in `docs/testing.md`; local evidence is under
+`headline-fix/` beside the production receipts below. No deployment or proof of
+the historical production cause is claimed. The historical workflow failure
+remains unwaived. The actionable blocker remains in `TODO.md`.
 
 ## Evidence
 

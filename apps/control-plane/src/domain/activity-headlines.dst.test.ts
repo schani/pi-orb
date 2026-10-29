@@ -1,9 +1,10 @@
+import assert from "node:assert/strict";
 import type { HistoryRecord } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { errAsync, ok, okAsync, ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { makeHarness, makeOrbRow, makeProjectRow } from "../testkit/fixtures.ts";
-import { runDst } from "../testkit/sim.ts";
+import { LogCapture, runDst } from "../testkit/sim.ts";
 import { generateActivityHeadline } from "./activity-headlines.ts";
 import type { ActivityHeadlineGenerator } from "./ports.ts";
 
@@ -708,4 +709,101 @@ describe("headline concurrent publication DST", () => {
       );
     },
   );
+});
+
+describe("headline deletion at persistence fence DST", () => {
+  it("actual source deletion after service validation cannot publish a headline", async () => {
+    const logs = new LogCapture();
+    await runDst(
+      {
+        name: "headline-delete-before-persistence",
+        iterations: 20,
+        lateTimerProbability: 0,
+        logCapture: logs,
+      },
+      async (sim) => {
+        const h = harness();
+        const admitted = gate();
+        const deleted = gate();
+        let writes = 0;
+        let inferences = 0;
+        const put = h.store.putActivityHeadlineIfAbsent.bind(h.store);
+        h.store.putActivityHeadlineIfAbsent = (task, candidate) =>
+          new ResultAsync(
+            (async () => {
+              writes++;
+              admitted.resolve();
+              await deleted.promise;
+              return await put(task, candidate);
+            })(),
+          );
+        const results = await sim.runTasks([
+          {
+            name: "request",
+            f: async (task) => {
+              (await replicate(task, h))._unsafeUnwrap();
+              const result = await generateActivityHeadline(
+                task,
+                {
+                  ...h.deps,
+                  headlineGenerator: {
+                    generate: () => {
+                      inferences++;
+                      return okAsync("PRIVATE_HEADLINE_CANARY");
+                    },
+                  },
+                },
+                ref,
+              );
+              expect(result._unsafeUnwrapErr()).toEqual({
+                type: "invalidated",
+                stage: "persistence",
+              });
+              expect(inferences).toBe(1);
+              expect(writes).toBe(1);
+              const completed = logs.matching("headline.completed");
+              expect(completed).toHaveLength(1);
+              expect(completed[0]).toContain("outcome=invalidated");
+              expect(completed[0]).toContain("persistence_outcome=invalidated");
+              expect(completed[0]).toContain("retryable=false");
+              expect(completed[0]).not.toContain("PRIVATE");
+              expect((await h.store.readActivityHeadline(task, ref))._unsafeUnwrap()).toBeNull();
+              expect(
+                (
+                  await h.store.readHistoryRecord(task, ref.orbId, ref.sessionId, ref.recordId)
+                )._unsafeUnwrap(),
+              ).toBeNull();
+              return ok(undefined);
+            },
+          },
+          {
+            name: "delete source",
+            f: async (task) => {
+              await admitted.promise;
+              await task.checkpoint("delete after service validation before store fence");
+              const orb = h.store.orbSnapshot(ref.orbId);
+              assert(orb !== null);
+              const deleting = (
+                await h.store.requestOrbDeletion(task, {
+                  orbId: orb.id,
+                  expectedStateVersion: orb.stateVersion,
+                  now: task.wallNow(),
+                  cleanupAfter: task.wallNow(),
+                })
+              )._unsafeUnwrap();
+              (
+                await h.store.finalizeOrbDeletion(task, {
+                  orbId: orb.id,
+                  expectedStateVersion: deleting.stateVersion,
+                })
+              )._unsafeUnwrap();
+              deleted.resolve();
+              return ok(undefined);
+            },
+          },
+        ]);
+        expect(results.isOk(), results.isErr() ? results.error.message : "").toBe(true);
+      },
+    );
+  });
 });
