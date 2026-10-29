@@ -38,7 +38,7 @@ All 19 uploaded trace JSONs match tracked historical fixtures byte-for-byte; no 
 Final local lint (existing warnings), typecheck, infrastructure suite (120 Node, 238 Python, 34 native-VM)
 and 28 release contracts pass; logs/exit receipts remain under `$HOME/.local/share/pi-orb/pr226-finalization/`.
 No blind CI rerun, weakened assertion, raised timeout or application/prompt/schema/extension change.
-Fresh exact-head CI qualification remains required before merge; no deployment qualification is claimed.
+Final PR-head and exact-main qualification passed; results: `docs/testing.md`.
 
 ## Second qualification
 Head `fc36de79` passed all four E2E shards, four Durable shards and the image job.

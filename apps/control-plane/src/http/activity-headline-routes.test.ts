@@ -1,7 +1,7 @@
 import websocketPlugin from "@fastify/websocket";
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
-import { errAsync, okAsync } from "neverthrow";
+import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import { expect, it, vi } from "vitest";
 import type { ActivityHeadlineGenerationError } from "../domain/ports.ts";
 import { headlineSource, seedDisplayHistory } from "../testkit/display-history.ts";
@@ -165,6 +165,105 @@ it("authentication rejects before cache or replica access", async () => {
     expect(response.statusCode).toBe(401);
     expect(cache).not.toHaveBeenCalled();
     expect(orb).not.toHaveBeenCalled();
+  } finally {
+    await app.close();
+  }
+});
+
+it.each(["invalidated", "unavailable", "invariant", "corruption"] as const)(
+  "POST distinguishes fenced persistence from %s failures without leaking diagnostics",
+  async (outcome) => {
+    const task = new NoSimulationTask("persistence HTTP", false);
+    const h = makeHarness();
+    h.store.seedProject(makeProjectRow("project"));
+    h.store.seedOrb(makeOrbRow("orb", "project", "stopped"));
+    await seedDisplayHistory(task, h, [headlineSource("PRIVATE_SOURCE_CANARY")]);
+    const write = vi.spyOn(h.store, "putActivityHeadlineIfAbsent").mockReturnValueOnce(
+      outcome === "invalidated"
+        ? okAsync(null)
+        : errAsync({
+            type: "store_error",
+            code: outcome,
+            retryable: outcome === "unavailable",
+            message: "PRIVATE_SQL_MESSAGE",
+            sqlState: "42P01",
+          }),
+    );
+    const app = Fastify({ logger: false });
+    registerRoutes(app, task, h.deps, {}, TEST_SYSTEM_VIEW);
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/orbs/orb/headlines/record/record%3A0?sessionId=session",
+      });
+      expect(write).toHaveBeenCalledOnce();
+      expect(response.statusCode).toBe(outcome === "invalidated" ? 409 : 503);
+      expect(response.json()).toEqual({
+        error:
+          outcome === "invalidated"
+            ? { code: "conflict", message: "headline source changed", retryable: false }
+            : {
+                code: "unavailable",
+                message: "headline unavailable",
+                retryable: outcome === "unavailable",
+              },
+      });
+      expect(response.body).not.toMatch(/PRIVATE|42P01|sqlState|store_error/);
+      expect(response.headers["cache-control"]).toBe("private, no-store");
+    } finally {
+      await app.close();
+    }
+  },
+);
+
+it("POST cannot persist after deletion wins the final store fence", async () => {
+  const task = new NoSimulationTask("deleted headline HTTP", false);
+  const h = makeHarness();
+  h.store.seedProject(makeProjectRow("project"));
+  h.store.seedOrb(makeOrbRow("orb", "project", "stopped"));
+  await seedDisplayHistory(task, h, [headlineSource()]);
+  const generate = vi.fn(() => okAsync("PRIVATE_HEADLINE_CANARY"));
+  const put = h.store.putActivityHeadlineIfAbsent.bind(h.store);
+  const write = vi.spyOn(h.store, "putActivityHeadlineIfAbsent").mockImplementationOnce(
+    (t, candidate) =>
+      new ResultAsync(
+        (async () => {
+          const deleting = (
+            await h.store.requestOrbDeletion(t, {
+              orbId: "orb",
+              expectedStateVersion: 0,
+              now: t.wallNow(),
+              cleanupAfter: t.wallNow(),
+            })
+          )._unsafeUnwrap();
+          (
+            await h.store.finalizeOrbDeletion(t, {
+              orbId: "orb",
+              expectedStateVersion: deleting.stateVersion,
+            })
+          )._unsafeUnwrap();
+          return await put(t, candidate);
+        })(),
+      ),
+  );
+  const app = Fastify({ logger: false });
+  registerRoutes(app, task, { ...h.deps, headlineGenerator: { generate } }, {}, TEST_SYSTEM_VIEW);
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/orbs/orb/headlines/record/record%3A0?sessionId=session",
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({
+      error: { code: "conflict", message: "headline source changed", retryable: false },
+    });
+    expect(generate).toHaveBeenCalledOnce();
+    expect(write).toHaveBeenCalledOnce();
+    expect((await h.store.readActivityHeadlines(task, "orb", "session"))._unsafeUnwrap()).toEqual(
+      [],
+    );
+    expect((await h.store.getOrb(task, "orb"))._unsafeUnwrap()).toBeNull();
+    expect(response.body).not.toContain("PRIVATE");
   } finally {
     await app.close();
   }
