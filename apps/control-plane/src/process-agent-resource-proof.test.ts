@@ -546,6 +546,37 @@ it("executes the first boot-time command under pinned instructions and routes li
   }
 });
 
+it("blocks tools when the host incarnation changes during owner skill installation", async () => {
+  const gate = { entered: barrier(), release: barrier() };
+  const f = await fixture(undefined, gate);
+  let bundle: Bundle | undefined;
+  try {
+    f.releaseGit.resolve();
+    bundle = await f.openContext();
+    await f.state("running");
+    const pending = required(bundle.checkExecutionReady)(BACKGROUND_CONTEXT);
+    await gate.entered.promise;
+    (
+      await f.db.query("UPDATE orbs SET host_incarnation=1 WHERE id=$1", [f.snapshot.orbId])
+    )._unsafeUnwrap();
+    gate.release.resolve();
+    const result = await pending;
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().message).toBe("Owner skill installation admission changed");
+    expect(
+      (await invoke(bundle, "bash", { command: "printf MUST_NOT_RUN > blocked-command" })).isError,
+    ).toBe(true);
+    expect(f.installs()).toBe(1);
+    await expect(readFile(join(f.root, "blocked-command"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  } finally {
+    gate.release.resolve();
+    await bundle?.closeResources?.();
+    await f.close();
+  }
+});
+
 it("copies the captured binary/script outside Git, singleflights admission, and reuses captured bytes after replacement", async () => {
   const gate = { entered: barrier(), release: barrier(), failNext: false };
   const f = await fixture(undefined, gate);

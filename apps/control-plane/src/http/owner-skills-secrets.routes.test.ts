@@ -1,10 +1,11 @@
+import { request as httpRequest } from "node:http";
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
-import { okAsync } from "neverthrow";
-import { afterEach, expect, it } from "vitest";
+import { err, ok, okAsync, ResultAsync } from "neverthrow";
+import { afterEach, expect, it, vi } from "vitest";
 import { bundledPlatformSkillNames } from "../adapters/durable/platform-resources.ts";
-import type { OwnerSkillBundle } from "../domain/owner-skills.ts";
-import { readOwnerSkillsSnapshot } from "../domain/owner-skills.ts";
+import type { OwnerSkillBundle, OwnerSkillsDeps } from "../domain/owner-skills.ts";
+import { ownerSkillError, readOwnerSkillsSnapshot } from "../domain/owner-skills.ts";
 import { UserScope } from "../domain/user-scope.ts";
 import { makeHarness, TEST_SYSTEM_VIEW } from "../testkit/fixtures.ts";
 import { makeProjectSecretsHarness } from "../testkit/project-secrets.ts";
@@ -18,7 +19,7 @@ afterEach(async () => Promise.all(apps.splice(0).map((app) => app.close())));
 const doc = (name: string, description = `${name} help`) =>
   `---\nname: ${name}\ndescription: ${description}\n---\nSteps.\n`;
 
-async function setup(imported?: OwnerSkillBundle) {
+async function setup(imported?: OwnerSkillBundle | OwnerSkillsDeps["acquireGithub"]) {
   const h = makeHarness();
   const ownerSecrets = makeProjectSecretsHarness(ALICE, BOB).deps;
   const platformSkillNames = (await bundledPlatformSkillNames())._unsafeUnwrap();
@@ -42,7 +43,9 @@ async function setup(imported?: OwnerSkillBundle) {
       ownerSkills: {
         ...h.deps.ownerSkills,
         platformSkillNames,
-        ...(imported ? { acquireGithub: () => okAsync(imported) } : {}),
+        ...(imported
+          ? { acquireGithub: typeof imported === "function" ? imported : () => okAsync(imported) }
+          : {}),
       },
     },
     {},
@@ -54,7 +57,7 @@ async function setup(imported?: OwnerSkillBundle) {
     expect(response.headers["cache-control"]).toBe("no-store");
     return { status: response.statusCode, body: response.json() };
   };
-  return { call, store: h.deps.ownerSkills.store };
+  return { app, call, store: h.deps.ownerSkills.store };
 }
 type Method = "GET" | "POST" | "PUT" | "DELETE";
 const names = (body: { items: Array<{ name: string }> }) => body.items.map((item) => item.name);
@@ -142,4 +145,63 @@ it("adds an imported bundle atomically, keeps lists light, and preserves its fil
   expect((await readOwnerSkillsSnapshot(task, store, ALICE))._unsafeUnwrap()).toEqual({
     skills: [],
   });
+});
+
+function gate<T = void>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+it("cancels pending GitHub acquisition when the client disconnects after submitting JSON", async () => {
+  const started = gate<AbortSignal | undefined>();
+  const release = gate();
+  const closed = gate<{ complete: boolean; finished: boolean }>();
+  const completed = gate();
+  const { app, store } = await setup((_url, signal) => {
+    started.resolve(signal);
+    return new ResultAsync(
+      release.promise.then(() =>
+        signal?.aborted
+          ? err(ownerSkillError("unavailable", "GitHub import cancelled"))
+          : ok({ content: doc("imported"), files: [], source: null }),
+      ),
+    );
+  });
+  const save = vi.spyOn(store, "apply");
+  app.addHook("onRequest", async (request, reply) => {
+    reply.raw.once("close", () =>
+      closed.resolve({ complete: request.raw.complete, finished: reply.raw.writableFinished }),
+    );
+  });
+  app.addHook("onSend", async () => completed.resolve());
+  const origin = await app.listen({ host: "127.0.0.1", port: 0 });
+  const client = httpRequest(`${origin}/api/v1/owner-skills`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    agent: false,
+  });
+  client.on("error", () => {});
+  client.on("response", (response) => response.resume());
+  try {
+    client.end(JSON.stringify({ githubUrl: "https://github.com/nasa/a/tree/main/skill" }));
+    const signal = await Promise.race([started.promise, completed.promise.then(() => undefined)]);
+    expect(signal).toBeDefined();
+    expect(signal?.aborted).toBe(false);
+    client.destroy();
+    expect(await closed.promise).toEqual({ complete: true, finished: false });
+    expect.soft(signal?.aborted).toBe(true);
+    release.resolve();
+    await completed.promise;
+    expect.soft(save).not.toHaveBeenCalled();
+    expect((await readOwnerSkillsSnapshot(task, store, ALICE))._unsafeUnwrap()).toEqual({
+      skills: [],
+    });
+  } finally {
+    client.destroy();
+    release.resolve();
+    await completed.promise;
+  }
 });

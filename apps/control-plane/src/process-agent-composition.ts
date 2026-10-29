@@ -281,6 +281,19 @@ export function createProcessAgentContext(
       lease?.signal.addEventListener("abort", () => resourcesAbort.abort(), { once: true });
       let appendMcpAlert: DurableAgent["appendAlert"] | undefined;
       const installed = new Map<string, Promise<Result<void, RuntimeClientError>>>();
+      const checkAdmission = (incarnation: string, message: string) =>
+        deps.store
+          .getOrb(task, orb.id)
+          .mapErr(() => durableError(`${message} admission unavailable`))
+          .andThen((current) =>
+            current &&
+            String(current.hostIncarnation) === incarnation &&
+            current.agentAdmissionVersion === orb.agentAdmissionVersion &&
+            current.stopReason !== "manual" &&
+            current.stopReason !== "sleep"
+              ? ok(current)
+              : err(durableError(`${message} admission changed`)),
+          );
       const loadReady = (
         binding: ExecutionBinding & { release?: () => void },
         ctx: Context,
@@ -303,105 +316,85 @@ export function createProcessAgentContext(
                 ...durableError("execution wait cancelled"),
                 code: "cancelled" as const,
               });
-            return deps.store
-              .getOrb(task, orb.id)
-              .mapErr(() => durableError("execution admission unavailable"))
-              .andThen((current) => {
-                if (
-                  ctx.abortSignal?.aborted ||
-                  !current ||
-                  (requireRunning
-                    ? current.state !== "running" &&
-                      !(
-                        current.state === "archiving" &&
-                        deps.agentPlane?.session(orb.id)?.workActive?.() === true &&
-                        !deps.control.isStopping(orb.id, current.stateVersion)
+            return checkAdmission(binding.incarnation, "execution").andThen((current) => {
+              if (
+                ctx.abortSignal?.aborted ||
+                (requireRunning
+                  ? current.state !== "running" &&
+                    !(
+                      current.state === "archiving" &&
+                      deps.agentPlane?.session(orb.id)?.workActive?.() === true &&
+                      !deps.control.isStopping(orb.id, current.stateVersion)
+                    )
+                  : !["creating", "starting", "running"].includes(current.state))
+              )
+                return err(durableError("execution admission changed"));
+              remote.cwd = ready.value.cwd;
+              env.cwd = ready.value.cwd;
+              let install = installed.get(binding.incarnation);
+              if (!install) {
+                install = Promise.resolve(
+                  ResultAsync.fromPromise(
+                    task.checkpoint("owner skills installation", orb.id, binding.incarnation),
+                    () => durableError("Owner skill installation cancelled"),
+                  ).andThen(() =>
+                    remote
+                      .installOwnerSkills(
+                        prepared.value.captureId,
+                        { skills: prepared.value.managed.skills },
+                        withAbortSignal(
+                          AbortSignal.any([operation.signal, resourcesAbort.signal]),
+                          BACKGROUND_CONTEXT,
+                        ),
                       )
-                    : !["creating", "starting", "running"].includes(current.state)) ||
-                  String(current.hostIncarnation) !== binding.incarnation ||
-                  current.agentAdmissionVersion !== orb.agentAdmissionVersion ||
-                  current.stopReason === "manual" ||
-                  current.stopReason === "sleep"
-                )
-                  return err(durableError("execution admission changed"));
-                remote.cwd = ready.value.cwd;
-                env.cwd = ready.value.cwd;
-                let install = installed.get(binding.incarnation);
-                if (!install) {
-                  install = Promise.resolve(
-                    ResultAsync.fromPromise(
-                      task.checkpoint("owner skills installation", orb.id, binding.incarnation),
-                      () => durableError("Owner skill installation cancelled"),
-                    ).andThen(() =>
-                      remote
-                        .installOwnerSkills(
-                          prepared.value.captureId,
-                          { skills: prepared.value.managed.skills },
-                          withAbortSignal(
-                            AbortSignal.any([operation.signal, resourcesAbort.signal]),
-                            BACKGROUND_CONTEXT,
-                          ),
+                      .mapErr((error) => durableError(error.message, true))
+                      .andTee(() => {
+                        if (
+                          !resourcesAbort.signal.aborted &&
+                          deps.control.noteCondition(`owner-skills-install:${orb.id}`, false)
                         )
-                        .mapErr((error) => durableError(error.message, true))
-                        .andTee(() => {
-                          if (
-                            !resourcesAbort.signal.aborted &&
-                            deps.control.noteCondition(`owner-skills-install:${orb.id}`, false)
-                          )
-                            logOrbEvent(task, orb.id, "owner-skills-install-recovered", {});
-                        })
-                        .orElse((error) => {
-                          if (
-                            resourcesAbort.signal.aborted ||
-                            operation.signal.aborted ||
-                            !deps.control.noteCondition(`owner-skills-install:${orb.id}`, true)
-                          )
-                            return err(error);
-                          logOrbEvent(task, orb.id, "owner-skills-install-blocked", {
-                            message: error.message,
-                          });
-                          return (
-                            appendMcpAlert?.(
-                              randomUUID(),
-                              `Owner skills unavailable: ${error.message}`,
-                            ).map(() => undefined) ?? okAsync(undefined)
-                          )
-                            .orElse(() => okAsync(undefined))
-                            .andThen(() => err(error));
-                        }),
-                    ),
-                  );
-                  installed.set(binding.incarnation, install);
-                  void install.then((result) => {
-                    if (result.isErr()) installed.delete(binding.incarnation);
-                  });
-                }
-                return ResultAsync.fromSafePromise(install)
-                  .andThen((result) => result)
-                  .andThen(() =>
-                    ctx.abortSignal?.aborted || resourcesAbort.signal.aborted
-                      ? err(durableError("Owner skill installation cancelled"))
-                      : lease
-                          .check()
-                          .mapErr(() => durableError("Owner skill installation admission revoked"))
-                          .andThen(() =>
-                            deps.store
-                              .getOrb(task, orb.id)
-                              .mapErr(() =>
-                                durableError("Owner skill installation admission unavailable"),
-                              ),
-                          )
-                          .andThen((latest) =>
-                            latest &&
-                            String(latest.hostIncarnation) === binding.incarnation &&
-                            latest.agentAdmissionVersion === orb.agentAdmissionVersion &&
-                            latest.stopReason !== "manual" &&
-                            latest.stopReason !== "sleep"
-                              ? ok(remote)
-                              : err(durableError("Owner skill installation admission changed")),
-                          ),
-                  );
-              });
+                          logOrbEvent(task, orb.id, "owner-skills-install-recovered", {});
+                      })
+                      .orElse((error) => {
+                        if (
+                          resourcesAbort.signal.aborted ||
+                          operation.signal.aborted ||
+                          !deps.control.noteCondition(`owner-skills-install:${orb.id}`, true)
+                        )
+                          return err(error);
+                        logOrbEvent(task, orb.id, "owner-skills-install-blocked", {
+                          message: error.message,
+                        });
+                        return (
+                          appendMcpAlert?.(
+                            randomUUID(),
+                            `Owner skills unavailable: ${error.message}`,
+                          ).map(() => undefined) ?? okAsync(undefined)
+                        )
+                          .orElse(() => okAsync(undefined))
+                          .andThen(() => err(error));
+                      }),
+                  ),
+                );
+                installed.set(binding.incarnation, install);
+                void install.then((result) => {
+                  if (result.isErr()) installed.delete(binding.incarnation);
+                });
+              }
+              return ResultAsync.fromSafePromise(install)
+                .andThen((result) => result)
+                .andThen(() =>
+                  ctx.abortSignal?.aborted || resourcesAbort.signal.aborted
+                    ? err(durableError("Owner skill installation cancelled"))
+                    : lease
+                        .check()
+                        .mapErr(() => durableError("Owner skill installation admission revoked"))
+                        .andThen(() =>
+                          checkAdmission(binding.incarnation, "Owner skill installation"),
+                        )
+                        .map(() => remote),
+                );
+            });
           })
           .orTee(() => binding.release?.());
       };

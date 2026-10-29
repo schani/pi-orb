@@ -1,4 +1,5 @@
-import { expect, it } from "vitest";
+import { OWNER_SKILLS_MAX_BYTES } from "@pi-orb/protocol";
+import { expect, it, vi } from "vitest";
 import { acquireGithubOwnerSkill } from "./github-owner-skill.ts";
 
 const sha = "a".repeat(40);
@@ -11,13 +12,18 @@ function fixture(
     truncated?: boolean;
     status?: number;
     size?: number;
+    rawBody?: ReadableStream<Uint8Array>;
   } = {},
 ) {
   const calls: string[] = [];
   const fetcher: typeof fetch = async (input, init) => {
     const url = String(input);
     calls.push(url);
-    expect(init?.redirect).toBe("error");
+    expect(init).toEqual({
+      redirect: "error",
+      headers: { accept: "application/vnd.github+json" },
+      signal: expect.any(AbortSignal),
+    });
     if (options.status)
       return Response.json({ message: "Validation Failed" }, { status: options.status });
     if (url.includes("/commits/feature%2Fscience%2Fskills"))
@@ -65,6 +71,7 @@ function fixture(
       });
     if (url.includes("raw.githubusercontent.com")) {
       expect(url).toContain(`/${sha}/skills/nasa/`);
+      if (options.rawBody) return new Response(options.rawBody);
       return new Response(url.endsWith("/SKILL.md") ? content : new Uint8Array([0, 255, 1]));
     }
     return new Response("", { status: 404 });
@@ -86,6 +93,23 @@ it.each([url, url.replace("feature/science", "feature%2Fscience"), `${url}#`])(
     expect(f.calls.filter((c) => c.includes("/commits/"))).toHaveLength(2);
   },
 );
+it("cancels oversized streamed responses and returns a typed invalid error", async () => {
+  const cancel = vi.fn();
+  const rawBody = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new Uint8Array(OWNER_SKILLS_MAX_BYTES + 1));
+    },
+    cancel,
+  });
+  const f = fixture({ rawBody });
+  expect(
+    (await acquireGithubOwnerSkill(url, undefined, f.fetcher))._unsafeUnwrapErr(),
+  ).toMatchObject({
+    code: "invalid",
+    message: "GitHub response exceeds 8 MiB",
+  });
+  expect(cancel).toHaveBeenCalledOnce();
+});
 it.each([
   { mode: "120000" },
   { mode: "160000" },

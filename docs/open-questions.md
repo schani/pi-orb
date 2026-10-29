@@ -234,4 +234,4 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 
 ## GitHub owner-skill folders — 86
 
-86. **Resolved (2026-10-28; user decision):** direct Add acquires a public GitHub folder once at one commit, preserving binary supporting files/executable mode and pinned provenance in the existing skill row. Manual root edits preserve those files/source. One complete 8 MiB / 1000-file owner snapshot serves private capture and gated off-checkout installation; no preview/refetch or broader cache machinery. Contract and rationale: `docs/owner-skills-secrets.md`.
+86. **Resolved (2026-10-28; user decision):** single-acquisition, commit-pinned public GitHub skill bundles; proposal 3 Source. Contract and rejected preview/refetch rationale: `docs/owner-skills-secrets.md`.
