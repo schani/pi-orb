@@ -1841,13 +1841,23 @@ missing generation; a stable fixture grant passes unchanged diagnostics assertio
 No product fix is claimed. Evidence: `.context/ci-second-failure/` and
 `docs/postmortems/2026-10-25-codex-fixture-grant-expiry.md`.
 
-## PostgreSQL 17 PR qualification (2026-10-29; local corrections, CI pending)
+## PostgreSQL 17 qualification (2026-10-29; PR and exact-main green)
 
 Decision: E2E CI exports and reports locked Playwright Chromium for launchers honoring that
 selection; direct system launchers are unchanged. Status assertions target their owning region;
 release contracts preserve uncertain-apply lock retention. Local scoped checks and all 102 unchanged
-frontend-session cases pass (360.71s, owned-worker exit 0); exact-head CI remains required. Evidence/attribution limits:
+frontend-session cases pass (360.71s, owned-worker exit 0). Evidence/attribution limits:
 `docs/postmortems/2026-10-29-pg17-ci-qualification.md`.
+
+Final PR head `8a51357b` passed CI/E2E/Durable qualification. Selected push/main
+`05feb52b5ea213d8a49851c5ab692c43f1a67254` independently passed all ten jobs on attempt 1:
+[CI 40928328258](https://github.com/schani/pi-orb/actions/runs/40928328258) (checks/image),
+[E2E 40928328301](https://github.com/schani/pi-orb/actions/runs/40928328301) (four shards), and
+[Durable 40928328240](https://github.com/schani/pi-orb/actions/runs/40928328240) (four shards).
+The scratch-only ANALYZE identity projection correction has tests-first RED/GREEN evidence
+and 26 passing offline tests.
+Deploy 40928556779 validated the release but failed its separate rollout monitor;
+receipts and analysis: `docs/postmortems/2026-10-29-pg17-production.md`.
 
 ## iPhone floating accessory reserve (2026-10-28; local, undeployed)
 

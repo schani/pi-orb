@@ -8,6 +8,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
+- **Investigate/fix the headline/deletion race** (`docs/postmortems/2026-10-29-pg17-production.md`; unwaived blocker, user approval required outside PG17-only scope). Reproduce the deletion fence interleaving deterministically; distinguish invalidation from store errors in telemetry and HTTP outcomes.
+
 - **Harden CPU-starvation-sensitive tests** (2026-10-26, PR 221; [evidence](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/6e16dc75-2326-4f5a-bbfd-853e5ce5fcd0/evidence/pr221-local-load-failures.tgz)). With 8 busy loops on 2 CPUs, `adapters/pg/mcp.test.ts`, `adapters/pg/project-instructions.test.ts` and `http/mcp-oauth-routes.test.ts` exceed the 10s PGlite `beforeEach` (quiet open+migrate ≈2s, unchanged by migration 051), and four WebKit `e2e/frontend-mobile.e2e.test.ts` tail/wheel tests fail with `locator resolved to 0 elements` after ≈10s; quiet runs and CI pass. First seen when three agents ran suites concurrently. Replace wall-clock waits with explicit synchronization or bound setup cost.
 
 - **Qualify signed-out Google login** (2026-10-23; `docs/postmortems/2026-10-23-google-signed-out-login-500.md`). Verify full real-Google login through our callback in affected Chrome and Safari.
