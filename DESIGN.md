@@ -284,6 +284,7 @@ Tracking:
 - [docs/postmortems/2026-09-08-workspace-image-readonly-check.md](docs/postmortems/2026-09-08-workspace-image-readonly-check.md) — captured workspace template fails resize after a successful read-only check
 - [docs/postmortems/2026-09-08-orb-local-release-builder-user.md](docs/postmortems/2026-09-08-orb-local-release-builder-user.md) — orb-local release blocked by implicit SSH username and runtime account collision
 - [docs/postmortems/2026-09-05-signing-key-bootstrap-orphans.md](docs/postmortems/2026-09-05-signing-key-bootstrap-orphans.md) — DST-discovered signing-key orphan leak, retry ownership fix, and preserved failure trace
+- [docs/postmortems/2026-10-28-node-wasm-wrapper-lifetime.md](docs/postmortems/2026-10-28-node-wasm-wrapper-lifetime.md) — Node 24 Wasm wrapper crash family, fixed-source upgrade and attribution limits
 
 Reference material:
 

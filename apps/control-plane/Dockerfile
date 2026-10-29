@@ -1,7 +1,7 @@
 # Control-plane image (docs/deployment.md). Build from the repository root:
 #   docker build -f apps/control-plane/Dockerfile -t pi-orb-control-plane:dev .
 
-FROM node:24.22.1-bookworm-slim AS web-build
+FROM node:26.13.0-bookworm-slim AS web-build
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/protocol/package.json packages/protocol/
@@ -12,7 +12,7 @@ COPY packages/protocol/src packages/protocol/src
 COPY apps/web ./apps/web
 RUN npm run build --workspace @pi-orb/web
 
-FROM node:24.22.1-bookworm-slim AS dependencies
+FROM node:26.13.0-bookworm-slim AS dependencies
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 build-essential git ca-certificates \
   && rm -rf /var/lib/apt/lists/*
@@ -33,7 +33,7 @@ RUN --network=none rm -rf node_modules/node-pty/prebuilds \
   && npm_config_nodedir=/usr/local npm rebuild node-pty \
   && node -e "const pty = require('node-pty'); const child = pty.spawn('/bin/sh', ['-c', 'exit 0']); child.onExit(({ exitCode }) => process.exit(exitCode))"
 
-FROM node:24.22.1-bookworm-slim
+FROM node:26.13.0-bookworm-slim
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git ca-certificates \
   && rm -rf /var/lib/apt/lists/*
@@ -52,5 +52,5 @@ RUN node --input-type=module -e "await import('./apps/control-plane/src/adapters
 ENV PI_ORB_WEB_DIST=/app/apps/web/dist
 EXPOSE 8080
 
-# Node 24 strips types natively; no build step.
+# Node 26 strips types natively; no build step.
 CMD ["node", "apps/control-plane/src/main.ts"]

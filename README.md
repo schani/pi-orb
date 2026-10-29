@@ -14,7 +14,7 @@ There are three development compositions: the Docker-backed full service, the Do
 
 ### Docker-backed full service
 
-Requires Node.js 24 and Docker. On Linux, root `npm ci` also requires Python 3 and the `build-essential` toolchain to compile the approved `node-pty` addon; macOS uses node-pty's bundled arm64/x64 prebuild.
+Requires Node.js 26.13.0 LTS and Docker. On Linux, root `npm ci` also requires Python 3 and the `build-essential` toolchain to compile the approved `node-pty` addon; macOS uses node-pty's bundled arm64/x64 prebuild.
 
 ```sh
 npm ci

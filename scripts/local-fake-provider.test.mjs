@@ -129,21 +129,26 @@ const settings = {
 };
 
 test("pin verification rejects HEAD, lock and installed version drift", () => {
+  assert.equal(PIN, "a6e97a6057d4c323c341b41ea4be98b4fa59f575");
+  assert.equal(
+    FLING_INTEGRITY,
+    "sha512-bfgwsKB5NlW5aMtaz64ZZpFlFAZCwHyPhwKHlUXTKpCUfG9WF569ibc9HXq+pL627voYm8bp96HlBbYiudyUlA==",
+  );
   const lock = {
     packages: {
       "node_modules/flingit": {
-        version: "0.0.70",
+        version: "0.0.71",
         integrity: FLING_INTEGRITY,
-        resolved: "https://registry.npmjs.org/flingit/-/flingit-0.0.70.tgz",
+        resolved: "https://registry.npmjs.org/flingit/-/flingit-0.0.71.tgz",
       },
     },
   };
-  assert.equal(validatePins(PIN, lock, "0.0.70").isOk(), true);
+  assert.equal(validatePins(PIN, lock, "0.0.71").isOk(), true);
   for (const args of [
-    ["main", lock, "0.0.70"],
-    [PIN, {}, "0.0.70"],
-    [PIN, null, "0.0.70"],
-    [PIN, lock, "0.0.71"],
+    ["main", lock, "0.0.71"],
+    [PIN, {}, "0.0.71"],
+    [PIN, null, "0.0.71"],
+    [PIN, lock, "0.0.70"],
   ])
     assert.equal(validatePins(...args).error.type, "pin_mismatch");
 });
@@ -560,6 +565,13 @@ test("npm diagnostics retain only allowlisted anchored code/errno fields", () =>
       ),
       { npmCode: "ECONNRESET", errno: -104, clipped: false },
     );
+  for (const prefix of ["npm error", "npm ERR!"])
+    assert.deepEqual(
+      npmDiagnostic(
+        `${prefix} code EBADENGINE\n${prefix} engine Unsupported engine https://token:secret@private.invalid`,
+      ),
+      { npmCode: "EBADENGINE", errno: null, clipped: false },
+    );
   assert.equal(npmDiagnostic("npm error code E401\nnpm error errno ECONNREFUSED").npmCode, "E401");
   assert.equal(npmDiagnostic("npm error errno ECONNREFUSED").errno, "ECONNREFUSED");
   for (const output of [
@@ -583,12 +595,13 @@ test("conflicting or oversized npm diagnostics stay unknown", () => {
     clipped: true,
   });
 });
-for (const [npmVersion, denied, expectedError] of [
+for (const [npmVersion, denied, expectedError, npmCode = "ECONNRESET", errno = -104] of [
   ["11.19.1", true, "tool_failed"],
+  ["11.19.1", true, "tool_failed", "EBADENGINE", null],
   ["10.9.4", true, "npm_version_unsupported"],
   ["11.19.1", false, "install_policy_mismatch"],
 ])
-  test(`actual npm preparation: ${npmVersion}, denial=${denied}`, async (t) => {
+  test(`actual npm preparation: ${npmVersion}, denial=${denied}, code=${npmCode}`, async (t) => {
     if (!linux) return t.skip("needs Linux /proc");
     const f = await ownedFixture(t);
     const bin = join(f.root, "bin"),
@@ -597,9 +610,9 @@ for (const [npmVersion, denied, expectedError] of [
     const lock = {
       packages: {
         "node_modules/flingit": {
-          version: "0.0.70",
+          version: "0.0.71",
           integrity: FLING_INTEGRITY,
-          resolved: "https://registry.npmjs.org/flingit/-/flingit-0.0.70.tgz",
+          resolved: "https://registry.npmjs.org/flingit/-/flingit-0.0.71.tgz",
         },
       },
     };
@@ -611,7 +624,7 @@ for (const [npmVersion, denied, expectedError] of [
     const calls = join(f.root, "calls");
     await fs.writeFile(
       join(bin, "npm"),
-      `#!${process.execPath}\nrequire('node:fs').appendFileSync(${JSON.stringify(calls)},JSON.stringify(process.argv.slice(2))+'\\n');if(process.argv[2]==='--version'){console.log('${npmVersion}');process.exit(0);}console.error('npm error code ECONNRESET\\nnpm error errno -104\\nnpm error command sh -c secret https://token@private.invalid');process.exit(152);`,
+      `#!${process.execPath}\nrequire('node:fs').appendFileSync(${JSON.stringify(calls)},JSON.stringify(process.argv.slice(2))+'\\n');if(process.argv[2]==='--version'){console.log('${npmVersion}');process.exit(0);}console.error('npm error code ${npmCode}\\nnpm error errno ${errno}\\nnpm error command sh -c secret https://token@private.invalid');process.exit(152);`,
       { mode: 0o700 },
     );
     const wrapper = fileURLToPath(new URL("./local-fake-provider.mjs", import.meta.url));
@@ -634,7 +647,7 @@ for (const [npmVersion, denied, expectedError] of [
     const installs = phases.filter((p) => p.phase === "install" && p.state === "finished");
     assert.equal(installs.length, expectedError === "tool_failed" ? 1 : 0);
     if (expectedError === "tool_failed") {
-      assert.deepEqual(installs[0].npm, { npmCode: "ECONNRESET", errno: -104, clipped: false });
+      assert.deepEqual(installs[0].npm, { npmCode, errno, clipped: false });
       assert.equal(installs[0].code, 152);
     }
     assert.equal(manifest.error, expectedError);

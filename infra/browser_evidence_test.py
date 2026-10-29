@@ -121,9 +121,9 @@ class BrowserEvidenceTest(unittest.TestCase):
         self.assertIn('    timeout-minutes: 40', body)
         self.assertIn('        shard: [1, 2, 3, 4]', body)
         workflow_steps = steps('e2e.yml')
-        self.assertIn("node-version: '24.22.1'", workflow_steps['Set up Node.js'])
+        self.assertIn("node-version: '26.13.0'", workflow_steps['Set up Node.js'])
         self.assertIn('run: npm ci', workflow_steps['Install dependencies'])
-        self.assertIn('run: npm run test:e2e:install', workflow_steps['Install pinned browser engines and system dependencies'])
+        self.assertIn('run: |\n          npm run test:e2e:install\n', workflow_steps['Install pinned browser engines and system dependencies'])
         full = workflow_steps['Run end-to-end test']
         self.assertIn('DEBUG: pw:browser', full)
         self.assertIn('node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project frontend --project provider --project postgres --shard=${{ matrix.shard }}/4', full)
@@ -141,6 +141,20 @@ class BrowserEvidenceTest(unittest.TestCase):
         positions = [full.index(command) for command in commands]
         self.assertEqual(positions, sorted(positions))
         self.assertNotIn('/usr/bin/chromium', full)
+
+    def test_functional_ci_selects_and_logs_the_installed_chromium(self):
+        expected = (
+            '        run: |\n'
+            '          npm run test:e2e:install\n'
+            '          executable="$(node -p \'require("@playwright/test").chromium.executablePath()\')"\n'
+            '          printf \'PLAYWRIGHT_CHROMIUM_EXECUTABLE=%s\\n\' "$executable" | tee -a "$GITHUB_ENV"\n'
+            '          sudo ln -sf "$executable" /usr/bin/chromium\n'
+            '          "$executable" --version'
+        )
+        for workflow in ('e2e.yml', 'durable-qualification.yml'):
+            with self.subTest(workflow=workflow):
+                install = steps(workflow)['Install pinned browser engines and system dependencies']
+                self.assertEqual(install.rstrip(), expected)
 
     def test_lazy_return_owns_and_preserves_failure_evidence(self):
         source = (ROOT / 'e2e/lazy-transcript-frontend.e2e.test.ts').read_text()
