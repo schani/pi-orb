@@ -1,6 +1,9 @@
 import type { SimulationTask } from "determined";
 import type { FastifyInstance } from "fastify";
-import { generateActivityHeadline } from "../domain/activity-headlines.ts";
+import {
+  generateActivityHeadline,
+  isActivityHeadlineRetryable,
+} from "../domain/activity-headlines.ts";
 import type { ControlPlaneDeps } from "../domain/ports.ts";
 
 export function registerActivityHeadlineRoutes(
@@ -40,7 +43,7 @@ export function registerActivityHeadlineRoutes(
     request.raw.off("aborted", disconnect);
     if (result.isOk()) return reply.send({ headline: result.value.headline });
     const status =
-      result.error.type === "invalid_session"
+      result.error.type === "invalid_session" || result.error.type === "invalidated"
         ? 409
         : result.error.type === "orb_missing" || result.error.type === "detail_missing"
           ? 404
@@ -59,13 +62,15 @@ export function registerActivityHeadlineRoutes(
                 : "unavailable",
         message:
           status === 409
-            ? "session changed"
+            ? result.error.type === "invalidated"
+              ? "headline source changed"
+              : "session changed"
             : status === 404
               ? "orb or detail not found"
               : status === 400
                 ? "detail is ineligible"
                 : "headline unavailable",
-        retryable: status === 503,
+        retryable: isActivityHeadlineRetryable(result.error),
       },
     });
   });

@@ -1841,13 +1841,44 @@ missing generation; a stable fixture grant passes unchanged diagnostics assertio
 No product fix is claimed. Evidence: `.context/ci-second-failure/` and
 `docs/postmortems/2026-10-25-codex-fixture-grant-expiry.md`.
 
-## PostgreSQL 17 PR qualification (2026-10-29; local corrections, CI pending)
+## PostgreSQL 17 qualification (2026-10-29; PR and exact-main green)
 
 Decision: E2E CI exports and reports locked Playwright Chromium for launchers honoring that
 selection; direct system launchers are unchanged. Status assertions target their owning region;
 release contracts preserve uncertain-apply lock retention. Local scoped checks and all 102 unchanged
-frontend-session cases pass (360.71s, owned-worker exit 0); exact-head CI remains required. Evidence/attribution limits:
+frontend-session cases pass (360.71s, owned-worker exit 0). Evidence/attribution limits:
 `docs/postmortems/2026-10-29-pg17-ci-qualification.md`.
+
+Final PR head `8a51357b` passed CI/E2E/Durable qualification. Selected push/main
+`05feb52b5ea213d8a49851c5ab692c43f1a67254` independently passed all ten jobs on attempt 1:
+[CI 40928328258](https://github.com/schani/pi-orb/actions/runs/40928328258) (checks/image),
+[E2E 40928328301](https://github.com/schani/pi-orb/actions/runs/40928328301) (four shards), and
+[Durable 40928328240](https://github.com/schani/pi-orb/actions/runs/40928328240) (four shards).
+The scratch-only ANALYZE identity projection correction has tests-first RED/GREEN evidence
+and 26 passing offline tests.
+Deploy 40928556779 validated the release but failed its separate rollout monitor;
+receipts and analysis: `docs/postmortems/2026-10-29-pg17-production.md`.
+
+**Headline persistence correction (approved 2026-10-29; locally qualified, undeployed):**
+HTTP invalidation/store-error outcomes and safe telemetry follow
+`docs/activity-headlines.md`. Evidence: `$HOME/.local/share/pi-orb/pg17-production-20261029/headline-fix/summary.md`
+and adjacent logs. `npm ci` passed; `green-focused-final.log` passed 93/93 tests
+in seven files, including the fresh deterministic DST campaign;
+`green-store-headlines.log` passed four existing PGlite headline contracts
+(90 filtered skips); `green-store-authority.log` passed one existing
+missing-source/session/deletion-fence contract (93 filtered skips; all exit 0). After merging main `744736d0`, typecheck and lint passed
+(454 existing warnings, 91 infos); diff check passed.
+
+Tests-first `red.log` records 11 failures. `red-replay.log` reproduces the original
+DST failure before the production fix. Post-fix, the original trace passes the
+formerly failing assertion but exhausts at a previously unreachable verification
+read (`postfix-replay-trace-exhausted.log`): **not a passing replay**. The original
+trace is retained. `green-focused.log` was interrupted by the tool's 200-second
+budget while the entire existing stores file was active, with no assertion
+failure reported; it is **not a passing aggregate suite**. No real-network
+PostgreSQL 17, browser or full-gate qualification is claimed. Fresh exact-head PR
+CI remains pending; the original production cause is unproven and monitor failure
+unwaived.
 
 ## iPhone floating accessory reserve (2026-10-28; local, undeployed)
 
