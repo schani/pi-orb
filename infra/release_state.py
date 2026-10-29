@@ -437,11 +437,38 @@ def activate(cloud, record):
     generation = record["artifacts"]["deploy_generation"]
     if previous.value is not None:
         body = previous.value["body"]
-        if not isinstance(body, dict) or type(body.get("generation")) is not int or body["generation"] > generation:
+        if (not isinstance(body, dict) or type(body.get("generation")) is not int or body["generation"] > generation
+                or type(body.get("retireThroughGeneration", 0)) is not int or not 0 <= body.get("retireThroughGeneration", 0) < generation):
             return fail("conflict", "activation would regress authority")
         if body["generation"] == generation:
             return Result(body)
-    return cloud.put(bucket, key, {"generation": generation, "releaseId": record["releaseId"], "activatedAt": now()}, "0" if previous.value is None else previous.value["generation"])
+    return cloud.put(bucket, key, {"generation": generation, "retireThroughGeneration": generation - 1, "releaseId": record["releaseId"], "activatedAt": now()}, "0" if previous.value is None else previous.value["generation"])
+
+
+def request_retirement(cloud, record):
+    if record["artifacts"] is None or record["serving"] is None or record["retirement"] is None:
+        return fail("invalid", "accepted deployment and retirement inventory are required")
+    current = snapshot(cloud, record["project"], record["region"])
+    if current.error:
+        return current
+    generation = record["artifacts"]["deploy_generation"]
+    if current.value != record["serving"] or any(item["generation"] != generation or item["image"] != record["artifacts"]["control_plane_image"] for item in current.value):
+        return fail("conflict", "serving deployment changed before retirement request")
+    bucket = f"pi-orb-tfstate-{record['project']}"
+    key = "static-plane/releases/active.json"
+    previous = cloud.object(bucket, key)
+    if previous.error or previous.value is None:
+        # Without an activation record no generation could have passed its gate.
+        return previous
+    body = previous.value["body"]
+    if (not isinstance(body, dict) or type(body.get("generation")) is not int or not 0 < body["generation"] <= generation
+            or type(body.get("retireThroughGeneration", 0)) is not int or not 0 <= body.get("retireThroughGeneration", 0) < generation):
+        return fail("conflict", "retirement would regress authority or retire the serving generation")
+    cutoff = generation - 1
+    if body.get("retireThroughGeneration", 0) == cutoff:
+        return Result(body)
+    print(f"release: requesting retirement through generation {cutoff}", flush=True)
+    return cloud.put(bucket, key, {**body, "retireThroughGeneration": cutoff}, previous.value["generation"])
 
 
 def write_vars(path, values):
@@ -601,12 +628,14 @@ def main(argv):
                 authority = cloud.object(f"pi-orb-tfstate-{record['project']}", "static-plane/releases/active.json")
                 if authority.error:
                     result = authority
-                elif authority.value is not None and (not isinstance(authority.value["body"], dict) or type(authority.value["body"].get("generation")) is not int):
+                elif authority.value is not None and (not isinstance(authority.value["body"], dict) or type(authority.value["body"].get("generation")) is not int
+                        or type(authority.value["body"].get("retireThroughGeneration", 0)) is not int or authority.value["body"].get("retireThroughGeneration", 0) < 0):
                     result = fail("invalid", "invalid existing activation generation")
                 else:
                     active = 0 if authority.value is None else authority.value["body"]["generation"]
+                    retired = 0 if authority.value is None else authority.value["body"].get("retireThroughGeneration", 0)
                     previous = max((item["generation"] for item in record["previousServing"] or []), default=0)
-                    record["artifacts"]["deploy_generation"] = max(record["artifacts"]["deploy_generation"], previous + 1, active + 1)
+                    record["artifacts"]["deploy_generation"] = max(record["artifacts"]["deploy_generation"], previous + 1, active + 1, retired + 1)
                     result = write_vars(args[0], record["artifacts"])
                     if not result.error:
                         result = save(path, record)
@@ -622,6 +651,8 @@ def main(argv):
                         result = save(path, record)
             elif action == "publish":
                 result = publish(cloud, record)
+            elif action == "request-retirement":
+                result = request_retirement(cloud, record)
             elif action == "activate":
                 result = activate(cloud, record)
             elif action == "finish" and len(args) == 1 and args[0].isdigit():

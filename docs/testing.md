@@ -1883,3 +1883,49 @@ These automated checks are synthetic browser qualification. On 2026-10-29 PDT,
 the user confirmed typing and Send on the reported physical iPhone preview
 (“It's perfect!”). Rotation, broader Safari/home-screen, iPad and Android coverage
 remain pending in `TODO.md`; no deployment is established.
+
+## Cooperative release retirement qualification (2026-10-29; local, undeployed)
+
+The existing activation-object cutoff and unchanged independent retirement gate
+are specified in `docs/deployment.md`; production incident evidence is in
+`docs/postmortems/2026-10-29-pg17-production-interruption.md`.
+
+After `npm ci`, the five affected activation/DST, GCS adapter, live-proxy,
+composition and release-shell contract files pass **71 tests** on CI's pinned
+Node 24.22.1. Deterministic schedules cover unavailable reads during handoff,
+nonconsecutive generations, retired startup and no successor activation before
+predecessor drain. Real TCP WebSocket tests pause both live and terminal clients
+and require server/upstream closure without peer close acknowledgement.
+`npm run test:infra` separately passes **120 Node, 242 Python and 34 native-VM
+tests**. Root typecheck and lint pass (454 existing warnings, 91 infos).
+
+A disposable real `main()`/PGlite composition passes retirement after activation,
+retired startup without starting the poller, and actual OS SIGTERM. A fourth case
+opens a 128 MiB static response, pauses its TCP reader before completion, publishes
+the cutoff, and requires main to return with agent/database close success before
+resuming the client; the response is incomplete and its socket closes. This
+checks stream shutdown, not a production Cloud Run retirement-time bound. Scratch
+fixtures are removed. Receipts: `/tmp/pi-orb-retirement-main-*-stream-final.log`,
+`/tmp/pi-orb-retirement-main-stream.log`,
+`/tmp/pi-orb-retirement-focused-stream-final.log`,
+`/tmp/pi-orb-retirement-typecheck-stream.log`,
+`/tmp/pi-orb-retirement-lint-final.log`, `/tmp/pi-orb-retirement-infra.log`.
+
+The broad `npm test` attempt used this orb's default **Node 26.12.1**, not CI's
+pinned version, and is not a full-suite green claim. Five unchanged native-Claude
+diagnostic cases redact UUID digits because the inherited non-secret flags
+`AMP_THREAD_IDENTITY_AUTH` and `AMP_DISABLE_AMP_COAUTHOR_TRAILER` match the existing
+secret-name heuristic. The same five assertions pass on Node 24 only when those
+two flags are absent; Node 24 alone does not correct the redaction. Separately,
+the unchanged concurrent code-mode resource test reports peak memory 7,839,859
+bytes rather than more than 32 MiB on Node 26; a focused Node 26 invocation
+reproduces it while Node 24 passes all eight code-mode tests. These controlled
+contrasts identify environment-dependent failures, not product fixes or a proven
+native memory-accounting cause. First-failure and contrast evidence remains in
+`/tmp/pi-orb-retirement-full-tests.log`,
+`/tmp/pi-orb-retirement-{unrelated-failure,node24-baseline,isolated-env}.log` and
+`/tmp/pi-orb-retirement-codemode-node{24,26}.log`.
+
+No full Docker E2E gate or hosted exact-head qualification is claimed; the orb has
+no running Docker daemon. The pull request's normal CI/E2E gates remain required
+before merge/deployment. No production mutation or deployment is included.

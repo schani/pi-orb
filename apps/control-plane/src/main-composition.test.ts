@@ -55,7 +55,7 @@ describe("single control-plane composition", () => {
 
   it("keeps signing-key repair before activation and all autonomous loops after it", () => {
     const activation = source.indexOf("await waitForReleaseActivation(");
-    const repair = source.indexOf("void ensureSigningKeyInBackground()");
+    const repair = source.indexOf("signingKeyRepair = ensureSigningKeyInBackground()");
     expect(repair).toBeGreaterThanOrEqual(0);
     expect(activation).toBeGreaterThanOrEqual(0);
     expect(activation).toBeGreaterThan(repair);

@@ -311,6 +311,7 @@ stage repair
 if [ -z "$VALIDATE" ]; then state snapshot; else state check; fi
 
 stage retire
+state request-retirement
 release_run_child python3 -m infra.release_retire wait "$RECORD"
 stage activate
 state activate

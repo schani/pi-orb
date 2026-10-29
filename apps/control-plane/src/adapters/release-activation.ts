@@ -37,7 +37,11 @@ export function createReleaseActivationReader(
         ) {
           return err(unavailable());
         }
-        return ok(body.generation);
+        const cutoff = "retireThroughGeneration" in body ? body.retireThroughGeneration : 0;
+        if (typeof cutoff !== "number" || !Number.isSafeInteger(cutoff) || cutoff < 0) {
+          return err(unavailable());
+        }
+        return ok({ generation: body.generation, retireThroughGeneration: cutoff });
       }, unavailable);
       return (await read()).andThen((result) => result);
     },

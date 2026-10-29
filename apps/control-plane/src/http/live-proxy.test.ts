@@ -110,8 +110,24 @@ describe.each([
     browser.send("bridge-ready");
     expect((await echo)[0].toString()).toBe("bridge-ready");
     const proxyBrowser = [...app.websocketServer.clients][0] ?? expect.fail("proxy peer missing");
-    return { browser, proxyBrowser, upstream, log, edges, unregister, removed, orbId };
+    return { app, browser, proxyBrowser, upstream, log, edges, unregister, removed, orbId };
   }
+
+  it("shuts down without waiting for an unresponsive browser to acknowledge WebSocket close", async () => {
+    const { app, browser, upstream } = await connect();
+    const browserClosed = once(browser, "close");
+    const upstreamClosed = once(upstream, "close");
+    browser.pause();
+    try {
+      await app.close();
+      expect(app.websocketServer.clients.size).toBe(0);
+    } finally {
+      browser.resume();
+    }
+    await browserClosed;
+    await upstreamClosed;
+    expect(upstream.readyState).toBe(WebSocket.CLOSED);
+  });
 
   it.each([1005, 1006, 1011])(
     "closes the browser when an established runtime ends with %i",

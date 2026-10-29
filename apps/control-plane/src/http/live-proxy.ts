@@ -51,6 +51,12 @@ export async function registerLiveProxy(
   scheduleSessionExpiry?: SessionExpiryScheduler,
 ): Promise<void> {
   await app.register(websocketPlugin, {
+    preClose(done) {
+      // A retiring process must not wait for clients to acknowledge close.
+      // The browser reconnects to the serving revision; agent drain is separate.
+      for (const client of this.websocketServer.clients) client.terminate();
+      this.websocketServer.close(done);
+    },
     options: {
       handleProtocols: (protocols: Set<string>) =>
         protocols.has(RUNTIME_SUBPROTOCOL)
