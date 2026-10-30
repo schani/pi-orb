@@ -1,10 +1,6 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import type { Skill } from "@earendil-works/pi-coding-agent";
-import {
-  type OwnerSkillsSnapshot,
-  ownerSkillCapturePath,
-  validateOwnerSkillsSnapshot,
-} from "@pi-orb/protocol";
+import { type OwnerSkillsSnapshot, validateOwnerSkillsSnapshot } from "@pi-orb/protocol";
 import { errAsync, ok, okAsync, type ResultAsync } from "neverthrow";
 import { z } from "zod";
 import {
@@ -33,8 +29,6 @@ export interface PlatformContextStore {
   put(snapshot: PersistedPlatformContext): ResultAsync<void, ResourceError>;
 }
 export interface PreparedResourceContext {
-  captureId: string;
-  ownerSkillRoot: string;
   commitSha: string | null;
   managed: ManagedResourceInstructions;
   instructions: Array<{ path: string; content: string }>;
@@ -95,8 +89,7 @@ export function prepareResourceContext(options: {
   /** Deterministic scheduling/failpoint seam before private context publication. */
   checkpoint?: () => ResultAsync<void, ResourceError>;
 }): ResultAsync<PreparedResourceContext, ResourceError> {
-  const captureId = randomUUID();
-  const ownerSkillRoot = ownerSkillCapturePath(captureId);
+  const ownerSkillRoot = "../owner-skills";
   const check = () =>
     options.signal.aborted
       ? errAsync<void, ResourceError>(resourceError("cancelled", "Resource context cancelled"))
@@ -183,8 +176,6 @@ export function prepareResourceContext(options: {
                   resourceError("invalid", "Duplicate repository and platform skill names"),
                 );
               return okAsync({
-                captureId,
-                ownerSkillRoot,
                 commitSha: repository?.commitSha ?? null,
                 managed,
                 instructions: project.value.instructions,

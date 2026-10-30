@@ -2057,6 +2057,6 @@ succeeds; ports 3210/5173 are free. No new DST failure occurred. Private receipt
 
 ## GitHub owner-skill folders (2026-10-28; local, undeployed)
 
-Coverage: acquisition/materializer boundaries, command DST/store preservation, private capture and fenced installation/retry/replacement; browser Settings and local-fake process E2E. Historical local receipts: typecheck/lint; 188 focused tests / 12 files; PGlite 91 passed / four conditional skips; two PostgreSQL 16 owner contracts (owned container removed); Chromium/WebKit 6/6; Durable process 3/3 with provider cleanup. Acquisition/error mapping changed after browser/process receipts, then passed focused regression.
+Historical `f1df6b84` receipts (2026-10-28), including superseded per-context delivery: typecheck/lint; 188 focused tests / 12 files; PGlite 91 passed / four conditional skips; two PostgreSQL 16 owner contracts (owned container removed); Chromium/WebKit 6/6; Durable process 3/3 with provider cleanup. Acquisition/error mapping changed after browser/process receipts, then passed focused regression.
 
-[Incident/evidence](postmortems/2026-10-28-github-skills-ci-qualification.md) retains first failures and attribution limits. Rebased exact-head CI remains pending on [PR 225](https://github.com/schani/pi-orb/pull/225); these historical receipts do not qualify it or production. No merge/deployment or native release gates are claimed.
+[Incident/evidence](postmortems/2026-10-28-github-skills-ci-qualification.md) retains first failures and attribution limits. Exact-head qualification is recorded on [PR 225](https://github.com/schani/pi-orb/pull/225); these historical receipts do not qualify later revisions or production. No merge/deployment or native release gates are claimed.

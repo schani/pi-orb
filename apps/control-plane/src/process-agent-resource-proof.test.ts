@@ -1,6 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
@@ -9,12 +11,14 @@ import type { ToolDiagnostic, ToolExecutionApi } from "@earendil-works/pi-durabl
 import { NoSimulationTask } from "determined";
 import { okAsync, ResultAsync } from "neverthrow";
 import { assert, expect, it, vi } from "vitest";
+import { ExecutionBoot } from "../../orb-runtime/src/execution/boot.ts";
 import { buildExecutionServer } from "../../orb-runtime/src/execution/server.ts";
 import { composeControlPlaneDatabase } from "./adapters/database.ts";
 import { NativeResourceContext } from "./adapters/durable/context-storage.ts";
 import * as durableModels from "./adapters/durable/models.ts";
 import { PGliteClient } from "./adapters/pg/pglite-client.ts";
 import { PgResourceSnapshots } from "./adapters/pg/resource-snapshots.ts";
+import { readOwnerSkillsSnapshot } from "./domain/owner-skills.ts";
 import type { ResourceSnapshot } from "./domain/resources.ts";
 import { createProcessAgentContext } from "./process-agent-composition.ts";
 import { makeHarness, makeOrbRow, makeProjectRow } from "./testkit/fixtures.ts";
@@ -23,13 +27,11 @@ const skillPath = ".agents/skills/proof/SKILL.md";
 const skill = "---\nname: proof\ndescription: composition proof\n---\nPG skill baseline";
 /** Renamed to "proof", the owner's skill replaces the same-named repository skill. */
 const ownerPath = (instructions: string, name: string) =>
-  required(
-    instructions.match(new RegExp(`\\.\\./owner-skills/[a-f0-9-]+/${name}/SKILL\\.md`))?.[0],
-  );
+  required(instructions.match(new RegExp(`\\.\\./owner-skills/${name}/SKILL\\.md`))?.[0]);
 const ownerFiles = [
   {
     path: "scripts/run",
-    base64: Buffer.from("#!/bin/sh\nprintf captured-v1").toString("base64"),
+    base64: Buffer.from("#!/bin/sh\nprintf saved-script").toString("base64"),
     executable: true,
   },
   { path: "data.bin", base64: "AP8B", executable: false },
@@ -51,14 +53,7 @@ function barrier() {
   });
   return { promise, resolve };
 }
-async function fixture(
-  repositoryUrl: string | null = makeProjectRow("project").repositoryUrl,
-  installGate?: {
-    entered: ReturnType<typeof barrier>;
-    release: ReturnType<typeof barrier>;
-    failNext?: boolean;
-  },
-) {
+async function fixture(repositoryUrl: string | null = makeProjectRow("project").repositoryUrl) {
   const db = new PGliteClient();
   const database = composeControlPlaneDatabase(db);
   const task = new NoSimulationTask("resource composition proof", false);
@@ -124,36 +119,46 @@ async function fixture(
   await writeFile(join(root, "AGENTS.md"), "hook-modified instructions");
   let incarnation = "0";
   let executionRoot = root;
-  let installs = 0;
-  const makeServer = () => {
-    const server = buildExecutionServer({
+  const brokerServer = createServer(async (request, response) => {
+    expect(request.headers.authorization).toBe("Bearer proof-token");
+    response.setHeader("content-type", "application/json");
+    const body =
+      request.url === "/runtime/v1/owner-skills"
+        ? (
+            await readOwnerSkillsSnapshot(task, database.ownerSkills, project.ownerUserId)
+          )._unsafeUnwrap()
+        : request.url === "/runtime/v1/project-secrets"
+          ? { revision: 0, values: {} }
+          : { name: "", email: "" };
+    response.end(JSON.stringify(body));
+  });
+  brokerServer.listen(0, "127.0.0.1");
+  await once(brokerServer, "listening");
+  const brokerAddress = brokerServer.address();
+  assert(brokerAddress && typeof brokerAddress !== "string");
+  const makeServer = async () => {
+    const boot = new ExecutionBoot({
+      orbId: orb.id,
+      workDir: join(executionRoot, ".."),
+      repositoryUrl: null,
+      incarnation,
+      environment: { ...process.env },
+      broker: {
+        controlPlaneUrl: `http://127.0.0.1:${brokerAddress.port}`,
+        runtimeToken: "proof-token",
+      },
+    });
+    (await boot.boot())._unsafeUnwrap();
+    boot.shutdown();
+    return buildExecutionServer({
       token: "proof-token",
       incarnation,
       cwd: executionRoot,
-      ready: () => ({
-        cwd: executionRoot,
-        incarnation,
-        pid: process.pid,
-        checkoutCommit: snapshot.commitSha,
-      }),
+      ready: () => boot.snapshot,
+      health: () => boot.health(),
     });
-    server.addHook("preHandler", async (request, reply) => {
-      if ((request.body as { operation?: string } | null)?.operation === "installOwnerSkills") {
-        installs++;
-        installGate?.entered.resolve();
-        await installGate?.release.promise;
-        if (installGate?.failNext) {
-          installGate.failNext = false;
-          return reply.send({
-            ok: false,
-            error: { code: "unknown", message: "test install failure" },
-          });
-        }
-      }
-    });
-    return server;
   };
-  let server = makeServer();
+  let server = await makeServer();
   let baseUrl = await server.listen({ host: "127.0.0.1", port: 0 });
   let readyReads = 0;
   const h = makeHarness();
@@ -192,14 +197,13 @@ async function fixture(
     project,
     snapshot,
     root,
-    installs: () => installs,
     replaceHost: async () => {
       await server.close();
       incarnation = "1";
       executionRoot = join(workDir, "replacement/repo");
       await mkdir(executionRoot, { recursive: true });
       (await db.query("UPDATE orbs SET host_incarnation=1 WHERE id=$1", [orb.id]))._unsafeUnwrap();
-      server = makeServer();
+      server = await makeServer();
       baseUrl = await server.listen({ host: "127.0.0.1", port: 0 });
       return executionRoot;
     },
@@ -233,6 +237,8 @@ async function fixture(
       models.mockRestore();
       await lease.release();
       await server.close();
+      brokerServer.close();
+      await once(brokerServer, "close");
       await database.agentPersistence.close();
       await database.close();
       await rm(workDir, { recursive: true, force: true });
@@ -530,9 +536,7 @@ it("executes the first boot-time command under pinned instructions and routes li
     await f.state("starting");
     await f.reopenLease();
     bundle = await f.openContext();
-    expect(bundle.instructions.replace(/owner-skills\/[a-f0-9-]+/g, "owner-skills/CAPTURE")).toBe(
-      instructions.replace(/owner-skills\/[a-f0-9-]+/g, "owner-skills/CAPTURE"),
-    );
+    expect(bundle.instructions).toBe(instructions);
     const priorBindings = f.bindings();
     expect((await invoke(bundle, "read", { path: skillPath })).output).toEqual([
       { type: "text", text: skill },
@@ -546,41 +550,9 @@ it("executes the first boot-time command under pinned instructions and routes li
   }
 });
 
-it("blocks tools when the host incarnation changes during owner skill installation", async () => {
-  const gate = { entered: barrier(), release: barrier() };
-  const f = await fixture(undefined, gate);
-  let bundle: Bundle | undefined;
-  try {
-    f.releaseGit.resolve();
-    bundle = await f.openContext();
-    await f.state("running");
-    const pending = required(bundle.checkExecutionReady)(BACKGROUND_CONTEXT);
-    await gate.entered.promise;
-    (
-      await f.db.query("UPDATE orbs SET host_incarnation=1 WHERE id=$1", [f.snapshot.orbId])
-    )._unsafeUnwrap();
-    gate.release.resolve();
-    const result = await pending;
-    expect(result.isErr()).toBe(true);
-    expect(result._unsafeUnwrapErr().message).toBe("Owner skill installation admission changed");
-    expect(
-      (await invoke(bundle, "bash", { command: "printf MUST_NOT_RUN > blocked-command" })).isError,
-    ).toBe(true);
-    expect(f.installs()).toBe(1);
-    await expect(readFile(join(f.root, "blocked-command"))).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-  } finally {
-    gate.release.resolve();
-    await bundle?.closeResources?.();
-    await f.close();
-  }
-});
-
-it("copies the captured binary/script outside Git, singleflights admission, and reuses captured bytes after replacement", async () => {
-  const gate = { entered: barrier(), release: barrier(), failNext: false };
-  const f = await fixture(undefined, gate);
-  let bundle: Bundle | undefined;
+it("reads live owner files over HTTP and adopts the latest saved bundle only at replacement boot", async () => {
+  const f = await fixture();
+  let bundle: Bundle | undefined, next: Bundle | undefined;
   try {
     f.releaseGit.resolve();
     bundle = await f.openContext();
@@ -597,54 +569,48 @@ it("copies the captured binary/script outside Git, singleflights admission, and 
       })
     )._unsafeUnwrap();
     await f.state("running");
-    const abort = new AbortController();
-    const first = required(bundle.checkExecutionReady)(
-      withAbortSignal(abort.signal, BACKGROUND_CONTEXT),
-    );
-    await gate.entered.promise;
-    const second = required(bundle.checkExecutionReady)(BACKGROUND_CONTEXT);
-    abort.abort();
-    gate.release.resolve();
-    expect((await first).isErr()).toBe(true);
-    expect((await second).isOk()).toBe(true);
-    expect(f.installs()).toBe(1);
+    (await required(bundle.checkExecutionReady)(BACKGROUND_CONTEXT))._unsafeUnwrap();
     execFileSync("git", ["init", "-q", f.root]);
     const before = execFileSync("git", ["-C", f.root, "status", "--porcelain"]).toString();
-    const run = async () => {
+    const run = async (version: string) => {
       const output = await invoke(required(bundle), "bash", {
         command: `${path.replace(/SKILL.md$/, "scripts/run")} && cat ${path}`,
       });
       expect(output.isError, JSON.stringify(output)).not.toBe(true);
-      expect(JSON.stringify(output.output)).toContain("captured-v1");
-      expect(JSON.stringify(output.output)).toContain("owner body v1");
-      expect(JSON.stringify(output.output)).not.toContain("owner body v2");
+      expect(JSON.stringify(output.output)).toContain("saved-script");
+      expect(JSON.stringify(output.output)).toContain(`owner body ${version}`);
     };
-    await run();
+    await run("v1");
     expect(await readFile(join(f.root, path.replace(/SKILL.md$/, "data.bin")))).toEqual(
       Buffer.from([0, 255, 1]),
     );
     expect(execFileSync("git", ["-C", f.root, "status", "--porcelain"]).toString()).toBe(before);
+    await writeFile(join(f.root, path), "runtime-local edit");
     expect((await invoke(bundle, "read", { path: join(f.root, path) })).output).toEqual([
-      { type: "text", text: ownerSkill("v1") },
+      { type: "text", text: "runtime-local edit" },
     ]);
-    const alerts: string[] = [];
-    required(bundle.activateResources)((_id, message) => {
-      alerts.push(message);
-      return okAsync({ recordId: "alert", duplicate: false });
-    });
-    gate.failNext = true;
+    expect((await invoke(bundle, "read", { path })).output).toEqual([
+      { type: "text", text: "runtime-local edit" },
+    ]);
+    // A new context refreshes inventory, not files on an already-running host.
+    next = await f.openContext();
+    expect(next.instructions).toContain("owner proof v2");
+    (await required(next.checkExecutionReady)(BACKGROUND_CONTEXT))._unsafeUnwrap();
+    expect((await invoke(next, "read", { path })).output).toEqual([
+      { type: "text", text: "runtime-local edit" },
+    ]);
     const replacement = await f.replaceHost();
-    const failed = await invoke(bundle, "bash", { command: "printf MUST_NOT_RUN" });
-    expect(failed.isError).toBe(true);
-    expect(alerts).toEqual(["Owner skills unavailable: test install failure"]);
     (await required(bundle.checkExecutionReady)(BACKGROUND_CONTEXT))._unsafeUnwrap();
-    await run();
-    expect(f.installs()).toBe(3);
+    await run("v2");
+    expect(bundle.instructions).toContain("owner proof v1");
+    expect((await invoke(bundle, "read", { path })).output).toEqual([
+      { type: "text", text: ownerSkill("v2") },
+    ]);
     expect(await readFile(join(replacement, path.replace(/SKILL.md$/, "data.bin")))).toEqual(
       Buffer.from([0, 255, 1]),
     );
   } finally {
-    gate.release.resolve();
+    await next?.closeResources?.();
     await bundle?.closeResources?.();
     await f.close();
   }

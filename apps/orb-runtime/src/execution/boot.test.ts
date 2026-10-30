@@ -1,6 +1,16 @@
 import { execFileSync } from "node:child_process";
 import { once } from "node:events";
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -184,7 +194,9 @@ async function gitIdentityBoot(
     const reply =
       request.url === "/runtime/v1/project-secrets"
         ? { status: 200, body: { revision: 0, values: {} } }
-        : serve(request.url);
+        : request.url === "/runtime/v1/owner-skills"
+          ? { status: 200, body: { skills: [] } }
+          : serve(request.url);
     response.writeHead(reply.status, { "content-type": "application/json" });
     response.end(JSON.stringify(reply.body));
   });
@@ -312,6 +324,175 @@ test("repository-free execution readies without fetching or validating a Git pin
     expect(boot.health()).toMatchObject({ status: "ready", checkoutCommit: null });
   } finally {
     boot.shutdown();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("execution startup blocks readiness on saved owner files and installs privately outside Git", async () => {
+  const root = await mkdtemp(join(tmpdir(), "execution-owner-skills-"));
+  let requested!: () => void;
+  let seen = new Promise<void>((resolve) => {
+    requested = resolve;
+  });
+  let release!: () => void;
+  let gated = true;
+  let ownerStatus = 200;
+  let invalidSnapshot = false;
+  let savedContent = "saved database bytes";
+  let savedBinary = "AP8B";
+  let emptySnapshot = false;
+  const server = createServer((request, response) => {
+    expect(request.headers.authorization).toBe("Bearer private");
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/runtime/v1/owner-skills") {
+      release = () => {
+        if (response.writableEnded) return;
+        response.statusCode = ownerStatus;
+        response.end(
+          JSON.stringify(
+            invalidSnapshot
+              ? {}
+              : {
+                  skills: emptySnapshot
+                    ? []
+                    : [
+                        {
+                          name: "saved",
+                          content: savedContent,
+                          source: { url: "https://github.com/a/b", commitSha: "a".repeat(40) },
+                          files: [
+                            { path: "data.bin", base64: savedBinary, executable: false },
+                            {
+                              path: "scripts/run",
+                              base64: Buffer.from("#!/bin/sh\nprintf saved").toString("base64"),
+                              executable: true,
+                            },
+                          ],
+                        },
+                      ],
+                },
+          ),
+        );
+      };
+      if (gated) requested();
+      else release();
+    } else
+      response.end(
+        JSON.stringify(
+          request.url === "/runtime/v1/project-secrets"
+            ? { revision: 0, values: {} }
+            : { name: "", email: "" },
+        ),
+      );
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("test port unavailable");
+  const options = {
+    orbId: "test",
+    workDir: root,
+    repositoryUrl: null,
+    incarnation: "3",
+    environment: { ...process.env },
+    broker: { controlPlaneUrl: `http://127.0.0.1:${address.port}`, runtimeToken: "private" },
+  };
+  const boot = new ExecutionBoot(options);
+  try {
+    const result = boot.boot();
+    // A completed boot without requesting the snapshot is a failure, not a stalled fixture.
+    await Promise.race([
+      seen,
+      result.then(() => {
+        throw new Error("boot completed before owner skills request");
+      }),
+    ]);
+    expect(boot.health().status).toBe("initializing");
+    expect(boot.snapshot).toBeNull();
+    release();
+    expect((await result).isOk()).toBe(true);
+    const directory = join(root, "owner-skills/saved");
+    expect(await readFile(join(directory, "SKILL.md"), "utf8")).toBe("saved database bytes");
+    expect(await readFile(join(directory, "data.bin"))).toEqual(Buffer.from([0, 255, 1]));
+    expect((await stat(join(root, "owner-skills"))).mode & 0o777).toBe(0o700);
+    expect((await stat(join(directory, "data.bin"))).mode & 0o777).toBe(0o600);
+    expect((await stat(join(directory, "scripts/run"))).mode & 0o777).toBe(0o700);
+    execFileSync("git", ["init", "-q", join(root, "repo")]);
+    expect(
+      execFileSync("git", ["status", "--porcelain"], { cwd: join(root, "repo"), encoding: "utf8" }),
+    ).toBe("");
+    expect(boot.health().status).toBe("ready");
+    await writeFile(join(directory, "SKILL.md"), "old private sentinel");
+    seen = new Promise<void>((resolve) => {
+      requested = resolve;
+    });
+    const cancelled = new ExecutionBoot(options);
+    const cancelledResult = cancelled.boot();
+    await Promise.race([
+      seen,
+      cancelledResult.then(() => {
+        throw new Error("boot completed before gated shutdown");
+      }),
+    ]);
+    expect(cancelled.health().status).toBe("initializing");
+    expect(cancelled.snapshot).toBeNull();
+    cancelled.shutdown();
+    release();
+    const stopped = await cancelledResult;
+    expect({
+      error: stopped.isErr() ? stopped.error : null,
+      snapshot: cancelled.snapshot,
+      health: cancelled.health(),
+      sentinel: await readFile(join(directory, "SKILL.md"), "utf8"),
+    }).toMatchObject({
+      error: { type: "execution_boot_error", code: "boot_cancelled" },
+      snapshot: null,
+      health: { status: "failed", error: { code: "boot_cancelled" } },
+      sentinel: "old private sentinel",
+    });
+    gated = false;
+    savedContent = "latest saved database bytes";
+    savedBinary = Buffer.from([2, 0, 254]).toString("base64");
+    await writeFile(join(directory, "obsolete.txt"), "old file");
+    const refreshed = new ExecutionBoot(options);
+    expect((await refreshed.boot()).isOk()).toBe(true);
+    expect(refreshed.snapshot?.incarnation).toBe("3");
+    expect(await readFile(join(directory, "SKILL.md"), "utf8")).toBe(savedContent);
+    expect(await readFile(join(directory, "data.bin"))).toEqual(Buffer.from([2, 0, 254]));
+    expect(await readdir(directory)).not.toContain("obsolete.txt");
+    refreshed.shutdown();
+    emptySnapshot = true;
+    const emptied = new ExecutionBoot(options);
+    expect((await emptied.boot()).isOk()).toBe(true);
+    expect(emptied.snapshot?.incarnation).toBe("3");
+    expect(await readdir(join(root, "owner-skills"))).toEqual([]);
+    emptied.shutdown();
+    emptySnapshot = false;
+    for (const failure of ["HTTP 503", "invalid snapshot", "symlink"] as const) {
+      ownerStatus = failure === "HTTP 503" ? 503 : 200;
+      invalidSnapshot = failure === "invalid snapshot";
+      if (failure === "symlink") {
+        await rm(join(root, "owner-skills"), { recursive: true });
+        await symlink(join(root, "repo"), join(root, "owner-skills"));
+      }
+      const failed = new ExecutionBoot(options);
+      expect((await failed.boot()).isErr()).toBe(true);
+      expect(failed.snapshot).toBeNull();
+      expect(failed.health()).toMatchObject({
+        status: "failed",
+        error: {
+          code: "owner_skills_unavailable",
+          message: expect.stringContaining(failure),
+          retryable: true,
+        },
+      });
+      failed.shutdown();
+    }
+  } finally {
+    release?.();
+    boot.shutdown();
+    server.close();
+    await once(server, "close");
     await rm(root, { recursive: true, force: true });
   }
 });

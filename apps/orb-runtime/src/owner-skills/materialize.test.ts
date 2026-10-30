@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ownerSkillCapturePath, validateOwnerSkillsSnapshot } from "@pi-orb/protocol";
+import { validateOwnerSkillsSnapshot } from "@pi-orb/protocol";
 import { assert, expect, it } from "vitest";
 import { materializeOwnerSkills } from "./materialize.ts";
 
@@ -54,7 +54,6 @@ it("validates the whole bundle before writes, copies binary/mode, and rebuilds o
 });
 
 it("accepts a realistic 500 KiB binary and enforces canonical base64, aggregate files and serialized JSON bounds", () => {
-  expect(ownerSkillCapturePath("one")).not.toBe(ownerSkillCapturePath("two"));
   const file = {
     path: "asset.bin",
     base64: Buffer.alloc(500 * 1024, 255).toString("base64"),

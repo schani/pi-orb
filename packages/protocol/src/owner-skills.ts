@@ -133,7 +133,6 @@ export function validOwnerSkillPath(path: string): boolean {
     path.split("/").every((part) => part !== "" && part !== "." && part !== "..")
   );
 }
-export const ownerSkillCapturePath = (captureId: string): string => `../owner-skills/${captureId}`;
 
 export function canonicalOwnerSkillBase64(value: string): boolean {
   if (value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) return false;

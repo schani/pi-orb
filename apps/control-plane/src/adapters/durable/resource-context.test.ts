@@ -234,9 +234,9 @@ it("ranks platform over owner over repository skills; owner skills read at their
     ["x", "owner"],
     ["hosting", "platform skill"],
   ]);
-  const path = `${value.ownerSkillRoot}/mine/SKILL.md`;
+  const path = "../owner-skills/mine/SKILL.md";
   expect(Buffer.from((await value.reader.read(path))._unsafeUnwrap()).toString()).toBe(
     owner("mine").content,
   );
-  expect(value.reader.contains(`${value.ownerSkillRoot}/hosting/SKILL.md`)).toBe(false);
+  expect(value.reader.contains("../owner-skills/hosting/SKILL.md")).toBe(false);
 });

@@ -1,11 +1,10 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
-import { ownerSkillCapturePath } from "@pi-orb/protocol";
 import { afterEach, expect, test } from "vitest";
 import { RemoteExecutionEnv } from "./env.ts";
 
@@ -13,18 +12,15 @@ const context = (abortSignal?: AbortSignal): Context =>
   abortSignal ? withAbortSignal(abortSignal, BACKGROUND_CONTEXT) : BACKGROUND_CONTEXT;
 let child: ChildProcess | undefined;
 let directory: string | undefined;
-let parentDirectory: string | undefined;
 afterEach(async () => {
   if (child && child.exitCode === null) {
     child.kill("SIGTERM");
     await once(child, "exit");
   }
-  if (parentDirectory) await rm(parentDirectory, { recursive: true, force: true });
+  if (directory) await rm(directory, { recursive: true, force: true });
 });
 async function start() {
-  parentDirectory = await realpath(await mkdtemp(join(tmpdir(), "orb-execution-test-")));
-  directory = join(parentDirectory, "workspace");
-  await mkdir(directory);
+  directory = await realpath(await mkdtemp(join(tmpdir(), "orb-execution-test-")));
   child = spawn(process.execPath, ["apps/orb-runtime/src/execution/test-host.ts"], {
     cwd: process.cwd(),
     env: { ...process.env, EXECUTION_TEST_CWD: directory },
@@ -269,16 +265,4 @@ test("abort kills command process group and stale incarnation refuses effects", 
   });
   expect((await stale.writeFile("stale-effect", "bad", context())).ok).toBe(false);
   expect(await env.exists("stale-effect", context())).toEqual({ ok: true, value: false });
-  const captureId = "00000000-0000-4000-8000-000000000000";
-  const rejected = await stale.installOwnerSkills(captureId, { skills: [] }, context());
-  expect(rejected._unsafeUnwrapErr()).toEqual({
-    type: "execution_transport_error",
-    code: "unavailable",
-    message: "stale execution incarnation",
-  });
-  expect(await env.exists(ownerSkillCapturePath(captureId), context())).toEqual({
-    ok: true,
-    value: false,
-  });
-  expect((await env.installOwnerSkills(captureId, { skills: [] }, context())).isOk()).toBe(true);
 });

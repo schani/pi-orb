@@ -13,6 +13,8 @@ import { applyGitIdentity } from "../git-identity/apply.ts";
 import { BootHookRunner } from "../hooks/runner.ts";
 import { NodeHookSpawner } from "../hooks/spawner.ts";
 import { initialCheckoutCommands } from "../initial-checkout.ts";
+import { fetchOwnerSkills } from "../owner-skills/endpoint.ts";
+import { materializeOwnerSkills } from "../owner-skills/materialize.ts";
 import { awaitInitialCheckoutCommit } from "../pending-initial-checkout.ts";
 import { fetchProjectSecretSnapshotAtBoot } from "../project-secrets/endpoint.ts";
 import { checkTestLaunchFailure } from "../test-launch-failure.ts";
@@ -210,6 +212,24 @@ export class ExecutionBoot {
     }
     await this.hooks.runResume();
     await this.hooks.applyHookEnv(o.environment);
+    if (o.broker) {
+      const fetched = await fetchOwnerSkills(o.broker);
+      if (this.bootAbort.signal.aborted)
+        return err({
+          type: "execution_boot_error",
+          code: "boot_cancelled",
+          message: "execution boot cancelled",
+        });
+      const skills = fetched.andThen((snapshot) =>
+        materializeOwnerSkills(join(o.workDir, "owner-skills"), snapshot.skills),
+      );
+      if (skills.isErr())
+        return err({
+          type: "execution_boot_error",
+          code: "owner_skills_unavailable",
+          message: skills.error.message,
+        });
+    }
     this.snapshot = {
       cwd,
       incarnation: o.incarnation,

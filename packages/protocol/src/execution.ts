@@ -9,7 +9,6 @@ export const EXECUTION_READY_PATH = "/execution/ready";
 export const EXECUTION_BINARY_READ_MAX_BYTES = 1024 * 1024;
 export const ExecutionOperationSchema = Type.Union([
   ...[
-    "installOwnerSkills",
     "absolutePath",
     "joinPath",
     "readTextFile",

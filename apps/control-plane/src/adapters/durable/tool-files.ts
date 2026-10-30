@@ -90,7 +90,6 @@ export function createAgentToolFiles(options: {
   reader: ResourceReader;
   artifacts: AgentArtifacts;
   allowSnapshotRead: () => boolean;
-  managedPath?: (path: string) => string | undefined;
   check: () => ResultAsync<void, ToolError>;
 }): Required<AgentToolFiles> {
   const check = (ctx: Context) =>
@@ -100,13 +99,10 @@ export function createAgentToolFiles(options: {
   return {
     read: (request, _api, ctx) => {
       const artifact = request.path.startsWith("/orb-artifacts/");
-      const managed = options.managedPath?.(request.path);
-      const platform =
-        managed !== undefined ||
-        ["/opt/pi-orb/skills/"].some(
-          (prefix) =>
-            request.path.startsWith(prefix) || posix.normalize(request.path).startsWith(prefix),
-        );
+      const platform = ["/opt/pi-orb/skills/"].some(
+        (prefix) =>
+          request.path.startsWith(prefix) || posix.normalize(request.path).startsWith(prefix),
+      );
       if (
         !artifact &&
         !platform &&
@@ -123,7 +119,7 @@ export function createAgentToolFiles(options: {
                   bytes ? okAsync(bytes) : errAsync(failure("Private artifact not found")),
                 )
             : options.reader
-                .read(managed ?? request.path)
+                .read(request.path)
                 .mapErr(() => failure("Snapshot resource not found")),
         )
         .andThen((bytes) => check(ctx).andThen(() => content(bytes, request)));
