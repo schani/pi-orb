@@ -34,7 +34,7 @@ migration_secrets=''
 migration_owner_args=()
 release_run_child gcloud run jobs create """ + migration
         for args, seconds, reason in [
-            ([], 300, "default"),
+            ([], 600, "default"),
             (["--migration-timeout-30m"], 1800, "explicit 30-minute override"),
         ]:
             with self.subTest(args=args), tempfile.TemporaryDirectory() as directory:
@@ -51,6 +51,22 @@ release_run_child gcloud run jobs create """ + migration
                 self.assertIn(diagnostic, result.stdout)
                 self.assertIn(diagnostic, summary.read_text())
         self.assertIn('KEEP_REMOTE_LOCK=true\n  release_run_child gcloud run jobs create', source)
+
+    def test_validation_only_accepts_default_600_without_migration_diagnostic(self):
+        source = Path("infra/release.sh").read_text()
+        parser = source.split('[[ "${PI_ORB_USER_ID:-}"', 1)[0]
+        script = parser + '\nprintf "%s\\n" "$MIGRATION_TIMEOUT_SECONDS" "$VALIDATE"\n'
+        for release in ["latest", "test-release"]:
+            with self.subTest(release=release), tempfile.TemporaryDirectory() as directory:
+                summary = Path(directory) / "summary"
+                result = subprocess.run(
+                    ["bash", "-c", script, "infra/release.sh", "--validate", release],
+                    env={**os.environ, "GITHUB_STEP_SUMMARY": str(summary)},
+                    text=True, capture_output=True, check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.splitlines(), ["600", release])
+                self.assertFalse(summary.exists())
 
     def test_uncertain_apply_retains_release_lock(self):
         source = Path("infra/release.sh").read_text()
