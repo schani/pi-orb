@@ -13,7 +13,6 @@ import { writeFile } from "node:fs/promises";
 import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PGlite } from "@electric-sql/pglite";
 import {
   capHeadline,
   DisplayHistoryViewSchema,
@@ -27,6 +26,7 @@ import { Check } from "typebox/value";
 import { build } from "vite";
 import { expect, it } from "vitest";
 import WebSocket from "ws";
+import { PGliteClient } from "../apps/control-plane/src/adapters/pg/pglite-client.ts";
 import {
   api,
   createFakeSession,
@@ -975,20 +975,24 @@ text('NOTIFY_PARENT_HANDLED');`),
       expect((await history()).records).toEqual(expect.arrayContaining([notice]));
       expect(await readDetails()).toBe(details);
       await cp.stop();
-      const persistence = new PGlite(join(root, "db"));
+      const persistence = new PGliteClient(join(root, "db"));
       try {
-        const native = await persistence.query<{ count: number }>(
-          "SELECT COUNT(*)::integer AS count FROM durable_pg_entries WHERE orb_id = $1",
-          [orb],
-        );
-        expect(native.rows[0]?.count).toBe(0);
-        const retained = await persistence.query<{ record: unknown }>(
-          "SELECT record FROM history_records WHERE orb_id=$1 AND record_id=$2",
-          [orb, notice?.id],
-        );
-        expect(retained.rows[0]?.record).toEqual(notice);
+        const native = (
+          await persistence.query(
+            "SELECT COUNT(*)::integer AS count FROM durable_pg_entries WHERE orb_id = $1",
+            [orb],
+          )
+        )._unsafeUnwrap();
+        expect(native.rows[0]?.["count"]).toBe(0);
+        const retained = (
+          await persistence.query(
+            "SELECT record FROM history_records WHERE orb_id=$1 AND record_id=$2",
+            [orb, notice?.id],
+          )
+        )._unsafeUnwrap();
+        expect(retained.rows[0]?.["record"]).toEqual(notice);
       } finally {
-        await persistence.close();
+        (await persistence.end())._unsafeUnwrap();
       }
       failed = false;
     } catch (error) {

@@ -2040,3 +2040,17 @@ Full exact-new-head unit/DST, browser/runtime E2E and image CI are pending; earl
 On 2026-10-29 PDT, the selector-only fix has [controlled RED/GREEN, Chromium 7/7 without skips, root typecheck and scoped lint receipts](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/f80c5983-861b-49b6-9bb1-6683386edf7c/evidence/pr227-drop-feedback-selector-7599ac39.tgz); fresh-head CI remains pending on [PR 227](https://github.com/schani/pi-orb/pull/227).
 The font-response barrier has controlled RED/GREEN and original full-file 11/11 receipts in `.context/node26-evidence/font-observation/`; fresh-head CI remains pending on [PR 227](https://github.com/schani/pi-orb/pull/227).
 Evidence, source limits and compatibility mechanisms: `docs/postmortems/2026-10-28-node-wasm-wrapper-lifetime.md`.
+
+## Native-search PGlite reopen qualification (2026-10-29 PDT)
+
+[PR 231's first Central process 4/4 failure](https://github.com/schani/pi-orb/actions/runs/40974088344/job/123797716075)
+occurs after successful drain: the archive inspection opens the persisted database without
+`pg_textsearch`, whose plugin persisted `shared_preload_libraries=pg_textsearch`.
+A local raw-constructor reproduction fails at the first query; `PGliteClient` reopens that
+same database and reads its retained row and extension version. The E2E inspection now
+uses that adapter, preserving both private-state purge and public-history retention assertions.
+Clean Node 26.13.0 `npm ci`, PGlite tests (3/3), workspace/E2E typecheck, lint and the
+unchanged three-case process E2E pass without retries or timeout changes. Provider cleanup
+succeeds; ports 3210/5173 are free. No new DST failure occurred. Private receipts:
+`$HOME/.local/share/pi-orb/pr231-ci-fix/`; original CI evidence remains in
+`$HOME/.local/share/pi-orb/pr231-babysit/`. Exact-new-head full CI remains required; no deployment.
