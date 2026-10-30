@@ -10,6 +10,10 @@ resource "google_sql_database_instance" "pi_orb" {
   settings {
     tier    = "db-custom-1-3840"
     edition = "ENTERPRISE"
+    database_flags {
+      name  = "cloudsql.enable_pg_textsearch"
+      value = "on"
+    }
     ip_configuration {
       ipv4_enabled    = false
       private_network = local.pi_orb_network

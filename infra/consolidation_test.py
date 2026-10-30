@@ -58,42 +58,78 @@ class ConsolidationTest(unittest.TestCase):
                 self.assertFalse(accepted(changes[:index] + changes[index + 1:]))
                 self.assertFalse(accepted(changes[:index] + changes[index + 1:] + [changes[1 if index == 0 else 0]]))
 
-        upgrade = json.loads(json.dumps(changes))
-        before = dict(database_version='POSTGRES_16', name='pi-orb',
-                      settings=[dict(tier='db-custom-1-3840', database_flags=[],
+        flag = dict(name='cloudsql.enable_pg_textsearch', value='on')
+        iam = dict(name='cloudsql.iam_authentication', value='on')
+        before = dict(database_version='POSTGRES_17', name='pi-orb',
+                      settings=[dict(tier='db-custom-1-3840', database_flags=[iam],
                                      ip_configuration=[dict(private_network='network')],
                                      backup_configuration=[dict(enabled=True)])])
-        after = dict(before, database_version='POSTGRES_17')
-        upgrade[0]['change'] = dict(actions=['update'], before=before, after=after, after_unknown={})
-        self.assertTrue(accepted(upgrade))
+        after = json.loads(json.dumps(before))
+        after['settings'][0]['database_flags'].append(flag)
+        preload = json.loads(json.dumps(changes))
+        preload[0]['change'] = dict(actions=['update'], before=before, after=after, after_unknown={})
+        self.assertTrue(accepted(preload))
+        for flags in ([], None, [dict(flag, value='off')]):
+            safe = json.loads(json.dumps(preload))
+            safe[0]['change']['before']['settings'][0]['database_flags'] = flags
+            safe[0]['change']['after']['settings'][0]['database_flags'] = [flag]
+            self.assertTrue(accepted(safe))
+        safe = json.loads(json.dumps(preload))
+        safe[0]['change']['before']['settings'][0].pop('database_flags')
+        safe[0]['change']['after']['settings'][0]['database_flags'] = [flag]
+        self.assertTrue(accepted(safe))
+        safe = json.loads(json.dumps(preload))
+        safe[0]['change']['after']['settings'][0]['database_flags'].reverse()
+        self.assertTrue(accepted(safe))
         for version in ('POSTGRES_15', 'POSTGRES_16', 'POSTGRES_18', None):
-            unsafe = json.loads(json.dumps(upgrade))
+            unsafe = json.loads(json.dumps(preload))
             unsafe[0]['change']['after']['database_version'] = version
             self.assertFalse(accepted(unsafe))
+        upgrade = json.loads(json.dumps(preload))
+        upgrade[0]['change']['before']['database_version'] = 'POSTGRES_16'
+        upgrade[0]['change']['after'] = dict(upgrade[0]['change']['before'], database_version='POSTGRES_17')
+        self.assertFalse(accepted(upgrade))
         for mutation in (
             dict(actions=['delete', 'create']),
-            dict(before=dict(before, database_version='POSTGRES_15')),
+            dict(before=dict(before, database_version='POSTGRES_16')),
             dict(after=dict(after, name='replacement')),
             dict(after_unknown=dict(database_version=True)),
-            dict(after_unknown=dict(settings=[dict(tier=True)])),
+            dict(after_unknown=dict(settings=[dict(database_flags=True)])),
+            dict(after_unknown=None),
         ):
             with self.subTest(mutation=mutation):
-                unsafe = json.loads(json.dumps(upgrade))
+                unsafe = json.loads(json.dumps(preload))
                 unsafe[0]['change'].update(mutation)
                 self.assertFalse(accepted(unsafe))
         for settings in (dict(tier='db-custom-2-7680'),
-                         dict(database_flags=[dict(name='log_connections', value='on')]),
+                         dict(database_flags=[flag]),
+                         dict(database_flags=[dict(iam, value='off'), flag]),
+                         dict(database_flags=[iam, dict(name='log_connections', value='on'), flag]),
+                         dict(database_flags=[iam, dict(flag, value='off')]),
+                         dict(database_flags=[iam, flag, flag]),
                          dict(ip_configuration=[dict(private_network='other')]),
                          dict(backup_configuration=[dict(enabled=False)])):
-            unsafe = json.loads(json.dumps(upgrade))
-            unsafe[0]['change']['after']['settings'][0].update(settings)
-            self.assertFalse(accepted(unsafe))
+            with self.subTest(settings=settings):
+                unsafe = json.loads(json.dumps(preload))
+                unsafe[0]['change']['after']['settings'][0].update(settings)
+                self.assertFalse(accepted(unsafe))
+        unsafe = json.loads(json.dumps(preload))
+        unsafe[0]['change']['before']['settings'][0]['database_flags'].append(flag)
+        self.assertFalse(accepted(unsafe))
         for index in range(1, len(protected)):
-            unsafe = json.loads(json.dumps(upgrade))
+            unsafe = json.loads(json.dumps(preload))
             unsafe[index]['change']['actions'] = ['update']
             self.assertFalse(accepted(unsafe))
-        upgrade[0]['change'] = dict(actions=['no-op'], before=after, after=after)
-        self.assertTrue(accepted(upgrade))
+        preload[0]['change'] = dict(actions=['no-op'], before=after, after=after)
+        self.assertTrue(accepted(preload))
+
+    def test_textsearch_preload_configuration_and_logging(self):
+        sql = Path('infra/sql.tf').read_text()
+        self.assertRegex(sql, r'database_flags\s*\{\s*name\s*=\s*"cloudsql\.enable_pg_textsearch"\s*value\s*=\s*"on"')
+        release = Path('infra/release.sh').read_text()
+        self.assertIn('Database plan accepted: cloudsql.enable_pg_textsearch -> on; database restart expected', release)
+        self.assertNotIn('PostgreSQL 16 -> 17', release)
+        self.assertLess(release.index('stage schema'), release.index('stage apply'))
 
     def test_issuer_resource_sizing(self):
         source = Path('infra/run.tf').read_text().split('resource "google_cloud_run_v2_service" "issuer" {', 1)[1]
