@@ -2444,7 +2444,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     _task: SimulationTask,
     _params: import("../domain/ports.ts").HistorySearchParams,
   ): ResultAsync<import("../domain/ports.ts").HistorySearchPage, StoreError> {
-    return okAsync({ hits: [], documentCount: 0, candidateCount: 0 });
+    return okAsync({ hits: [] });
   }
 
   readHistorySnapshot(

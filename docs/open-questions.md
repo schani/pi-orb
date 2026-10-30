@@ -227,3 +227,7 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 ## Current-URL share access placement — 84
 
 84. **Partially resolved (2026-10-28; implemented locally, not deployed):** orb-title placement and icon-pair variant A are selected: flexible title, then icon-only pencil + connected-nodes Share right-aligned within the identity cell, before lifecycle state. Upload keeps its existing tray; connected nodes distinguish sharing from uploading. Only access on other pages, including the dashboard, remains undecided. Studies, unselected alternatives and rationale: [docs/web-ui.md](web-ui.md#current-url-sharing-decided-and-implemented-locally-2026-10-28-not-deployed).
+
+## Native history search prerequisites — 85
+
+85. **Resolved (2026-10-29, PDT):** use **1.3.1**, assuming Google fixed the reported bugs or they are irrelevant; backports remain unverified. The user rejected waiting for patched **1.5.1+** to avoid delay. Use two sequential PR/releases: **deploy** flag-only prerequisite [PR 230](https://github.com/schani/pi-orb/pull/230), including its required restart, **before merging** the replacement feature PR. Keep migrations before full infrastructure apply. A stored projection does not address recycled-page corruption; no projection state or workaround is approved. Findings and qualification: `docs/history-search.md`, `docs/testing.md`; ordering: `docs/deployment.md`.

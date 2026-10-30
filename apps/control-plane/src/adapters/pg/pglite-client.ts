@@ -1,4 +1,5 @@
 import { PGlite, type Transaction } from "@electric-sql/pglite";
+import { pg_textsearch } from "@electric-sql/pglite-pg_textsearch";
 import { err, type Result, ResultAsync } from "neverthrow";
 import type { StoreError } from "../../domain/errors.ts";
 import {
@@ -19,7 +20,7 @@ export class PGliteClient implements PostgreSQLClient {
   private readonly database: PGlite;
 
   constructor(path?: string) {
-    this.database = path === undefined ? new PGlite() : new PGlite(path);
+    this.database = new PGlite({ dataDir: path ?? "memory://", extensions: { pg_textsearch } });
   }
 
   query(text: string, values: unknown[] = []): ResultAsync<PgQueryResult, StoreError> {

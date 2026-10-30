@@ -190,7 +190,7 @@ export function createOrbAgentOperations(
               if (result.isErr()) return fail("unavailable", "history search unavailable");
               const hits = result.value.hits.map((hit) => ({ ...hit, orbUrl: url(hit.orbId) }));
               task.log(
-                `history-search: scope=${scope} documents=${result.value.documentCount} candidates=${result.value.candidateCount} hits=${hits.length} durationMs=${Math.max(0, task.wallNow() - started)}`,
+                `history-search: scope=${scope} hits=${hits.length} durationMs=${Math.max(0, task.wallNow() - started)}`,
               );
               return ok({ hits });
             }

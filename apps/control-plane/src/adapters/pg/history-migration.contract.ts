@@ -51,9 +51,10 @@ export function historyMigrationContractTests(label: string, connectionString: (
           )
         )._unsafeUnwrap();
         (
-          await client.query("INSERT INTO schema_migrations (name) VALUES ($1), ($2)", [
+          await client.query("INSERT INTO schema_migrations (name) VALUES ($1), ($2), ($3)", [
             migration,
             searchMigration,
+            "052_native_history_search.sql",
           ])
         )._unsafeUnwrap();
         (await runMigrations(client))._unsafeUnwrap();

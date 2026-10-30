@@ -27,7 +27,7 @@ describe.each(["PGlite", ...(url ? ["PostgreSQL"] : [])])("%s orb harness migrat
       )._unsafeUnwrap();
       (
         await client.query(
-          "INSERT INTO schema_migrations (name) VALUES ('044_lossless_history_json.sql'), ('049_history_search.sql')",
+          "INSERT INTO schema_migrations (name) VALUES ('044_lossless_history_json.sql'), ('049_history_search.sql'), ('052_native_history_search.sql')",
         )
       )._unsafeUnwrap();
       expect((await database.migrate()).isOk()).toBe(true);

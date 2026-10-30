@@ -17,6 +17,7 @@
     "@earendil-works/pi-durable": "1.4.0",
     "@earendil-works/pi-mcp": "1.4.0",
     "@electric-sql/pglite": "^0.5.4",
+    "@electric-sql/pglite-pg_textsearch": "0.0.13",
     "@fastify/static": "^10.1.2",
     "@fastify/websocket": "^11.0.0",
     "@google-cloud/secret-manager": "^7.2.0",

@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { TEST_USER_ID } from "../../testkit/fixtures.ts";
 import type { StoreContractSubject } from "../../testkit/store-contract.ts";
 import { jsonParam } from "./client.ts";
+import { HISTORY_SEARCH_SQL } from "./history-search.ts";
 
 const task = new NoSimulationTask("history search", false);
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -273,80 +274,99 @@ export function historySearchContractTests(
       expect(await text(message("a".repeat(3000)))).toHaveLength(3000);
     });
 
-    it("uses exact scoped corpus statistics, Pi cursor ancestry, all committed Claude branches and ranks before limit", async () => {
-      await add("a1", message("needle ".repeat(600)));
-      await add("a2", message("needle other x"), orb, "a1");
-      await add("a3", message("other other other other"), orb, "a2");
+    it("applies scope and committed ancestry before the native ranked limit", async () => {
+      await add("a1", message("needle"));
+      await add("a2", message("needle other"), orb, "a1");
       await add("orphan", message("needle ".repeat(100)));
-      await sql("UPDATE orbs SET replication_cursor='a3',replicated_head_id='a3' WHERE id=$1", [
+      await sql("UPDATE orbs SET replication_cursor='a2',replicated_head_id='a2' WHERE id=$1", [
         orb,
       ]);
       await add("b1", message("needle"), claude);
       await add("b2", message("other"), claude);
       await add("c1", message("needle"), otherOrb);
-      await add("d1", message("needle"), foreignOrb);
-      for (const [scope, n, ids] of [
-        [{ orbId: orb }, 3, ["a1", "a2"]],
-        [{ projectId: project }, 5, ["a1", "b1", "a2"]],
-        [{}, 6, ["a1", "b1", "c1", "a2"]],
+      await add("d1", message("needle ".repeat(100)), foreignOrb);
+      for (const [scope, ids] of [
+        [{ orbId: orb }, ["a1", "a2"]],
+        [{ projectId: project }, ["a1", "a2", "b1"]],
+        [{}, ["a1", "a2", "b1", "c1"]],
       ] as const) {
-        const result = (await search("needle needle", scope))._unsafeUnwrap();
-        expect(result.documentCount).toBe(n);
-        expect(result.candidateCount).toBe(ids.length);
-        expect(result.hits.map((hit) => hit.recordId)).toEqual(ids);
+        const result = (await search("needle", scope))._unsafeUnwrap();
+        expect(result.hits.map((hit) => hit.recordId).sort()).toEqual([...ids].sort());
+        for (const hit of result.hits) {
+          expect(Number.isFinite(hit.score)).toBe(true);
+          expect(hit.score).toBeGreaterThan(0);
+        }
+        const limited = (await search("needle", { ...scope, limit: 1 }))._unsafeUnwrap().hits;
+        expect(limited).toHaveLength(1);
+        expect(ids).toContain(limited[0]?.recordId);
       }
       expect((await search("needle", { orbId: foreignOrb }))._unsafeUnwrap().hits).toEqual([]);
-      expect((await search("!!!"))._unsafeUnwrap().hits).toEqual([]);
-      const all = (await search("needle other absent needle"))._unsafeUnwrap();
-      expect(all.documentCount).toBe(3);
-      expect(all.candidateCount).toBe(3);
-      for (const [recordId, dl, needleTf, otherTf] of [
-        ["a1", 600, 600, 0],
-        ["a2", 3, 1, 1],
-        ["a3", 4, 0, 4],
-      ] as const) {
-        const termScore = (tf: number, df: number) =>
-          tf === 0
-            ? 0
-            : (Math.log(1 + (3 - df + 0.5) / (df + 0.5)) * tf * 2.2) /
-              (tf + 1.2 * (0.25 + (0.75 * dl) / (607 / 3)));
-        expect(all.hits.find((hit) => hit.recordId === recordId)?.score).toBeCloseTo(
-          termScore(needleTf, 2) + termScore(otherTf, 2),
-          12,
-        );
-      }
-      expect((await search("needle other", { orbId: orb, limit: 2 }))._unsafeUnwrap().hits).toEqual(
-        all.hits.slice(0, 2),
-      );
+      for (const query of ["!!!", "unmatchedword"])
+        expect((await search(query))._unsafeUnwrap().hits).toEqual([]);
+      await sql("UPDATE orbs SET state='deleting' WHERE id=$1", [claude]);
+      expect(
+        (await search("needle", { projectId: project }))
+          ._unsafeUnwrap()
+          .hits.map((hit) => hit.recordId)
+          .sort(),
+      ).toEqual(["a1", "a2"]);
+      await sql("UPDATE orbs SET state='stopped' WHERE id=$1", [claude]);
+      await sql("UPDATE projects SET state='deleting' WHERE id=$1", [project]);
+      expect((await search("needle"))._unsafeUnwrap().hits).toEqual([]);
+      await sql("UPDATE projects SET state='active' WHERE id=$1", [project]);
     });
 
-    it("indexes lossless NUL/surrogate source and query JSON consistently across languages and long tokens", async () => {
-      const content = "Ａ é ﬁ ١ १२ 你好 ไทย क् before\u0000after literal\\u0000 😀 \uD800";
+    it("never indexes private source text and follows committed updates and deletes", async () => {
+      await add(
+        "visible",
+        message("cobalt", {
+          content: [
+            { type: "text", text: "cobalt" },
+            { type: "reasoning", text: "privatecanary" },
+          ],
+          overflow: { native: { text: "privatecanary\u0000\uD800" } },
+        }),
+        claude,
+      );
+      await add("hidden", message("privatecanary", { role: "system" }), claude);
+      expect((await search("privatecanary", { orbId: claude }))._unsafeUnwrap().hits).toEqual([]);
+      expect((await search("cobalt", { orbId: claude }))._unsafeUnwrap().hits[0]?.snippet).toBe(
+        "cobalt",
+      );
+      await sql(
+        "UPDATE history_records SET record=$1::json WHERE orb_id=$2 AND record_id='visible'",
+        [jsonParam(message("falcon")), claude],
+      );
+      expect((await search("cobalt", { orbId: claude }))._unsafeUnwrap().hits).toEqual([]);
+      expect(
+        (await search("falcon", { orbId: claude }))._unsafeUnwrap().hits.map((hit) => hit.recordId),
+      ).toEqual(["visible"]);
+      await sql("DELETE FROM history_records WHERE orb_id=$1 AND record_id='visible'", [claude]);
+      expect((await search("falcon", { orbId: claude }))._unsafeUnwrap().hits).toEqual([]);
+    });
+
+    it("uses native English stemming and removes the token-key helpers", async () => {
+      await add("stem", message("run"));
+      expect((await search("running"))._unsafeUnwrap().hits.map((hit) => hit.recordId)).toEqual([
+        "stem",
+      ]);
+      expect(
+        (
+          await sql(
+            "SELECT proname FROM pg_proc WHERE pronamespace=current_schema()::regnamespace AND proname IN ('history_search_keys','history_search_tokens')",
+          )
+        ).rows,
+      ).toEqual([]);
+    });
+
+    it("preserves lossless JSON, sanitizes query escapes and bounds Unicode snippets", async () => {
+      const content = "Ａ é ﬁ ١ १२ 你好 ไทย क् cobalt\u0000falcon literal\\u0000 😀 \uD800";
       const record = await add(
         "unicode",
         message(content, { overflow: { private: "\u0000\uD800" } }),
       );
-      const tokens = (
-        await sql(
-          "SELECT history_search_tokens(history_search_public_text(record)) AS tokens FROM history_records",
-        )
-      ).rows[0]?.["tokens"];
-      expect(tokens).toEqual([
-        "a",
-        "é",
-        "fi",
-        "١",
-        "१२",
-        "你好",
-        "ไทย",
-        "क",
-        "before",
-        "after",
-        "literal",
-        "u0000",
-      ]);
       expect(
-        (await search("before\u0000after \uD800"))._unsafeUnwrap().hits.map((hit) => hit.recordId),
+        (await search("cobalt\u0000falcon \uD800"))._unsafeUnwrap().hits.map((hit) => hit.recordId),
       ).toEqual(["unicode"]);
       expect((await sql("SELECT record FROM history_records")).rows[0]?.["record"]).toEqual(record);
       for (const [source, expected] of [
@@ -363,17 +383,11 @@ export function historySearchContractTests(
             .rows[0]?.["text"],
         ).toBe(expected);
       const long = "a".repeat(100000);
-      expect(
-        (await sql("SELECT history_search_keys($1::json) AS keys", [jsonParam(message(long))]))
-          .rows[0]?.["keys"],
-      ).toEqual([expect.stringMatching(/^[0-9a-f]{32}$/)]);
       await add("long", message(long), orb, "unicode");
-      expect((await search(long))._unsafeUnwrap().hits.map((hit) => hit.recordId)).toEqual([
-        "long",
-      ]);
-      const snippet = (await search("after"))._unsafeUnwrap().hits[0]?.snippet ?? "";
+      expect((await search(long)).isOk()).toBe(true);
+      const snippet = (await search("falcon"))._unsafeUnwrap().hits[0]?.snippet ?? "";
       expect(snippet.length).toBeLessThanOrEqual(500);
-      expect(snippet).toContain("after");
+      expect(snippet).toContain("falcon");
       expect(await text(message("\\\u0000"))).toBe("\\ ");
       await add("snippet", message(`${"😀".repeat(300)}needle${"😀".repeat(300)}`), orb, "long");
       const centered = (await search("needle"))._unsafeUnwrap().hits[0]?.snippet ?? "";
@@ -386,20 +400,39 @@ export function historySearchContractTests(
       await sql("DROP INDEX history_records_search_idx");
       await add("old", message("existing"));
       await sql(
-        "CREATE INDEX history_records_search_idx ON history_records USING gin(history_search_keys(record))",
+        "CREATE INDEX history_records_search_idx ON history_records USING bm25(history_search_public_text(record)) WITH (text_config='english')",
       );
       expect((await search("existing"))._unsafeUnwrap().hits.map((hit) => hit.recordId)).toEqual([
         "old",
       ]);
-      await sql("SET enable_seqscan=off");
-      try {
-        const plan = await sql(
-          "EXPLAIN (COSTS OFF) SELECT record_id FROM history_records WHERE history_search_keys(record) && ARRAY[md5('existing')]",
+      await sql(
+        `INSERT INTO history_records(orb_id,record_id,parent_id,record)
+        SELECT $1,'background-' || n,NULL,json_build_object('type','message','role','assistant',
+          'content',json_build_array(json_build_object('type','text','text','background document ' || n)))
+        FROM generate_series(1,1000) n`,
+        [claude],
+      );
+      await sql(
+        "UPDATE orbs SET replication_cursor='background-1',replicated_head_id='background-1' WHERE id=$1",
+        [claude],
+      );
+      await sql("ANALYZE history_records");
+      const plan = await sql(
+        `EXPLAIN (ANALYZE, FORMAT JSON, COSTS OFF, TIMING OFF) ${HISTORY_SEARCH_SQL}`,
+        [TEST_USER_ID, null, null, jsonParam({ query: "existing" }), 10],
+      );
+      const orderedSearchIndex = (node: unknown): boolean => {
+        if (Array.isArray(node)) return node.some(orderedSearchIndex);
+        if (typeof node !== "object" || node === null) return false;
+        const fields = node as Record<string, unknown>;
+        return (
+          (fields["Index Name"] === "history_records_search_idx" &&
+            String(fields["Order By"]).includes("<@>") &&
+            Number(fields["Actual Loops"]) > 0) ||
+          Object.values(fields).some(orderedSearchIndex)
         );
-        expect(JSON.stringify(plan.rows)).toContain("history_records_search_idx");
-      } finally {
-        await sql("RESET enable_seqscan");
-      }
+      };
+      expect(orderedSearchIndex(plan.rows)).toBe(true);
       await add("new", message("future"), orb, "old");
       expect((await search("future"))._unsafeUnwrap().hits.map((hit) => hit.recordId)).toEqual([
         "new",
