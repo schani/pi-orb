@@ -88,11 +88,11 @@ No PostgreSQL 17 defect or historical persistence cause is established.
 correction. The local correction separates expected persistence invalidation
 from real store errors and adds safe completion diagnostics
 (`docs/activity-headlines.md`). Focused local tests, PGlite contracts and static
-checks pass; fresh exact-head PR CI remains **pending**. Qualification receipts
-and replay/suite limits are in `docs/testing.md`; local evidence is under
-`headline-fix/` beside the production receipts below. No deployment or proof of
-the historical production cause is claimed. The historical workflow failure
-remains unwaived. The actionable blocker remains in `TODO.md`.
+checks passed before subsequent combined exact-main qualification and corrective
+deployment below. Qualification receipts and unchanged replay/suite limits are in
+`docs/testing.md`; local evidence is under `headline-fix/` beside the original
+production receipts below. The historical production cause remains unproven and
+workflow failure unwaived. The corrective rollout result is recorded below.
 
 ## Evidence
 
@@ -108,3 +108,67 @@ Token-free receipts remain in
 `identity-fix-tests-receipt.json`, `rollout-summary.json`,
 `rollout-error-summary.json`, `rollout-error-metadata.json`,
 `rollout-sql-error-summary.json` and `workflow-final.json`.
+
+## Corrective release (2026-10-29, PDT; workflow success, rollout observed)
+
+User-approved combined Node 26/headlines and explicitly PR 228 cooperative
+retirement shipped through normal [Deploy 40986634860](https://github.com/schani/pi-orb/actions/runs/40986634860),
+dispatched at 18:34:20 after the 15:35 not-before. Source/runner
+`0f52ae6cd795f2b83fd0b6b71e31790eb36ba25c` passed all ten exact-main jobs on
+attempt 1 (`docs/testing.md`). Release
+`r-1793324145-ba8aa6fe-8673-43be-9afb-2d5bca55c463` validated at 19:11:07;
+all 12 gates passed, including the normal schema/migrator gate and native
+acceptance. No search feature/extension, preload flag or new SQL migration file
+was included. Read-only SQL verification confirms `pg_textsearch` is neither
+installed nor preloaded. This was not another database major-version upgrade.
+
+Serving revision `pi-orb-issuer-00078-r22`, generation `1793324912`, uses
+`sha256:20ff6928c562053c1b3e8c7d9bc120fa6554df8395bcaec1d45155994abb09b6`.
+Active authority matches and retains retirement cutoff `1793324911`.
+Independent predecessor zeros preceded activation at 19:00:00; first-handover
+limits and observer interruptions are in
+`docs/postmortems/2026-10-29-pg17-production-interruption.md`.
+All four fixtures independently return 404; their VMs/disks and all four native
+cleanup resources are absent. Images `pi-orb-image-v-0f52ae6c-4cfec022089e459d`
+(ID `5476221122335623365`) and `pi-orb-image-workspace-v-0f52ae6c-4cfec022089e459d`
+(ID `7067460596598197046`) are `READY`. Release lock is absent and no Compute
+operation is pending at the final snapshot.
+
+SQL remains PostgreSQL 17.11 (`170011`), primary and `RUNNABLE`. Endpoint,
+connection name, region, tier, edition, availability, network/backup/PITR settings,
+database flags and database-secret versions match the protected baseline.
+Fresh original-credential authentication and all 41 original `last_analyze`
+timestamps are confirmed; **ANALYZE was not repeated**. Original pre/post-upgrade
+backups remain `SUCCESSFUL`; latest automated PostgreSQL 17 backup
+`1793318400000` is also `SUCCESSFUL`.
+
+The independent full monitor ended **observed** for **19:11:11–19:30:02 PDT**
+(October 30, 02:11:11–02:30:02Z): 1,130 seconds, 14 samples, all health `ok` and
+SQL `RUNNABLE`, zero ERROR/HTTP 429/HTTP 5xx. One `compute-discard` and one
+`compute-discard-requested` were nonregression events. Central inference remained
+**unobserved**, not live-provider verification. Workflow 40986634860 completed
+**success on attempt 1**. The uploaded release artifact exactly matches the
+durable validated record. These receipts do not rewrite the original failed
+monitor or establish its historical cause.
+
+### Fleet warning: classification pending
+
+The final fleet gained one `setup_failed` detail on the still-running parent orb
+`973fb397-1897-4cdb-bd51-7a47a283482a`, hook `setup`, state-change timestamp
+**19:28:44.717 PDT**. The other failed orb, `dbe40ba4-6860-4d70-b119-31be81985fcd`,
+was already failed on October 9. Read-only parent-local diagnostics were requested;
+the warning's reason and classification remain **pending**, not an established
+deployment regression or a resolved warning. The user was informed at the last
+check before final signoff. The investigation is tracked only in `TODO.md`.
+
+Corrective evidence is separate from the original inventory:
+`$HOME/.local/share/pi-orb/headline-corrective-release-20261029/`:
+`release-validated.json`, `active-final.json`, `protected-baseline-final.json`,
+`sql-private-verification-final.json`, `backups-final.json`,
+`fixture-absence-final.json`, `native-resource-absence-final.json`,
+`resource-cleanup-final.json`, `compute-images-final.json`,
+`compute-pending-final.json`, `lock-final.stderr`, `rollout-summary.json`,
+`workflow-final.json`, `fleet-failure-metadata-final.json`,
+`excluded-feature-verification.json` and `final-evidence-sha256.json`.
+Final workflow artifacts: `artifacts/release-40986634860-1/release.json` and
+`artifacts/rollout-monitor-40986634860-1/rollout-monitor.json`.
