@@ -20,7 +20,7 @@ REMOTE_LOCK_GENERATION=""
 KEEP_REMOTE_LOCK=false
 FIRST_CONSOLIDATION=false
 QUALIFICATION=""
-MIGRATION_TIMEOUT_SECONDS=300
+MIGRATION_TIMEOUT_SECONDS=600
 MIGRATION_TIMEOUT_REASON=default
 
 usage() {
@@ -39,7 +39,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-if [ -n "$VALIDATE" ] && [ "$MIGRATION_TIMEOUT_SECONDS" -ne 300 ]; then
+if [ -n "$VALIDATE" ] && [ "$MIGRATION_TIMEOUT_SECONDS" -ne 600 ]; then
   echo 'release: --migration-timeout-30m cannot be used with --validate' >&2
   exit 2
 fi
