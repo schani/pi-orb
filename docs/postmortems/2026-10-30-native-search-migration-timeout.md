@@ -1,6 +1,6 @@
 # Native-search migration timeout
 
-**2026-10-30, PDT. Failed deployment; no correction or retry.**
+**2026-10-30, PDT. Original 300-second failure; slow phase unproven.**
 
 ## Release
 
@@ -91,6 +91,10 @@ The user directly approved **“I approve the lock-release!”** after the execu
 Fresh pre-delete checks established that exact lock/release/job ownership, one terminal failed execution/no running tasks, no migration backend or index-build progress/exclusive history lock, old GIN/helpers and absent 052/053/extension, healthy unchanged old serving state, no active Deploy and no pending normal Compute/SQL operations. An initial pending-operation gate correctly held on an unrelated normal orb insertion; that exact operation completed without error at 10:59:06. No operation was canceled and no gate was weakened.
 
 Authority, first pending-gate evidence, intent, ACK and independent postchecks are retained under `~/deploy-e124/timeout600/lock-recovery/`, with a sibling hash manifest. Release qualification remains separate; releasing the failed lock is not a deployment or a successful migration.
+
+## Separate retry outcome
+
+The subsequently authorized 600-second retry ran once as [Deploy 41110874347](https://github.com/schani/pi-orb/actions/runs/41110874347): 052/053 committed, then application apply failed on Cloud Run startup TCP:8080. Old serving search returned 503 against the new schema; the new lock remains retained. That attempt's build/lock observations do not establish this original 300-second failure's slow phase, and no historical waiver or root-cause fix is claimed. Separate incident: `docs/postmortems/2026-10-30-control-plane-startup-health-failure.md`.
 
 ## Evidence
 
