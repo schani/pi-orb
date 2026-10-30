@@ -70,7 +70,7 @@ A small upstream concurrent-build exercise held `SHARE UPDATE EXCLUSIVE`, allowe
 
 The resource-matched whole-migration run and small lock/pool models characterize mechanisms but do not reproduce the production timeout. Production phase attribution and release qualification remain incomplete; execution work is tracked in `TODO.md`.
 
-Options for user decision are an online concurrent-build/cutover design or explicit maintenance with a justified, bounded SQL/task budget. The latter must account for backend work continuing after task death; a longer task alone is not a cancellation or availability guarantee. Neither option is selected. No nontransactional runner mode, extra index/state, resource change or timeout override is authorized here.
+Initially proposed options were an online concurrent-build/cutover design or explicit maintenance with a justified, bounded SQL/task budget. The user subsequently directed a **600-second task deadline and retry**, after disclosure that the slow phase remains unknown and UI/history can stall again. [PR 234](https://github.com/schani/pi-orb/pull/234) changes only the normal task default, its validation baseline, tests and current design record. A longer task alone is not a SQL cancellation, availability guarantee or root-cause fix. No nontransactional runner mode, extra index/state or infrastructure-resource change is approved.
 
 ## Protection and disposition
 
@@ -78,11 +78,19 @@ Independent before/after reads show the entire serving service object unchanged:
 
 MCP OAuth versions **1103–1105** were added; **1099–1101** were destroyed. Audit metadata attributes the successful writes to the existing control-plane service account, not the deployment executor; it does not establish the initiating operation. A further destroy attempt returned code 9. Payloads were not inspected or changed by the executor. These deltas are not reported as unchanged secrets.
 
-The four prerequisite fixtures still return independent 404s; this failed release created none. All four exact owned builder/validator VM/disk targets return 404, both accepted images retain their recorded IDs and `READY` status, and no Compute operations are pending. The failed migration job and generation-matched release lock remain intact. Two unrelated terminal October 23 migration jobs were retained, not mistaken for active/current-owned resources.
+The four prerequisite fixtures still return independent 404s; this failed release created none. All four exact owned builder/validator VM/disk targets return 404, both accepted images retain their recorded IDs and `READY` status, and no Compute operations are pending. The failed migration job/execution remain intact. The release lock was initially retained, then separately released under the explicit recovery approval below. Two unrelated terminal October 23 migration jobs were retained, not mistaken for active/current-owned resources.
 
 Fixed bearer files were mode 0600 under a mode-0700 directory and removed after final safety reads; no background observer remains.
 
-Only one Deploy was dispatched. No SQL repair, reindex, restart, cancellation, timeout increase, rollback, unlock or cloud cleanup mutation followed failure. Operator probes used pre-acquired fixed access/invoker tokens; no official measurement window opened. Investigation and follow-up are tracked in `TODO.md`.
+The original failed attempt dispatched one Deploy; no second attempt had started at the recovery checkpoint below. No SQL repair, reindex, restart, cancellation, rollback or job deletion followed failure. The source-only 600-second task-default change and exact lock release were separately authorized; original release/failed-job records were not rewritten. Operator probes used pre-acquired fixed access/invoker tokens; no official measurement window opened. Investigation and follow-up are tracked in `TODO.md`.
+
+## Authorized lock-only recovery — 2026-10-30, PDT
+
+The user directly approved **“I approve the lock-release!”** after the executor narrowed recovery to the exact retained lock, preserving the failed job and evidence. At **11:00:34**, GCS acknowledged HTTP 204 for deletion with `ifGenerationMatch=1793373032512231`; subsequent reads confirmed lock absence and unchanged original failed release, active authority, serving service and SQL configuration. Job UID `035c75cf-f45d-4d3a-9081-67fb7d7234a8` and its sole failed execution remain retained.
+
+Fresh pre-delete checks established that exact lock/release/job ownership, one terminal failed execution/no running tasks, no migration backend or index-build progress/exclusive history lock, old GIN/helpers and absent 052/053/extension, healthy unchanged old serving state, no active Deploy and no pending normal Compute/SQL operations. An initial pending-operation gate correctly held on an unrelated normal orb insertion; that exact operation completed without error at 10:59:06. No operation was canceled and no gate was weakened.
+
+Authority, first pending-gate evidence, intent, ACK and independent postchecks are retained under `~/deploy-e124/timeout600/lock-recovery/`, with a sibling hash manifest. Release qualification remains separate; releasing the failed lock is not a deployment or a successful migration.
 
 ## Evidence
 
