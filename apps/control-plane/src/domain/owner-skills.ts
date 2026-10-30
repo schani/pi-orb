@@ -1,15 +1,17 @@
 import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import {
+  AddOwnerSkillRequestSchema,
   OWNER_SKILL_MAX_BYTES,
   OWNER_SKILL_MAX_COUNT,
   OWNER_SKILL_MAX_DESCRIPTION,
   OWNER_SKILL_NAME_PATTERN,
   type OwnerSkillList,
   type OwnerSkillsSnapshot,
+  validateOwnerSkillsSnapshot,
   WriteOwnerSkillRequestSchema,
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import { err, ok, Result, type ResultAsync } from "neverthrow";
+import { err, errAsync, ok, okAsync, Result, type ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
 
 /** Owner skills apply to every orb of every project the owner has (docs/owner-skills-secrets.md). */
@@ -22,12 +24,18 @@ export const ownerSkillError = (
   code: OwnerSkillError["code"],
   message: string,
 ): OwnerSkillError => ({ type: "owner_skill_error", code, message });
-export interface OwnerSkillRecord {
+export type OwnerSkillBundle = Omit<OwnerSkillsSnapshot["skills"][number], "name">;
+export interface OwnerSkillRecord extends OwnerSkillBundle {
   readonly name: string;
   readonly content: string;
   readonly updatedAt: string;
 }
-type OwnerSkillWrite = { readonly name: string; readonly content: string };
+type OwnerSkillWrite = {
+  readonly name: string;
+  readonly content: string;
+  readonly files?: OwnerSkillBundle["files"];
+  readonly source?: OwnerSkillBundle["source"];
+};
 type Records = ResultAsync<OwnerSkillRecord[], OwnerSkillError>;
 /** `replace` renames when `skill.name` differs from `name`. */
 export type OwnerSkillCommand =
@@ -41,6 +49,10 @@ export interface OwnerSkillStore {
 }
 export interface OwnerSkillsDeps {
   readonly store: OwnerSkillStore;
+  readonly acquireGithub: (
+    url: string,
+    signal?: AbortSignal,
+  ) => ResultAsync<OwnerSkillBundle, OwnerSkillError>;
   /** Bundled platform skill names; owner skills may not take them. */
   readonly platformSkillNames: ReadonlySet<string>;
 }
@@ -62,8 +74,24 @@ export function applyOwnerSkillCommand(
   if (command.kind === "create" && current.length >= OWNER_SKILL_MAX_COUNT)
     return err(ownerSkillError("conflict", `At most ${OWNER_SKILL_MAX_COUNT} skills`));
   const kept = current.filter((item) => item.name !== target);
-  const next = command.kind === "delete" ? kept : [...kept, { ...command.skill, updatedAt }];
-  return ok(next.sort((a, b) => (a.name < b.name ? -1 : 1)));
+  const previous = current.find((item) => item.name === target);
+  const next =
+    command.kind === "delete"
+      ? kept
+      : [
+          ...kept,
+          {
+            files: previous?.files ?? [],
+            source: previous?.source ?? null,
+            ...command.skill,
+            updatedAt,
+          },
+        ];
+  return validateOwnerSkillsSnapshot({
+    skills: next.map(({ name, content, files, source }) => ({ name, content, files, source })),
+  })
+    .mapErr(({ message }) => invalid(message))
+    .map(() => next.sort((a, b) => (a.name < b.name ? -1 : 1)));
 }
 const namePattern = new RegExp(OWNER_SKILL_NAME_PATTERN);
 const parseYaml = Result.fromThrowable(parseFrontmatter, () => invalid("Invalid skill YAML"));
@@ -98,7 +126,15 @@ export function describeOwnerSkills(
 ): ResultAsync<OwnerSkillList, OwnerSkillError> {
   const describe = (record: OwnerSkillRecord) =>
     parseOwnerSkill({ content: record.content }).andThen(({ name, description }) =>
-      name === record.name ? ok({ ...record, description }) : err(invalid("")),
+      name === record.name
+        ? ok({
+            name,
+            content: record.content,
+            updatedAt: record.updatedAt,
+            source: record.source,
+            description,
+          })
+        : err(invalid("")),
     );
   return records.andThen((items) =>
     Result.combine(items.map(describe))
@@ -114,22 +150,34 @@ export const writeOwnerSkill = (
   userId: string,
   name: string | null,
   body: unknown,
-) =>
-  describeOwnerSkills(
-    parseOwnerSkill(body)
-      .andThen(({ name: skillName, content }) =>
-        deps.platformSkillNames.has(skillName)
-          ? err(invalid(`"${skillName}" is a bundled platform skill`))
-          : ok({ name: skillName, content }),
-      )
-      .asyncAndThen((skill) =>
-        deps.store.apply(
-          task,
-          userId,
-          name === null ? { kind: "create", skill } : { kind: "replace", name, skill },
+  signal?: AbortSignal,
+) => {
+  const schema = name === null ? AddOwnerSkillRequestSchema : WriteOwnerSkillRequestSchema;
+  if (!Check(schema, body)) return errAsync(invalid("Expected {content: string}"));
+  const importing = "githubUrl" in body;
+  const acquired: ResultAsync<Omit<OwnerSkillWrite, "name">, OwnerSkillError> = importing
+    ? deps.acquireGithub(body.githubUrl, signal)
+    : okAsync({ content: body.content });
+  return describeOwnerSkills(
+    acquired
+      .andThen((bundle) =>
+        parseOwnerSkill({ content: bundle.content }).andThen(({ name: skillName }) =>
+          deps.platformSkillNames.has(skillName)
+            ? err(invalid(`"${skillName}" is a bundled platform skill`))
+            : ok({ name: skillName, ...bundle }),
         ),
+      )
+      .andThen((skill) =>
+        importing && signal?.aborted
+          ? err(ownerSkillError("unavailable", "GitHub import cancelled"))
+          : deps.store.apply(
+              task,
+              userId,
+              name === null ? { kind: "create", skill } : { kind: "replace", name, skill },
+            ),
       ),
   );
+};
 
 /** What an agent context adopts at open: names and raw `SKILL.md` text. */
 export const readOwnerSkillsSnapshot = (
@@ -137,6 +185,13 @@ export const readOwnerSkillsSnapshot = (
   store: OwnerSkillStore,
   userId: string,
 ): ResultAsync<OwnerSkillsSnapshot, OwnerSkillError> =>
-  store
-    .list(task, userId)
-    .map((records) => ({ skills: records.map(({ name, content }) => ({ name, content })) }));
+  store.list(task, userId).andThen((records) =>
+    validateOwnerSkillsSnapshot({
+      skills: records.map(({ name, content, files, source }) => ({
+        name,
+        content,
+        files,
+        source,
+      })),
+    }).mapErr(({ message }) => invalid(message)),
+  );

@@ -1,10 +1,9 @@
 import {
   OWNER_SKILLS_RUNTIME_PATH,
   type OwnerSkillsSnapshot,
-  OwnerSkillsSnapshotSchema,
+  validateOwnerSkillsSnapshot,
 } from "@pi-orb/protocol";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
-import { Check } from "typebox/value";
 import type { BrokerEnv } from "../broker/endpoint.ts";
 
 export interface OwnerSkillsFetchError {
@@ -35,7 +34,7 @@ export async function fetchOwnerSkills(
   if (!response.value.ok)
     return failure(`HTTP ${response.value.status}`, response.value.status >= 500);
   const body = await ResultAsync.fromPromise(response.value.json(), () => undefined);
-  return body.isOk() && Check(OwnerSkillsSnapshotSchema, body.value)
-    ? ok(body.value)
+  return body.isOk() && validateOwnerSkillsSnapshot(body.value).isOk()
+    ? ok(body.value as OwnerSkillsSnapshot)
     : failure("invalid snapshot", false);
 }

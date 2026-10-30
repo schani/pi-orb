@@ -99,7 +99,7 @@ export function createAgentToolFiles(options: {
   return {
     read: (request, _api, ctx) => {
       const artifact = request.path.startsWith("/orb-artifacts/");
-      const platform = ["/opt/pi-orb/skills/", "/opt/pi-orb/owner-skills/"].some(
+      const platform = ["/opt/pi-orb/skills/"].some(
         (prefix) =>
           request.path.startsWith(prefix) || posix.normalize(request.path).startsWith(prefix),
       );

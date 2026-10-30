@@ -18,10 +18,18 @@ export class FakeOwnerSkillStore implements OwnerSkillStore {
   readonly commits = new Map<string, OwnerSkillRecord[][]>();
 
   /** Commits a starting state directly, outside any simulated schedule. */
-  seed(userId: string, skills: ReadonlyArray<{ name: string; content: string }>): void {
+  seed(
+    userId: string,
+    skills: ReadonlyArray<{
+      name: string;
+      content: string;
+      files?: OwnerSkillRecord["files"];
+      source?: OwnerSkillRecord["source"];
+    }>,
+  ): void {
     const updatedAt = new Date(0).toISOString();
     const state = skills
-      .map((skill) => ({ ...skill, updatedAt }))
+      .map((skill) => ({ files: [], source: null, ...skill, updatedAt }))
       .sort((a, b) => (a.name < b.name ? -1 : 1));
     this.commits.set(userId, [...(this.commits.get(userId) ?? []), state]);
   }

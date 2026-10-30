@@ -119,6 +119,109 @@ it.each(["chromium", "webkit"] as const)(
   },
 );
 
+it.each(["chromium", "webkit"] as const)(
+  "%s mobile skill import retains drafts and shows the pinned source",
+  async (engine) => {
+    const fixture = await createFrontendFixture(engine, {
+      page: { viewport: { width: 390, height: 844 } },
+    });
+    const { page, origin } = fixture;
+    const githubUrl = "https://github.com/example/skills/tree/main/skills/screenshots";
+    const commitSha = "a1b2c3d4".repeat(5);
+    const sourceUrl = githubUrl.replace("/main/", `/${commitSha}/`);
+    const content = skill("screenshots", "Capture screenshots.");
+    const calls: string[] = [];
+    let release = () => {};
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    fixture.cleanup(async () => release());
+    await page.route("**/api/v1/owner-skills", async (route) => {
+      const method = route.request().method();
+      calls.push(method);
+      if (method === "GET") return route.fulfill({ json: { items: [] } });
+      check(route.request().postDataJSON()).toEqual({ githubUrl });
+      if (calls.length === 2)
+        return route.fulfill({
+          status: 400,
+          json: {
+            error: {
+              code: "invalid_request",
+              message: "Skill screenshots already exists",
+              retryable: false,
+            },
+          },
+        });
+      await pending;
+      await route.fulfill({
+        json: {
+          items: [
+            {
+              name: "screenshots",
+              description: "Capture screenshots.",
+              content,
+              updatedAt: "2026-10-25T00:00:00.000Z",
+              source: { url: sourceUrl, commitSha },
+            },
+          ],
+        },
+      });
+    });
+    await gotoFrontendFixture(page, `${origin}/`);
+    const dialog = await openSettings(page, "Skills");
+    const panel = dialog.getByRole("tabpanel", { name: "Skills", exact: true });
+    await button(panel, "add skill").click();
+    const fresh = panel.locator("details").filter({ hasText: "new skill" });
+    const source = fresh.getByRole("combobox", { name: "Source", exact: true });
+    const url = fresh.getByRole("textbox", { name: "GitHub URL", exact: true });
+    const draft = skill("manual-draft", "Keep this draft.");
+    await check(source).toHaveValue("manual");
+    await editor(fresh).fill(draft);
+    await source.selectOption("github");
+    await check(url).not.toHaveAttribute("placeholder", /.+/);
+    await url.fill(githubUrl);
+    await source.selectOption("manual");
+    await check(editor(fresh)).toHaveValue(draft);
+    await source.selectOption("github");
+    await check(url).toHaveValue(githubUrl);
+    check(calls).toEqual(["GET"]);
+    await button(fresh, "Add").click();
+    await check(fresh.getByRole("alert")).toContainText("screenshots already exists");
+    await check(url).toHaveValue(githubUrl);
+    await source.selectOption("manual");
+    await check(editor(fresh)).toHaveValue(draft);
+    await source.selectOption("github");
+    await button(fresh, "Add").click();
+    await check(source).toBeDisabled();
+    await check(url).toBeDisabled();
+    await check(button(fresh, "Add")).toBeDisabled();
+    await check(button(dialog, "Close settings")).toBeDisabled();
+    release();
+    const saved = panel
+      .locator("details")
+      .filter({ has: page.locator("summary", { hasText: "screenshots" }) });
+    await check(saved).toContainText("Saved · next orb start");
+    await check(editor(saved)).toHaveValue(content);
+    await check(saved.getByRole("link", { name: sourceUrl, exact: true })).toHaveAttribute(
+      "href",
+      sourceUrl,
+    );
+    check(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    check(calls).toEqual(["GET", "POST", "POST"]);
+    await button(panel, "add skill").click();
+    await check(source).toHaveValue("manual");
+    await check(editor(fresh)).toHaveValue("");
+    await source.selectOption("github");
+    await check(url).toHaveValue("");
+    await url.fill(githubUrl);
+    await button(fresh, "cancel").click();
+    await button(panel, "add skill").click();
+    await check(source).toHaveValue("manual");
+    await source.selectOption("github");
+    await check(url).toHaveValue("");
+  },
+);
+
 /** Every element box inside the pane, relative to the pane. */
 function paneGeometry(pane: Locator) {
   return pane.evaluate((root) => {

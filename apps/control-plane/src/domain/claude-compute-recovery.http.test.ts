@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -107,7 +107,8 @@ it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
           `#!/bin/sh\nprintf ${hook} > .${hook}-ran\n`,
           { mode: 0o700 },
         );
-      symlinkSync(f.configDir, join(f.dir, "claude", "config"), "dir");
+      renameSync(f.configDir, join(f.dir, "claude", "config"));
+      symlinkSync(join(f.dir, "claude", "config"), f.configDir, "dir");
       process.env.PI_ORB_CONTAINER = "0";
       expect((await f.attach()).isOk()).toBe(true);
       const oldUrl = await serve(f.agent);

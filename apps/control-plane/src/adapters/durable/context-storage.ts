@@ -12,7 +12,7 @@ const ContextSnapshot = defineDoc<{
   managed: {
     personal: { content: string; revision: number };
     project: { content: string; revision: number };
-    skills: Array<{ name: string; content: string }>;
+    skills: ManagedResourceInstructions["skills"];
   } | null;
 }>({
   kind: "orb.resource-context",

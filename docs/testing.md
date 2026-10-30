@@ -2054,3 +2054,9 @@ unchanged three-case process E2E pass without retries or timeout changes. Provid
 succeeds; ports 3210/5173 are free. No new DST failure occurred. Private receipts:
 `$HOME/.local/share/pi-orb/pr231-ci-fix/`; original CI evidence remains in
 `$HOME/.local/share/pi-orb/pr231-babysit/`. Exact-new-head full CI remains required; no deployment.
+
+## GitHub owner-skill folders (2026-10-28; local, undeployed)
+
+Historical `f1df6b84` receipts (2026-10-28), including superseded per-context delivery: typecheck/lint; 188 focused tests / 12 files; PGlite 91 passed / four conditional skips; two PostgreSQL 16 owner contracts (owned container removed); Chromium/WebKit 6/6; Durable process 3/3 with provider cleanup. Acquisition/error mapping changed after browser/process receipts, then passed focused regression.
+
+[Incident/evidence](postmortems/2026-10-28-github-skills-ci-qualification.md) retains first failures and attribution limits. Exact-head qualification is recorded on [PR 225](https://github.com/schani/pi-orb/pull/225); these historical receipts do not qualify later revisions or production. No merge/deployment or native release gates are claimed.

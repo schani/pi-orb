@@ -29,7 +29,14 @@ vi.mock("../personal-instructions/endpoint.ts", () => ({
 }));
 const ownerSkills = vi.hoisted(() => ({
   reply: (): unknown => ({
-    skills: [{ name: "owner-notes", content: "---\nname: owner-notes\ndescription: d\n---\n" }],
+    skills: [
+      {
+        name: "owner-notes",
+        files: [],
+        source: null,
+        content: "---\nname: owner-notes\ndescription: d\n---\n",
+      },
+    ],
   }),
 }));
 vi.mock("../owner-skills/endpoint.ts", () => ({

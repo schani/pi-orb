@@ -1,8 +1,11 @@
+import { request as httpRequest } from "node:http";
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
-import { okAsync } from "neverthrow";
-import { afterEach, expect, it } from "vitest";
+import { err, ok, okAsync, ResultAsync } from "neverthrow";
+import { afterEach, expect, it, vi } from "vitest";
 import { bundledPlatformSkillNames } from "../adapters/durable/platform-resources.ts";
+import type { OwnerSkillsDeps } from "../domain/owner-skills.ts";
+import { ownerSkillError, readOwnerSkillsSnapshot } from "../domain/owner-skills.ts";
 import { UserScope } from "../domain/user-scope.ts";
 import { makeHarness, TEST_SYSTEM_VIEW } from "../testkit/fixtures.ts";
 import { makeProjectSecretsHarness } from "../testkit/project-secrets.ts";
@@ -16,7 +19,7 @@ afterEach(async () => Promise.all(apps.splice(0).map((app) => app.close())));
 const doc = (name: string, description = `${name} help`) =>
   `---\nname: ${name}\ndescription: ${description}\n---\nSteps.\n`;
 
-async function setup() {
+async function setup(acquireGithub?: OwnerSkillsDeps["acquireGithub"]) {
   const h = makeHarness();
   const ownerSecrets = makeProjectSecretsHarness(ALICE, BOB).deps;
   const platformSkillNames = (await bundledPlatformSkillNames())._unsafeUnwrap();
@@ -35,7 +38,14 @@ async function setup() {
   registerRoutes(
     app,
     task,
-    { ...deps, ownerSkills: { ...h.deps.ownerSkills, platformSkillNames } },
+    {
+      ...deps,
+      ownerSkills: {
+        ...h.deps.ownerSkills,
+        platformSkillNames,
+        ...(acquireGithub ? { acquireGithub } : {}),
+      },
+    },
     {},
     TEST_SYSTEM_VIEW,
   );
@@ -45,35 +55,77 @@ async function setup() {
     expect(response.headers["cache-control"]).toBe("no-store");
     return { status: response.statusCode, body: response.json() };
   };
-  return { call };
+  return { app, call, store: h.deps.ownerSkills.store };
 }
 type Method = "GET" | "POST" | "PUT" | "DELETE";
 const names = (body: { items: Array<{ name: string }> }) => body.items.map((item) => item.name);
 
-it("creates, replaces, renames and deletes the signed-in owner's skills", async () => {
-  const { call } = await setup();
-  const created = await call("POST", "/api/v1/owner-skills", { content: doc("zeta") });
-  expect(created.body.items).toMatchObject([{ name: "zeta", description: "zeta help" }]);
-  await call("POST", "/api/v1/owner-skills", { content: doc("alpha") });
-  const renamed = await call("PUT", "/api/v1/owner-skills/zeta", { content: doc("beta", "new") });
-  expect(renamed.body.items).toMatchObject([
-    { name: "alpha" },
-    { name: "beta", description: "new" },
-  ]);
-  expect(names((await call("DELETE", "/api/v1/owner-skills/alpha")).body)).toEqual(["beta"]);
-  expect((await call("GET", "/api/v1/owner-skills", undefined, "bob")).body).toEqual({ items: [] });
-  expect((await call("DELETE", "/api/v1/owner-skills/beta", undefined, "bob")).status).toBe(404);
+it.each([
+  {
+    kind: "manual",
+    initial: { content: doc("zeta") },
+    bundle: { content: doc("zeta"), files: [], source: null },
+  },
+  {
+    kind: "GitHub import",
+    initial: { githubUrl: "https://github.com/nasa/a/tree/main/skill" },
+    bundle: {
+      content: doc("zeta"),
+      files: [{ path: "scripts/run", base64: "AP8B", executable: true }],
+      source: {
+        url: `https://github.com/nasa/a/tree/${"a".repeat(40)}/skill`,
+        commitSha: "a".repeat(40),
+      },
+    },
+  },
+])(
+  "$kind: creates, replaces, renames and deletes the signed-in owner's skills",
+  async ({ initial, bundle }) => {
+    const { call, store } = await setup(() => okAsync(bundle));
+    const created = await call("POST", "/api/v1/owner-skills", initial);
+    expect(created.status).toBe(200);
+    expect(created.body.items).toMatchObject([
+      { name: "zeta", description: "zeta help", source: bundle.source },
+    ]);
+    expect(created.body.items[0]).not.toHaveProperty("files");
+    expect((await call("POST", "/api/v1/owner-skills", initial)).status).toBe(409);
+    expect(
+      (await call("POST", "/api/v1/owner-skills", { githubUrl: "x", content: doc("bad") })).status,
+    ).toBe(400);
+    await call("POST", "/api/v1/owner-skills", { content: doc("alpha") });
+    const renamed = await call("PUT", "/api/v1/owner-skills/zeta", { content: doc("beta", "new") });
+    expect(renamed.status).toBe(200);
+    expect(renamed.body.items).toMatchObject([
+      { name: "alpha" },
+      { name: "beta", description: "new" },
+    ]);
+    expect(names((await call("DELETE", "/api/v1/owner-skills/alpha")).body)).toEqual(["beta"]);
+    expect((await readOwnerSkillsSnapshot(task, store, ALICE))._unsafeUnwrap()).toEqual({
+      skills: [{ ...bundle, name: "beta", content: doc("beta", "new") }],
+    });
+    expect((await call("GET", "/api/v1/owner-skills", undefined, "bob")).body).toEqual({
+      items: [],
+    });
+    expect((await call("DELETE", "/api/v1/owner-skills/beta", undefined, "bob")).status).toBe(404);
+    expect((await readOwnerSkillsSnapshot(task, store, BOB))._unsafeUnwrap()).toEqual({
+      skills: [],
+    });
 
-  for (const [method, url, content, status] of [
-    ["POST", "/api/v1/owner-skills", "no frontmatter", 400],
-    ["POST", "/api/v1/owner-skills", doc("Bad_Name"), 400],
-    ["POST", "/api/v1/owner-skills", doc("codemode"), 400],
-    ["POST", "/api/v1/owner-skills", doc("beta"), 409],
-    ["PUT", "/api/v1/owner-skills/missing", doc("missing"), 404],
-  ] as const)
-    expect((await call(method, url, { content })).status).toBe(status);
-  expect(names((await call("GET", "/api/v1/owner-skills")).body)).toEqual(["beta"]);
-});
+    for (const [method, url, content, status] of [
+      ["POST", "/api/v1/owner-skills", "no frontmatter", 400],
+      ["POST", "/api/v1/owner-skills", doc("Bad_Name"), 400],
+      ["POST", "/api/v1/owner-skills", doc("codemode"), 400],
+      ["POST", "/api/v1/owner-skills", doc("beta"), 409],
+      ["PUT", "/api/v1/owner-skills/missing", doc("missing"), 404],
+    ] as const)
+      expect((await call(method, url, { content })).status).toBe(status);
+    expect(names((await call("GET", "/api/v1/owner-skills")).body)).toEqual(["beta"]);
+    expect((await call("DELETE", "/api/v1/owner-skills/beta")).status).toBe(200);
+    expect((await readOwnerSkillsSnapshot(task, store, ALICE))._unsafeUnwrap()).toEqual({
+      skills: [],
+    });
+  },
+);
 
 it("writes the signed-in owner's secrets without ever returning values", async () => {
   const { call } = await setup();
@@ -94,4 +146,63 @@ it("writes the signed-in owner's secrets without ever returning values", async (
     revision: 2,
     items: [],
   });
+});
+
+function gate<T = void>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+it("cancels pending GitHub acquisition when the client disconnects after submitting JSON", async () => {
+  const started = gate<AbortSignal | undefined>();
+  const release = gate();
+  const closed = gate<{ complete: boolean; finished: boolean }>();
+  const completed = gate();
+  const { app, store } = await setup((_url, signal) => {
+    started.resolve(signal);
+    return new ResultAsync(
+      release.promise.then(() =>
+        signal?.aborted
+          ? err(ownerSkillError("unavailable", "GitHub import cancelled"))
+          : ok({ content: doc("imported"), files: [], source: null }),
+      ),
+    );
+  });
+  const save = vi.spyOn(store, "apply");
+  app.addHook("onRequest", async (request, reply) => {
+    reply.raw.once("close", () =>
+      closed.resolve({ complete: request.raw.complete, finished: reply.raw.writableFinished }),
+    );
+  });
+  app.addHook("onSend", async () => completed.resolve());
+  const origin = await app.listen({ host: "127.0.0.1", port: 0 });
+  const client = httpRequest(`${origin}/api/v1/owner-skills`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    agent: false,
+  });
+  client.on("error", () => {});
+  client.on("response", (response) => response.resume());
+  try {
+    client.end(JSON.stringify({ githubUrl: "https://github.com/nasa/a/tree/main/skill" }));
+    const signal = await Promise.race([started.promise, completed.promise.then(() => undefined)]);
+    expect(signal).toBeDefined();
+    expect(signal?.aborted).toBe(false);
+    client.destroy();
+    expect(await closed.promise).toEqual({ complete: true, finished: false });
+    expect.soft(signal?.aborted).toBe(true);
+    release.resolve();
+    await completed.promise;
+    expect.soft(save).not.toHaveBeenCalled();
+    expect((await readOwnerSkillsSnapshot(task, store, ALICE))._unsafeUnwrap()).toEqual({
+      skills: [],
+    });
+  } finally {
+    client.destroy();
+    release.resolve();
+    await completed.promise;
+  }
 });

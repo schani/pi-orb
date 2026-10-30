@@ -714,6 +714,8 @@ describe("runtime broker routes", () => {
     expect((await request()).statusCode).toBe(401);
     const skill = (name: string) => ({
       name,
+      files: [],
+      source: null,
       content: `---\nname: ${name}\ndescription: d\n---\n`,
     });
     ownerSkills.seed(TEST_USER_ID, [skill("zeta"), skill("alpha")]);
