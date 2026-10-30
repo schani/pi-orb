@@ -225,7 +225,10 @@ unknown and no crash is claimed.
 
 All 12 corrective release gates passed at 19:11:07; independent full rollout
 observation ended **observed** for 19:11:11–19:30:02, with workflow **success** on
-attempt 1. Release, cleanup and pending parent setup-hook warning classification:
+attempt 1. Read-only diagnostics classify the still-visible parent setup-hook
+warning as experimental lab APT prerequisites, absent from selected production
+source; why prerequisites were unavailable remains unknown, with no fix claimed.
+Release, cleanup and classification evidence:
 `docs/postmortems/2026-10-29-pg17-production.md`.
 No fix for the historical PostgreSQL Client crash or cached agent-drain failure,
 original-message delivery, or clearance of the original failed monitor is claimed.

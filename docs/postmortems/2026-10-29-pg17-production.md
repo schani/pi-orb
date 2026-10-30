@@ -151,15 +151,36 @@ SQL `RUNNABLE`, zero ERROR/HTTP 429/HTTP 5xx. One `compute-discard` and one
 durable validated record. These receipts do not rewrite the original failed
 monitor or establish its historical cause.
 
-### Fleet warning: classification pending
+### Fleet warning: experimental lab APT prerequisites
 
 The final fleet gained one `setup_failed` detail on the still-running parent orb
 `973fb397-1897-4cdb-bd51-7a47a283482a`, hook `setup`, state-change timestamp
 **19:28:44.717 PDT**. The other failed orb, `dbe40ba4-6860-4d70-b119-31be81985fcd`,
-was already failed on October 9. Read-only parent-local diagnostics were requested;
-the warning's reason and classification remain **pending**, not an established
-deployment regression or a resolved warning. The user was informed at the last
-check before final signoff. The investigation is tracked only in `TODO.md`.
+was already failed on October 9.
+
+Read-only parent-local diagnostics confirm setup incarnation 2 exited **100**,
+**October 29, 19:28:38.807–19:28:41.331 PDT**. Bundled PostgreSQL package checksums
+passed before APT failed PostgreSQL 17 dependency resolution: `locales`/`locales-all`,
+`ssl-cert` and `libxslt1.1` were unavailable; `postgresql-common` required
+`libjson-perl`/`ssl-cert`. The parent's experimental checkout
+`/workspace/repo/.agents/setup` conditionally calls
+`scripts/history-search-lab/install.sh`; this lab bootstrap is absent from selected
+production source `0f52ae6c`. The immediate failure path is APT, not Node/npm/PGlite;
+this does not establish a broader Node 26 causal exclusion. The exact invocation
+was not traced, and why prerequisites were unavailable remains **unknown**.
+
+The warning remains visible, not fixed; it is classified as experimental lab APT
+prerequisites, not an unclassified production regression. Corrective production
+release gates and monitor passed; this is not a globally clean-fleet claim.
+The parent reports its isolated process backend healthy. Diagnostics did not rerun
+hooks, install packages, restart, authenticate or mutate source/release state.
+Follow-up is tracked only in `TODO.md`.
+
+Sanitized peer receipt: `parent-hook-classification.json` in the corrective evidence
+directory below. Peer-retained SHA-256: status
+`df740406dcf6d9638f750f1524c451e28573037765896ba941e2c9e9866053e0`;
+log `a7e5503e0f74bc565993b4a542de4ff45ce540286b97232042ea54032d5269b2`.
+No prerequisite-availability root cause or fix is claimed.
 
 Corrective evidence is separate from the original inventory:
 `$HOME/.local/share/pi-orb/headline-corrective-release-20261029/`:

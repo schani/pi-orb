@@ -2042,11 +2042,15 @@ validated record.
 
 The final fleet gained a `setup_failed` detail on still-running parent orb
 `973fb397-1897-4cdb-bd51-7a47a283482a`, hook `setup`, state-change timestamp
-**19:28:44.717 PDT**. The other failed orb predates rollout (October 9). Requested
-read-only parent-local diagnostics and reason/classification remain **pending**;
-this is not yet an established deployment regression or a resolved warning.
-The user was informed at the last check before final signoff. Details:
-`docs/postmortems/2026-10-29-pg17-production.md`; investigation: `TODO.md`.
+**19:28:44.717 PDT**. The other failed orb predates rollout (October 9). Read-only
+parent-local diagnostics classify the warning as experimental history-search lab
+APT prerequisites, absent from selected production source `0f52ae6c`. Setup
+incarnation 2 exited 100 during PostgreSQL 17 dependency resolution, not a
+Node/npm/PGlite path. Exact invocation and why prerequisites were unavailable
+remain unproven; no broader Node 26 causal exclusion or fix is claimed.
+The warning remains visible despite passing production release gates and monitor;
+no globally clean fleet is claimed. Details and peer receipt:
+`docs/postmortems/2026-10-29-pg17-production.md`; follow-up: `TODO.md`.
 
 These results do not clear the original Deploy 40928556779 monitor failure, prove
 its persistence cause, turn the retained exhausted replay into a passing replay,

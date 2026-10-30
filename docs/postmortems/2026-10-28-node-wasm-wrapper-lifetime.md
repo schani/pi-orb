@@ -46,7 +46,10 @@ shipped Node 26.13.0 and passed all 12 release gates at 19:11:07, including nati
 acceptance/retained-workspace qualification; cleanup is verified
 (`docs/postmortems/2026-10-29-pg17-production.md`). Independent rollout observation
 ended `observed` for 19:11:11–19:30:02; workflow `success` on attempt 1. Central
-inference remained unobserved; the parent setup-hook warning is pending
-classification in that postmortem. The historical wrapper race's exact
+inference remained unobserved; read-only diagnostics classify the visible parent
+setup-hook warning as experimental lab APT prerequisites, absent from selected
+production source. Why prerequisites were unavailable remains unknown; no fix or
+broader Node 26 causal exclusion is claimed. Details are in that postmortem.
+The historical wrapper race's exact
 module/interleaving remains unproven; no deterministic historical-crash
 reproduction is claimed.
