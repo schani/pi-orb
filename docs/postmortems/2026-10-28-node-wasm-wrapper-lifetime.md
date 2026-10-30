@@ -12,7 +12,7 @@ One project failure was observed: no CI core/binary hash, exact module/interleav
 
 **Decision (2026-10-28):** user-approved, separate Node 26.13.0 LTS upgrade; no pool, GC/JIT, retry or assertion workaround.
 Existing native crash artifacts and installed-version/build-phase logs remain the diagnostics; no new persisted state.
-Qualification and outstanding image/native gates: `docs/testing.md`.
+Historical qualification and subsequent release status: `docs/testing.md`.
 
 ## Qualification failures (2026-10-28 PDT)
 
@@ -26,14 +26,32 @@ All eight E2E/Durable shards failed fake-provider installation before tests. One
 
 ## Compatibility fixes (decision 2026-10-29 PDT)
 
-User-authorized fixes preserve engines, assertions and limits. Fake-provider pin `a6e97a6057d4c323c341b41ea4be98b4fa59f575` uses `flingit@0.0.71`, including `better-sqlite3@12.11.1` with Node 26 support. Its dependency refresh also changes Hono, dotenv, esbuild and other fixture dependencies; the application's npm graph and Pi family remain unchanged. Upstream [fake-openai PR 11](https://github.com/glideapps/fake-openai/pull/11) remains a draft/unmerged prerequisite. Bounded npm diagnostics now retain `EBADENGINE`, never raw stderr.
+User-authorized fixes preserve engines, assertions and limits. Fake-provider pin `a6e97a6057d4c323c341b41ea4be98b4fa59f575` uses `flingit@0.0.71`, including `better-sqlite3@12.11.1` with Node 26 support. Its dependency refresh also changes Hono, dotenv, esbuild and other fixture dependencies; the application's npm graph and Pi family remain unchanged. Upstream [fake-openai PR 11](https://github.com/glideapps/fake-openai/pull/11) merged as `df4cd59b75f2004836f99b0ec9cce275a69b2d62` on October 29 at 13:53:40 PDT; the qualified fixture pin remains unchanged. Bounded npm diagnostics now retain `EBADENGINE`, never raw stderr.
 
 The sealed SDK publishes a fresh per-VM owned-memory getter before guest execution, returning zero after disposal. The bounded worker adds the entire owned linear capacity to heap + external at existing checkpoints, including quiet completion before disposal. Native exported-module/QuickJS regressions reject engines that resume counting these bytes, preventing double-counting. Earlier overlap concerns are resolved for the pinned engine by these probes, not by subtracting initial capacity or estimating from RSS. Current/peak, historical resource fields and aggregate telemetry are unchanged. No cap, threshold, pool, GC/JIT or output-limit workaround is used. SDK source/seals: `patches/pi-codemode.PROVENANCE.md`; accounting rule: `docs/pi-adapter.md`.
 
-Clean Node 26 installation applies the new seals; typecheck/lint/web build, 44 memory/sandbox/DST, 23 patch-pipeline, 45 fake-provider and 26 Python pin/browser cases pass. Upstream CI/build, 100 worker Vitest cases, 10 dependency Node cases and one CLI test pass; native SQLite query returns 42 on ABI 147. Owned fixture readiness/session create-list-delete and all three existing `durable-process.e2e.test.ts` tests pass with the new fixture/SDK on Node 26; both child groups clean up and ports are free. These local proofs do not qualify the full exact-head unit/DST, browser/runtime E2E or images; fresh CI remains required. Native GCP acceptance/retained-workspace release gates remain unrun. Historical wrapper-race attribution remains limited as above.
+Clean Node 26 installation applies the new seals; typecheck/lint/web build, 44 memory/sandbox/DST, 23 patch-pipeline, 45 fake-provider and 26 Python pin/browser cases pass. Upstream CI/build, 100 worker Vitest cases, 10 dependency Node cases and one CLI test pass; native SQLite query returns 42 on ABI 147. Owned fixture readiness/session create-list-delete and all three existing `durable-process.e2e.test.ts` tests pass with the new fixture/SDK on Node 26; both child groups clean up and ports are free. These local proofs alone do not qualify full exact-head unit/DST, browser/runtime E2E, images or native GCP acceptance/retained-workspace gates. Subsequent combined qualification is recorded below. Historical wrapper-race attribution remains limited as above.
 
 [Private compatibility-fix archive](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/f80c5983-861b-49b6-9bb1-6683386edf7c/evidence/pr227-node26-compatibility-fixes.tgz) preserves both initial failures, native accounting RED/GREEN, fixture provenance/readiness, clean-install seals and current Node 26 process receipts. Toolchains, installed packages, binaries and bulk historical DST traces are excluded.
 
 On 2026-10-29 PDT, the [first UI failure](https://github.com/schani/pi-orb/actions/runs/40920963723/job/123613737949) matched both valid sharing-notice and drop-feedback statuses; scoping the test to the component-owned status preserves role, text, attachment, draft and no-upload/no-send assertions.
 
 The shell test now observes two successful font responses before reload: controlled observation RED/GREEN establishes the boundary fix, while CI's exact historical ordering remains unproven; cache behavior, timeouts and post-load assertions are unchanged.
+
+## Subsequent deployment (2026-10-29, PDT; rollout observed)
+
+Combined exact-main `0f52ae6c` passed all ten CI/image, E2E and Durable jobs on
+attempt 1 (`docs/testing.md`). User-approved corrective Deploy 40986634860
+shipped Node 26.13.0 and passed all 12 release gates at 19:11:07, including native
+acceptance/retained-workspace qualification; cleanup is verified
+(`docs/postmortems/2026-10-29-pg17-production.md`). Independent rollout observation
+ended `observed` for 19:11:11–19:30:02; workflow `success` on attempt 1. Central
+inference remained unobserved; read-only diagnostics classify the visible parent
+setup-hook warning as experimental lab APT prerequisites, absent from selected
+production source. Parent-reported source/cache evidence explains the dependency
+failure: the cached installer skips refresh with empty APT indexes. Exact invocation
+is untraced; no application regression, fix or broader Node 26 causal exclusion is
+established. Details are in that postmortem.
+The historical wrapper race's exact
+module/interleaving remains unproven; no deterministic historical-crash
+reproduction is claimed.

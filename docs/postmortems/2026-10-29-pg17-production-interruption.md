@@ -2,7 +2,8 @@
 
 Read-only investigation on 2026-10-29 after the user reported “rate exceeded”
 during [Deploy 40928556779](https://github.com/schani/pi-orb/actions/runs/40928556779).
-All times below are UTC (subtract seven hours for PDT).
+The original incident chronology uses UTC (subtract seven hours for PDT);
+the corrective-deployment follow-up is labeled PDT.
 
 ## Observed sequence
 
@@ -145,8 +146,9 @@ cleared, not extended.
 
 The user also approved a simple PR for cooperative retirement via the
 existing activation object. The decision and unchanged independent retirement
-proof are recorded in `docs/deployment.md`. This does not authorize deployment
-or claim to fix the separate database-client crash / cached agent-drain failure.
+proof are recorded in `docs/deployment.md`. That approval did not authorize
+deployment or claim to fix the separate database-client crash / cached agent-drain
+failure; later deployment approval is recorded below.
 
 ## Renewed monitoring at 20:22–20:29 UTC
 
@@ -200,3 +202,35 @@ timestamps above. Query `resource.type="cloud_run_revision"` with service
 version change. The failed process reports Node v24.22.1 and
 `/app/node_modules/pg/lib/client.js:422` as the Client error emission site;
 the owning first-party client was not identified in this investigation.
+
+## Corrective deployment and first handover (October 29, 2026, PDT)
+
+The user later explicitly approved inclusion of PR 228 in combined corrective
+[Deploy 40986634860](https://github.com/schani/pi-orb/actions/runs/40986634860)
+and authorized deployment. Dispatch at 18:34:20 respected the 15:35 not-before.
+The existing activation object now retains cutoff `1793324911` with successor
+generation `1793324912`. The predecessor `00077-v6l` lacked the watcher, so this
+first deployment could not accelerate its retirement. Independent active and
+idle zeroes were both recorded at **18:59:00** (October 30, 01:59:00Z), before
+activation at **19:00:00**. No early activation or relaxed retirement proof was
+used; this does not measure future cooperative-retirement latency.
+
+The observer Spot VM was preempted at **18:38:50.934**; parent-retained audit,
+operation and boot evidence confirms preemption. Automatic recovery was verified
+by a successful current-date command at **18:41:52**. GitHub Actions continued
+independently and was unaffected. Private evidence remains under
+`$HOME/deploy-monitor-backup/`.
+A second short guest-tool interruption recovered at **19:11**; attribution is
+unknown and no crash is claimed.
+
+All 12 corrective release gates passed at 19:11:07; independent full rollout
+observation ended **observed** for 19:11:11–19:30:02, with workflow **success** on
+attempt 1. Read-only diagnostics classify the still-visible parent setup-hook
+warning as experimental lab APT prerequisites, absent from selected production
+source. Parent-reported source/cache evidence explains the dependency failure:
+the cached installer skips refresh with empty APT indexes. Exact invocation is
+untraced; no application regression or fix is established.
+Release, cleanup and classification evidence:
+`docs/postmortems/2026-10-29-pg17-production.md`.
+No fix for the historical PostgreSQL Client crash or cached agent-drain failure,
+original-message delivery, or clearance of the original failed monitor is claimed.

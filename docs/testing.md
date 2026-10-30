@@ -1859,7 +1859,7 @@ and 26 passing offline tests.
 Deploy 40928556779 validated the release but failed its separate rollout monitor;
 receipts and analysis: `docs/postmortems/2026-10-29-pg17-production.md`.
 
-**Headline persistence correction (approved 2026-10-29; locally qualified, undeployed):**
+**Headline persistence correction (approved 2026-10-29; locally and exact-main qualified, deployed; rollout observed):**
 HTTP invalidation/store-error outcomes and safe telemetry follow
 `docs/activity-headlines.md`. Evidence: `$HOME/.local/share/pi-orb/pg17-production-20261029/headline-fix/summary.md`
 and adjacent logs. `npm ci` passed; `green-focused-final.log` passed 93/93 tests
@@ -1875,10 +1875,11 @@ formerly failing assertion but exhausts at a previously unreachable verification
 read (`postfix-replay-trace-exhausted.log`): **not a passing replay**. The original
 trace is retained. `green-focused.log` was interrupted by the tool's 200-second
 budget while the entire existing stores file was active, with no assertion
-failure reported; it is **not a passing aggregate suite**. No real-network
-PostgreSQL 17, browser or full-gate qualification is claimed. Fresh exact-head PR
-CI remains pending; the original production cause is unproven and monitor failure
-unwaived.
+failure reported; it is **not a passing aggregate suite**. Those local receipts
+alone do not qualify real-network PostgreSQL 17, browser or aggregate gates.
+Subsequent combined exact-main qualification and release gates passed as recorded
+below; rollout observation ended `observed`. The original production cause is
+unproven and monitor failure unwaived.
 
 ## iPhone floating accessory reserve (2026-10-28; local, undeployed)
 
@@ -1915,7 +1916,7 @@ the user confirmed typing and Send on the reported physical iPhone preview
 (“It's perfect!”). Rotation, broader Safari/home-screen, iPad and Android coverage
 remain pending in `TODO.md`; no deployment is established.
 
-## Cooperative release retirement qualification (2026-10-29; local, undeployed)
+## Cooperative release retirement qualification (2026-10-29; historical local evidence; subsequently deployed)
 
 The existing activation-object cutoff and unchanged independent retirement gate
 are specified in `docs/deployment.md`; production incident evidence is in
@@ -1957,9 +1958,9 @@ native memory-accounting cause. First-failure and contrast evidence remains in
 `/tmp/pi-orb-retirement-{unrelated-failure,node24-baseline,isolated-env}.log` and
 `/tmp/pi-orb-retirement-codemode-node{24,26}.log`.
 
-No full Docker E2E gate or hosted exact-head qualification is claimed; the orb has
-no running Docker daemon. The pull request's normal CI/E2E gates remain required
-before merge/deployment. No production mutation or deployment is included.
+These local runs did not include a full Docker E2E gate or hosted exact-head
+qualification; the orb had no running Docker daemon. Subsequent combined
+exact-main qualification and deployment are recorded below.
 
 **Oracle review correction:** source-stream close is not HTTP-response completion.
 A real TCP regression explicitly establishes source close with an unfinished
@@ -1983,10 +1984,10 @@ above were not corrected at that head, waived or qualified by a rerun.
 All ten hosted CI/image, E2E and Durable checks passed on retirement head
 `23d57ed5` on their first attempt. Before merge, `main` advanced to include the
 Node 26.13.0 upgrade and its memory-accounting correction documented below.
-Integrating that base requires fresh combined-head qualification; the historical
-Node 24 receipts and Node 26.12.1 contrasts above do not qualify the new toolchain.
+Combined exact-main qualification subsequently passed as recorded below; the
+historical Node 24 receipts and Node 26.12.1 contrasts above do not qualify the new toolchain.
 
-## Node 26.13.0 LTS qualification (2026-10-28; updated 2026-10-29, undeployed)
+## Node 26.13.0 LTS qualification (2026-10-28; updated 2026-10-29, deployed; rollout observed)
 
 Based on `9e2a5d85`: Node 26.13.0 / npm 11.20.0 / ABI 147; only typings 26.6.6 and required undici-types 8.9.0 change npm resolutions.
 Official signed manifest verified with Richard Lau's key `C82FA3AE1CBEDC6BE46B9360C43CEC45C17AB93C`; archive checksum matches.
@@ -2001,9 +2002,67 @@ This avoids the independent [Chromium Event Timing CHECK crash](https://github.c
 Exact browser-install block contracts: RED, then 26 combined browser/pin Python cases pass. Receipts: `.context/node26-evidence/` in the isolated worktree.
 Exact head `ccee910a` is not green: [CI checks](https://github.com/schani/pi-orb/actions/runs/40815977698/job/123257002330) failed with 6,091 unit tests passing and one code-mode memory assertion failing; the control-plane image passed. All eight E2E/Durable shards failed fake-provider installation before tests; a single exact-pin reproduction confirms `EBADENGINE` from bundled `better-sqlite3@12.8.0` excluding Node 26.
 **Compatibility fixes (2026-10-29):** the sealed SDK exposes fresh owned Wasm capacity before guest callbacks; the worker adds it to heap + external without initial-capacity deduction. Native exported-module/QuickJS tests establish non-overlap on pinned Node 26 and reject future counter changes. Existing current/peak, aggregate telemetry, guest limits, memory thresholds and output limits remain unchanged. Pi package versions and application lockfile are unchanged.
-The fake-provider pin moves to `a6e97a6057d4c323c341b41ea4be98b4fa59f575` / `flingit@0.0.71` (fixture lock SHA-256 `c34d693f1b71d6ced47e9f8704d996c429ea9cd853ecc4340170961c36cc1c7f`), retaining strict engines and pinned integrity. The fixture's required dependency refresh includes SQLite, Hono, dotenv and esbuild. [Upstream PR 11](https://github.com/glideapps/fake-openai/pull/11) is draft/unmerged. `EBADENGINE` now survives bounded npm diagnostics; raw stderr remains excluded.
+The fake-provider pin moves to `a6e97a6057d4c323c341b41ea4be98b4fa59f575` / `flingit@0.0.71` (fixture lock SHA-256 `c34d693f1b71d6ced47e9f8704d996c429ea9cd853ecc4340170961c36cc1c7f`), retaining strict engines and pinned integrity. The fixture's required dependency refresh includes SQLite, Hono, dotenv and esbuild. [Upstream PR 11](https://github.com/glideapps/fake-openai/pull/11) merged as `df4cd59b75f2004836f99b0ec9cce275a69b2d62` on October 29 at 13:53:40 PDT; the tested fixture pin is unchanged. `EBADENGINE` now survives bounded npm diagnostics; raw stderr remains excluded.
 Fresh clean Node 26 `npm ci` applies all three sealed patches and audits cleanly. Serial workspace/E2E typecheck, lint and web build pass; 44 memory/sandbox/DST + 23 patch-pipeline + 45 fake-provider + 26 Python pin/browser cases pass. The normal owned wrapper runs all three existing Durable process tests successfully on Node 26 with the new SDK/fixture; manifest records exit 0, unchanged ready identity and successful cleanup of both child groups. Ports 3210/5173 are free. Receipts: [private compatibility-fix archive](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/f80c5983-861b-49b6-9bb1-6683386edf7c/evidence/pr227-node26-compatibility-fixes.tgz), `.context/node26-evidence/compat-fix-final/`. Upstream/native SQLite and fixture-readiness proofs: the incident below.
-Full exact-new-head unit/DST, browser/runtime E2E and image CI are pending; earlier image or Node 24 process receipts do not qualify the compatibility fixes. Fresh native GCP acceptance/retained-workspace gates remain required before production release; none was run or published. No merge or deployment occurred.
-On 2026-10-29 PDT, the selector-only fix has [controlled RED/GREEN, Chromium 7/7 without skips, root typecheck and scoped lint receipts](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/f80c5983-861b-49b6-9bb1-6683386edf7c/evidence/pr227-drop-feedback-selector-7599ac39.tgz); fresh-head CI remains pending on [PR 227](https://github.com/schani/pi-orb/pull/227).
-The font-response barrier has controlled RED/GREEN and original full-file 11/11 receipts in `.context/node26-evidence/font-observation/`; fresh-head CI remains pending on [PR 227](https://github.com/schani/pi-orb/pull/227).
+These local receipts did not qualify full exact-head unit/DST, browser/runtime E2E, images or native acceptance. Subsequent combined exact-main and release qualification, including native acceptance/retained-workspace gates, passed as recorded below; rollout observation ended `observed`.
+On 2026-10-29 PDT, the selector-only fix has [controlled RED/GREEN, Chromium 7/7 without skips, root typecheck and scoped lint receipts](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/f80c5983-861b-49b6-9bb1-6683386edf7c/evidence/pr227-drop-feedback-selector-7599ac39.tgz).
+The font-response barrier has controlled RED/GREEN and original full-file 11/11 receipts in `.context/node26-evidence/font-observation/`. Subsequent combined exact-main qualification is recorded below.
 Evidence, source limits and compatibility mechanisms: `docs/postmortems/2026-10-28-node-wasm-wrapper-lifetime.md`.
+
+## Combined corrective release qualification (2026-10-29, PDT; workflow success, rollout observed)
+
+Selected source/runner `0f52ae6cd795f2b83fd0b6b71e31790eb36ba25c` passed all ten
+push/main jobs on attempt 1:
+[CI 40966942066](https://github.com/schani/pi-orb/actions/runs/40966942066) (checks/image),
+[E2E 40966942146](https://github.com/schani/pi-orb/actions/runs/40966942146) (four shards),
+and [Durable 40966942067](https://github.com/schani/pi-orb/actions/runs/40966942067)
+(four shards). This qualifies combined Node 26 PR 227, headline correction PR 229,
+explicitly user-approved cooperative retirement PR 228 and the native-caret UI
+change in `0f52ae6c`, not merely their earlier isolated heads.
+
+[Deploy 40986634860](https://github.com/schani/pi-orb/actions/runs/40986634860),
+dispatched at 18:34:20 after the 15:35 not-before, validated
+`r-1793324145-ba8aa6fe-8673-43be-9afb-2d5bca55c463` at 19:11:07.
+All 12 gates passed, including native acceptance, schema, independent retirement,
+activation, lifecycle and identity; fixture/native cleanup is independently verified.
+No search feature/extension, preload flag or new SQL migration file was included;
+the normal migrator passed. Read-only SQL verification confirms `pg_textsearch`
+is neither installed nor preloaded. Serving/artifact identity, unchanged PostgreSQL 17
+baseline, original ANALYZE verification and cleanup receipts are recorded in
+`docs/postmortems/2026-10-29-pg17-production.md`; first-handover and observer
+interruptions are recorded in `docs/postmortems/2026-10-29-pg17-production-interruption.md`.
+
+The independent full rollout monitor ended **observed**, **19:11:11–19:30:02 PDT**
+(October 30, 02:11:11–02:30:02Z): 1,130 seconds, 14 samples, all health `ok`, SQL
+`RUNNABLE`, zero ERROR/HTTP 429/HTTP 5xx. One `compute-discard` and one
+`compute-discard-requested` were nonregression events. Central inference remained
+**unobserved**: no live-provider verification. Deploy 40986634860 completed
+**success on attempt 1**; its release artifact exactly matches the durable
+validated record.
+
+The final fleet gained a `setup_failed` detail on still-running parent orb
+`973fb397-1897-4cdb-bd51-7a47a283482a`, hook `setup`, state-change timestamp
+**19:28:44.717 PDT**. The other failed orb predates rollout (October 9). Read-only
+parent-local diagnostics classify the warning as experimental history-search lab
+APT prerequisites, absent from selected production source `0f52ae6c`. Setup
+incarnation 2 exited 100 during PostgreSQL 17 dependency resolution, not a
+Node/npm/PGlite path. Parent-reported read-only source/cache evidence explains
+missing prerequisites: the cached installer skips refresh on a fresh incarnation
+with no APT indexes. Exact invocation remains untraced; no application regression,
+broader Node 26 causal exclusion or fix is established.
+The warning remains visible despite passing production release gates and monitor;
+no globally clean fleet is claimed. Details and peer receipt:
+`docs/postmortems/2026-10-29-pg17-production.md`; follow-up: `TODO.md`.
+
+These results do not clear the original Deploy 40928556779 monitor failure, prove
+its persistence cause, turn the retained exhausted replay into a passing replay,
+or qualify the interrupted local aggregate suite. No assertions, thresholds or
+historical evidence were relaxed.
+
+Receipts: `$HOME/.local/share/pi-orb/headline-corrective-release-20261029/`:
+`qualification-main-40966942066.json`, `qualification-main-40966942146.json`,
+`qualification-main-40966942067.json`, `release-validated.json`,
+`rollout-summary.json`, `workflow-final.json`, `fleet-failure-metadata-final.json`,
+`excluded-feature-verification.json` and `final-evidence-sha256.json`; final
+artifacts: `artifacts/release-40986634860-1/release.json` and
+`artifacts/rollout-monitor-40986634860-1/rollout-monitor.json`.
