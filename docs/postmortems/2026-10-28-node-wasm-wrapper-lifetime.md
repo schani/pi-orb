@@ -48,8 +48,10 @@ acceptance/retained-workspace qualification; cleanup is verified
 ended `observed` for 19:11:11–19:30:02; workflow `success` on attempt 1. Central
 inference remained unobserved; read-only diagnostics classify the visible parent
 setup-hook warning as experimental lab APT prerequisites, absent from selected
-production source. Why prerequisites were unavailable remains unknown; no fix or
-broader Node 26 causal exclusion is claimed. Details are in that postmortem.
+production source. Parent-reported source/cache evidence explains the dependency
+failure: the cached installer skips refresh with empty APT indexes. Exact invocation
+is untraced; no application regression, fix or broader Node 26 causal exclusion is
+established. Details are in that postmortem.
 The historical wrapper race's exact
 module/interleaving remains unproven; no deterministic historical-crash
 reproduction is claimed.

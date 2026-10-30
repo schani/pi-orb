@@ -2046,8 +2046,10 @@ The final fleet gained a `setup_failed` detail on still-running parent orb
 parent-local diagnostics classify the warning as experimental history-search lab
 APT prerequisites, absent from selected production source `0f52ae6c`. Setup
 incarnation 2 exited 100 during PostgreSQL 17 dependency resolution, not a
-Node/npm/PGlite path. Exact invocation and why prerequisites were unavailable
-remain unproven; no broader Node 26 causal exclusion or fix is claimed.
+Node/npm/PGlite path. Parent-reported read-only source/cache evidence explains
+missing prerequisites: the cached installer skips refresh on a fresh incarnation
+with no APT indexes. Exact invocation remains untraced; no application regression,
+broader Node 26 causal exclusion or fix is established.
 The warning remains visible despite passing production release gates and monitor;
 no globally clean fleet is claimed. Details and peer receipt:
 `docs/postmortems/2026-10-29-pg17-production.md`; follow-up: `TODO.md`.

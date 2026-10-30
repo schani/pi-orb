@@ -166,11 +166,21 @@ passed before APT failed PostgreSQL 17 dependency resolution: `locales`/`locales
 `/workspace/repo/.agents/setup` conditionally calls
 `scripts/history-search-lab/install.sh`; this lab bootstrap is absent from selected
 production source `0f52ae6c`. The immediate failure path is APT, not Node/npm/PGlite;
-this does not establish a broader Node 26 causal exclusion. The exact invocation
-was not traced, and why prerequisites were unavailable remains **unknown**.
+this does not establish a broader Node 26 causal exclusion.
+
+Stronger parent-reported read-only source/cache evidence explains unavailable
+prerequisites: `scripts/history-search-lab/install.sh` lines 10–13 verify the cached
+`.deb` bundle, then run `apt-get install` without `apt-get update`; the noncached
+branch refreshes indexes at line 21. The bundle contains only PostgreSQL 17,
+client/common packages, `libpq5` and `libllvm19`, omitting transitive `locales`,
+`ssl-cert`, `libxslt1.1` and `libjson-perl`. Fresh incarnation 2's current
+`/var/lib/apt/lists` has **zero index files**. A cached install after replacement
+therefore lacks the catalog needed to resolve unbundled dependencies, explaining
+the exit-100 failure. The exact invocation was not traced; current cache/source
+inspection is not an execution trace.
 
 The warning remains visible, not fixed; it is classified as experimental lab APT
-prerequisites, not an unclassified production regression. Corrective production
+prerequisites; no application regression is established. Corrective production
 release gates and monitor passed; this is not a globally clean-fleet claim.
 The parent reports its isolated process backend healthy. Diagnostics did not rerun
 hooks, install packages, restart, authenticate or mutate source/release state.
@@ -180,7 +190,8 @@ Sanitized peer receipt: `parent-hook-classification.json` in the corrective evid
 directory below. Peer-retained SHA-256: status
 `df740406dcf6d9638f750f1524c451e28573037765896ba941e2c9e9866053e0`;
 log `a7e5503e0f74bc565993b4a542de4ff45ce540286b97232042ea54032d5269b2`.
-No prerequisite-availability root cause or fix is claimed.
+Source/cache observations are parent-reported; no repair, rerun, package installation
+or restart was performed, and no fix is claimed.
 
 Corrective evidence is separate from the original inventory:
 `$HOME/.local/share/pi-orb/headline-corrective-release-20261029/`:

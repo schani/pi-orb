@@ -227,7 +227,9 @@ All 12 corrective release gates passed at 19:11:07; independent full rollout
 observation ended **observed** for 19:11:11–19:30:02, with workflow **success** on
 attempt 1. Read-only diagnostics classify the still-visible parent setup-hook
 warning as experimental lab APT prerequisites, absent from selected production
-source; why prerequisites were unavailable remains unknown, with no fix claimed.
+source. Parent-reported source/cache evidence explains the dependency failure:
+the cached installer skips refresh with empty APT indexes. Exact invocation is
+untraced; no application regression or fix is established.
 Release, cleanup and classification evidence:
 `docs/postmortems/2026-10-29-pg17-production.md`.
 No fix for the historical PostgreSQL Client crash or cached agent-drain failure,
