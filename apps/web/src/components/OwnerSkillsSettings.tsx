@@ -20,8 +20,7 @@ export function useOwnerSkills(dialog: RefObject<HTMLElement | null>) {
   const [drafts, setDrafts] = useState<Readonly<Record<string, string | undefined>>>({});
   const [open, setOpen] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [newSource, setNewSource] = useState("manual");
-  const [githubUrl, setGithubUrl] = useState("");
+  const [newSkill, setNewSkill] = useState({ source: "manual", githubUrl: "" });
   const writing = useRef(false);
   const [error, setError] = useState<string | null>(null);
   /** The last write's outcome, shown only in its row: `error: null` is the save receipt. */
@@ -37,12 +36,13 @@ export function useOwnerSkills(dialog: RefObject<HTMLElement | null>) {
     if (result.isErr()) setError(describeApiError(result.error));
     else setItems(result.value.items);
   };
+  const updateNewSkill = (patch: Partial<typeof newSkill>) => {
+    setNewSkill((current) => ({ ...current, ...patch }));
+    setStatus(null);
+  };
   const setDraft = (key: string, content?: string) => {
     setDrafts((current) => ({ ...current, [key]: content }));
-    if (key === NEW && content === undefined) {
-      setNewSource("manual");
-      setGithubUrl("");
-    }
+    if (key === NEW && content === undefined) setNewSkill({ source: "manual", githubUrl: "" });
     setStatus(null);
   };
   const write = async (key: string, request: () => Promise<Result<OwnerSkillList, ApiError>>) => {
@@ -63,8 +63,8 @@ export function useOwnerSkills(dialog: RefObject<HTMLElement | null>) {
     const content = drafts[key];
     if (saving || items === null || content === undefined) return;
     const after = await write(key, () =>
-      key === NEW && newSource === "github"
-        ? importOwnerSkill(githubUrl)
+      key === NEW && newSkill.source === "github"
+        ? importOwnerSkill(newSkill.githubUrl)
         : saveOwnerSkill(key === NEW ? null : key, content),
     );
     if (after === null) return;
@@ -90,16 +90,8 @@ export function useOwnerSkills(dialog: RefObject<HTMLElement | null>) {
     setDraft,
     save,
     remove,
-    newSource,
-    githubUrl,
-    setNewSource: (source: string) => {
-      setNewSource(source);
-      setStatus(null);
-    },
-    setGithubUrl: (url: string) => {
-      setGithubUrl(url);
-      setStatus(null);
-    },
+    newSkill,
+    updateNewSkill,
   };
 }
 export type OwnerSkills = ReturnType<typeof useOwnerSkills>;
@@ -122,7 +114,7 @@ export function OwnerSkillsPane({ skills }: { skills: OwnerSkills }) {
       {rows.map(({ name, description, content, source }) => {
         const draft = skills.drafts[name] ?? content;
         const status = skills.status?.key === name ? skills.status : null;
-        const github = name === NEW && skills.newSource === "github";
+        const github = name === NEW && skills.newSkill.source === "github";
         return (
           <details
             key={name}
@@ -156,9 +148,9 @@ export function OwnerSkillsPane({ skills }: { skills: OwnerSkills }) {
                 {name === NEW && (
                   <select
                     aria-label="Source"
-                    value={skills.newSource}
+                    value={skills.newSkill.source}
                     disabled={skills.saving}
-                    onChange={(event) => skills.setNewSource(event.target.value)}
+                    onChange={(event) => skills.updateNewSkill({ source: event.target.value })}
                   >
                     <option value="manual">SKILL.md</option>
                     <option value="github">GitHub URL</option>
@@ -171,9 +163,9 @@ export function OwnerSkillsPane({ skills }: { skills: OwnerSkills }) {
                       type="url"
                       spellCheck={false}
                       autoComplete="off"
-                      value={skills.githubUrl}
+                      value={skills.newSkill.githubUrl}
                       disabled={skills.saving}
-                      onChange={(event) => skills.setGithubUrl(event.target.value)}
+                      onChange={(event) => skills.updateNewSkill({ githubUrl: event.target.value })}
                     />
                   ) : (
                     <textarea
@@ -196,7 +188,7 @@ export function OwnerSkillsPane({ skills }: { skills: OwnerSkills }) {
                     <span role="status">
                       {status
                         ? "Saved · next orb start"
-                        : (github ? skills.githubUrl !== "" : draft !== content)
+                        : (github ? skills.newSkill.githubUrl !== "" : draft !== content)
                           ? "Unsaved"
                           : ""}
                     </span>
@@ -225,7 +217,8 @@ export function OwnerSkillsPane({ skills }: { skills: OwnerSkills }) {
                   <button
                     type="submit"
                     disabled={
-                      skills.saving || (github ? !skills.githubUrl.trim() : draft === content)
+                      skills.saving ||
+                      (github ? !skills.newSkill.githubUrl.trim() : draft === content)
                     }
                   >
                     {github ? "Add" : "Save"}

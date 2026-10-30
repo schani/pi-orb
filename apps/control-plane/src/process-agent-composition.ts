@@ -280,7 +280,7 @@ export function createProcessAgentContext(
       if (lease?.signal.aborted) resourcesAbort.abort();
       lease?.signal.addEventListener("abort", () => resourcesAbort.abort(), { once: true });
       let appendMcpAlert: DurableAgent["appendAlert"] | undefined;
-      const installed = new Map<string, Promise<Result<void, RuntimeClientError>>>();
+      const installed = new Map<string, ResultAsync<void, RuntimeClientError>>();
       const checkAdmission = (incarnation: string, message: string) =>
         deps.store
           .getOrb(task, orb.id)
@@ -333,11 +333,11 @@ export function createProcessAgentContext(
               env.cwd = ready.value.cwd;
               let install = installed.get(binding.incarnation);
               if (!install) {
-                install = Promise.resolve(
-                  ResultAsync.fromPromise(
-                    task.checkpoint("owner skills installation", orb.id, binding.incarnation),
-                    () => durableError("Owner skill installation cancelled"),
-                  ).andThen(() =>
+                install = ResultAsync.fromPromise(
+                  task.checkpoint("owner skills installation", orb.id, binding.incarnation),
+                  () => durableError("Owner skill installation cancelled"),
+                )
+                  .andThen(() =>
                     remote
                       .installOwnerSkills(
                         prepared.value.captureId,
@@ -374,26 +374,23 @@ export function createProcessAgentContext(
                           .orElse(() => okAsync(undefined))
                           .andThen(() => err(error));
                       }),
-                  ),
-                );
+                  )
+                  .orTee(() => {
+                    installed.delete(binding.incarnation);
+                  });
                 installed.set(binding.incarnation, install);
-                void install.then((result) => {
-                  if (result.isErr()) installed.delete(binding.incarnation);
-                });
               }
-              return ResultAsync.fromSafePromise(install)
-                .andThen((result) => result)
-                .andThen(() =>
-                  ctx.abortSignal?.aborted || resourcesAbort.signal.aborted
-                    ? err(durableError("Owner skill installation cancelled"))
-                    : lease
-                        .check()
-                        .mapErr(() => durableError("Owner skill installation admission revoked"))
-                        .andThen(() =>
-                          checkAdmission(binding.incarnation, "Owner skill installation"),
-                        )
-                        .map(() => remote),
-                );
+              return install.andThen(() =>
+                ctx.abortSignal?.aborted || resourcesAbort.signal.aborted
+                  ? err(durableError("Owner skill installation cancelled"))
+                  : lease
+                      .check()
+                      .mapErr(() => durableError("Owner skill installation admission revoked"))
+                      .andThen(() =>
+                        checkAdmission(binding.incarnation, "Owner skill installation"),
+                      )
+                      .map(() => remote),
+              );
             });
           })
           .orTee(() => binding.release?.());

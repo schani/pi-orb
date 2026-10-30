@@ -4,7 +4,7 @@ import Fastify from "fastify";
 import { err, ok, okAsync, ResultAsync } from "neverthrow";
 import { afterEach, expect, it, vi } from "vitest";
 import { bundledPlatformSkillNames } from "../adapters/durable/platform-resources.ts";
-import type { OwnerSkillBundle, OwnerSkillsDeps } from "../domain/owner-skills.ts";
+import type { OwnerSkillsDeps } from "../domain/owner-skills.ts";
 import { ownerSkillError, readOwnerSkillsSnapshot } from "../domain/owner-skills.ts";
 import { UserScope } from "../domain/user-scope.ts";
 import { makeHarness, TEST_SYSTEM_VIEW } from "../testkit/fixtures.ts";
@@ -19,7 +19,7 @@ afterEach(async () => Promise.all(apps.splice(0).map((app) => app.close())));
 const doc = (name: string, description = `${name} help`) =>
   `---\nname: ${name}\ndescription: ${description}\n---\nSteps.\n`;
 
-async function setup(imported?: OwnerSkillBundle | OwnerSkillsDeps["acquireGithub"]) {
+async function setup(acquireGithub?: OwnerSkillsDeps["acquireGithub"]) {
   const h = makeHarness();
   const ownerSecrets = makeProjectSecretsHarness(ALICE, BOB).deps;
   const platformSkillNames = (await bundledPlatformSkillNames())._unsafeUnwrap();
@@ -43,9 +43,7 @@ async function setup(imported?: OwnerSkillBundle | OwnerSkillsDeps["acquireGithu
       ownerSkills: {
         ...h.deps.ownerSkills,
         platformSkillNames,
-        ...(imported
-          ? { acquireGithub: typeof imported === "function" ? imported : () => okAsync(imported) }
-          : {}),
+        ...(acquireGithub ? { acquireGithub } : {}),
       },
     },
     {},
@@ -62,30 +60,72 @@ async function setup(imported?: OwnerSkillBundle | OwnerSkillsDeps["acquireGithu
 type Method = "GET" | "POST" | "PUT" | "DELETE";
 const names = (body: { items: Array<{ name: string }> }) => body.items.map((item) => item.name);
 
-it("creates, replaces, renames and deletes the signed-in owner's skills", async () => {
-  const { call } = await setup();
-  const created = await call("POST", "/api/v1/owner-skills", { content: doc("zeta") });
-  expect(created.body.items).toMatchObject([{ name: "zeta", description: "zeta help" }]);
-  await call("POST", "/api/v1/owner-skills", { content: doc("alpha") });
-  const renamed = await call("PUT", "/api/v1/owner-skills/zeta", { content: doc("beta", "new") });
-  expect(renamed.body.items).toMatchObject([
-    { name: "alpha" },
-    { name: "beta", description: "new" },
-  ]);
-  expect(names((await call("DELETE", "/api/v1/owner-skills/alpha")).body)).toEqual(["beta"]);
-  expect((await call("GET", "/api/v1/owner-skills", undefined, "bob")).body).toEqual({ items: [] });
-  expect((await call("DELETE", "/api/v1/owner-skills/beta", undefined, "bob")).status).toBe(404);
+it.each([
+  {
+    kind: "manual",
+    initial: { content: doc("zeta") },
+    bundle: { content: doc("zeta"), files: [], source: null },
+  },
+  {
+    kind: "GitHub import",
+    initial: { githubUrl: "https://github.com/nasa/a/tree/main/skill" },
+    bundle: {
+      content: doc("zeta"),
+      files: [{ path: "scripts/run", base64: "AP8B", executable: true }],
+      source: {
+        url: `https://github.com/nasa/a/tree/${"a".repeat(40)}/skill`,
+        commitSha: "a".repeat(40),
+      },
+    },
+  },
+])(
+  "$kind: creates, replaces, renames and deletes the signed-in owner's skills",
+  async ({ initial, bundle }) => {
+    const { call, store } = await setup(() => okAsync(bundle));
+    const created = await call("POST", "/api/v1/owner-skills", initial);
+    expect(created.status).toBe(200);
+    expect(created.body.items).toMatchObject([
+      { name: "zeta", description: "zeta help", source: bundle.source },
+    ]);
+    expect(created.body.items[0]).not.toHaveProperty("files");
+    expect((await call("POST", "/api/v1/owner-skills", initial)).status).toBe(409);
+    expect(
+      (await call("POST", "/api/v1/owner-skills", { githubUrl: "x", content: doc("bad") })).status,
+    ).toBe(400);
+    await call("POST", "/api/v1/owner-skills", { content: doc("alpha") });
+    const renamed = await call("PUT", "/api/v1/owner-skills/zeta", { content: doc("beta", "new") });
+    expect(renamed.status).toBe(200);
+    expect(renamed.body.items).toMatchObject([
+      { name: "alpha" },
+      { name: "beta", description: "new" },
+    ]);
+    expect(names((await call("DELETE", "/api/v1/owner-skills/alpha")).body)).toEqual(["beta"]);
+    expect((await readOwnerSkillsSnapshot(task, store, ALICE))._unsafeUnwrap()).toEqual({
+      skills: [{ ...bundle, name: "beta", content: doc("beta", "new") }],
+    });
+    expect((await call("GET", "/api/v1/owner-skills", undefined, "bob")).body).toEqual({
+      items: [],
+    });
+    expect((await call("DELETE", "/api/v1/owner-skills/beta", undefined, "bob")).status).toBe(404);
+    expect((await readOwnerSkillsSnapshot(task, store, BOB))._unsafeUnwrap()).toEqual({
+      skills: [],
+    });
 
-  for (const [method, url, content, status] of [
-    ["POST", "/api/v1/owner-skills", "no frontmatter", 400],
-    ["POST", "/api/v1/owner-skills", doc("Bad_Name"), 400],
-    ["POST", "/api/v1/owner-skills", doc("codemode"), 400],
-    ["POST", "/api/v1/owner-skills", doc("beta"), 409],
-    ["PUT", "/api/v1/owner-skills/missing", doc("missing"), 404],
-  ] as const)
-    expect((await call(method, url, { content })).status).toBe(status);
-  expect(names((await call("GET", "/api/v1/owner-skills")).body)).toEqual(["beta"]);
-});
+    for (const [method, url, content, status] of [
+      ["POST", "/api/v1/owner-skills", "no frontmatter", 400],
+      ["POST", "/api/v1/owner-skills", doc("Bad_Name"), 400],
+      ["POST", "/api/v1/owner-skills", doc("codemode"), 400],
+      ["POST", "/api/v1/owner-skills", doc("beta"), 409],
+      ["PUT", "/api/v1/owner-skills/missing", doc("missing"), 404],
+    ] as const)
+      expect((await call(method, url, { content })).status).toBe(status);
+    expect(names((await call("GET", "/api/v1/owner-skills")).body)).toEqual(["beta"]);
+    expect((await call("DELETE", "/api/v1/owner-skills/beta")).status).toBe(200);
+    expect((await readOwnerSkillsSnapshot(task, store, ALICE))._unsafeUnwrap()).toEqual({
+      skills: [],
+    });
+  },
+);
 
 it("writes the signed-in owner's secrets without ever returning values", async () => {
   const { call } = await setup();
@@ -105,45 +145,6 @@ it("writes the signed-in owner's secrets without ever returning values", async (
   expect((await call("DELETE", "/api/v1/owner-secrets/NPM_TOKEN")).body).toEqual({
     revision: 2,
     items: [],
-  });
-});
-
-it("adds an imported bundle atomically, keeps lists light, and preserves its files/source through manual rename", async () => {
-  const imported = {
-    content: doc("nasa"),
-    files: [{ path: "scripts/run", base64: "AP8B", executable: true }],
-    source: {
-      url: `https://github.com/nasa/a/tree/${"a".repeat(40)}/skill`,
-      commitSha: "a".repeat(40),
-    },
-  };
-  const { call, store } = await setup(imported);
-  const created = await call("POST", "/api/v1/owner-skills", {
-    githubUrl: "https://github.com/nasa/a/tree/main/skill",
-  });
-  expect(created.status).toBe(200);
-  expect(created.body.items[0]).toMatchObject({ name: "nasa", source: imported.source });
-  expect(created.body.items[0]).not.toHaveProperty("files");
-  expect(
-    (
-      await call("POST", "/api/v1/owner-skills", {
-        githubUrl: "https://github.com/nasa/a/tree/main/skill",
-      })
-    ).status,
-  ).toBe(409);
-  expect(
-    (await call("POST", "/api/v1/owner-skills", { githubUrl: "x", content: doc("bad") })).status,
-  ).toBe(400);
-  expect((await call("PUT", "/api/v1/owner-skills/nasa", { content: doc("science") })).status).toBe(
-    200,
-  );
-  expect((await readOwnerSkillsSnapshot(task, store, ALICE))._unsafeUnwrap()).toEqual({
-    skills: [{ ...imported, name: "science", content: doc("science") }],
-  });
-  expect((await readOwnerSkillsSnapshot(task, store, BOB))._unsafeUnwrap()).toEqual({ skills: [] });
-  expect((await call("DELETE", "/api/v1/owner-skills/science")).status).toBe(200);
-  expect((await readOwnerSkillsSnapshot(task, store, ALICE))._unsafeUnwrap()).toEqual({
-    skills: [],
   });
 });
 

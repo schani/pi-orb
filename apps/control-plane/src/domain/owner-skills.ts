@@ -11,7 +11,7 @@ import {
   WriteOwnerSkillRequestSchema,
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import { err, ok, Result, type ResultAsync } from "neverthrow";
+import { err, errAsync, ok, okAsync, Result, type ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
 
 /** Owner skills apply to every orb of every project the owner has (docs/owner-skills-secrets.md). */
@@ -152,37 +152,29 @@ export const writeOwnerSkill = (
   body: unknown,
   signal?: AbortSignal,
 ) => {
-  if (name === null && Check(AddOwnerSkillRequestSchema, body) && "githubUrl" in body) {
-    const acquired = deps.acquireGithub(body.githubUrl, signal);
-    return describeOwnerSkills(
-      acquired
-        .andThen((bundle) =>
-          parseOwnerSkill({ content: bundle.content }).andThen(({ name: skillName }) =>
-            deps.platformSkillNames.has(skillName)
-              ? err(invalid(`"${skillName}" is a bundled platform skill`))
-              : ok({ name: skillName, ...bundle }),
-          ),
-        )
-        .andThen((skill) =>
-          signal?.aborted
-            ? err(ownerSkillError("unavailable", "GitHub import cancelled"))
-            : deps.store.apply(task, userId, { kind: "create", skill }),
-        ),
-    );
-  }
+  const schema = name === null ? AddOwnerSkillRequestSchema : WriteOwnerSkillRequestSchema;
+  if (!Check(schema, body)) return errAsync(invalid("Expected {content: string}"));
+  const importing = "githubUrl" in body;
+  const acquired: ResultAsync<Omit<OwnerSkillWrite, "name">, OwnerSkillError> = importing
+    ? deps.acquireGithub(body.githubUrl, signal)
+    : okAsync({ content: body.content });
   return describeOwnerSkills(
-    parseOwnerSkill(body)
-      .andThen(({ name: skillName, content }) =>
-        deps.platformSkillNames.has(skillName)
-          ? err(invalid(`"${skillName}" is a bundled platform skill`))
-          : ok({ name: skillName, content }),
-      )
-      .asyncAndThen((skill) =>
-        deps.store.apply(
-          task,
-          userId,
-          name === null ? { kind: "create", skill } : { kind: "replace", name, skill },
+    acquired
+      .andThen((bundle) =>
+        parseOwnerSkill({ content: bundle.content }).andThen(({ name: skillName }) =>
+          deps.platformSkillNames.has(skillName)
+            ? err(invalid(`"${skillName}" is a bundled platform skill`))
+            : ok({ name: skillName, ...bundle }),
         ),
+      )
+      .andThen((skill) =>
+        importing && signal?.aborted
+          ? err(ownerSkillError("unavailable", "GitHub import cancelled"))
+          : deps.store.apply(
+              task,
+              userId,
+              name === null ? { kind: "create", skill } : { kind: "replace", name, skill },
+            ),
       ),
   );
 };
