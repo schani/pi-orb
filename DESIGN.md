@@ -127,6 +127,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-30-native-search-migration-timeout.md](docs/postmortems/2026-10-30-native-search-migration-timeout.md) — migration 052 task timeout, visible rollback and preapply availability/lease impact; slow phase unproven
 - [docs/postmortems/2026-10-29-pg17-production.md](docs/postmortems/2026-10-29-pg17-production.md) — production upgrade and ANALYZE guard; release validated, rollout monitor failed on headline/deletion overlap
 - [docs/postmortems/2026-10-29-pg17-ci-qualification.md](docs/postmortems/2026-10-29-pg17-ci-qualification.md) — stale release contracts, ambiguous status locator and unmanaged Chromium CHECK; PR and exact-main qualification passed
 - [docs/postmortems/2026-10-28-github-skills-ci-qualification.md](docs/postmortems/2026-10-28-github-skills-ci-qualification.md) — managed-config recovery fixture and Chromium native crash; CI browser pinning
