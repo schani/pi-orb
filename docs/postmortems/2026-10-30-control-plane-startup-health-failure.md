@@ -76,7 +76,7 @@ All GHA transaction gates, including native lifecycle and identity, passed. The 
 
 Post-release checks verified generation **1793412534**, revision 81 at 100%, no release lock, four fixture 404s, ready native images, no pending Compute/SQL operations and the three historical failed jobs retained. SQL settings, users, databases and secret parents matched the fresh pre-release baseline; only the MCP version inventory changed. Both auxiliary operator bearers were removed; no operator identity mint occurred during the official window.
 
-Normal runtime-authorized orb search tool and HTTP probes succeeded: **three hits, 90.8 ms**. Skill API/read DTO, hash, no-store and 401 checks passed; two roots were unchanged, with zero files and zero sources. No import or config writes occurred. Project search separately exceeded its client's read bound; all-scope search remains unqualified (`docs/postmortems/2026-10-30-project-search-probe-timeout.md`).
+Normal runtime-authorized orb search tool and HTTP probes succeeded: **three hits, 90.8 ms**. Skill API/read DTO, hash, no-store and 401 checks passed; two roots were unchanged, with zero supporting files and zero imported sources. No import or config writes occurred. Project search separately exceeded its client's read bound; all-scope search remains unqualified (`docs/postmortems/2026-10-30-project-search-probe-timeout.md`).
 
 The R2 guard refused **before mint** because the release phase had advanced to `retire`: only an attempt file exists, no bearer. No retry or operator Google mint occurred during the window.
 
