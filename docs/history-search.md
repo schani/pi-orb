@@ -26,7 +26,7 @@ One statement snapshot applies owner/project/orb scope: Pi uses cursor ancestry;
 
 The extension tokenizes documents and queries with the English text configuration. Native limits and stopwords apply, including ignored oversized tokens. Ranking uses index-wide statistics, not owner/project/orb-local statistics; corpus changes outside a selected scope can change scores. Equal scores have extension-native order, without a secondary ID sort. The API exposes positive BM25 scores (the negated native distance), highest first.
 
-An ordered BM25 scan applies scope and ancestry before `LIMIT`; nonmatching zero-distance rows are removed afterward. Snippets extract public text only for selected hits and center on literal query terms. A single statement snapshot covers eligibility and retrieval. No query-time corpus parsing, exact candidate count or latency guarantee is part of the contract. The 2 s qualification budget is a benchmark setting, not a production timeout or shipping gate.
+An ordered BM25 scan applies scope and ancestry before `LIMIT`; nonmatching zero-distance rows are removed afterward. Snippets extract public text only for selected hits and center on literal query terms. A single statement snapshot covers eligibility and retrieval. No query-time corpus parsing, exact candidate count or latency guarantee is part of the contract. The 2 s qualification budget is a benchmark setting, not a production timeout or shipping gate. The October 30 project probe exceeded a separate 30 s client bound despite orb-scope success; neither bound is a product SLO, and wider scopes remain unqualified (`docs/postmortems/2026-10-30-project-search-probe-timeout.md`).
 
 ## Interfaces
 

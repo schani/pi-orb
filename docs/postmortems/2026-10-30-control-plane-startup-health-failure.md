@@ -1,6 +1,6 @@
 # Control-plane startup health failure after committed migrations
 
-**2026-10-30, PDT. Schema passed; apply failed; root cause unknown.**
+**2026-10-30, PDT. Instrumented recovery validated. Original startup cause unknown.**
 
 ## Authority and release
 
@@ -50,7 +50,7 @@ Local harness failures remain separate: the first private daemon exceeded the Un
 
 ## Protection and disposition
 
-New GCS release-lock generation **1793386569045462** remains retained. No rollback, helper restoration, restart, reindex, deadline increase, redispatch or unlock followed the new failure. No further production mutation was authorized. Follow-up lives only in `TODO.md`.
+GCS release-lock generation **1793386569045462** was retained after the failed apply. No rollback, helper restoration, restart, reindex, deadline increase, redispatch or unlock followed before separate recovery authority. Its later exact-generation deletion is recorded below. Follow-up lives only in `TODO.md`.
 
 Protected SQL settings, two users, two databases, ten backup metadata entries and PITR/backup configuration (14 retained backups; logs seven days) were unchanged; preload flag remained on. All thirteen secret parents and twelve version inventories were unchanged. MCP versions **1115–1118** were added and **1108, 1112–1114** destroyed by the existing control-plane service account; the initiating operation is unproven. Payloads were not inspected.
 
@@ -62,7 +62,23 @@ R2 expired at 13:11; its final probe's expiry guard stopped before any call. A s
 
 ## Diagnostic direction
 
-The separate privileged Cloud Run probe proposal was withdrawn without creating or pushing anything: matching production identity is not a sandbox, and guard instrumentation was expanding beyond the need. [PR 235](https://github.com/schani/pi-orb/pull/235) instead proposes content-free startup phases and default-command image coverage through normal release fences. It is not a root fix; merge, exact-lock recovery and another rollout remain separately held.
+The separate privileged Cloud Run probe proposal was withdrawn without creating or pushing anything: matching production identity is not a sandbox, and guard instrumentation was expanding beyond the need. [PR 235](https://github.com/schani/pi-orb/pull/235) added content-free startup phases and default-command image coverage through normal release fences. Instrumentation landed; no root fix is established.
+
+## Authorized instrumented recovery
+
+After all ten fresh exact-main jobs passed, the approved old-lock-only recovery deleted generation **1793386569045462** with HTTP **204**. One normal [Deploy 41157512677](https://github.com/schani/pi-orb/actions/runs/41157512677) used main `da14295ece24ed4734ff6e903821d7e67eff0311`, release `r-1793411728-0e96c91b-3a88-4e06-9c96-4a087ce41735`.
+
+At **19:12:49**, successor `pi-orb-issuer-00081-kbp` was ready with **100%** traffic. Its 33 server startup marks include `module.enter` at **10,202 ms** and `listen.complete` at **10,604 ms**, plus inherited worker-bootstrap extras. This successful boot does not explain revision `00080-2j5`: its startup cause remains **UNKNOWN**.
+
+Initial unbounded log queries returned empty pages **with `nextPageToken`**, not proof of absence. Corrected bounded pagination captured logs. The complete October 30 **12:20–12:45 PDT** (19:20–19:45Z) query for revision 80 returned eight system/audit rows only, no application stdout/stderr; the old boot phase remains unlocated.
+
+All GHA transaction gates, including native lifecycle and identity, passed. The authoritative monitor passed **19:26:49–19:44:54**: 1,084 seconds including the 180-second metric lag. Overall Deploy succeeded on attempt one. The monitor itself did not observe central inference.
+
+Post-release checks verified generation **1793412534**, revision 81 at 100%, no release lock, four fixture 404s, ready native images, no pending Compute/SQL operations and the three historical failed jobs retained. SQL settings, users, databases and secret parents matched the fresh pre-release baseline; only the MCP version inventory changed. Both auxiliary operator bearers were removed; no operator identity mint occurred during the official window.
+
+Normal runtime-authorized orb search tool and HTTP probes succeeded: **three hits, 90.8 ms**. Skill API/read DTO, hash, no-store and 401 checks passed; two roots were unchanged, with zero files and zero sources. No import or config writes occurred. Project search separately exceeded its client's read bound; all-scope search remains unqualified (`docs/postmortems/2026-10-30-project-search-probe-timeout.md`).
+
+The R2 guard refused **before mint** because the release phase had advanced to `retire`: only an attempt file exists, no bearer. No retry or operator Google mint occurred during the window.
 
 ## Resulting rule and evidence
 
