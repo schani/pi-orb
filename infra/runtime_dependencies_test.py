@@ -21,7 +21,8 @@ class RuntimeDependenciesTests(unittest.TestCase):
         for name in ['ci', 'e2e', 'deploy', 'durable-qualification']:
             with self.subTest(workflow=name):
                 source = (ROOT / f'.github/workflows/{name}.yml').read_text()
-                self.assertEqual(re.findall(r"node-version: '([^']+)'", source), ['26.13.0'])
+                self.assertEqual(re.findall(r"node-version: '([^']+)'", source),
+                                 ['26.13.0'] * (2 if name == 'ci' else 1))
         for app, count in [('control-plane', 3), ('orb-runtime', 1)]:
             with self.subTest(app=app):
                 source = (ROOT / f'apps/{app}/Dockerfile').read_text()

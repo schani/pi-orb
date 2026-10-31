@@ -53,4 +53,4 @@ ENV PI_ORB_WEB_DIST=/app/apps/web/dist
 EXPOSE 8080
 
 # Node 26 strips types natively; no build step.
-CMD ["node", "apps/control-plane/src/main.ts"]
+CMD ["node", "--import", "./apps/control-plane/src/startup-bootstrap.ts", "apps/control-plane/src/main.ts"]
