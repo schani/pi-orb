@@ -140,6 +140,9 @@ import {
 import { lifecycleConstantsForHost } from "./lifecycle-config.ts";
 import { migrationOwnerInput } from "./migrate.ts";
 import { createProcessAgentContext } from "./process-agent-composition.ts";
+import { startupPhase } from "./startup.ts";
+
+startupPhase("module.enter");
 
 const env = (name: string, fallback: string): string => {
   const value = process.env[name];
@@ -213,6 +216,7 @@ export async function main(
     ) => import("./domain/resources.ts").ResourceSource;
   } = {},
 ): Promise<void> {
+  startupPhase("main.enter");
   const bootTask = new NoSimulationTask("boot", true);
   const databaseUrl = env("DATABASE_URL", "postgres://pi-orb:pi-orb@127.0.0.1:5433/pi_orb");
   const databaseKind = env("PI_ORB_DATABASE_KIND", "postgresql");
@@ -267,7 +271,9 @@ export async function main(
     return;
   }
   const issuerUrl = configuredIssuerUrl.value;
+  startupPhase("platform-skills.start");
   const platformSkillNames = await bundledPlatformSkillNames();
+  startupPhase("platform-skills.complete");
   if (platformSkillNames.isErr()) {
     bootTask.error(platformSkillNames.error.message);
     process.exitCode = 1;
@@ -280,12 +286,16 @@ export async function main(
     return;
   }
 
+  startupPhase("auth-directory.start");
   mkdirSync(authDir, { recursive: true });
+  startupPhase("auth-directory.complete");
+  startupPhase("database-open.start");
   const openedDatabase = openControlPlaneDatabase(
     databaseKind === "pglite"
       ? { kind: "pglite", path: pglitePath }
       : { kind: "postgresql", connectionString: databaseUrl },
   );
+  startupPhase("database-open.complete");
   if (openedDatabase.isErr()) {
     bootTask.error("database open failed:", openedDatabase.error.message);
     process.exitCode = 1;
@@ -294,7 +304,9 @@ export async function main(
   const database = openedDatabase.value;
   // Production's release job migrates before consumers; local development initializes itself.
   if (requestIdentity.value.kind === "local") {
+    startupPhase("database-migrate.start");
     const migrated = await database.migrate(migrationOwner._unsafeUnwrap());
+    startupPhase("database-migrate.complete");
     if (migrated.isErr()) {
       bootTask.error(`migration failed code=${migrated.error.code}`);
       const closed = await database.close();
@@ -314,6 +326,7 @@ export async function main(
   // Secret store: file-backed locally, Secret Manager in the cloud
   // (docs/credentials.md). The GSM parent secrets are created by OpenTofu.
   const secretStoreKind = env("PI_ORB_SECRET_STORE", "file");
+  startupPhase("secrets.start");
   const secrets =
     secretStoreKind === "gsm"
       ? new GsmSecretStore({
@@ -321,6 +334,7 @@ export async function main(
           secretPrefix: env("PI_ORB_CREDENTIAL_SECRET_PREFIX", "pi-orb-credential"),
         })
       : new FileSecretStore(join(authDir, "broker-secrets"));
+  startupPhase("secrets.complete");
   // GitHub App credentials for the gh/user-token flow (docs/credentials.md).
   // Unset means "no GitHub integration": no gate, no refresher — tokens/github
   // answers auth_required and everything else is unchanged.
@@ -443,6 +457,7 @@ export async function main(
   // An unparsable or unset value folds to 0: such a revision replaces nothing
   // a real deploy stamped, and the next real deploy replaces forward.
   const specGeneration = Number.parseInt(env("PI_ORB_HOST_SPEC_GENERATION", "0"), 10) || 0;
+  startupPhase("host.start");
   const hostProvider =
     providerKind === "gce"
       ? new GceOrbHostProvider(new RestGceApiTransport(), {
@@ -493,12 +508,14 @@ export async function main(
             ...extraEnvOption,
             ...tailscaleOption,
           });
+  startupPhase("host.complete");
   const nameInferenceUrl = env("PI_ORB_NAME_INFERENCE_URL", mockOpenAi?.inferenceBaseUrl ?? "");
   const nameGenerator = new PiOrbNameGenerator(
     brokerForUser,
     database.modelUsage,
     nameInferenceUrl === "" ? null : nameInferenceUrl,
   );
+  startupPhase("hosting-store.start");
   const hostedBytes =
     hosting.store.kind === "gcs"
       ? createGcsHostedByteStore({
@@ -508,6 +525,7 @@ export async function main(
       : createFilesystemHostedByteStore({
           root: hosting.store.root,
         });
+  startupPhase("hosting-store.complete");
   let deps: ControlPlaneDeps = {
     workspaceUploadRuntime: (task) => ({
       status: (row) => uploadRequest(task, deps, row, "status"),
@@ -623,7 +641,9 @@ export async function main(
     process.on("message", e2eHistoryMessageHandler);
   }
 
+  startupPhase("http.start");
   const app = Fastify({ logger: false });
+  startupPhase("http.complete");
   const stop = new AbortController();
   registerResponseDrain(app, stop.signal);
   const oauthNetwork = createMcpOAuthFetch();
@@ -685,6 +705,7 @@ export async function main(
         message: "alert admission unavailable",
       }));
   };
+  startupPhase("central-factory.start");
   const opened = await DurableAgentPlane.create({
     persistence: database.agentPersistence,
     prepare: (task, orb, context) =>
@@ -763,6 +784,7 @@ export async function main(
       appendAlert,
     }),
   });
+  startupPhase("central-factory.complete");
   if (opened.isErr()) {
     bootTask.error("central agent authority failed:", opened.error.message);
     if (hostProvider instanceof ProcessOrbHostProvider) await hostProvider.close();
@@ -808,6 +830,7 @@ export async function main(
     bootstrap: createSigningKeyBootstrapState(),
     constants: DEFAULT_ISSUER_CONSTANTS,
   };
+  startupPhase("auth.start");
   const identityConfig = requestIdentity.value;
   let applicationAuth: ApplicationAuth | undefined;
   const authOutcome: AuthOutcomeSink = ({ event, outcome, requestId }) =>
@@ -858,17 +881,22 @@ export async function main(
   const principalResolver =
     adapters.requestPrincipalResolverFactory?.(httpTask, database.users) ??
     configuredPrincipalResolver.value;
+  startupPhase("auth.complete");
+  startupPhase("browser-register.start");
   registerAuthenticatedBrowserRoutes(
     app,
     principalResolver,
     async (browser) => {
+      startupPhase("browser-initialize.start");
       registerBrowserHostingRoutes(browser, httpTask, {
         store: deps.store,
         hosting: deps.hosting,
         filesOrigin: hostingOrigin,
         appOrigin,
       });
+      startupPhase("websocket.start");
       await registerLiveProxy(browser, httpTask, deps);
+      startupPhase("websocket.complete");
       registerRoutes(browser, httpTask, deps, viewConfig, systemView, signingKeyDeps);
       registerMcpOAuthRoutes(browser, httpTask, database.mcp, mcpOAuth, appOrigin);
       registerMcpRoutes(browser, httpTask, database.mcp, async (projectId, config) => {
@@ -879,6 +907,7 @@ export async function main(
       });
       registerWorkspaceUploadRoutes(browser, httpTask, deps);
       registerClaudeAuthRoutes(browser, httpTask, claudeAuth, appOrigin);
+      startupPhase("browser-initialize.complete");
     },
     applicationAuth === undefined || identityConfig.kind !== "google"
       ? undefined
@@ -888,15 +917,20 @@ export async function main(
           outcome: authOutcome,
         },
   );
+  startupPhase("browser-register.complete");
   // Static assets do not resolve an application user.
   const webDist = env("PI_ORB_WEB_DIST", "");
+  startupPhase("static.start");
   if (webDist !== "") await registerWebAssets(app, webDist);
+  startupPhase("static.complete");
+  startupPhase("hosting-routes.start");
   await registerRuntimeHostingRoutes(app, httpTask, {
     store: deps.store,
     hosting: deps.hosting,
     filesOrigin: hostingOrigin,
     appOrigin,
   });
+  startupPhase("hosting-routes.complete");
   registerRuntimeRoutes(app, httpTask, {
     appOrigin,
     ...viewConfig,
@@ -1034,6 +1068,7 @@ export async function main(
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
+  startupPhase("listen.start");
   const listening = await app.listen({ port, host: env("HOST", "0.0.0.0") }).then(
     (address) => address,
     (error: unknown) => {
@@ -1042,6 +1077,7 @@ export async function main(
       return null;
     },
   );
+  startupPhase("listen.complete");
   if (listening === null) return;
   bootTask.log(`control plane listening on ${listening}`);
 
