@@ -113,14 +113,18 @@ it("settles an outstanding callback on caller abort without merging store writes
   }
 });
 
-it("bounds cumulative calls including discovery and preserves completed summaries", async () => {
+it("bounds cumulative calls including discovery without undoing completed effects", async () => {
+  let calls = 0;
   const f = await fixture(
     new CallableCatalog([
       defineTool({
         name: "small",
         description: "small",
         parameters: Type.Object({}),
-        execute: async () => ({ output: [{ type: "text", text: "ok" }] }),
+        execute: async () => {
+          calls++;
+          return { output: [{ type: "text", text: "ok" }] };
+        },
       }),
     ]),
   );
@@ -129,9 +133,9 @@ it("bounds cumulative calls including discovery and preserves completed summarie
       'await tools.small({}); for(let i=0;i<256;i++) await describeTool("small");',
     );
     expectLimit(result);
-    expect(result.details).toMatchObject({
-      calls: [expect.objectContaining({ name: "small", status: "ok" })],
-    });
+    expect(calls).toBe(1);
+    expect(result.details).not.toHaveProperty("calls");
+    expect(result.details).not.toHaveProperty("omittedCalls");
   } finally {
     await f.close();
   }
@@ -215,23 +219,27 @@ it("allows eight simultaneous callbacks with a deterministic release barrier", a
   }
 });
 
-it("bounds cumulative serialized replies without script output and without losing completed calls", async () => {
+it("bounds cumulative serialized replies without script output and without undoing completed effects", async () => {
+  let calls = 0;
   const f = await fixture(
     new CallableCatalog([
       defineTool({
         name: "reply",
         description: "reply",
         parameters: Type.Object({}),
-        execute: async () => ({ output: [{ type: "text", text: "x".repeat(4 * 1024 * 1024) }] }),
+        execute: async () => {
+          calls++;
+          return { output: [{ type: "text", text: "x".repeat(4 * 1024 * 1024) }] };
+        },
       }),
     ]),
   );
   try {
     const result = await f.run('store("bad",true); for(let i=0;i<17;i++) await tools.reply({});');
     expectLimit(result);
-    expect(
-      (result.details as { calls: { status: string }[] }).calls.some((c) => c.status === "ok"),
-    ).toBe(true);
+    expect(calls).toBe(16);
+    expect(result.details).not.toHaveProperty("calls");
+    expect(result.details).not.toHaveProperty("omittedCalls");
     expect((await f.run('text(load("bad")===undefined);')).output).toContainEqual({
       type: "text",
       text: "true",

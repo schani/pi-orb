@@ -5,13 +5,13 @@ Upstream: https://github.com/earendil-works/pi/tree/v1.5.0/packages/durable
 Published artifact: https://registry.npmjs.org/@earendil-works/pi-durable/-/pi-durable-1.5.0.tgz
 Artifact SHA-256: `7e95b160ebebb7059dd5f5502419b85d52f1e0432a9e914e608364ae9b2b2a69`.
 Artifact integrity: `sha512-xeBP2vIo5NvsCMQ4Y/V+Z164xQEi9JWiBWHdjn4Z15EnFqV3c0FxJAX26FqyyyintrYyk+Enre94GNcvRlBA5g==`.
-Patch SHA-256: `251c4401fea01280e9d95c71c43f1cf28fb5aaa1b05e2f66b87bfdff5699e15f`.
+Patch SHA-256: `837bbe87cc9001e189e875d2bf123e65dea49a23463f70a23d37d64c24bbebd6`.
 
 **Decision (2026-10-16):** retain upstream native execution, task identity, journal and replay. Export the existing `CodemodeRunDoc` and `CodemodeJournalDoc` through the public code-mode JavaScript/declaration barrels so chart replay reads native successful journal entries and completion decoration updates native `run.result` in the same commit. Private imports, copied document tokens and a second task document/journal are rejected.
 
 Initialize native namespace snapshots from all supplied namespaces, including resource-only MCP servers with no callable tools. Preserve optional descriptions/instructions and canonical names; existing longest-prefix assignment fills real tools. Discovery accepts canonical and normalized names. Empty tool lists already fit the native snapshot schema; no synthetic callable tools or new schema.
 
-Three display sites use one bounded preview: JSON-encoded object keys (first 16), otherwise the argument's type, truncated to 256 characters. Native started rows and earlier/current divergence descriptions must not expose argument values. Display previews do not alter execution arguments, nested inputs, native journal arguments or structural replay comparisons. Live internal slots and arbitrary tool error text still require first-party public-projection sanitization.
+Code-mode presentation and persistence policy: `docs/pi.md`. Native preview serialization is unpatched.
 
 **Decision (2026-10-16):** preserve explicit null in native tool calls for existing schema validation before hooks, authorization, credential acquisition or effects. Only omitted or undefined arguments default to {}; null must not become an effectful parameterless-object call. Actual native MCP coverage checks caught/uncaught null rejection, sanitized outcomes and exactly-once valid {}, omitted and undefined calls.
 

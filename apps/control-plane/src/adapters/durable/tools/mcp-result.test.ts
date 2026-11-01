@@ -74,7 +74,8 @@ it("preserves MCP structuredContent/isError/metadata in script results and decla
       type: "text",
       text: '{"n":7,"error":true,"trace":"kept"}',
     });
-    expect(JSON.stringify(result.details)).toContain('"status":"error"');
+    expect(result.details).not.toHaveProperty("calls");
+    expect(result.details).not.toHaveProperty("omittedCalls");
   } finally {
     await fixture?.close();
     await bundle.close();
