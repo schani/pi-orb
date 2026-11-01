@@ -74,29 +74,11 @@ function isJsonObject(value: JsonValue | undefined): value is JsonObject {
 function publicMessage(message: NonNullable<EntryRecord["model"]>[number]) {
   if (message.role !== "toolResult" || message.toolName !== "codemode") return message;
   const details = message.details;
-  if (!isJsonObject(details) || !Array.isArray(details.calls)) return message;
-  return {
-    ...message,
-    details: {
-      ...details,
-      calls: details.calls.flatMap((call: JsonValue) => {
-        if (!isJsonObject(call)) return [];
-        return [
-          {
-            ...(typeof call.id === "number" ? { id: call.id } : {}),
-            ...(typeof call.name === "string" ? { name: call.name } : {}),
-            ...(typeof call.status === "string" ? { status: call.status } : {}),
-            ...(typeof call.durationMs === "number" ? { durationMs: call.durationMs } : {}),
-            argumentKeys:
-              Array.isArray(call.argumentKeys) &&
-              call.argumentKeys.every((key: JsonValue) => typeof key === "string")
-                ? call.argumentKeys
-                : [],
-          },
-        ];
-      }),
-    },
-  };
+  if (!isJsonObject(details)) return message;
+  const projectedDetails = { ...details };
+  delete projectedDetails.calls;
+  delete projectedDetails.omittedCalls;
+  return { ...message, details: projectedDetails };
 }
 
 /** Root transcript and child launch metadata are public history; native configuration stays private. */

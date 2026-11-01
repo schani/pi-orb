@@ -10,7 +10,10 @@ import {
   createRegistry,
   defineTool,
   Harness,
+  type JsonObject,
+  type StorageWrite,
   type TaskId,
+  type ToolExecutionResult,
   type ToolTaskInput,
 } from "@earendil-works/pi-durable";
 import {
@@ -82,6 +85,8 @@ describe("native codemode interrupted journal recovery", () => {
       }[] = [];
       const authorizations: { name: string; taskId: TaskId; reopening: boolean }[] = [];
       const callbacks: { name: string; key: string | undefined; reopening: boolean }[] = [];
+      const committedOutcomes: ToolExecutionResult[] = [];
+      const persisted: StorageWrite[] = [];
       const offeredTools: string[][] = [];
       const callableTools: string[][] = [];
       const children = new Map<
@@ -93,7 +98,7 @@ describe("native codemode interrupted journal recovery", () => {
         sentinels = 0;
       let reopening = false;
       let holdTaskId: TaskId | undefined;
-      let result: { output?: unknown; details?: unknown; isError?: boolean } | undefined;
+      let result: ToolExecutionResult | undefined;
       const bundle = createDurableTools({
         authorize: (name, _args, api) => {
           authorizations.push({ name, taskId: api.taskId, reopening });
@@ -208,6 +213,14 @@ describe("native codemode interrupted journal recovery", () => {
                       { ...args, code },
                       {
                         ...api,
+                        commit: (change, commitContext) =>
+                          api.commit(async (tx) => {
+                            const value = await change(tx);
+                            const outcome = (await tx.doc(CodemodeRunDoc, api.taskId)).result;
+                            if (outcome !== undefined)
+                              committedOutcomes.push(JSON.parse(JSON.stringify(outcome)));
+                            return value;
+                          }, commitContext),
                         executeTool: (name, value, callContext, options) => {
                           callbacks.push({ name, key: options?.key, reopening });
                           trace("parent-executeTool", {
@@ -257,7 +270,18 @@ describe("native codemode interrupted journal recovery", () => {
         const models = createModels();
         models.setProvider(faux.provider);
         const storage = (await authority.openOrb("recovery", false))._unsafeUnwrap().storage;
-        const opened = await Harness.open(storage, { models, registry }, context);
+        const observed = new Proxy(storage, {
+          get(target, key) {
+            if (key === "commit")
+              return async (writes: readonly StorageWrite[], ctx: typeof context) => {
+                const seq = await target.commit(writes, ctx);
+                persisted.push(...structuredClone(writes));
+                return seq;
+              };
+            return Reflect.get(target, key);
+          },
+        });
+        const opened = await Harness.open(observed, { models, registry }, context);
         opened.subscribeClose(() => trace("harness-close"));
         opened.subscribeCommits((publication) => {
           for (const change of publication.changes) {
@@ -351,7 +375,14 @@ describe("native codemode interrupted journal recovery", () => {
             status: "pending",
             checkpoint: { phase: "execute" },
           });
-          expect((await tx.task(admitted[0]!.taskId))?.state.status).toBe("terminal");
+          const recorded = await tx.task(admitted[0]!.taskId);
+          expect(recorded?.state.status).toBe("terminal");
+          expect(recorded?.input).toMatchObject({
+            call: { arguments: { secret: "REPLAY_CANARY" } },
+          });
+          expect(child?.input).toMatchObject({
+            call: { arguments: { secret: "PENDING_CANARY" } },
+          });
           trace("reopened-child", {
             taskId: holdTaskId,
             owner: child?.owner,
@@ -372,6 +403,53 @@ describe("native codemode interrupted journal recovery", () => {
         }, context);
         harness.resume();
         await completed.promise;
+        await root.waitForIdle(context);
+        const runIds = new Set(
+          persisted.flatMap((write) =>
+            write.type === "document.create" && write.record.kind === "pi.codemode.run"
+              ? [write.record.id]
+              : [],
+          ),
+        );
+        const persistedResults = persisted.flatMap<unknown>((write) => {
+          if (
+            (write.type === "document.create" && runIds.has(write.record.id)) ||
+            (write.type === "document.change" && runIds.has(write.id))
+          ) {
+            return write.content.kind === "base"
+              ? [write.content.value.result]
+              : write.content.ops.flatMap<unknown>((op) => {
+                  if (op[0] !== "r") return op[1][0] === "result" ? [op] : [];
+                  const value = op[1];
+                  return [
+                    value !== null && typeof value === "object" && !Array.isArray(value)
+                      ? value.result
+                      : undefined,
+                  ];
+                });
+          }
+          if (write.type === "task" && write.value.state.outcome !== undefined)
+            return [write.value.state.outcome];
+          return [];
+        });
+        expect(persistedResults).not.toHaveLength(0);
+        expect(JSON.stringify(persistedResults)).not.toMatch(
+          /REPLAY_CANARY|PENDING_CANARY|CHANGED_CANARY|CHANGED_PENDING_CANARY|argumentKeys|omittedCalls|"calls"/,
+        );
+        expect(runIds.size).toBe(1);
+        // Refusal presentation samples resources again after worker drain.
+        const committed = committedOutcomes.at(-1);
+        assert(committed !== undefined && result !== undefined);
+        const committedDetails = { ...(committed.details as JsonObject) };
+        const returnedDetails = { ...(result.details as JsonObject) };
+        delete committedDetails.cpu;
+        delete committedDetails.memory;
+        delete returnedDetails.cpu;
+        delete returnedDetails.memory;
+        expect({ ...committed, details: committedDetails }).toEqual({
+          ...result,
+          details: returnedDetails,
+        });
         expect(records).toBe(1);
         expect(recordAttempts).toEqual([admitted[0]!.taskId]);
         const denied = alteration === "authorization" || alteration === "unsafe";
@@ -406,6 +484,16 @@ describe("native codemode interrupted journal recovery", () => {
         expect(callableTools.every((names) => names.includes("post_hold"))).toBe(true);
         expect(sentinels).toBe(alteration === "none" ? 1 : 0);
         expect(result?.isError, JSON.stringify(result)).toBe(alteration !== "none");
+        expect(committedOutcomes).not.toHaveLength(0);
+        for (const outcome of committedOutcomes) {
+          expect(outcome).not.toHaveProperty("details.calls");
+          expect(outcome).not.toHaveProperty("details.omittedCalls");
+          expect(JSON.stringify(outcome)).not.toMatch(
+            /REPLAY_CANARY|PENDING_CANARY|CHANGED_CANARY|CHANGED_PENDING_CANARY|argumentKeys/,
+          );
+        }
+        expect(result?.details).not.toHaveProperty("calls");
+        expect(result?.details).not.toHaveProperty("omittedCalls");
         expect(JSON.stringify(result?.details)).not.toContain("REPLAY_CANARY");
         expect(JSON.stringify(result?.output)).not.toContain("REPLAY_CANARY");
         expect(JSON.stringify(result)).not.toContain("CHANGED_CANARY");

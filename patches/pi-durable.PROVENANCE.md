@@ -5,13 +5,13 @@ Upstream: https://github.com/earendil-works/pi/tree/v1.4.0/packages/durable
 Published artifact: https://registry.npmjs.org/@earendil-works/pi-durable/-/pi-durable-1.4.0.tgz
 Artifact SHA-256: `6d4dedd7a342151bca8b962f35a6231312cb10e5226796734e6644ad02f48224`.
 Artifact integrity: `sha512-EtIyXH1MBSXdJSkodmy+CYXuwfve3gPrD4GNCZ0XmuRWLPupwRlNQ7fdaXjRcLoKb6SWkT/yEzK+sMmrqvYK+Q==`.
-Patch SHA-256: `3326dd20ce27c8b1679fa98a136fa6f18df6441f289011aae7b35c664cbf070f`.
+Patch SHA-256: `4b25580e7e2fcd68e93d89412e02bf45c7beab633e1430a75d86b9261fedac1f`.
 
 **Decision (2026-10-16):** retain upstream native execution, task identity, journal and replay. Export the existing `CodemodeRunDoc` and `CodemodeJournalDoc` through the public code-mode JavaScript/declaration barrels so chart replay reads native successful journal entries and completion decoration updates native `run.result` in the same commit. Private imports, copied document tokens and a second task document/journal are rejected.
 
 Initialize native namespace snapshots from all supplied namespaces, including resource-only MCP servers with no callable tools. Preserve optional descriptions/instructions and canonical names; existing longest-prefix assignment fills real tools. Discovery accepts canonical, normalized and final `__` suffix names. Empty tool lists already fit the native snapshot schema; no synthetic callable tools or new schema.
 
-Three display sites use one bounded preview: JSON-encoded object keys (first 16), otherwise the argument's type, truncated to 256 characters. Native started rows and earlier/current divergence descriptions must not expose argument values. Display previews do not alter execution arguments, nested inputs, native journal arguments or structural replay comparisons. Live internal slots and arbitrary tool error text still require first-party public-projection sanitization.
+**Decision (2026-10-31, PDT; user-approved):** pi-orb omits unused `details.calls` and `omittedCalls` at its native outcome commit/presentation boundary and public history mapping. Native rows and divergence descriptions remain transient upstream work, including full argument serialization. Actual nested inputs, journal values and structural replay comparisons remain unchanged; divergence output is normalized before outcome persistence. This reduces future preview storage, not serialization cost. Charts, resources, spills and execution-wait metadata remain intact. Existing records are not purged or rewritten. Scope and rationale: `docs/pi-durable-evaluation.md`.
 
 **Decision (2026-10-16):** preserve explicit null in native tool calls for existing schema validation before hooks, authorization, credential acquisition or effects. Only omitted or undefined arguments default to {}; null must not become an effectful parameterless-object call. Actual native MCP coverage checks caught/uncaught null rejection, sanitized outcomes and exactly-once valid {}, omitted and undefined calls.
 
