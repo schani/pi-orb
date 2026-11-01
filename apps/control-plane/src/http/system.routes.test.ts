@@ -13,7 +13,7 @@ describe("deployment facts", () => {
 
   beforeEach(async () => {
     app = Fastify();
-    registerRoutes(app, task, makeHarness().deps, {}, TEST_SYSTEM_VIEW);
+    registerRoutes(app, task, makeHarness().deps, TEST_SYSTEM_VIEW);
     await app.ready();
   });
 

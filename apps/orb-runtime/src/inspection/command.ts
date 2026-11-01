@@ -15,6 +15,9 @@ import { Check } from "typebox/value";
 
 export const INSPECTION_USAGE = `usage:
   pi-orb self [--json]
+  pi-orb expose <port>
+  pi-orb unexpose <port>
+  pi-orb previews [--json]
   pi-orb orbs [query] [--json]
   pi-orb transcript <orb-id> [--json]
   pi-orb search QUERY [--orb ID | --project | --all] [--limit N] [--json]
@@ -115,7 +118,6 @@ export function formatSelf(self: OrbSelf): string {
     lines.push(`Spawned by: ${self.spawnedByOrb.id} (${self.spawnedByOrb.url})`);
   for (const child of self.children)
     lines.push(`Child: ${cell(child.name ?? "untitled orb")} (${cell(child.id)}) ${child.url}`);
-  if (self.previewHost !== null) lines.push(`Preview: ${self.previewHost}`);
   return `${lines.join("\n")}\n`;
 }
 

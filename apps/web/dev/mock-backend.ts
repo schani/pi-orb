@@ -124,7 +124,6 @@ function initialState(timestampChurn: boolean, orbNesting: boolean): MockState {
     state: "running",
     stateVersion: 1,
     checkoutCommit: "fixture123",
-    previewHost: "frontend-fixture.tailnet.ts.net",
     stateChangedAt: runningOrbCreatedAt,
     createdAt: runningOrbCreatedAt,
     updatedAt: createdAt,

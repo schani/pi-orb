@@ -2274,7 +2274,6 @@ describe("full slice E2E", () => {
       },
       spawnedByOrb: null,
       children: [],
-      previewHost: null,
     });
     const selfText = await terminalRun(
       secondOrbId,
@@ -2418,7 +2417,6 @@ describe("full slice E2E", () => {
       },
       spawnedByOrb: { id: secondOrbId, url: `${base}/orbs/${secondOrbId}` },
       children: [],
-      previewHost: null,
     });
     const parentSelf = await terminalRun(
       secondOrbId,

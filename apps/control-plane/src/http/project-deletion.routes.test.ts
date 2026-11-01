@@ -15,7 +15,7 @@ describe("project deletion HTTP API", () => {
     app = Fastify();
     harness.store.seedProject(makeProjectRow("project-http"));
     harness.store.seedOrb(makeOrbRow("orb-http", "project-http", "stopped"));
-    registerRoutes(app, task, harness.deps, {}, TEST_SYSTEM_VIEW);
+    registerRoutes(app, task, harness.deps, TEST_SYSTEM_VIEW);
     await app.ready();
   });
 

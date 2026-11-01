@@ -5,10 +5,11 @@ import { ClaudeOrbAgent } from "./claude/agent.ts";
 import { startModelUsageReceiver } from "./claude/model-usage.ts";
 import { readClaudeRecoveryProof } from "./claude/recovery-proof.ts";
 import type { OrbAgent } from "./domain/orb-agent.ts";
+import { RuntimePreviewService } from "./domain/preview.ts";
 import { ORB_MARKER_ENV } from "./hooks/env-file.ts";
 import { buildRuntimeServer } from "./http/server.ts";
-import { startTailscale } from "./tailscale/daemon.ts";
-import { readTailscaleEnv } from "./tailscale/env.ts";
+import { HmacPreviewVerifier } from "./preview/admission.ts";
+import { runtimeReservedPorts } from "./preview/reserved-ports.ts";
 import { TerminalManager } from "./terminal/manager.ts";
 import { checkTestLaunchFailure } from "./test-launch-failure.ts";
 import { registerUploadRoutes } from "./uploads/routes.ts";
@@ -19,11 +20,6 @@ const env = (name: string, fallback?: string): string => {
   if (fallback !== undefined) return fallback;
   console.error(`missing required environment variable ${name}`);
   process.exit(1);
-};
-
-/** `startTailscale` resolves with a typed failure; a rejection is a bug. */
-const unreachableRejection = (error: unknown): void => {
-  console.error("tailscale: unexpected rejection:", error);
 };
 
 async function main(): Promise<void> {
@@ -39,14 +35,12 @@ async function main(): Promise<void> {
       `test launch failure injected for orb=${env("PI_ORB_ID")} incarnation=${env("PI_ORB_HOST_INCARNATION")}`,
     );
   }
-  const tailscale = readTailscaleEnv(process.env);
   const agentOptions = {
     orbId: env("PI_ORB_ID"),
     repositoryUrl: process.env.PI_ORB_REPOSITORY_URL || null,
     workDir,
     skillsDir: env(SKILLS_DIR_ENV),
     broker: readBrokerEnv(process.env),
-    previewHost: tailscale?.previewHost ?? null,
     incarnation: env("PI_ORB_HOST_INCARNATION", "0"),
     claudeRecoveryProof: readClaudeRecoveryProof(process.env.PI_ORB_CLAUDE_RECOVERY_PROOF),
     testLaunchFailure: launchFailure.inject,
@@ -69,7 +63,19 @@ async function main(): Promise<void> {
     cwd: join(workDir, "repo"),
     hookEnv: agent.hookEnvSource(),
   });
-  const app = buildRuntimeServer(agent, terminalManager);
+  const preview = new RuntimePreviewService({
+    agent,
+    orbId: agentOptions.orbId,
+    verifier: new HmacPreviewVerifier(env("PI_ORB_RUNTIME_TOKEN")),
+    reservedPorts: () => {
+      const address = app.server.address();
+      return runtimeReservedPorts(
+        address !== null && typeof address !== "string" ? address.port : 0,
+        process.env,
+      );
+    },
+  });
+  const app = buildRuntimeServer(agent, terminalManager, process.env.PI_ORB_RUNTIME_TOKEN, preview);
   await registerUploadRoutes(app, {
     workDir,
     incarnation: env("PI_ORB_HOST_INCARNATION", "0"),
@@ -88,6 +94,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
     // A resume hook still running past its blocking window stops with the orb.
     agent.shutdownHooks();
+    preview.closeAll();
     void agent
       .closeExtensions()
       .then(() => app.close())
@@ -111,20 +118,6 @@ async function main(): Promise<void> {
     },
   );
   console.log(`orb runtime listening on ${listening}`);
-
-  // Tier-1 port exposure (docs/ports.md) is optional and never blocks the
-  // boot: joining the tailnet runs alongside it and only ever logs.
-  if (tailscale !== null) {
-    void startTailscale({ config: tailscale, workDir }).then((result) => {
-      if (result.isErr()) {
-        console.error(
-          `tailscale: port exposure unavailable (${result.error.code}): ${result.error.message}`,
-        );
-        return;
-      }
-      console.log(`tailscale: ports are reachable at http://${tailscale.previewHost}:<port>`);
-    }, unreachableRejection);
-  }
 
   await agent.boot();
   const health = agent.getHealth();

@@ -215,7 +215,7 @@ it.each([false, true])(
     )._unsafeUnwrap();
     const deps = { ...h.deps, store: database.store, agentPlane: plane };
     const app = Fastify();
-    registerRoutes(app, task, deps, {}, TEST_SYSTEM_VIEW);
+    registerRoutes(app, task, deps, TEST_SYSTEM_VIEW);
     try {
       (await database.migrate())._unsafeUnwrap();
       (

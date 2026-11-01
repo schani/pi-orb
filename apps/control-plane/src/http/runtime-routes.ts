@@ -37,7 +37,6 @@ import {
   PERSONAL_INSTRUCTIONS_RUNTIME_PATH,
   PROJECT_INSTRUCTIONS_RUNTIME_PATH,
   PROJECT_SECRETS_RUNTIME_PATH,
-  previewHost,
   RUNTIME_TOKENS_PREFIX,
   RuntimeAlertRequestSchema,
   type TokenErrorBody,
@@ -109,7 +108,6 @@ export interface RuntimeRouteDeps {
     import("../domain/claude-auth.ts").ClaudeAuthError
   >;
   readonly appOrigin: string;
-  readonly tailnetDnsName?: string;
   readonly spawn: (
     task: SimulationTask,
     caller: OrbRow,
@@ -924,8 +922,6 @@ export function registerRuntimeRoutes(
         repositoryUrl: project.value.repositoryUrl,
       },
       ...relations.value,
-      previewHost:
-        deps.tailnetDnsName === undefined ? null : previewHost(auth.orb.id, deps.tailnetDnsName),
     });
   });
 

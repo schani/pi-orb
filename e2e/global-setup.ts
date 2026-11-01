@@ -12,7 +12,11 @@ export default async function setup(): Promise<void> {
     const actualImageId = await docker(["image", "inspect", "--format", "{{.Id}}", RUNTIME_IMAGE]);
     assert.equal(actualImageId, expectedImageId, "E2E runtime image identity mismatch");
     console.info(`E2E runtime image verified: ${actualImageId}`);
-    return;
+  } else {
+    await docker(["build", "-f", "apps/orb-runtime/Dockerfile", "-t", RUNTIME_IMAGE, "."], 600_000);
   }
-  await docker(["build", "-f", "apps/orb-runtime/Dockerfile", "-t", RUNTIME_IMAGE, "."], 600_000);
+  await docker(
+    ["build", "-f", "e2e/fixtures/preview.Dockerfile", "-t", "pi-orb-preview-fixture:dev", "."],
+    600_000,
+  );
 }

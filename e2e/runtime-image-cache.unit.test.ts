@@ -7,6 +7,14 @@ import { docker } from "./harness.ts";
 vi.mock("./harness.ts", () => ({ docker: vi.fn() }));
 
 const imageId = `sha256:${"a".repeat(64)}`;
+const previewFixtureBuild = [
+  "build",
+  "-f",
+  "e2e/fixtures/preview.Dockerfile",
+  "-t",
+  "pi-orb-preview-fixture:dev",
+  ".",
+];
 const source = readFileSync(resolve(import.meta.dirname, "../.github/workflows/e2e.yml"), "utf8");
 const step = (name: string) => source.split(`- name: ${name}\n`)[1]?.split("- name:")[0];
 
@@ -22,10 +30,10 @@ describe("runtime image build ownership", () => {
   it("keeps the local current-tree build and ten-minute budget", async () => {
     vi.mocked(docker).mockResolvedValue("");
     await setup();
-    expect(docker).toHaveBeenCalledExactlyOnceWith(
-      ["build", "-f", "apps/orb-runtime/Dockerfile", "-t", "pi-orb-runtime:dev", "."],
-      600_000,
-    );
+    expect(vi.mocked(docker).mock.calls).toEqual([
+      [["build", "-f", "apps/orb-runtime/Dockerfile", "-t", "pi-orb-runtime:dev", "."], 600_000],
+      [previewFixtureBuild, 600_000],
+    ]);
   });
 
   it("does not use Docker for the process backend", async () => {
@@ -39,12 +47,10 @@ describe("runtime image build ownership", () => {
     vi.stubEnv("PI_ORB_E2E_RUNTIME_IMAGE_ID", imageId);
     vi.mocked(docker).mockResolvedValue(imageId);
     await setup();
-    expect(docker).toHaveBeenCalledExactlyOnceWith([
-      "image",
-      "inspect",
-      "--format",
-      "{{.Id}}",
-      "pi-orb-runtime:dev",
+    // The preview fixture layers on the verified runtime image; the runtime is never rebuilt.
+    expect(vi.mocked(docker).mock.calls).toEqual([
+      [["image", "inspect", "--format", "{{.Id}}", "pi-orb-runtime:dev"]],
+      [previewFixtureBuild, 600_000],
     ]);
   });
 

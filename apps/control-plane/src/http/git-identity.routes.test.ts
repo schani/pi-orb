@@ -21,7 +21,7 @@ function setup() {
         ? { kind: "ops", id: "machine" }
         : { kind: "user", user: { id: TEST_USER_ID, email: null } };
   });
-  registerRoutes(app, new NoSimulationTask("git routes", false), h.deps, {}, TEST_SYSTEM_VIEW);
+  registerRoutes(app, new NoSimulationTask("git routes", false), h.deps, TEST_SYSTEM_VIEW);
   return { app, store: h.deps.gitIdentity as FakeGitIdentityStore, h };
 }
 const put = (payload: object, headers: Record<string, string> = {}): InjectOptions => ({

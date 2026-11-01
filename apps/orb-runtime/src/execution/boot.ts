@@ -7,6 +7,7 @@ import { type ExecutionReady, type RuntimeHealth, validateRepositoryUrl } from "
 import { NoSimulationTask } from "determined";
 import { err, ok, Result, ResultAsync } from "neverthrow";
 import type { BrokerEnv } from "../broker/endpoint.ts";
+import { readExecutionIdentity } from "../claude/execution-identity.ts";
 import { configurePersistentHome } from "../domain/home.ts";
 import { configurePersistentRust } from "../domain/rust.ts";
 import { applyGitIdentity } from "../git-identity/apply.ts";
@@ -45,7 +46,8 @@ const git = (args: string[], cwd: string) =>
 export class ExecutionBoot {
   snapshot: ExecutionReady | null = null;
   private hooks: BootHookRunner | null = null;
-  private readonly runtimeInstanceId = randomUUID();
+  readonly runtimeInstanceId = randomUUID();
+  private executionId: string | null = null;
   private readonly bootAbort = new AbortController();
   private phase: "booting" | "cloning" | "setup_running" | "checking_project_secrets" = "booting";
   private error: BootError | null = null;
@@ -69,6 +71,8 @@ export class ExecutionBoot {
       return {
         ...base,
         status: "ready",
+        incarnation: Number(this.options.incarnation),
+        ...(this.executionId === null ? {} : { executionId: this.executionId }),
         sessionId: `execution-${this.options.orbId}`,
         checkoutCommit: this.snapshot.checkoutCommit,
         activity: "idle",
@@ -92,6 +96,14 @@ export class ExecutionBoot {
   }
   private async steps(): Promise<Result<void, BootError>> {
     const o = this.options;
+    const identity = readExecutionIdentity(o.environment);
+    if (identity.isErr())
+      return err({
+        type: "execution_boot_error",
+        code: "execution_identity_failed",
+        message: identity.error.message,
+      });
+    this.executionId = identity.value;
     const launchFailure = checkTestLaunchFailure(o.environment, o.workDir);
     if (launchFailure.error !== undefined) console.error(launchFailure.error);
     if (launchFailure.inject)

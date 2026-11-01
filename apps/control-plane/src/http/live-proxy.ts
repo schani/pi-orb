@@ -44,28 +44,31 @@ function isWireCloseCode(code: number): boolean {
  * the advisory `last_busy_at` timestamp on client requests. Host-native requests
  * are then forwarded unchanged.
  */
+/** A retiring process must not wait for clients to acknowledge close.
+ * The browser reconnects to the serving revision; agent drain is separate. */
+export function terminateWebSocketClients(this: FastifyInstance, done: () => void): void {
+  for (const client of this.websocketServer.clients) client.terminate();
+  this.websocketServer.close(done);
+}
+
 export async function registerLiveProxy(
   app: FastifyInstance,
   task: SimulationTask,
   deps: ControlPlaneDeps,
   scheduleSessionExpiry?: SessionExpiryScheduler,
 ): Promise<void> {
-  await app.register(websocketPlugin, {
-    preClose(done) {
-      // A retiring process must not wait for clients to acknowledge close.
-      // The browser reconnects to the serving revision; agent drain is separate.
-      for (const client of this.websocketServer.clients) client.terminate();
-      this.websocketServer.close(done);
-    },
-    options: {
-      handleProtocols: (protocols: Set<string>) =>
-        protocols.has(RUNTIME_SUBPROTOCOL)
-          ? RUNTIME_SUBPROTOCOL
-          : protocols.has(TERMINAL_SUBPROTOCOL)
-            ? TERMINAL_SUBPROTOCOL
-            : false,
-    },
-  });
+  if (!app.hasDecorator("websocketServer"))
+    await app.register(websocketPlugin, {
+      preClose: terminateWebSocketClients,
+      options: {
+        handleProtocols: (protocols: Set<string>) =>
+          protocols.has(RUNTIME_SUBPROTOCOL)
+            ? RUNTIME_SUBPROTOCOL
+            : protocols.has(TERMINAL_SUBPROTOCOL)
+              ? TERMINAL_SUBPROTOCOL
+              : false,
+      },
+    });
 
   app.get<{ Params: { orbId: string } }>(
     "/api/v1/orbs/:orbId/live",

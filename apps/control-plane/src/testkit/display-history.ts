@@ -32,7 +32,7 @@ export async function openDisplayHistory(records: HistoryRecord[]) {
   await seedDisplayHistory(task, harness, records);
   const app = Fastify({ logger: false });
   onTestFinished(() => app.close());
-  registerRoutes(app, task, harness.deps, {}, TEST_SYSTEM_VIEW);
+  registerRoutes(app, task, harness.deps, TEST_SYSTEM_VIEW);
   return { app, harness, task };
 }
 

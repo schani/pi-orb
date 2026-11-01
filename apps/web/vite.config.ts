@@ -16,10 +16,9 @@ export default defineConfig(({ mode }) => ({
       : []),
   ],
   server: {
-    // Binds all interfaces for tailnet access. The dev server is unauthenticated:
-    // never expose it publicly.
+    // Binds all interfaces. The dev server is unauthenticated: never expose it publicly.
     host: true,
-    allowedHosts: ["vibestation", ".ts.net"],
+    allowedHosts: ["vibestation"],
     proxy:
       mode === "frontend"
         ? {}

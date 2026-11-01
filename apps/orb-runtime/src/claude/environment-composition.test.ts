@@ -5,7 +5,6 @@ import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { err, errAsync, ok, okAsync } from "neverthrow";
 import { expect, it, vi } from "vitest";
 import { environmentPrompt } from "../environment-prompt.ts";
-import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { ClaudeOrbAgent } from "./agent.ts";
 import { claudeEnvironmentPrompt } from "./environment-prompt.ts";
 
@@ -62,13 +61,11 @@ it("appends the shared environment then Claude suffix exactly once before existi
   const workDir = mkdtempSync(join(tmpdir(), "claude-environment-"));
   mkdirSync(join(workDir, "repo"));
   const options: Options[] = [];
-  const previewHost = "pi-orb-test.tail1234.ts.net";
   const agent = new ClaudeOrbAgent({
     orbId: "orb",
     repositoryUrl: "https://example.com/repo",
     workDir,
     skillsDir: null,
-    previewHost,
     broker: { controlPlaneUrl: "http://unused.invalid", runtimeToken: "unused" },
     sdkFactory: (_input, value) => {
       options.push(value);
@@ -87,7 +84,6 @@ it("appends the shared environment then Claude suffix exactly once before existi
         claudeEnvironmentPrompt,
         "PERSONAL",
         "PROJECT",
-        portExposurePrompt(previewHost),
         "User's time zone: America/Los_Angeles.",
       ].join("\n\n"),
     });

@@ -70,6 +70,14 @@ export function createOrbTools(
   const lifecycleSchema = resultSchema(
     Type.Object({ orbId: Type.String(), state: OrbStateSchema }, { additionalProperties: false }),
   );
+  const port = Type.Object(
+    { port: Type.Integer({ minimum: 1, maximum: 65535 }) },
+    { additionalProperties: false },
+  );
+  const registration = Type.Object(
+    { port: Type.Integer(), registrationId: Type.String(), url: Type.String() },
+    { additionalProperties: false },
+  );
   return [
     defineTool({
       name: "orb_self",
@@ -216,6 +224,36 @@ export function createOrbTools(
       structuredOutputSchema: lifecycleSchema,
       replay: "unsafe",
       execute: async (_args, api) => output({ kind: "delete" }, api),
+    }),
+    defineTool({
+      name: "orb_expose_port",
+      description:
+        "Register a localhost HTTP port as an authenticated preview and return the URL to share; never guess preview URLs. Registration does not mean the service is running, and previews never start stopped compute.",
+      parameters: port,
+      structuredOutputSchema: resultSchema(registration),
+      replay: "safe",
+      execute: async (args, api) => output({ kind: "expose_port", ...args }, api),
+    }),
+    defineTool({
+      name: "orb_unexpose_port",
+      description: "Revoke a port's preview registration.",
+      parameters: port,
+      structuredOutputSchema: resultSchema(
+        Type.Object(
+          { port: Type.Integer(), revoked: Type.Literal(true) },
+          { additionalProperties: false },
+        ),
+      ),
+      replay: "safe",
+      execute: async (args, api) => output({ kind: "unexpose_port", ...args }, api),
+    }),
+    defineTool({
+      name: "orb_list_previews",
+      description: "List this orb's registered preview ports and URLs.",
+      parameters: empty,
+      structuredOutputSchema: resultSchema(Type.Array(registration)),
+      replay: "safe",
+      execute: async (_args, api) => output({ kind: "list_previews" }, api),
     }),
   ];
 }

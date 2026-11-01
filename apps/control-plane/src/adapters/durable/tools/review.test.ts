@@ -222,7 +222,6 @@ it("declares and returns orb objects without changing subagent text contracts", 
           project: { id: "project", name: "Project", repositoryUrl: null },
           spawnedByOrb: null,
           children: [],
-          previewHost: null,
         }),
     }),
   });

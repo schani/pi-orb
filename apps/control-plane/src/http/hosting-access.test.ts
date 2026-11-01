@@ -5,7 +5,31 @@ import {
   type HostingAccessOutcome,
   registerHostingAccessGuard,
 } from "./hosting-access.ts";
+import { createPreviewHosts } from "./preview-host.ts";
 
+it("allows only canonical preview hosts to reach the root preview gateway", async () => {
+  const app = Fastify();
+  const hosts = createPreviewHosts({
+    previewOrigin: "https://preview.example.net",
+    appOrigin: "https://app.example.com",
+    filesOrigin: "https://files.example.org",
+  })._unsafeUnwrap();
+  registerHostingAccessGuard(app, policy(), "https://app.test", undefined, hosts);
+  app.get("/api/private", () => "root gateway");
+  const host = new URL(hosts.url("12345678-1234-4234-8234-123456789abc", 5173)._unsafeUnwrap())
+    .host;
+  expect((await app.inject({ url: "/api/private", headers: { host } })).statusCode).toBe(200);
+  for (const invalid of [
+    host + ".evil.test",
+    host.toUpperCase(),
+    host + ":443",
+    "preview.example.net",
+  ])
+    expect((await app.inject({ url: "/api/private", headers: { host: invalid } })).statusCode).toBe(
+      403,
+    );
+  await app.close();
+});
 const policy = (trustedLocal = false) =>
   createHostingAccessPolicy({
     appOrigin: "https://app.test",

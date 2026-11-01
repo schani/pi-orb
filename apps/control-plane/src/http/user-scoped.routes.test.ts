@@ -31,7 +31,7 @@ function setup() {
         ? { kind: "ops", id: "machine" }
         : { kind: "user", user: { id: selected === "bob" ? BOB : ALICE, email: null } };
   });
-  registerRoutes(app, task, { ...h.deps, userScope }, {}, TEST_SYSTEM_VIEW);
+  registerRoutes(app, task, { ...h.deps, userScope }, TEST_SYSTEM_VIEW);
   return app;
 }
 

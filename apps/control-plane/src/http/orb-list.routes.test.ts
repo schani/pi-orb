@@ -25,7 +25,7 @@ beforeEach(async () => {
     })
   )._unsafeUnwrap();
   app = Fastify();
-  registerRoutes(app, task, h.deps, {}, TEST_SYSTEM_VIEW);
+  registerRoutes(app, task, h.deps, TEST_SYSTEM_VIEW);
   await app.ready();
 });
 afterEach(async () => {

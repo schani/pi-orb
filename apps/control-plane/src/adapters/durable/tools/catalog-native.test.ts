@@ -210,7 +210,6 @@ it.each(["root", "child"] as const)(
           project: { id: "project", name: "Project", repositoryUrl: null },
           spawnedByOrb: null,
           children: [],
-          previewHost: null,
         }),
     });
     const bundle = createDurableTools({
