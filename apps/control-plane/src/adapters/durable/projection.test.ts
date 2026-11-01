@@ -149,7 +149,7 @@ it("projects child task headers independently of private child history", () => {
 });
 
 it.each(["ok", "error", "cancelled"])(
-  "whitelists explicit codemode argument keys for %s previews",
+  "omits unused codemode previews for %s outcomes",
   (status) => {
     const secret = "PRIVATE_NESTED_ARGUMENT_CANARY";
     for (const args of [
@@ -181,6 +181,9 @@ it.each(["ok", "error", "cancelled"])(
                 secret,
               ],
               omittedCalls: 0,
+              executionWait: false,
+              charts: [],
+              cpu: { cpuMs: 2 },
             },
             isError: status !== "ok",
             timestamp: 1,
@@ -192,16 +195,20 @@ it.each(["ok", "error", "cancelled"])(
       expect(projected?.overflow.native).toMatchObject({
         message: {
           details: {
-            calls: [{ id: 1, name: "inner", argumentKeys: ["token"], status, durationMs: 2 }],
+            executionWait: false,
+            charts: [],
+            cpu: { cpuMs: 2 },
           },
         },
       });
+      expect(projected?.overflow.native).not.toHaveProperty("message.details.calls");
+      expect(projected?.overflow.native).not.toHaveProperty("message.details.omittedCalls");
       expect(JSON.stringify(source)).toContain(secret);
     }
   },
 );
 
-it("never infers safe key previews from raw arguments or malformed metadata", () => {
+it("omits malformed preview metadata without changing assistant arguments", () => {
   const secret = "PRIVATE_NESTED_ARGUMENT_CANARY";
   for (const argumentKeys of [undefined, secret, ["token", { token: secret }]]) {
     const projected = projectEntry(
@@ -233,9 +240,8 @@ it("never infers safe key previews from raw arguments or malformed metadata", ()
       null,
       "session",
     )._unsafeUnwrap();
-    expect(projected?.overflow.native).toMatchObject({
-      message: { details: { calls: [{ argumentKeys: [] }] } },
-    });
+    expect(projected?.overflow.native).toMatchObject({ message: { details: {} } });
+    expect(projected?.overflow.native).not.toHaveProperty("message.details.calls");
     expect(JSON.stringify(projected)).not.toContain(secret);
   }
   const ordinary = projectEntry(

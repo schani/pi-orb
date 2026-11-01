@@ -34,11 +34,6 @@ export function formatToolCatalogue(text: string | undefined): string | undefine
 function object(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-function argumentKeys(args: unknown): string {
-  return JSON.stringify(
-    object(args) || Array.isArray(args) ? Object.keys(args).slice(0, 16) : typeof args,
-  ).slice(0, 256);
-}
 function chartEntries(entries: unknown): ChartSpec[] {
   if (!Array.isArray(entries)) return [];
   return entries.flatMap((entry: unknown) => {
@@ -89,7 +84,6 @@ export function codemodeTool(
         ...(orb ? { orb } : {}),
         execution: { conversationId: String(api.conversationId), callId: api.callId },
       });
-      const previews = new Map<number, { args: string; argumentKeys: string[] }>();
       const paths = new Map<string, string>();
       const directory = `/orb-artifacts/codemode-${api.taskId}`;
       let charts: ChartSpec[] = [];
@@ -100,11 +94,9 @@ export function codemodeTool(
       };
       const project = (value: ToolExecutionResult): ToolExecutionResult => {
         const details = object(value.details) ? value.details : {};
-        const allCalls = Array.isArray(details.calls) ? details.calls.filter(object) : [];
-        const calls = allCalls.slice(-64).map((call) => ({
-          ...call,
-          ...(typeof call.id === "number" && previews.has(call.id) ? previews.get(call.id)! : {}),
-        }));
+        const projectedDetails = { ...details };
+        delete projectedDetails.calls;
+        delete projectedDetails.omittedCalls;
         return {
           ...value,
           output: (value.output ?? []).map((item) =>
@@ -118,11 +110,7 @@ export function codemodeTool(
                 },
           ),
           details: {
-            ...details,
-            calls,
-            omittedCalls:
-              (typeof details.omittedCalls === "number" ? details.omittedCalls : 0) +
-              Math.max(0, allCalls.length - 64),
+            ...projectedDetails,
             executionWait: false,
             ...(typeof details.fullOutputPath === "string"
               ? { fullOutputPath: replacePaths(details.fullOutputPath) }
@@ -211,13 +199,6 @@ export function codemodeTool(
         ...api,
         env,
         executeTool: (name, value, ctx, callOptions) => {
-          const id = Number(callOptions?.key?.slice(1));
-          if (Number.isSafeInteger(id))
-            previews.set(id, {
-              args: argumentKeys(value),
-              argumentKeys:
-                object(value) || Array.isArray(value) ? Object.keys(value).slice(0, 16) : [],
-            });
           return api.executeTool(name, value, ctx, callOptions).then((result) => ({
             ...result,
             diagnostics: result.diagnostics.map((diagnostic) =>
@@ -247,7 +228,7 @@ export function codemodeTool(
                 };
             }
             if (run.result !== undefined) {
-              // Artifact paths and chart rows commit with the native outcome, before it can be replayed.
+              // Project the native outcome before persistence or cached replay.
               run.result = copyJson(present(run.result as ToolExecutionResult), {
                 omitUndefinedProperties: true,
               }) as JsonObject;

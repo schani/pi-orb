@@ -16,6 +16,7 @@ import {
   type Storage,
   type ToolExecutionApi,
   type ToolExecutionResult,
+  type Tx,
 } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { SimulationTask } from "determined";
@@ -40,6 +41,7 @@ export async function openCodemodeHarness(
     env?: ExecutionEnv;
     storage?: Storage;
     orb?: { id: string; task: SimulationTask };
+    beforeCommit?: (tx: Tx, api: ToolExecutionApi) => Promise<void>;
     onResult?: (source: string, result: ToolExecutionResult) => void;
     holdForReplay?: boolean;
     hooks?: readonly HookRegistration[];
@@ -61,7 +63,19 @@ export async function openCodemodeHarness(
     ...code,
     execute: async (args, api, ctx) => {
       executing++;
-      const result = await code.execute(args, api, ctx);
+      const result = await code.execute(
+        args,
+        {
+          ...api,
+          commit: (change, context) =>
+            api.commit(async (tx) => {
+              const result = await change(tx);
+              await options.beforeCommit?.(tx, api);
+              return result;
+            }, context),
+        },
+        ctx,
+      );
       executing--;
       options.onResult?.(args.code, result);
       if (batch) {

@@ -1,5 +1,5 @@
 diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js b/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js
-index 774212f..ac547ab 100644
+index 774212f..dc1ec0e 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js
 +++ b/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js
 @@ -232,7 +232,12 @@ class CodemodeCall {
@@ -16,15 +16,6 @@ index 774212f..ac547ab 100644
          for (const tool of callable) {
              const namespace = namespaceOf(tool.name, this.options.namespaces ?? []);
              if (namespace === undefined)
-@@ -633,7 +638,7 @@ class CodemodeCall {
-         const made = input.call;
-         if (call.target === "tool" && made.name === call.name && sameJson(made.arguments, call.args ?? {}))
-             return undefined;
--        return `tools.${made.name}(${JSON.stringify(made.arguments)})`;
-+        return `tools.${made.name}(${argumentPreview(made.arguments)})`;
-     }
-     /** Run one live call and journal its result. */
-     launch(call) {
 @@ -668,7 +673,7 @@ class CodemodeCall {
      }
      async callTool(call) {
@@ -34,15 +25,6 @@ index 774212f..ac547ab 100644
          const model = call.name.startsWith(CODEMODE_INTERNAL_PREFIX);
          if (model) {
              await this.modelSlot();
-@@ -697,7 +702,7 @@ class CodemodeCall {
-     started(call) {
-         if (this.rows.has(call.id))
-             return;
--        const args = call.args === undefined ? "" : (JSON.stringify(call.args) ?? "");
-+        const args = call.args === undefined ? "" : argumentPreview(call.args);
-         const name = call.name.startsWith(CODEMODE_INTERNAL_PREFIX)
-             ? call.name.slice(CODEMODE_INTERNAL_PREFIX.length)
-             : call.name;
 @@ -761,7 +766,7 @@ class CodemodeCall {
          const { namespaces } = this.start;
          const tools = this.start.tools.filter((tool) => tool.hidden !== true);
@@ -52,19 +34,6 @@ index 774212f..ac547ab 100644
          if (call.name === "describeTool") {
              const [name] = args;
              if (typeof name !== "string")
-@@ -875,8 +880,11 @@ function countImages(value) {
-     const output = typeof value === "object" && value !== null ? value.output : undefined;
-     return Array.isArray(output) ? output.filter((item) => item?.type === "image").length : 0;
- }
-+function argumentPreview(value) {
-+    return JSON.stringify(typeof value === "object" && value !== null ? Object.keys(value).slice(0, 16) : typeof value).slice(0, 256);
-+}
- function describe(call) {
--    return `${call.target === "tool" ? "tools." : ""}${call.name}(${JSON.stringify(call.args) ?? ""})`;
-+    return `${call.target === "tool" ? "tools." : ""}${call.name}(${argumentPreview(call.args)})`;
- }
- /** Structural JSON equality; key order does not matter. */
- function sameJson(a, b) {
 diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/index.d.ts b/node_modules/@earendil-works/pi-durable/dist/codemode/index.d.ts
 index 3e1c49c..2af19e7 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/codemode/index.d.ts

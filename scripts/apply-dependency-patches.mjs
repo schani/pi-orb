@@ -66,11 +66,11 @@ const packages = [
     package: "node_modules/@earendil-works/pi-durable",
     version: "1.4.0",
     patch: "@earendil-works+pi-durable+1.4.0.patch",
-    sha: "3326dd20ce27c8b1679fa98a136fa6f18df6441f289011aae7b35c664cbf070f",
+    sha: "4b25580e7e2fcd68e93d89412e02bf45c7beab633e1430a75d86b9261fedac1f",
     files: {
       "node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js": [
         "0963efb938700fe914e4a7a99c232fd6f5596bd490900574d187706f08da702a",
-        "577b240911724557fc43d765e75ede0ecaf3407ab76a6d4388f7359571154ea5",
+        "b761c21cd0d5ed8e0aea63577feb9eeb82665f27882f4d1749480e5b8147d5a7",
       ],
       "node_modules/@earendil-works/pi-durable/dist/codemode/index.d.ts": [
         "957445b146e49e4b76107b97e280f763101c5c8a17989db12fdcec58e3c16e71",
