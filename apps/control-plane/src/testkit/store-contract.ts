@@ -524,6 +524,44 @@ export function storeSemanticsContractTests(
       expect((await store.uploads.list(task, orb.id))._unsafeUnwrap()).toHaveLength(2);
     });
 
+    it("rebinds upload identity without renewing activity or clearing retryable errors", async () => {
+      await store.insertProject(task, project);
+      await store.insertOrb(task, { ...orb, state: "running" });
+      const spec = { id: "a0000000-0000-4000-8000-000000000001", name: "sample.bin", size: 7 };
+      const admitted = (await store.uploads.admit(task, orb.id, spec, 2001))._unsafeUnwrap();
+      const failed = (
+        await store.uploads.record(
+          task,
+          admitted,
+          { status: "finalizing", error: "finish failed" },
+          2002,
+        )
+      )._unsafeUnwrap();
+      const before = (await store.getOrb(task, orb.id))._unsafeUnwrap();
+      const rebound = (
+        await store.uploads.admit(task, orb.id, spec, 400000, "rebind")
+      )._unsafeUnwrap();
+      expect(rebound).toEqual(failed);
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toEqual(before);
+      expect(
+        (
+          await store.uploads.admit(
+            task,
+            orb.id,
+            { ...spec, id: "b0000000-0000-4000-8000-000000000002" },
+            400001,
+            "rebind",
+          )
+        ).isErr(),
+      ).toBe(true);
+      const retried = (await store.uploads.admit(task, orb.id, spec, 400002))._unsafeUnwrap();
+      expect(retried).toMatchObject({ status: "finalizing", error: null, activeUntil: 700002 });
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toMatchObject({
+        uploadActiveUntil: 700002,
+        lastBusyAt: 400002,
+      });
+    });
+
     it("persists upload leases, fences idle CAS, and never wakes from upload notification", async () => {
       await store.insertProject(task, project);
       await store.insertOrb(task, { ...orb, state: "running" });

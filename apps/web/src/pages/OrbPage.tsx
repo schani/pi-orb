@@ -91,8 +91,12 @@ import {
   reuseQueuedMessages,
   withQueuedMessage,
 } from "../lib/queued-messages.ts";
-import { isPinnedAfterScroll } from "../lib/scroll-pin.ts";
 import { readSessionPrincipal } from "../lib/session.ts";
+import {
+  createTailFollowState,
+  type TailFollowEvent,
+  transitionTailFollow,
+} from "../lib/tail-follow.ts";
 import {
   type CachedTranscript,
   snapshotFromHistory,
@@ -1589,8 +1593,13 @@ function OrbConversation({
   // Follow the tail: while the reader is at (or near) the bottom, new chat
   // content keeps the view pinned there; once they scroll up, their position
   // stays locked until they return to the bottom themselves.
-  const pinnedRef = useRef(true);
-  const autoScrollYRef = useRef<number | null>(null);
+  const tailFollowRef = useRef(
+    createTailFollowState({
+      scrollY: 0,
+      viewportHeight: 0,
+      contentHeight: 0,
+    }),
+  );
   const onHistoryCompensatedRef = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
     const target = scrollRef.current;
@@ -1599,46 +1608,44 @@ function OrbConversation({
       viewportHeight: target?.clientHeight ?? 0,
       contentHeight: target?.scrollHeight ?? 0,
     });
-    let previousView = view();
-    let pointerActive = false;
+    tailFollowRef.current = {
+      ...tailFollowRef.current,
+      ownership: { kind: "settled", following: tailFollowRef.current.ownership.following },
+      previousView: view(),
+    };
     let touchY: number | null = null;
-    const setPinned = (pinned: boolean, reason: string) => {
-      if (pinnedRef.current === pinned) return;
-      pinnedRef.current = pinned;
-      devConsoleDebug.record({
-        event: "scroll_pin",
-        orbId,
-        outcome: `${pinned ? "pinned" : "released"}:${reason}`,
-        ...view(),
-      });
+    const dispatch = (event: TailFollowEvent) => {
+      const before = tailFollowRef.current;
+      const decision = transitionTailFollow(before, event);
+      tailFollowRef.current = decision.state;
+      if (before.ownership.following !== decision.state.ownership.following) {
+        devConsoleDebug.record({
+          event: "scroll_pin",
+          orbId,
+          outcome: `${decision.state.ownership.following ? "pinned" : "released"}:${decision.reason}`,
+          ...view(),
+        });
+      }
+      return decision.writeTail;
     };
     onHistoryCompensatedRef.current = () => {
-      previousView = view();
+      dispatch({ type: "compensated", view: view() });
     };
     const onScroll = () => {
-      const current = view();
-      setPinned(
-        isPinnedAfterScroll(
-          current,
-          autoScrollYRef.current,
-          pinnedRef.current && !pointerActive ? previousView : undefined,
-        ),
-        "scroll",
-      );
-      previousView = current;
-      autoScrollYRef.current = null;
+      dispatch({ type: "scroll", view: view() });
     };
     const readerIntent = (reason: "wheel" | "key" | "touch") => {
-      setPinned(false, reason);
-      autoScrollYRef.current = null;
+      dispatch({ type: "reader-intent", reason });
     };
     const pointerIntent = () => {
-      pointerActive = true;
+      dispatch({ type: "pointerdown" });
     };
-    const pointerSettled = () => {
-      if (!pointerActive) return;
-      onScroll();
-      pointerActive = false;
+    const pointerSettled = (event: PointerEvent) => {
+      dispatch({
+        type: "pointerend",
+        view: view(),
+        reason: event.type === "pointercancel" ? "pointercancel" : "pointerup",
+      });
     };
     const wheelIntent = (event: WheelEvent) => {
       // A wheel at the tail may produce no scroll event to restore pinning.
@@ -1665,7 +1672,7 @@ function OrbConversation({
       if (isScrollKey(event)) readerIntent("key");
     };
     const keyboardSettled = (event: KeyboardEvent) => {
-      if (isScrollKey(event)) onScroll();
+      if (isScrollKey(event)) dispatch({ type: "keyend", view: view() });
     };
     target?.addEventListener("keydown", keyboardIntent);
     target?.addEventListener("keyup", keyboardSettled);
@@ -1681,26 +1688,15 @@ function OrbConversation({
     // Observe geometry, not React renders. Polling must not write into a native
     // scrolling layer, even at the same offset.
     const observer = new ResizeObserver(() => {
-      const current = view();
       // Reconcile native movement before measuring the newly grown content.
-      if (Math.abs(current.scrollY - previousView.scrollY) > 1) {
-        setPinned(
-          isPinnedAfterScroll(
-            pinnedRef.current ? current : { ...previousView, scrollY: current.scrollY },
-            autoScrollYRef.current,
-            pinnedRef.current && !pointerActive ? previousView : undefined,
-          ),
-          "resize",
-        );
-      }
-      if (target && pinnedRef.current) {
+      const writeTail = dispatch({ type: "resize", view: view() });
+      if (target && writeTail) {
         const bottom = Math.max(0, target.scrollHeight - target.clientHeight);
         if (Math.abs(target.scrollTop - bottom) > 1) {
           target.scrollTop = bottom;
-          autoScrollYRef.current = target.scrollTop;
+          dispatch({ type: "tail-write", view: view() });
         }
       }
-      previousView = view();
     });
     if (target) observer.observe(target);
     if (scrollContentRef.current) observer.observe(scrollContentRef.current);

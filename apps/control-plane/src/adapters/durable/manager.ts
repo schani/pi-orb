@@ -35,9 +35,14 @@ export interface AgentOwnership<T> {
   active?(agent: T): boolean;
 }
 
+type AgentOwner<T> = { admissionVersion: number; agent: T } & (
+  | { state: "owned" }
+  | { state: "retiring"; closed: ResultAsync<void, RuntimeClientError> }
+);
+
 /** One mutation line per orb; shutdown joins every previously admitted open. */
 export class OrbAgentManager<T> {
-  private readonly agents = new Map<string, { admissionVersion: number; agent: T }>();
+  private readonly agents = new Map<string, AgentOwner<T>>();
   private readonly queues = new Map<string, Promise<void>>();
   private readonly disposed = new Set<string>();
   private readonly suspended = new Set<string>();
@@ -51,7 +56,7 @@ export class OrbAgentManager<T> {
 
   get(orbId: string, admissionVersion?: number): T | null {
     const owned = this.agents.get(orbId);
-    return owned &&
+    return owned?.state === "owned" &&
       (admissionVersion === undefined ||
         (owned.admissionVersion === admissionVersion &&
           this.admissions.get(orbId) === admissionVersion))
@@ -76,6 +81,16 @@ export class OrbAgentManager<T> {
     return ResultAsync.fromPromise(result, () =>
       durableError("agent ownership operation failed"),
     ).andThen((value) => value);
+  }
+
+  private retire(orbId: string, owner: AgentOwner<T>): ResultAsync<void, RuntimeClientError> {
+    if (owner.state === "retiring") return owner.closed;
+    const closed = this.ownership.close(owner.agent).map(() => {
+      this.agents.delete(orbId);
+      return undefined;
+    });
+    this.agents.set(orbId, { ...owner, state: "retiring", closed });
+    return closed;
   }
 
   ensure(
@@ -103,24 +118,25 @@ export class OrbAgentManager<T> {
       if (resume) this.suspended.delete(orbId);
       const existing = this.agents.get(orbId);
       if (
-        existing?.admissionVersion === admissionVersion &&
+        existing?.state === "owned" &&
+        existing.admissionVersion === admissionVersion &&
         this.ownership.active?.(existing.agent) !== false
       )
         return ok(existing.agent);
       if (existing) {
-        const closed = await this.ownership.close(existing.agent);
+        const closed = await this.retire(orbId, existing);
         if (closed.isErr()) return err(closed.error);
-        this.agents.delete(orbId);
       }
       const opened = await (open ? open() : this.ownership.open(orbId, admissionVersion));
       if (opened.isOk()) {
+        const owner: AgentOwner<T> = { state: "owned", admissionVersion, agent: opened.value };
+        this.agents.set(orbId, owner);
         if (!admitted()) {
-          const closed = await this.ownership.close(opened.value);
+          const closed = await this.retire(orbId, owner);
           return closed.isErr()
             ? err(closed.error)
             : err(durableError("agent admission superseded"));
         }
-        this.agents.set(orbId, { admissionVersion, agent: opened.value });
       }
       return opened;
     });
@@ -145,9 +161,7 @@ export class OrbAgentManager<T> {
           existing.admissionVersion > throughAdmissionVersion)
       )
         return ok(undefined);
-      const closed = await this.ownership.close(existing.agent);
-      if (closed.isOk()) this.agents.delete(orbId);
-      return closed;
+      return this.retire(orbId, existing);
     });
   }
 
@@ -158,13 +172,11 @@ export class OrbAgentManager<T> {
     return this.serial(orbId, async () => {
       const existing = this.agents.get(orbId);
       if (!existing) return ok(false);
+      if (existing.state === "retiring") return this.retire(orbId, existing).map(() => true);
       const prepared = await prepare(existing.agent);
       if (prepared.isErr()) return err(prepared.error);
       if (!prepared.value) return ok(false);
-      const closed = await this.ownership.close(existing.agent);
-      if (closed.isErr()) return err(closed.error);
-      this.agents.delete(orbId);
-      return ok(true);
+      return this.retire(orbId, existing).map(() => true);
     });
   }
 

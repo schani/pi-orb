@@ -1539,7 +1539,11 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           );
         if (message["status"] === "delivered" || message["operation_id"] !== null)
           return ok("active");
-        const native = await hasNativeInboxAdmission(query, params.orbId, params.messageId);
+        const native = await hasNativeInboxAdmission(
+          query,
+          params.orbId,
+          String(message["message_id"]),
+        );
         if (native.isErr()) return err(native.error);
         if (native.value) return ok("active");
         const cancelled = await query(

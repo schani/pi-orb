@@ -10,6 +10,7 @@ export type UploadRow = WorkspaceUpload & {
   activeUntil: number;
 };
 export type UploadStoreError = StoreError | StateConflict;
+export type UploadAdmissionIntent = "activity" | "rebind";
 export interface WorkspaceUploadStore {
   createBatch(
     task: SimulationTask,
@@ -18,11 +19,13 @@ export interface WorkspaceUploadStore {
     now: number,
   ): ResultAsync<UploadRow[], UploadStoreError>;
   list(task: SimulationTask, orbId: string): ResultAsync<UploadRow[], StoreError>;
+  /** Defaults to activity renewal; rebind preserves the existing lease and error. */
   admit(
     task: SimulationTask,
     orbId: string,
     spec: UploadSpec,
     now: number,
+    intent?: UploadAdmissionIntent,
   ): ResultAsync<UploadRow, UploadStoreError>;
   record(
     task: SimulationTask,
@@ -93,6 +96,20 @@ export interface UploadRuntime {
     row: UploadRow,
   ): ResultAsync<UploadProgress, { type: "upload_transport"; message: string }>;
 }
+type UploadRecoveryDecision =
+  | "ignore"
+  | "notify"
+  | "active-finalization"
+  | "publication-discovery-only";
+
+function uploadRecoveryDecision(row: UploadRow, now: number): UploadRecoveryDecision {
+  if (row.status === "stored") return "notify";
+  if (row.status !== "finalizing") return "ignore";
+  return row.error === null && row.activeUntil > now
+    ? "active-finalization"
+    : "publication-discovery-only";
+}
+
 /** Recovery runs on ordinary running reconciliation, including after browser loss. */
 export async function recoverUploads(
   task: SimulationTask,
@@ -102,49 +119,45 @@ export async function recoverUploads(
 ) {
   const rows = await store.uploads.list(task, orbId);
   if (rows.isErr()) return rows;
-  for (const row of rows.value) {
-    if (row.status === "stored") {
-      const sent = await notifyUpload(task, store, row);
-      if (sent.isErr()) return sent;
-    } else if (row.status === "finalizing") {
+  for (let row of rows.value) {
+    if (row.status === "finalizing") {
       const orb = await store.getOrb(task, orbId);
       if (orb.isErr()) return orb;
       if (orb.value?.state !== "running") continue;
-      // Rebind retained workspace metadata after replacement, but do not renew
-      // failed transfers every reconcile tick and thereby keep compute alive forever.
-      const admitted =
-        row.incarnation !== orb.value.hostIncarnation
-          ? await store.uploads.admit(
-              task,
-              orbId,
-              { id: row.id, name: row.name, size: row.size },
-              task.wallNow(),
-            )
-          : ok(row);
-      if (admitted.isErr()) return admitted;
-      let status = await runtime.status(admitted.value);
+      if (row.incarnation !== orb.value.hostIncarnation) {
+        const rebound = await store.uploads.admit(
+          task,
+          orbId,
+          { id: row.id, name: row.name, size: row.size },
+          task.wallNow(),
+          "rebind",
+        );
+        if (rebound.isErr()) return rebound;
+        row = rebound.value;
+      }
+    }
+    const decision = uploadRecoveryDecision(row, task.wallNow());
+    if (decision === "notify") {
+      const sent = await notifyUpload(task, store, row);
+      if (sent.isErr()) return sent;
+    } else if (decision !== "ignore") {
+      let status = await runtime.status(row);
       if (
         status.isOk() &&
         status.value.path === null &&
-        row.error === null &&
-        row.activeUntil > task.wallNow() &&
+        uploadRecoveryDecision(row, task.wallNow()) === "active-finalization" &&
         runtime.finish
       ) {
-        status = await runtime.finish(admitted.value);
+        status = await runtime.finish(row);
       }
       if (status.isErr()) {
-        await store.uploads.record(
-          task,
-          admitted.value,
-          { error: status.error.message },
-          task.wallNow(),
-        );
+        await store.uploads.record(task, row, { error: status.error.message }, task.wallNow());
         continue;
       }
       if (status.value.path !== null) {
         const stored = await store.uploads.record(
           task,
-          admitted.value,
+          row,
           { ...status.value, status: "stored", error: null },
           task.wallNow(),
         );
