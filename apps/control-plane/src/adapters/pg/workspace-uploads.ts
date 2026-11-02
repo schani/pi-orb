@@ -7,6 +7,7 @@ import {
 import type { SimulationTask } from "determined";
 import { err, ok } from "neverthrow";
 import type {
+  UploadAdmissionIntent,
   UploadRow,
   UploadStoreError,
   WorkspaceUploadStore,
@@ -99,7 +100,13 @@ export class PgWorkspaceUploads implements WorkspaceUploadStore {
       return touched.isErr() ? err(touched.error) : ok(rows);
     });
   }
-  admit(_task: SimulationTask, orbId: string, spec: UploadSpec, now: number) {
+  admit(
+    _task: SimulationTask,
+    orbId: string,
+    spec: UploadSpec,
+    now: number,
+    intent: UploadAdmissionIntent = "activity",
+  ) {
     return this.db.transaction<UploadRow, UploadStoreError>(async (query) => {
       const orb = await query("SELECT * FROM orbs WHERE id=$1 FOR UPDATE", [orbId]);
       if (orb.isErr()) return err(orb.error);
@@ -121,6 +128,15 @@ export class PgWorkspaceUploads implements WorkspaceUploadStore {
         return err(conflict());
       if (previous && ["stored", "notified"].includes(String(previous.status)))
         return ok(map(previous));
+      if (intent === "rebind") {
+        if (!previous) return err(conflict());
+        const rebound = await query(
+          `UPDATE workspace_uploads SET incarnation=$3,updated_at=$4
+          WHERE orb_id=$1 AND id=$2 RETURNING *`,
+          [orbId, spec.id, o.host_incarnation, new Date(now)],
+        );
+        return rebound.isErr() ? err(rebound.error) : ok(map(rebound.value.rows[0] ?? {}));
+      }
       if (!previous) {
         const group = await query(
           "SELECT id FROM workspace_uploads WHERE orb_id=$1 AND batch_id=$2",

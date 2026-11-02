@@ -148,7 +148,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       }).andThen((rows) =>
         rows === null ? errAsync({ type: "state_conflict" as const }) : okAsync(rows),
       ),
-    admit: (task, orbId, spec, now) =>
+    admit: (task, orbId, spec, now, intent = "activity") =>
       this.access(task, FAILPOINTS.storeWrite, "admit upload", () => {
         const orb = this.orbs.get(orbId);
         const key = `${orbId}/${spec.id}`;
@@ -165,6 +165,12 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         )
           return null;
         if (old && ["stored", "notified"].includes(old.status)) return old;
+        if (intent === "rebind") {
+          if (!old) return null;
+          const row = { ...old, incarnation: orb.hostIncarnation };
+          this.uploadRows.set(key, row);
+          return row;
+        }
         const row = {
           ...spec,
           batchId: spec.id,
