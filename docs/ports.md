@@ -122,8 +122,9 @@ decoded bytes maximum), avoiding URL normalization and private-route prefix esca
 Both boundaries strip application-spoofed reserved headers. Private platform failures carry
 `x-pi-orb-preview-error`; CP consumes it as a typed error and strips it, while ordinary
 application status codes remain unchanged. Signed admission carries orb, port, registration
-generation, incarnation, execution ID, runtime instance ID, origin and expiry. The signed admission lasts at most
-10 seconds. HMAC-SHA256 uses `runtimeTokenHash` as its key and the purpose prefix
+generation, incarnation, execution ID, runtime instance ID, origin and expiry. The control plane
+signs for 5 seconds and the runtime accepts at most 10 seconds ahead, leaving 5 seconds of clock
+skew either way (`docs/postmortems/2026-11-03-preview-admission-clock-skew.md`). HMAC-SHA256 uses `runtimeTokenHash` as its key and the purpose prefix
 `pi-orb-preview-admission-v1\n`; the runtime derives the same key from its bearer token.
 Neither the key nor runtime bearer is forwarded to the preview service. Runtime verifies
 signature/expiry and its own exact target identity before opening localhost. The Pi/Claude

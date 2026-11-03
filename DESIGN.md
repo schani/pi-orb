@@ -332,4 +332,5 @@ Reference material:
 - [docs/postmortems/2026-10-18-central-drain-close-race.md](docs/postmortems/2026-10-18-central-drain-close-race.md) — native failure/storage-close race blocked central deletion
 - [docs/postmortems/2026-10-23-frontend-chart-qualification.md](docs/postmortems/2026-10-23-frontend-chart-qualification.md) — responsive focus ownership and isolated Mermaid measurement
 - [docs/postmortems/2026-10-20-stopped-central-agent-recovery.md](docs/postmortems/2026-10-20-stopped-central-agent-recovery.md) — release shutdown during stopped-VM admission exposed a central recovery eligibility gap
+- [docs/postmortems/2026-11-03-preview-admission-clock-skew.md](docs/postmortems/2026-11-03-preview-admission-clock-skew.md) — preview admissions signed at the runtime's expiry limit failed under clock skew
 - [docs/postmortems/2026-10-24-claude-terminal-failure.md](docs/postmortems/2026-10-24-claude-terminal-failure.md) — subscription-limit failure retained a task synthesis handoff and busy ownership
