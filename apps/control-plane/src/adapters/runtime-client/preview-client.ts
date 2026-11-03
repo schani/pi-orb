@@ -110,7 +110,9 @@ function internalHeaders(
       v: 1,
       target: route.target,
       origin: route.origin,
-      expiresAt: Math.min(route.expiresAt, task.wallNow() + 10_000),
+      // Half the runtime's 10-second cap: independently synchronized clocks may differ by up to
+      // five seconds either way.
+      expiresAt: Math.min(route.expiresAt, task.wallNow() + 5_000),
     }),
   ).toString("base64url");
   const signature = createHmac("sha256", route.runtimeTokenHash)

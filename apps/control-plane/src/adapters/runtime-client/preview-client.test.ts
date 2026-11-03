@@ -1,10 +1,11 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { once } from "node:events";
 import { createServer } from "node:http";
 import { NoSimulationTask } from "determined";
 import { ok, okAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import { WebSocketServer } from "ws";
+import { HmacPreviewVerifier } from "../../../../orb-runtime/src/preview/admission.ts";
 import type { PreviewRoute } from "../../domain/preview.ts";
 import { NodePreviewClient } from "./preview-client.ts";
 
@@ -432,6 +433,57 @@ it("aborts a pending header read and closes the upstream socket", async () => {
     const result = await pending;
     expect(result.isErr() && result.error.code).toBe("cancelled");
     await ending;
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+it("signs admissions the runtime accepts across five seconds of clock skew either way", async () => {
+  let envelope = "";
+  const server = createServer((request, response) => {
+    envelope = String(request.headers["x-pi-orb-preview-admission"]);
+    request.resume();
+    response.end();
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (address === null || typeof address === "string") throw new Error("invalid fixture address");
+  const route: PreviewRoute = {
+    target: {
+      orbId: "orb-a",
+      port: 5173,
+      registrationId: "r1",
+      incarnation: 1,
+      executionId: "boot-1",
+      runtimeInstanceId: "rt-1",
+    },
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    runtimeTokenHash: createHash("sha256").update("runtime-token").digest("hex"),
+    origin: "https://preview.test",
+    expiresAt: Date.now() + 60000,
+  };
+  try {
+    const task = new NoSimulationTask("preview-skew", false);
+    const signedAt = task.wallNow();
+    const result = await new NodePreviewClient().openHttp(
+      task,
+      route,
+      {
+        method: "GET",
+        path: "/",
+        headers: [],
+        body: { read: async () => ok(null) },
+      },
+      { signal: new AbortController().signal },
+    );
+    if (result.isErr()) throw new Error(JSON.stringify(result.error));
+    result.value.dispose();
+    const verifier = new HmacPreviewVerifier("runtime-token");
+    // Runtime clock minus control-plane clock; Cloud Run and the VM are synchronized independently.
+    for (const skew of [-4_900, 0, 4_900])
+      expect(verifier.verify(envelope, signedAt + skew).isOk(), `skew ${skew}`).toBe(true);
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));

@@ -89,7 +89,7 @@ application Authorization; original path/query uses canonical bounded base64url 
 `x-pi-orb-preview-path` (16,384 encoded / 12,288 decoded maximum), avoiding URL normalization
 and prefix escapes. Reserved `x-pi-orb-preview-error` maps private platform failures to typed
 CP errors and is stripped; ordinary application statuses remain unchanged. A purpose-separated HMAC admission using `runtimeTokenHash`
-as key expires within 10 seconds and binds orb/port/registration/incarnation/execution/runtime
+as key is signed for 5 seconds, accepted at most 10 seconds ahead, and binds orb/port/registration/incarnation/execution/runtime
 instance/origin; no runtime key or bearer reaches the application. Runtime validates its own
 identity and reserved listener before dialing literal `127.0.0.1`; upstream Host/forwarding
 headers derive from signed admission origin. Actual local CP listeners are reserved, not remote
