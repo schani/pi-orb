@@ -198,6 +198,8 @@ for (const composition of CROSS_AXIS_CASES) {
           hostingRoot: join(root, "hosting"),
           webDist: join(root, "web"),
           entry: "e2e/cross-axis-control-plane-entry.ts",
+          // The Docker case deliberately exercises the real GitHub repository.
+          repositoryFixture: false,
           extraEnv: {
             ...(local ? localGitEnvironment(repo, URL) : {}),
             ...(local

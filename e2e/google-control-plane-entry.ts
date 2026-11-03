@@ -4,6 +4,7 @@ import { Agent, request as httpsRequest } from "node:https";
 import Fastify from "fastify";
 import { createGoogleLoginProvider } from "../apps/control-plane/src/adapters/google-application-auth.ts";
 import { main } from "../apps/control-plane/src/main.ts";
+import { localResourceSource } from "./testkit/resource-source-fixture.ts";
 
 // Only the external Google transport is replaced. main owns every identity and route.
 const cert = readFileSync(process.env["PI_ORB_E2E_GOOGLE_CERT"] ?? "");
@@ -126,4 +127,16 @@ const provider = createGoogleLoginProvider(
       }),
   },
 )._unsafeUnwrap();
-await main({ googleLoginProvider: provider });
+const repository = process.env["PI_ORB_E2E_RESOURCE_REPOSITORY"];
+await main({
+  googleLoginProvider: provider,
+  ...(repository
+    ? {
+        resourceSource: localResourceSource(
+          repository,
+          undefined,
+          process.env["PI_ORB_E2E_RESOURCE_URL"],
+        ),
+      }
+    : {}),
+});

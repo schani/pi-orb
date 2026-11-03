@@ -22,6 +22,7 @@ import {
   startControlPlane,
   waitFor,
 } from "./harness.ts";
+import { repositoryFixture } from "./testkit/repository-fixture.ts";
 
 const appOrigin = "https://app.full-main.test";
 const filesOrigin = "https://files.full-main.test";
@@ -321,6 +322,10 @@ it("main Google mode authenticates public/private/files surfaces and proxies a r
     );
     throw error;
   });
+  // The orb boots from the local repository fixture, never a GitHub clone.
+  expect((await api(`/api/v1/orbs/${orbId}`)).body["checkoutCommit"]).toBe(
+    (await repositoryFixture()).commit,
+  );
   const connect = (
     surface: "live" | "terminal",
     protocol: string,

@@ -9,6 +9,11 @@ import { err, ok, type Result } from "neverthrow";
 import { createControlPlaneForwarder } from "./testkit/control-plane-forwarder.ts";
 import { durableFakeRelay } from "./testkit/durable-fake-relay.ts";
 import { centralModelScenario } from "./testkit/durable-model-fixture.ts";
+import {
+  REPOSITORY_FIXTURE_URL,
+  repositoryFixture,
+  repositoryRewrite,
+} from "./testkit/repository-fixture.ts";
 
 export const FAKE_ORIGIN = process.env["PI_ORB_FAKE_OPENAI"] ?? "https://fake-openai.flingit.run";
 
@@ -753,6 +758,8 @@ export async function startControlPlane(options: {
   webDist?: string;
   entry?: string;
   resourceRepository?: string;
+  /** Serve the GitHub repository from a local snapshot (default true unless a test owns one). */
+  repositoryFixture?: boolean;
   resourceGateUrl?: string;
   readinessHeaders?: Record<string, string>;
   readinessPath?: string;
@@ -788,9 +795,17 @@ export async function startControlPlane(options: {
     options.pglitePath === undefined
       ? `http://host.docker.internal:${ingress.port}`
       : ingress.baseUrl;
+  // Full GitHub clones of the real repository made orb boot depend on GitHub throughput.
+  const fixture =
+    options.repositoryFixture === false ||
+    options.resourceRepository !== undefined ||
+    options.extraEnv?.["PI_ORB_E2E_RESOURCE_REPOSITORY"] !== undefined
+      ? undefined
+      : await repositoryFixture();
+  const resourceRepository = options.resourceRepository ?? fixture?.hostUrl;
   const entry =
     options.entry ??
-    (options.resourceRepository === undefined
+    (resourceRepository === undefined
       ? "apps/control-plane/src/main.ts"
       : "e2e/resource-control-plane-entry.ts");
   const clockSpec =
@@ -832,11 +847,21 @@ export async function startControlPlane(options: {
         : { PI_ORB_NAME_INFERENCE_URL: options.nameFake.inferenceBaseUrl }),
       ...options.extraEnv,
       PI_ORB_DOCKER_INVENTORY_SCOPE: options.dockerInventoryScope ?? randomUUID(),
-      ...(options.resourceRepository === undefined
+      ...(resourceRepository === undefined
         ? {}
         : {
-            PI_ORB_E2E_RESOURCE_REPOSITORY: options.resourceRepository,
+            PI_ORB_E2E_RESOURCE_REPOSITORY: resourceRepository,
             PI_ORB_E2E_RESOURCE_GATE_URL: options.resourceGateUrl,
+          }),
+      ...(fixture === undefined
+        ? {}
+        : {
+            PI_ORB_E2E_RESOURCE_URL: REPOSITORY_FIXTURE_URL,
+            PI_ORB_E2E_RUNTIME_ENV: JSON.stringify(
+              repositoryRewrite(
+                options.pglitePath === undefined ? fixture.containerUrl : fixture.hostUrl,
+              ),
+            ),
           }),
       PI_ORB_FAKE_OPENAI_INFERENCE_URL: relay.baseUrl,
     },
