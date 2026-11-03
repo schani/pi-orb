@@ -9,6 +9,11 @@ compute. The shared-namespace process provider is unsupported. No public domain 
 no preview ingress is provisioned, and local qualification is not deployed acceptance.
 Remaining ingress choices are in `docs/open-questions.md`; acceptance work is in `TODO.md`.
 
+**Deployed (2026-11-03):** [Deploy 41567414422](https://github.com/schani/pi-orb/actions/runs/41567414422)
+released `7858ba8c` with `preview_origin=https://piorb.live`, removing Tailscale. The wildcard
+certificate validated before the release finished; an unauthenticated document navigation to a
+preview host returns the 302 into preview login. Live acceptance remains in `TODO.md`.
+
 **Release order (decided 2026-11-03):** deploying this change removes Tailscale, so it
 deploys only with `PI_ORB_PREVIEW_ORIGIN` set: provision the domain and ingress, qualify,
 deploy, then run live acceptance. Rejected: deploying with previews disabled first, which

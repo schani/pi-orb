@@ -226,6 +226,8 @@ The foundation enables Cloud Domains, Cloud DNS and Certificate Manager, owns th
 on that zone only plus project `certificatemanager.editor` and `compute.loadBalancerAdmin`.
 The latter is project-wide load-balancer authority, including other forwarding rules and URL
 maps. A temporary administrator login applied exactly these seven additions with a targeted
-saved plan; the full plan's unrelated pending destroys are tracked in `TODO.md`. The domain
+saved plan. After the release, a second reviewed plan removed only the consolidation leftovers:
+the unused `pi-orb-issuer@` service account (no keys or workloads), its two bindings and the
+deployer's IAP web-service admin grant. The foundation then planned no changes. The domain
 was registered once with `gcloud domains registrations register --cloud-dns-zone=pi-orb-preview`,
 not Terraform: it is a paid registration with registrant contact data.
