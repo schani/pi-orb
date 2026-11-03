@@ -9,6 +9,11 @@ compute. The shared-namespace process provider is unsupported. No public domain 
 no preview ingress is provisioned, and local qualification is not deployed acceptance.
 Remaining ingress choices are in `docs/open-questions.md`; acceptance work is in `TODO.md`.
 
+**Release order (decided 2026-11-03):** deploying this change removes Tailscale, so it
+deploys only with `PI_ORB_PREVIEW_ORIGIN` set: provision the domain and ingress, qualify,
+deploy, then run live acceptance. Rejected: deploying with previews disabled first, which
+would leave orbs without any port access until ingress exists.
+
 Architecture prerequisite: [PR #51](https://github.com/schani/pi-orb/pull/51) merged as
 `3c03e4200b8220fa097b97b379cc20c851527103` October 5, 10:30 PM PDT.
 [Deploy 37469707425](https://github.com/schani/pi-orb/actions/runs/37469707425)
