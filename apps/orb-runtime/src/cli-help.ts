@@ -12,8 +12,8 @@ const commands = {
     usage: "pi-orb self [--json]",
     summary: "Show this orb's identity.",
     details: [
-      "Includes dashboard URL, project and repository, creation time, spawning parent,",
-      "direct children, and preview hostname (when configured, not a reachability check).",
+      "Includes dashboard URL, project and repository, creation time, spawning parent",
+      "and direct children.",
       "No parent is reported as null in JSON; no children as []. This does not inspect grandchildren.",
       "Output: readable labeled fields; --json prints the structured identity response.",
       "--json may appear anywhere once; repeated --json is an error.",
@@ -217,6 +217,42 @@ const commands = {
       "pi-orb host ls",
       "pi-orb host rm reports/index.html",
     ],
+  },
+  expose: {
+    usage: "pi-orb expose <port>",
+    summary: "Register a localhost HTTP port as an authenticated preview.",
+    details: [
+      "port is an integer from 1 to 65535; the runtime port 8080 is reserved.",
+      "Output: the preview URL to share. Never guess preview URLs.",
+      "Registration does not mean the service is running; previews never start stopped compute.",
+      "Registrations survive stop/start and compute replacement; orb deletion removes them.",
+      "Fails when HTTP previews are not configured.",
+      "Retry: idempotent; registering the same port again returns the same URL.",
+      "Exit: 0 registered; 2 usage/environment; 6 any other failure.",
+    ],
+    examples: ["pi-orb expose 5173"],
+  },
+  unexpose: {
+    usage: "pi-orb unexpose <port>",
+    summary: "Revoke a port's preview registration.",
+    details: [
+      "Open preview connections to the port close. Revoking an unregistered port succeeds.",
+      "Output: none.",
+      "Retry: idempotent; safe to repeat.",
+      "Exit: 0 revoked; 2 usage/environment; 6 any other failure.",
+    ],
+    examples: ["pi-orb unexpose 5173"],
+  },
+  previews: {
+    usage: "pi-orb previews [--json]",
+    summary: "List this orb's preview registrations.",
+    details: [
+      "Output: tab-separated port/URL rows (no header); --json prints {previews:[{port,registrationId,url}]}.",
+      "An empty list prints nothing.",
+      inspectionRetry,
+      "Exit: 0 success; 2 usage/environment; 6 any other failure.",
+    ],
+    examples: ["pi-orb previews", "pi-orb previews --json"],
   },
   "id-token": {
     usage: "pi-orb id-token --audience <audience> [--ttl-seconds <60..3600>]",

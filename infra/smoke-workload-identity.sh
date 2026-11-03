@@ -436,19 +436,6 @@ esac
 say "  mint instance located"
 wait_for_ssh "$MINT_INSTANCE"
 
-# Use the already-owned peer, not an optional tailnet client on the CI runner.
-preview=$(api "/api/v1/orbs/$STOPPED_ORB" | jget previewHost) || fail "peer-preview" "cannot read preview host"
-[[ "$preview" =~ ^[a-zA-Z0-9.-]+$ ]] && [ "${#preview}" -le 253 ] || fail "peer-preview" "invalid or absent preview host"
-preview_deadline=$(( $(date +%s) + 60 ))
-[ "$preview_deadline" -le "$DEADLINE" ] || preview_deadline=$DEADLINE
-preview_response=$(PI_ORB_SMOKE_DEADLINE="$preview_deadline" orb_ssh preview "$MINT_INSTANCE" "sudo python3 - /usr/bin/tailscale '$preview' $(( $(date +%s) + 25 < preview_deadline ? $(date +%s) + 25 : preview_deadline ))" < "$DIR/smoke_preview.py") ||
-  fail "peer-preview" "preview probe failed"
-preview_code=$(printf '%s\n' "$preview_response" | tail -n1)
-preview_body=$(printf '%s\n' "$preview_response" | sed '$d')
-[ "$preview_code" = 200 ] && jq -e '.status == "ready"' <<<"$preview_body" >/dev/null 2>&1 ||
-  fail "peer-preview" "peer did not return HTTP 200 ready"
-say "peer preview health: HTTP 200 ready"
-
 mint() {
   local audience=$1 out=$2
   # The CLI's contract is that stdout carries only the JWT; gcloud's own chatter

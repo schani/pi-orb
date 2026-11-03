@@ -150,9 +150,12 @@ it("selects shared and forced-process files once but both genuine provider compo
   }
   const docker = selected.get("docker")!;
   const process = selected.get("process")!;
+  // Preview files need the provider project's images and skip on the process backend.
   expect(docker.filter((file) => process.includes(file))).toEqual([
     resolve(root, "e2e/cross-axis.e2e.test.ts"),
     resolve(root, "e2e/full-slice.e2e.test.ts"),
+    resolve(root, "e2e/preview-central.e2e.test.ts"),
+    resolve(root, "e2e/preview-docker.e2e.test.ts"),
   ]);
   expect([...new Set([...docker, ...process])].sort()).toEqual(
     globSync("e2e/**/*.e2e.test.ts", { cwd: root })

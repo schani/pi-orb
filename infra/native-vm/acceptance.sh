@@ -20,6 +20,9 @@ sudo -u orb sh -ec '
   git-crypt --version
 '
 
+test -z "$(command -v tailscale || true)"
+test -z "$(command -v tailscaled || true)"
+
 test "$(findmnt --noheadings --output TARGET --mountpoint /workspace)" = /workspace
 mounted_device=$(findmnt --noheadings --output SOURCE --mountpoint /workspace)
 workspace_device=$(readlink -f /dev/disk/by-id/google-pi-orb-data)

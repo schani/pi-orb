@@ -40,8 +40,7 @@ runs on every start, which is exactly when a credential needs refreshing.
 | `HOME` | the orb's persistent home — what you write there survives compute replacement |
 | `PI_ORB_HOOK_ENV_FILE` | `$HOME/.pi-orb/env` — the only way to give the agent a variable |
 
-Plus the image's `PATH` and `PI_ORB_REPOSITORY_URL`. Neither hook gets Tailscale
-material. Network is available to both.
+Plus the image's `PATH` and `PI_ORB_REPOSITORY_URL`. Network is available to both.
 
 Both files are executed directly, so the shebang chooses the interpreter and the
 executable bit must be committed (`git update-index --chmod=+x .agents/setup`).
@@ -100,8 +99,7 @@ last value. Expand in the hook, as the `printf` above does, not in the file.
   `PI_ORB_RUNTIME_TOKEN`, `PI_ORB_CONTROL_PLANE_URL`, `PI_ORB_ID`,
   `PI_ORB_HOST_INCARNATION`, `PI_ORB_CLAUDE_RECOVERY_PROOF`, `PI_ORB_WORK_DIR`,
   `PI_CODING_AGENT_DIR`, `HOME`, `PATH`, `PI_ORB`,
-  `PI_ORB_TAILSCALE_AUTH_KEY`, `PI_ORB_TAILSCALE_HOSTNAME`,
-  `PI_ORB_PREVIEW_HOST`, `PI_ORB_SKILLS_DIR`.
+  `PI_ORB_SKILLS_DIR`.
 - An unusable line is skipped, reported by number in `env.status.json` and in
   your own context, and the rest of the file still applies.
 - A resume hook still running past its 10-second window writes too late for this

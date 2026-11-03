@@ -50,6 +50,7 @@ import type { ModelCallUse, ModelUsageLedger } from "./domain/model-usage.ts";
 import {
   createCentralOrbAgentOperations,
   type OrbAgentError,
+  type OrbAgentOptions,
 } from "./domain/orb-agent-operations.ts";
 import { readOwnerSkillsSnapshot } from "./domain/owner-skills.ts";
 import type { BrokerDeps, ControlPlaneDeps } from "./domain/ports.ts";
@@ -189,7 +190,7 @@ export function createProcessAgentContext(
     mcpOAuth: McpOAuth;
     modelUsage: ModelUsageLedger;
     appOrigin: string;
-    tailnetDnsName?: string;
+    previews?: NonNullable<OrbAgentOptions["previews"]>;
     inferenceBaseUrl?: (userId: string) => string | undefined;
     notifyParent?: (
       orbId: string,

@@ -50,6 +50,7 @@ import { retiredReasoningAliases } from "../domain/display-aliases.ts";
 import { readLiveDisplayDetail } from "../domain/display-detail.ts";
 import { configurePersistentHome } from "../domain/home.ts";
 import type { CompactError, DetailError, OrbAgent, SnapshotError } from "../domain/orb-agent.ts";
+import { PreviewActivity } from "../domain/preview-activity.ts";
 import type { AgentGateView } from "../domain/requests.ts";
 import { configurePersistentRust } from "../domain/rust.ts";
 import type { HarnessSnapshot, LiveOperationView } from "../domain/types.ts";
@@ -65,7 +66,6 @@ import { fetchOwnerSkills } from "../owner-skills/endpoint.ts";
 import { fetchPersonalInstructions } from "../personal-instructions/endpoint.ts";
 import { fetchProjectInstructions } from "../project-instructions/endpoint.ts";
 import { fetchProjectSecretSnapshotAtBoot } from "../project-secrets/endpoint.ts";
-import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { ClaudeActivity } from "./activity.ts";
 import { claudeChildEnvironment, fetchClaudeSubscription, verifyClaudeAccount } from "./auth.ts";
 import { validateClaudeAuthSettings } from "./auth-settings.ts";
@@ -73,7 +73,7 @@ import { fetchBootContext } from "./boot-context.ts";
 import { claudeBootEntries, pendingBootContext } from "./boot-notification.ts";
 import { BOOT_BASELINE_TYPE, planBootNotification, SLEEP_WAKE_TYPE } from "./boot-policy.ts";
 import { ClaudeDiagnostics, type ClaudeQueryError } from "./diagnostics.ts";
-import { claudeEnvironmentPrompt } from "./environment-prompt.ts";
+import { claudeEnvironmentPrompt, claudePortExposurePrompt } from "./environment-prompt.ts";
 import { readExecutionIdentity } from "./execution-identity.ts";
 import { ClaudeHistory, type HistoryFiles, nativeHistoryFiles } from "./history.ts";
 import { FileIdleStopFence } from "./idle-stop-fence.ts";
@@ -161,7 +161,6 @@ export interface ClaudeOrbAgentOptions {
   readonly workDir: string;
   readonly skillsDir: string | null;
   readonly broker: BrokerEnv | null;
-  readonly previewHost?: string | null;
   readonly incarnation?: string;
   readonly claudeRecoveryProof?: ClaudeRecoveryProof | undefined;
   readonly testLaunchFailure?: boolean;
@@ -410,6 +409,8 @@ export class ClaudeOrbAgent implements OrbAgent {
     return findNativeClaudeTranscript(this.configDir, this.state?.id ?? "");
   }
 
+  readonly previewActivity = new PreviewActivity();
+
   getHealth(): RuntimeHealth {
     if (this.health.status !== "ready")
       return {
@@ -421,6 +422,8 @@ export class ClaudeOrbAgent implements OrbAgent {
     return {
       ...this.health,
       activity: this.activity.busy || this.hasOwnedWork() ? "busy" : "idle",
+      ...(this.executionId === null ? {} : { executionId: this.executionId }),
+      incarnation: Number(this.options.incarnation ?? "0"),
       ...(this.activity.operationId === null ? {} : { operationId: this.activity.operationId }),
       ...(this.hooks === null ? {} : { hooks: this.hooks.report() }),
     };
@@ -548,7 +551,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       claudeEnvironmentPrompt,
       personal.value.content,
       project.value.content,
-      ...(this.options.previewHost ? [portExposurePrompt(this.options.previewHost)] : []),
+      claudePortExposurePrompt,
       ...(context.value.userTimeZone ? [`User's time zone: ${context.value.userTimeZone}.`] : []),
     ]
       .filter(Boolean)
@@ -2230,6 +2233,7 @@ export class ClaudeOrbAgent implements OrbAgent {
   }
   prepareIdleStop(): Result<boolean, { message: string }> {
     if (this.health.status !== "ready") return err({ message: "Claude session is not ready." });
+    if (this.previewActivity.blocksIdle()) return ok(false);
     if (this.activity.busy || this.hasOwnedWork() || this.configuring) return ok(false);
     if (!this.accepting) return this.sdk === null ? this.flushHistory().map(() => true) : ok(false);
     this.accepting = false;

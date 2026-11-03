@@ -15,14 +15,7 @@ import {
 import { createServer } from "node:net";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  CONTROL_PLANE_URL_ENV,
-  PREVIEW_HOST_ENV,
-  RUNTIME_TOKEN_ENV,
-  SKILLS_DIR_ENV,
-  TAILSCALE_AUTH_KEY_ENV,
-  TAILSCALE_HOSTNAME_ENV,
-} from "@pi-orb/protocol";
+import { CONTROL_PLANE_URL_ENV, RUNTIME_TOKEN_ENV, SKILLS_DIR_ENV } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, Result, ResultAsync } from "neverthrow";
 import type { OrbHostProviderError } from "../../domain/errors.ts";
@@ -327,9 +320,6 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
 
   private childEnvironment(metadata: HostMetadata): NodeJS.ProcessEnv {
     const environment: NodeJS.ProcessEnv = { ...process.env };
-    delete environment[TAILSCALE_AUTH_KEY_ENV];
-    delete environment[TAILSCALE_HOSTNAME_ENV];
-    delete environment[PREVIEW_HOST_ENV];
     // Boot writes git's XDG config file (docs/git-identity.md): never the developer's.
     delete environment.XDG_CONFIG_HOME;
     Object.assign(environment, this.options.extraEnv ?? {}, {

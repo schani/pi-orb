@@ -360,6 +360,5 @@ shown to *fail* has not been tested.
 
 ### Migrating an existing integration
 
-The Tailscale control-plane OAuth flow in `docs/ports.md` does not change because OIDC exists.
 Replacing a long-lived key with federation is separate work per integration, and each one must
 preserve whatever bounding the old credential had.

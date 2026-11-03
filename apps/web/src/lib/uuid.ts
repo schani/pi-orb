@@ -1,7 +1,6 @@
 /**
- * `crypto.randomUUID` exists only in secure contexts, and the first slice is
- * reachable over plain HTTP on a trusted network (e.g. a tailnet IP), which
- * is not one. `crypto.getRandomValues` works in every context, so fall back
+ * `crypto.randomUUID` exists only in secure contexts. Local development can
+ * use plain HTTP. `crypto.getRandomValues` works in every context, so fall back
  * to assembling a v4 UUID from it.
  */
 export function generateUuid(): string {

@@ -8,7 +8,6 @@ import { FileSecretStore } from "../../../apps/control-plane/src/adapters/secret
 
 const root = resolve(process.env.NATIVE_INTEGRATION_ROOT ?? ".context/native-vm-integration");
 const f = JSON.parse(readFileSync(`${root}/fixture.json`));
-const ts = JSON.parse(readFileSync(`${root}/tailscale.json`));
 Object.assign(process.env, {
   NATIVE_INTEGRATION_ROOT: root,
   PI_ORB_DATABASE_KIND: "pglite",
@@ -28,9 +27,6 @@ Object.assign(process.env, {
   PI_ORB_NAME_INFERENCE_URL: f.nameFake.inferenceBaseUrl,
   PI_ORB_FAKE_OPENAI_OAUTH_URL: f.fake.oauthBaseUrl,
   PI_ORB_FAKE_OPENAI_INFERENCE_URL: f.fake.inferenceBaseUrl,
-  PI_ORB_TAILSCALE_OAUTH_CLIENT_ID: ts.clientId,
-  PI_ORB_TAILSCALE_OAUTH_CLIENT_SECRET: ts.clientSecret,
-  PI_ORB_TAILSCALE_TAILNET_DNS_NAME: ts.tailnetDnsName,
   PI_ORB_GITHUB_CLIENT_ID: "integration-seeded-credential",
   PI_ORB_GITHUB_CLIENT_SECRET: "unused-no-refresh",
   PI_ORB_E2E_LAUNCH_FAILURE_MARKER: ".native-integration-fail",

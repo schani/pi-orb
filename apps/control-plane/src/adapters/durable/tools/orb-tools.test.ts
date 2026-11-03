@@ -64,6 +64,9 @@ it("uses durable child task identities and does not expose authority arguments",
     "orb_sleep",
     "orb_archive",
     "orb_delete",
+    "orb_expose_port",
+    "orb_unexpose_port",
+    "orb_list_previews",
   ]);
   const sleep = tools.find((t) => t.name === "orb_sleep")!;
   await sleep.execute(
@@ -223,7 +226,6 @@ const responses = [
       project,
       spawnedByOrb: null,
       children: [],
-      previewHost: null,
     },
   ],
   ["orb_list", {}, { currentOrbId: "orb", items: [item] }],
@@ -261,6 +263,9 @@ const responses = [
   ["orb_sleep", { durationSeconds: 60 }, { sleepId: "sleep", sleepUntil: 123456 }],
   ["orb_archive", {}, { orbId: "orb", state: "archived" }],
   ["orb_delete", {}, { orbId: "orb", state: "deleting" }],
+  ["orb_expose_port", { port: 5173 }, { port: 5173, registrationId: "registration", url: "url" }],
+  ["orb_unexpose_port", { port: 5173 }, { port: 5173, revoked: true }],
+  ["orb_list_previews", {}, [{ port: 5173, registrationId: "registration", url: "url" }]],
 ] as const;
 
 it.each(responses)(
@@ -300,3 +305,19 @@ it.each(responses)(
     }
   },
 );
+
+it("maps preview tools to idempotent preview requests", async () => {
+  const invoke = vi.fn(() => okAsync([]));
+  const tools = createOrbTools({ invoke });
+  const api = { taskId: 7, callId: "call" } as ToolExecutionApi;
+  for (const [name, args, request] of [
+    ["orb_expose_port", { port: 5173 }, { kind: "expose_port", port: 5173 }],
+    ["orb_unexpose_port", { port: 5173 }, { kind: "unexpose_port", port: 5173 }],
+    ["orb_list_previews", {}, { kind: "list_previews" }],
+  ] as const) {
+    const tool = tools.find((t) => t.name === name)!;
+    expect(tool.replay).toBe("safe");
+    await tool.execute(args as never, api, BACKGROUND_CONTEXT);
+    expect(invoke).toHaveBeenLastCalledWith(request, '[7,"call"]');
+  }
+});

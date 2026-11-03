@@ -24,6 +24,9 @@ const commands = [
   "send",
   "alert",
   "host",
+  "expose",
+  "unexpose",
+  "previews",
   "id-token",
 ];
 
@@ -102,7 +105,6 @@ describe("public pi-orb help", () => {
         "creation time",
         "spawning parent",
         "direct children",
-        "preview hostname",
         "--json",
       ],
       orbs: [/list.*search.*account.*orbs/i, "[query]"],

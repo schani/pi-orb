@@ -13,16 +13,14 @@ chmod 755 /usr/sbin/policy-rc.d
 apt-get update
 apt-get install -y --no-install-recommends ca-certificates curl xz-utils git git-crypt ripgrep zip unzip sudo python3 python3-venv python-is-python3 build-essential pkg-config iproute2 util-linux openssl
 curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/github.gpg
-curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg -o /etc/apt/keyrings/tailscale.gpg
 curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg -o /etc/apt/keyrings/google.asc
 curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
 chmod 644 /etc/apt/keyrings/*
 echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/github.gpg] https://cli.github.com/packages stable main' >/etc/apt/sources.list.d/github.list
-echo 'deb [signed-by=/etc/apt/keyrings/tailscale.gpg] https://pkgs.tailscale.com/stable/debian bookworm main' >/etc/apt/sources.list.d/tailscale.list
 echo 'deb [signed-by=/etc/apt/keyrings/google.asc] https://packages.cloud.google.com/apt cloud-sdk main' >/etc/apt/sources.list.d/google-cloud-sdk.list
 echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable' >/etc/apt/sources.list.d/docker.list
 apt-get update
-apt-get install -y --no-install-recommends gh tailscale chromium google-cloud-cli docker-ce=5:29.1.3-1~debian.12~bookworm docker-ce-cli=5:29.1.3-1~debian.12~bookworm containerd.io=2.3.4-2~debian.12~bookworm docker-buildx-plugin docker-compose-plugin
+apt-get install -y --no-install-recommends gh chromium google-cloud-cli docker-ce=5:29.1.3-1~debian.12~bookworm docker-ce-cli=5:29.1.3-1~debian.12~bookworm containerd.io=2.3.4-2~debian.12~bookworm docker-buildx-plugin docker-compose-plugin
 curl -fsSL https://nodejs.org/dist/v26.13.0/node-v26.13.0-linux-x64.tar.xz -o /tmp/node.tar.xz
 echo 'd28a96af6c38596f6d9d97c0ee531c13d238d757742387d1928de822d959e997  /tmp/node.tar.xz' | sha256sum -c -
 tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1
@@ -71,7 +69,6 @@ After=workspace.mount
 BindsTo=workspace.mount
 EOF
 done
-systemctl disable tailscaled.service
 systemctl disable docker.service docker.socket containerd.service
 systemctl enable workspace.mount pi-orb-bootstrap.service pi-orb-runtime.service
 systemctl daemon-reload

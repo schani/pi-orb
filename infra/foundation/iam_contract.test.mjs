@@ -142,3 +142,25 @@ test("legacy broad network and IAP grants are explicitly adopted for removal", (
   assert.match(roles, /roles\/iap\.admin/);
   assert.match(roles, /roles\/servicenetworking\.networksAdmin/);
 });
+
+test("preview ingress gets zone-scoped DNS and load balancer/certificate authority", () => {
+  const main = readFileSync(new URL("./main.tf", import.meta.url), "utf8");
+  for (const api of ["certificatemanager", "dns", "domains"])
+    assert.match(main, new RegExp(`"${api}\\.googleapis\\.com"`));
+  const zone = main.match(/resource "google_dns_managed_zone" "preview" \{[\s\S]*?\n\}/)?.[0];
+  assert(zone);
+  assert.match(zone, /dns_name\s+= "\$\{var\.preview_domain\}\."/);
+  const records = iam.match(
+    /resource "google_dns_managed_zone_iam_member" "deployer_preview_records" \{[\s\S]*?\n\}/,
+  )?.[0];
+  assert(records);
+  assert.match(records, /managed_zone = google_dns_managed_zone\.preview\.name/);
+  assert.match(records, /roles\/dns\.admin/);
+  const roles = iam.match(/deployer_project_roles = toset\(\[[\s\S]*?\]\)/)?.[0];
+  assert(roles);
+  assert.match(roles, /roles\/certificatemanager\.editor/);
+  assert.match(roles, /roles\/compute\.loadBalancerAdmin/);
+  assert.doesNotMatch(roles, /roles\/dns\./);
+  const variables = readFileSync(new URL("./variables.tf", import.meta.url), "utf8");
+  assert.match(variables, /variable "preview_domain" \{[\s\S]*?default\s+= "piorb\.live"/);
+});

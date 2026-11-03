@@ -3,6 +3,7 @@ import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import type { BinaryReader, TextLineReader } from "@earendil-works/pi-durable/env";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
+import websocket from "@fastify/websocket";
 import {
   EXECUTION_BINARY_READ_MAX_BYTES,
   EXECUTION_CANCEL_PATH,
@@ -22,6 +23,8 @@ import {
 import Fastify from "fastify";
 import type { ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
+import type { RuntimePreviewService } from "../domain/preview.ts";
+import { registerPreviewRoutes } from "../http/preview-route.ts";
 import { BoundedLineReader } from "./line-reader.ts";
 
 export const executionContext = (abortSignal?: AbortSignal): Context =>
@@ -38,6 +41,7 @@ export interface ExecutionServerOptions {
     RuntimeAlertResponse,
     { readonly code: "conflict" | "unavailable"; readonly message: string }
   >;
+  readonly preview?: RuntimePreviewService;
 }
 const failure = (code: string, message: string): ExecutionWireResult => ({
   ok: false,
@@ -74,7 +78,8 @@ export function buildExecutionServer(options: ExecutionServerOptions) {
   const binaryReaders = new Map<string, BinaryReader>();
   const calls = new Map<string, { controller: AbortController; done: Promise<void> }>();
   app.addHook("onRequest", async (request, reply) => {
-    if (request.url === "/v1/health") return;
+    // Preview requests carry a per-request HMAC admission instead of the bearer.
+    if (request.url === "/v1/health" || request.url.startsWith("/v1/preview/")) return;
     const received = Buffer.from(request.headers.authorization ?? "");
     const expected = Buffer.from(`Bearer ${options.token}`);
     if (received.length !== expected.length || !timingSafeEqual(received, expected))
@@ -95,6 +100,9 @@ export function buildExecutionServer(options: ExecutionServerOptions) {
       return reply.code(503).send(failure("invalid", "execution host not ready"));
     }
   });
+  void app.register(websocket);
+  const preview = options.preview;
+  if (preview) void app.register(async (scope) => registerPreviewRoutes(scope, preview));
   app.get("/v1/health", async () => options.health?.() ?? { status: "ready" });
   app.post(RUNTIME_ALERT_PATH, { bodyLimit: 32 * 1024 }, async (request, reply) => {
     if (!Check(RuntimeAlertRequestSchema, request.body) || !request.body.message.trim())

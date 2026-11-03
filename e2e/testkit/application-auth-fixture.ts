@@ -7,10 +7,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import websocket from "@fastify/websocket";
 import { NoSimulationTask } from "determined";
-import Fastify from "fastify";
+import Fastify, { type FastifyInstance } from "fastify";
 import { errAsync, ok, okAsync } from "neverthrow";
 import { createGoogleLoginProvider } from "../../apps/control-plane/src/adapters/google-application-auth.ts";
 import { createSealedAuthCookies } from "../../apps/control-plane/src/adapters/sealed-auth-cookies.ts";
+import { createSealedPreviewAuth } from "../../apps/control-plane/src/adapters/sealed-preview-cookies.ts";
 import { createApplicationAuth } from "../../apps/control-plane/src/domain/application-auth.ts";
 import {
   type AuthOutcomeSink,
@@ -21,12 +22,30 @@ import {
   createHostingAccessPolicy,
   registerHostingAccessGuard,
 } from "../../apps/control-plane/src/http/hosting-access.ts";
+import { registerPreviewAuth } from "../../apps/control-plane/src/http/preview-auth-routes.ts";
+import { previewRoutingUrl } from "../../apps/control-plane/src/http/preview-gateway.ts";
+import {
+  createPreviewHosts,
+  type PreviewHosts,
+} from "../../apps/control-plane/src/http/preview-host.ts";
 import { createGoogleRequestPrincipalResolver } from "../../apps/control-plane/src/identity-composition.ts";
 
 import { startAuthConnectProxy } from "./auth-connect-proxy.ts";
 
 /** Owned HTTPS origins; only user identity persistence is replaced, never login/session verification. */
-export async function startApplicationAuthFixture() {
+export async function startApplicationAuthFixture(
+  options: {
+    previews?: boolean;
+    orbId?: string;
+    previewPorts?: readonly number[];
+    configurePreviews?: (context: {
+      app: FastifyInstance;
+      hosts: PreviewHosts;
+      appOrigin: string;
+      task: NoSimulationTask;
+    }) => Promise<void>;
+  } = {},
+) {
   const directory = await mkdtemp(join(tmpdir(), "pi-orb-auth-"));
   const cleanup: (() => Promise<unknown>)[] = [
     () => rm(directory, { recursive: true, force: true }),
@@ -50,10 +69,15 @@ export async function startApplicationAuthFixture() {
     const appHost = `app.${suffix}.orb.test`;
     const filesHost = `files.${suffix}.orb.test`;
     const googleHost = `google.${suffix}.provider.test`;
+    const previewHost = `${suffix}.preview.test`;
+    const orbId = options.orbId ?? randomUUID();
+    const previewHostnames = (options.previewPorts ?? [5173, 5174]).map(
+      (port) => `p${port}-o${orbId}.${previewHost}`,
+    );
 
     await writeFile(
       join(directory, "openssl.cnf"),
-      `[req]\ndistinguished_name=dn\n[dn]\n[v3]\nbasicConstraints=critical,CA:TRUE\nsubjectAltName=DNS:${appHost},DNS:${filesHost},DNS:${googleHost}\n`,
+      `[req]\ndistinguished_name=dn\n[dn]\n[v3]\nbasicConstraints=critical,CA:TRUE\nsubjectAltName=DNS:${appHost},DNS:${filesHost},DNS:${googleHost},DNS:*.${previewHost}\n`,
     );
     execFileSync(
       "openssl",
@@ -83,7 +107,12 @@ export async function startApplicationAuthFixture() {
       cert: await readFile(join(directory, "cert.pem")),
     };
     const google = Fastify({ https: tls, logger: false });
-    const app = Fastify({ https: tls, logger: false });
+    let routingHosts: PreviewHosts | undefined;
+    const app = Fastify({
+      https: tls,
+      logger: false,
+      rewriteUrl: (request) => previewRoutingUrl(routingHosts, request),
+    });
     cleanup.push(
       () => google.close(),
       () => app.close(),
@@ -101,11 +130,21 @@ export async function startApplicationAuthFixture() {
     const filesOrigin = `https://${filesHost}:${port(app.server)}`;
     const issuer = `https://${googleHost}:${port(google.server)}`;
     const origins = { appOrigin, filesOrigin };
+    const previewHosts = createPreviewHosts({
+      previewOrigin: `https://${previewHost}:${port(app.server)}`,
+      ...origins,
+    })._unsafeUnwrap();
+    if (options.previews) routingHosts = previewHosts;
+    const previewOrigins = previewHostnames.map((host) => `https://${host}:${port(app.server)}`);
     const proxy = await startAuthConnectProxy(
       new Map([
         [new URL(appOrigin).host, port(app.server)],
         [new URL(filesOrigin).host, port(app.server)],
         [new URL(issuer).host, port(google.server)],
+        ...previewOrigins.map((origin): [string, number] => [
+          new URL(origin).host,
+          port(app.server),
+        ]),
       ]),
     );
     cleanup.push(proxy.close);
@@ -267,8 +306,37 @@ export async function startApplicationAuthFixture() {
         },
       },
     });
-    await app.register(websocket);
-    registerHostingAccessGuard(app, createHostingAccessPolicy(origins)._unsafeUnwrap(), appOrigin);
+    if (!options.configurePreviews) await app.register(websocket);
+    registerHostingAccessGuard(
+      app,
+      createHostingAccessPolicy(origins)._unsafeUnwrap(),
+      appOrigin,
+      undefined,
+      options.previews ? previewHosts : undefined,
+    );
+    if (options.previews) {
+      registerPreviewAuth(app, {
+        hosts: previewHosts,
+        appOrigin,
+        applicationAuth: auth,
+        previewAuth: createSealedPreviewAuth(
+          "test-owned-restart-stable-cookie-sealing-secret",
+          () => now,
+        )._unsafeUnwrap(),
+        now: () => now,
+      });
+      if (options.configurePreviews)
+        await options.configurePreviews({ app, hosts: previewHosts, appOrigin, task });
+      else
+        app.addHook("onRequest", async (request, reply) => {
+          if (!previewHosts.parse(request.headers.host) || !request.previewIdentity) return;
+          if (request.url === "/asset.js")
+            return reply.type("text/javascript").send('document.body.dataset.asset = "loaded";');
+          return reply
+            .type("text/html")
+            .send('<body><p>Preview application</p><script src="/asset.js"></script></body>');
+        });
+    }
     app.addHook("onRequest", async (request) => {
       if (request.url.startsWith("/auth/callback")) loginCookie = request.headers.cookie ?? "";
     });
@@ -309,6 +377,9 @@ export async function startApplicationAuthFixture() {
     return {
       ...origins,
       proxyUrl: proxy.url,
+      previewOrigins,
+      orbId,
+      applicationPort: port(app.server),
       advance: (ms: number) => {
         now += ms;
       },

@@ -18,7 +18,6 @@ it("reads selected-user usage, refuses user overrides, validates input and expos
     app,
     new NoSimulationTask("usage routes", false),
     { ...h.deps, modelUsage: { read } },
-    {},
     TEST_SYSTEM_VIEW,
   );
   const url = "/api/v1/usage?boundaries=" + encodeURIComponent("[0,900000]");

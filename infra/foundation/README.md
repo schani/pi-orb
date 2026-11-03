@@ -218,3 +218,14 @@ The gate validates a temporary copy of the real module, then omits only
 `imports.tf` adoption directives for the mock plan: OpenTofu 1.13.2 crashes on
 mock imports. Init disables the backend and keeps the lockfile readonly; no
 cloud credentials are needed. Mutation evidence and scope: `docs/testing.md`.
+
+### Preview ingress authority (2026-11-03; applied)
+
+The foundation enables Cloud Domains, Cloud DNS and Certificate Manager, owns the public zone
+`pi-orb-preview` for `var.preview_domain` (`piorb.live`), and grants the deployer `dns.admin`
+on that zone only plus project `certificatemanager.editor` and `compute.loadBalancerAdmin`.
+The latter is project-wide load-balancer authority, including other forwarding rules and URL
+maps. A temporary administrator login applied exactly these seven additions with a targeted
+saved plan; the full plan's unrelated pending destroys are tracked in `TODO.md`. The domain
+was registered once with `gcloud domains registrations register --cloud-dns-zone=pi-orb-preview`,
+not Terraform: it is a paid registration with registrant contact data.

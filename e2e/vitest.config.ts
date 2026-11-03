@@ -55,7 +55,12 @@ export default defineConfig({
         test: {
           ...shared,
           name: "provider",
-          include: ["e2e/full-slice.e2e.test.ts", "e2e/cross-axis.e2e.test.ts"],
+          include: [
+            "e2e/full-slice.e2e.test.ts",
+            "e2e/cross-axis.e2e.test.ts",
+            "e2e/preview-docker.e2e.test.ts",
+            "e2e/preview-central.e2e.test.ts",
+          ],
           globalSetup: ["e2e/global-setup.ts"],
           pool: "forks",
           maxWorkers: 1,

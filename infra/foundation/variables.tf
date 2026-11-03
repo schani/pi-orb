@@ -13,6 +13,12 @@ variable "zone" {
   default = "us-central1-a"
 }
 
+variable "preview_domain" {
+  description = "Registered domain whose wildcard subdomains serve HTTP previews (docs/ports.md)."
+  type        = string
+  default     = "piorb.live"
+}
+
 variable "state_bucket" {
   type    = string
   default = "pi-orb-tfstate-playground-dev-6ae7"

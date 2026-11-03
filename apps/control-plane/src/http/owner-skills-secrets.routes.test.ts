@@ -46,7 +46,6 @@ async function setup(acquireGithub?: OwnerSkillsDeps["acquireGithub"]) {
         ...(acquireGithub ? { acquireGithub } : {}),
       },
     },
-    {},
     TEST_SYSTEM_VIEW,
   );
   const call = async (method: Method, url: string, payload?: object, as = "alice") => {

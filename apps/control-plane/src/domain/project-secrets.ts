@@ -27,9 +27,6 @@ const RESERVED = new Set([
   "PATH",
   "PI_ORB_RUNTIME_TOKEN",
   "PI_ORB_CONTROL_PLANE_URL",
-  "PI_ORB_TAILSCALE_AUTH_KEY",
-  "PI_ORB_TAILSCALE_HOSTNAME",
-  "PI_ORB_PREVIEW_HOST",
 ]);
 const allowedName = (name: string): boolean =>
   NAME.test(name) && name.length <= 128 && !name.startsWith("PI_ORB_") && !RESERVED.has(name);

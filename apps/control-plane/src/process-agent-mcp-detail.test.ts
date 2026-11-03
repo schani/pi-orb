@@ -49,7 +49,7 @@ it.each(["needs-auth", "connected"] as const)(
     app.addHook("onRequest", async (request) => {
       request.principal = { kind: "user", user: { id: TEST_USER_ID, email: null } };
     });
-    registerRoutes(app, task, h.deps, {}, TEST_SYSTEM_VIEW);
+    registerRoutes(app, task, h.deps, TEST_SYSTEM_VIEW);
     const paths: string[] = [];
     const request = async (path: string) => {
       paths.push(path);

@@ -18,7 +18,7 @@ describe("inbox incremental reads", () => {
     harness.store.seedProject(makeProjectRow("project-inbox"));
     harness.store.seedOrb(makeOrbRow("orb-inbox", "project-inbox", "stopped"));
     app = Fastify();
-    registerRoutes(app, task, harness.deps, {}, TEST_SYSTEM_VIEW);
+    registerRoutes(app, task, harness.deps, TEST_SYSTEM_VIEW);
     await app.ready();
     const enqueued = await app.inject({
       method: "PUT",
