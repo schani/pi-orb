@@ -6,7 +6,7 @@ resource "google_logging_project_exclusion" "preview_requests" {
   filter      = <<-FILTER
     resource.type="cloud_run_revision"
     log_id("run.googleapis.com/requests")
-    httpRequest.requestUrl =~ "^https://p[1-9][0-9]{0,4}-o[0-9a-f-]{36}\\.${replace(trimprefix(var.preview_origin, "https://"), ".", "\\\\.")}([/:?]|$)"
+    httpRequest.requestUrl =~ "^https://p[1-9][0-9]{0,4}-o[0-9a-f-]{36}\.${replace(trimprefix(var.preview_origin, "https://"), ".", "\\.")}([/:?]|$)"
   FILTER
 }
 

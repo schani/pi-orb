@@ -25,22 +25,24 @@ class PreviewTest(unittest.TestCase):
         self.assertIn('resource.type="cloud_run_revision"', source)
         self.assertIn('log_id("run.googleapis.com/requests")', source)
         self.assertIn('httpRequest.requestUrl =~', source)
-        self.assertIn(r'replace(trimprefix(var.preview_origin, "https://"), ".", "\\\\.")', source)
-        self.assertIn(r'[0-9a-f-]{36}\\.', source)
+        self.assertIn(r'replace(trimprefix(var.preview_origin, "https://"), ".", "\\.")', source)
+        self.assertIn(r'[0-9a-f-]{36}\.', source)
         self.assertIn('google_logging_project_exclusion.preview_requests', Path('infra/run.tf').read_text())
         self.assertNotIn('cloudaudit.googleapis.com', source)
 
     def test_hostname_match_does_not_exclude_other_origins(self):
         origin = 'https://preview.example.net'
         source = Path('infra/preview.tf').read_text()
-        # Terraform heredocs keep literal backslashes; Logging then parses its string.
+        # Heredocs keep backslashes literally, and Cloud Logging hands the quoted regex to RE2
+        # without unescaping: a doubled backslash matches a literal backslash (2026-11-03).
         expression = source.split('httpRequest.requestUrl =~ ', 1)[1].splitlines()[0]
         interpolation = re.search(r'\$\{[^}]+\}', expression).group()
-        expression = expression.replace(interpolation, re.escape(origin.removeprefix('https://')).replace('\\', '\\\\'))
-        pattern = json.loads(expression)
+        rendered = expression.replace(interpolation, origin.removeprefix('https://').replace('.', '\\.'))
+        pattern = rendered[1:-1]
+        self.assertNotIn('\\\\', pattern)
         host = 'p5173-o00000000-0000-4000-8000-000000000001'
         self.assertRegex(f'https://{host}.preview.example.net/oauth?code=secret', pattern)
-        for value in [f'https://{host}.preview.example.net.attacker.test/', 'https://app.example.net/', f'https://{host}.other.example.net/']:
+        for value in [f'https://{host}.preview.example.net.attacker.test/', 'https://app.example.net/', f'https://{host}.other.example.net/', f'https://{host}Xpreview.example.net/']:
             self.assertNotRegex(value, pattern)
 
 

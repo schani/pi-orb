@@ -226,6 +226,17 @@ because application OAuth codes/secrets may occur on any path/query. It does not
 logs. This exclusion alone does not protect custom/ancestor sinks, LB/proxy access logs or
 upstream application logs. Their configuration and deployed absence evidence are prerequisites
 for exposure; no all-sinks no-query-logging guarantee is claimed from local contracts.
+The first deployed filter never matched because of doubled backslashes
+(`docs/postmortems/2026-11-03-preview-request-log-exclusion.md`); the corrected regex was verified
+against live entries.
+
+**Live acceptance (2026-11-03, Firefox, Claude orb):** HTTP, cookies (`x-forwarded-proto: https`),
+SSE first byte before the end, WebSocket text/binary echo, a 70-second stream, a 50 MiB download
+and 20 MiB uploads pass. A 40 MiB upload returns 413: Cloud Run's documented 32 MiB HTTP/1 request
+limit. Revoke closed an open WebSocket within 3 seconds, returned 404 `port_not_registered`, and
+re-registration restored service; every step logged its lifecycle edge. Vite's HMR socket
+connected through the preview. A browser's normal WebSocket close reached the application as
+`1006` until the runtime stopped cancelling accepted sockets on TCP close; fixed with a test.
 
 ## Retained decisions and alternatives
 

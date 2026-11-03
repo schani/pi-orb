@@ -361,3 +361,36 @@ it("intentional Stop aborts an upload blocked by upstream backpressure and relea
     await new Promise<void>((resolve) => upstream.close(() => resolve()));
   }
 });
+
+it("relays a client's normal WS close to the application with its code and reason", async () => {
+  const upstreamHttp = createServer();
+  const upstreamWs = new WebSocketServer({ server: upstreamHttp });
+  await new Promise<void>((resolve) => upstreamHttp.listen(0, "127.0.0.1", resolve));
+  const port = (upstreamHttp.address() as { port: number }).port;
+  const f = await runtime(port);
+  const received = new Promise<[number, string]>((resolve) =>
+    upstreamWs.on("connection", (socket) => {
+      socket.once("close", (code, reason) => resolve([code, reason.toString()]));
+      socket.send("ready");
+    }),
+  );
+  const down = new WebSocket(`${f.app.listeningOrigin.replace("http", "ws")}/v1/preview/${port}`, {
+    headers: {
+      "x-pi-orb-preview-admission": f.grant(),
+      "x-pi-orb-preview-path": Buffer.from("/").toString("base64url"),
+    },
+  });
+  down.on("error", () => undefined);
+  try {
+    await new Promise<void>((resolve) => down.once("message", () => resolve()));
+    down.close(1000, "bye");
+    expect(await received).toEqual([1000, "bye"]);
+  } finally {
+    down.terminate();
+    f.service.closeAll();
+    await f.app.close();
+    for (const socket of upstreamWs.clients) socket.terminate();
+    await new Promise<void>((resolve) => upstreamWs.close(() => resolve()));
+    await new Promise<void>((resolve) => upstreamHttp.close(() => resolve()));
+  }
+});
