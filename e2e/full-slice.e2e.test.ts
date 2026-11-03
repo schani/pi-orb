@@ -628,11 +628,22 @@ async function dumpOrbDiagnostics(id: string): Promise<void> {
           hostMetadata: entries.includes("host.json"),
         }),
       );
+      for (const log of ["runtime.log", "runtime.err.log"]) {
+        const path = join(hostDirectory, log);
+        const text = existsSync(path) ? readFileSync(path, "utf8") : "<absent>";
+        console.error(`=== ${log} (tail) ===\n${text.split("\n").slice(-60).join("\n")}`);
+      }
     } else {
       const names = await orbContainerNames(id).catch((error: unknown) => [
         `unavailable: ${String(error)}`,
       ]);
       console.error("=== docker inventory ===", JSON.stringify(names));
+      for (const name of names.filter((value) => !value.startsWith("unavailable:"))) {
+        const state = await docker(["inspect", "--format", "{{json .State}}", name]).catch(String);
+        console.error(`=== ${name} state === ${state}`);
+        const logs = await dockerOutcome(["logs", "--tail", "80", name]);
+        console.error(`=== ${name} logs (tail) ===\n${logs.stdout}\n${logs.stderr}`);
+      }
     }
   }
   console.error("=== control-plane logs (tail) ===");
