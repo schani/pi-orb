@@ -1622,6 +1622,16 @@ Dockerfile applied patches the runtime image no longer ships; both fixed. Unit/D
 151 Node, 238 Python and 34 native-VM tests; preview E2Es pass locally (two Docker, three
 frontend files). Evidence: `.context/rebase-20261101/`. No deployment.
 
+## Compact abort acknowledgement race (2026-11-03)
+
+PR #238's E2E shard 4 failed `compact-frontend.e2e.test.ts` on WebKit: the rejected-compaction
+feedback stayed empty. The mock backend sends the aborted compaction's transcript/status
+events before the abort's `request.result`, and the test submitted the next command once
+those rendered. While the abort was still pending, the composer dropped the input. Delaying
+the acknowledgement by 500 ms reproduced the exact failure on Chromium and WebKit; the test
+now waits for the header settings to re-enable (they are disabled while any request is pending),
+passing with the delay and in five normal runs. Evidence: `.context/pr238/`.
+
 ## Deterministic simulation testing strategy
 
 The [`determined`](https://www.npmjs.com/package/determined) package provides cooperative deterministic scheduling, reproducible entropy, failpoints, blocking primitives, deadlock detection, and exact record/replay of failing schedules. pi-orb does not require timed mutex or condition-variable APIs: it coordinates with database compare-and-swap, explicit lifecycle state, serialized in-process mutation queues, and cancellable adapter operations. Virtual sleep/deadline timers only need to participate correctly in scheduler quiescence and cancellation.

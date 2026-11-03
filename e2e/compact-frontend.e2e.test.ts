@@ -101,6 +101,9 @@ it.each(["chromium", "webkit"] as const)(
       await check(page.locator(".orb-composer-feedback-original")).not.toContainText(
         "Compaction aborted",
       );
+      // The abort's acknowledgement follows its transcript events; until it lands the composer
+      // drops input, and pending requests disable the header settings.
+      await check(page.getByRole("button", { name: "Change model", exact: true })).toBeEnabled();
       await page.request.post(control, { data: { reject: true } });
       await input.fill("/compact retain paths");
       await input.press("Enter");
