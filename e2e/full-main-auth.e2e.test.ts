@@ -302,8 +302,17 @@ it("main Google mode authenticates public/private/files surfaces and proxies a r
   ).catch(async (error: unknown) => {
     // A runtime that never reports ready otherwise leaves no evidence of why.
     console.error("=== orb view ===", JSON.stringify((await api(`/api/v1/orbs/${orbId}`)).body));
+    const host = join(directory, "hosts", orbId);
+    const metadata = existsSync(join(host, "host.json"))
+      ? (JSON.parse(readFileSync(join(host, "host.json"), "utf8")) as { port?: number })
+      : {};
+    const health = await fetch(`http://127.0.0.1:${metadata.port}/v1/health`)
+      .then((response) => response.text())
+      .catch(String);
+    console.error(`=== runtime health === ${health}`);
+    console.error(`=== host size === ${execFileSync("du", ["-sk", host]).toString().trim()} KiB`);
     for (const log of ["runtime.log", "runtime.err.log"]) {
-      const path = join(directory, "hosts", orbId, log);
+      const path = join(host, log);
       const text = existsSync(path) ? readFileSync(path, "utf8") : "<absent>";
       console.error(`=== ${log} (tail) ===\n${text.split("\n").slice(-80).join("\n")}`);
     }
