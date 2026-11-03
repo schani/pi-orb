@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { tmpdir } from "node:os";
@@ -299,7 +299,19 @@ it("main Google mode authenticates public/private/files surfaces and proxies a r
       return view.body["state"] === "running" ? true : null;
     },
     { timeoutMs: 300_000 },
-  );
+  ).catch(async (error: unknown) => {
+    // A runtime that never reports ready otherwise leaves no evidence of why.
+    console.error("=== orb view ===", JSON.stringify((await api(`/api/v1/orbs/${orbId}`)).body));
+    for (const log of ["runtime.log", "runtime.err.log"]) {
+      const path = join(directory, "hosts", orbId, log);
+      const text = existsSync(path) ? readFileSync(path, "utf8") : "<absent>";
+      console.error(`=== ${log} (tail) ===\n${text.split("\n").slice(-80).join("\n")}`);
+    }
+    console.error(
+      `=== control-plane logs (tail) ===\n${cp?.logs.join("").split("\n").slice(-60).join("\n")}`,
+    );
+    throw error;
+  });
   const connect = (
     surface: "live" | "terminal",
     protocol: string,
