@@ -128,6 +128,7 @@ jobs:
           FIRST_CONSOLIDATION: ${{ inputs.first_consolidation }}
           MIGRATION_TIMEOUT_30M: ${{ inputs.migration_timeout_30m }}
           TF_VAR_google_client_id: 1077475695242-hs53alaasigvrurtme2j73ej37vqre63.apps.googleusercontent.com
+          TF_VAR_preview_origin: https://piorb.live
           GH_TOKEN: ${{ github.token }}
           PI_ORB_CI_QUALIFICATION: ${{ needs.qualify.outputs.evidence }}
           PI_ORB_RELEASE_RESULT_DIR: ${{ runner.temp }}/release-result

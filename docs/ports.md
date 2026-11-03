@@ -180,11 +180,17 @@ After selecting an owned separate domain and DNS authority, operate a TLS revers
 4. Disable URL/query/header/body logging at the edge and audit every downstream sink before
    exposure. Verify registration, auth and streaming from an external browser.
 
-A GCP external application LB/serverless NEG is an ingress candidate, not a provisioned resource.
-For it, select the domain/managed DNS zone, reserve the IP, create wildcard DNS and use
-Certificate Manager DNS authorization plus its validation record; legacy Compute Engine managed
-SSL certificates do not supply wildcard issuance ([DNS authorization](https://cloud.google.com/certificate-manager/docs/deploy-google-managed-dns-auth)).
-No domain, certificate or LB was selected/applied by this implementation.
+**Ingress (decided 2026-11-03):** the user selected `piorb.live` and a GCP global external
+application LB (about $19/month). Rejected: a separately operated nginx edge. Cloud Domains
+registered the domain (Squarespace registrar, redacted contact data, renews 2027-11-03) with
+delegation to the foundation-owned public Cloud DNS zone `pi-orb-preview`; the foundation also
+grants the deployer `dns.admin` on that zone only plus project `certificatemanager.editor` and
+`compute.loadBalancerAdmin`. `infra/preview.tf` creates, when `preview_origin` is set, the
+global address, Certificate Manager DNS authorization and `*.piorb.live` certificate/map, a
+serverless NEG to the existing issuer service, a backend with edge logging disabled, the HTTPS
+proxy/443 forwarding rule and the wildcard A record. Deploy sets
+`TF_VAR_preview_origin=https://piorb.live`, so the ingress and Tailscale removal ship together;
+previews fail TLS until certificate validation completes. Rejected: a separate ingress PR.
 
 ## Testing and observability
 

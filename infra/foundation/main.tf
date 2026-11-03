@@ -21,9 +21,12 @@ data "google_project" "pi_orb" {}
 resource "google_project_service" "apis" {
   for_each = toset([
     "artifactregistry.googleapis.com",
+    "certificatemanager.googleapis.com",
     "cloudbuild.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     "compute.googleapis.com",
+    "dns.googleapis.com",
+    "domains.googleapis.com",
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
     "iap.googleapis.com",
@@ -36,6 +39,14 @@ resource "google_project_service" "apis" {
   ])
   service            = each.key
   disable_on_destroy = false
+}
+
+# The registered preview domain delegates to this zone; the application root
+# writes only its records (docs/ports.md).
+resource "google_dns_managed_zone" "preview" {
+  name       = "pi-orb-preview"
+  dns_name   = "${var.preview_domain}."
+  depends_on = [google_project_service.apis]
 }
 
 locals {

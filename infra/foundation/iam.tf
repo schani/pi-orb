@@ -203,7 +203,9 @@ resource "google_project_iam_member" "deployer_logging_exclusions" {
 
 locals {
   deployer_project_roles = toset([
+    "roles/certificatemanager.editor",
     "roles/cloudsql.admin",
+    "roles/compute.loadBalancerAdmin",
     "roles/compute.viewer",
     "roles/logging.viewer",
     "roles/monitoring.viewer",
@@ -318,4 +320,10 @@ resource "google_service_account_iam_member" "deployer_uses_runtime_accounts" {
   service_account_id = each.value
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.deployer.email}"
+}
+
+resource "google_dns_managed_zone_iam_member" "deployer_preview_records" {
+  managed_zone = google_dns_managed_zone.preview.name
+  role         = "roles/dns.admin"
+  member       = "serviceAccount:${google_service_account.deployer.email}"
 }

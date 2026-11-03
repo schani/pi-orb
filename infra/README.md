@@ -22,10 +22,11 @@ apply evidence. This is not a first-consolidation cutover.
 Set it only to the exact HTTPS base origin of an owned domain on a different registrable
 site from app/files (no trailing slash). The CP performs PSL/private-domain validation.
 `run.tf` injects `PI_ORB_PREVIEW_ORIGIN` into the existing application, preserving the
-exact issuer URL. It does not create DNS, certificates or a load balancer.
+exact issuer URL. With it set, `preview.tf` also creates the wildcard certificate, HTTPS load
+balancer and records in the foundation-owned `pi-orb-preview` zone. Production uses
+`https://piorb.live` (`docs/ports.md`).
 
-No domain is selected and no live provisioning/deployment is authorized. Operator contract:
-`docs/ports.md`. A TLS proxy must route wildcard preview hosts to the existing Cloud Run
+Operator contract: `docs/ports.md`. Any alternative TLS proxy must route wildcard preview hosts to the existing Cloud Run
 backend while preserving Host, path/query and WS Upgrade. For example, the relevant nginx
 routing configuration below requires the operator's DNS/TLS and existing issuer hostname:
 

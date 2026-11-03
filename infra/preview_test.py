@@ -44,5 +44,35 @@ class PreviewTest(unittest.TestCase):
             self.assertNotRegex(value, pattern)
 
 
+    def test_preview_ingress_is_a_wildcard_https_edge_to_the_issuer(self):
+        source = Path('infra/preview.tf').read_text()
+        for resource in [
+            'google_compute_global_address" "preview',
+            'google_certificate_manager_dns_authorization" "preview',
+            'google_certificate_manager_certificate" "preview',
+            'google_certificate_manager_certificate_map" "preview',
+            'google_certificate_manager_certificate_map_entry" "preview',
+            'google_compute_region_network_endpoint_group" "preview',
+            'google_compute_backend_service" "preview',
+            'google_compute_url_map" "preview',
+            'google_compute_target_https_proxy" "preview',
+            'google_compute_global_forwarding_rule" "preview',
+            'google_dns_record_set" "preview_wildcard',
+            'google_dns_record_set" "preview_certificate_authorization',
+        ]:
+            block = source.split(f'resource "{resource}" {{', 1)[1].split('\n}', 1)[0]
+            self.assertIn('count', block, resource)
+        self.assertIn('domains            = ["*.${local.preview_domain}"]', source)
+        self.assertIn('service = google_cloud_run_v2_service.issuer.name', source)
+        self.assertIn('load_balancing_scheme = "EXTERNAL_MANAGED"', source)
+        self.assertIn('port_range            = "443"', source)
+        self.assertRegex(source, r'log_config \{\s+enable = false')
+        self.assertIn('managed_zone = "pi-orb-preview"', source)
+        self.assertNotIn('iap', source)
+
+    def test_production_release_sets_the_preview_origin(self):
+        workflow = Path('.github/workflows/deploy.yml').read_text()
+        self.assertIn('TF_VAR_preview_origin: https://piorb.live', workflow)
+
 if __name__ == '__main__':
     unittest.main()
