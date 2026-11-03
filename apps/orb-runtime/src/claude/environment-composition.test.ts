@@ -6,7 +6,7 @@ import { err, errAsync, ok, okAsync } from "neverthrow";
 import { expect, it, vi } from "vitest";
 import { environmentPrompt } from "../environment-prompt.ts";
 import { ClaudeOrbAgent } from "./agent.ts";
-import { claudeEnvironmentPrompt } from "./environment-prompt.ts";
+import { claudeEnvironmentPrompt, claudePortExposurePrompt } from "./environment-prompt.ts";
 
 vi.mock("../domain/checkout.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../domain/checkout.ts")>();
@@ -84,12 +84,16 @@ it("appends the shared environment then Claude suffix exactly once before existi
         claudeEnvironmentPrompt,
         "PERSONAL",
         "PROJECT",
+        claudePortExposurePrompt,
         "User's time zone: America/Los_Angeles.",
       ].join("\n\n"),
     });
     const append = typeof system === "object" && "append" in system ? (system.append ?? "") : "";
     expect(append.split(environmentPrompt)).toHaveLength(2);
     expect(append.split(claudeEnvironmentPrompt)).toHaveLength(2);
+    expect(claudePortExposurePrompt).toBe(
+      "## Port exposure\n\nTo expose a port on this VM to the user, use the `pi-orb expose` CLI command",
+    );
     expect(append).not.toContain("Use the available orb tools");
   } finally {
     agent.shutdownHooks();

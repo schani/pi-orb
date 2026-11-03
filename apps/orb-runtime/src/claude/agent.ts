@@ -73,7 +73,7 @@ import { fetchBootContext } from "./boot-context.ts";
 import { claudeBootEntries, pendingBootContext } from "./boot-notification.ts";
 import { BOOT_BASELINE_TYPE, planBootNotification, SLEEP_WAKE_TYPE } from "./boot-policy.ts";
 import { ClaudeDiagnostics, type ClaudeQueryError } from "./diagnostics.ts";
-import { claudeEnvironmentPrompt } from "./environment-prompt.ts";
+import { claudeEnvironmentPrompt, claudePortExposurePrompt } from "./environment-prompt.ts";
 import { readExecutionIdentity } from "./execution-identity.ts";
 import { ClaudeHistory, type HistoryFiles, nativeHistoryFiles } from "./history.ts";
 import { FileIdleStopFence } from "./idle-stop-fence.ts";
@@ -551,6 +551,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       claudeEnvironmentPrompt,
       personal.value.content,
       project.value.content,
+      claudePortExposurePrompt,
       ...(context.value.userTimeZone ? [`User's time zone: ${context.value.userTimeZone}.`] : []),
     ]
       .filter(Boolean)

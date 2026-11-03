@@ -48,7 +48,10 @@ Host-runtime (Claude) orbs use `pi-orb expose <port>`, `pi-orb unexpose <port>` 
 The runtime's bearer-authenticated PUT/DELETE `/runtime/previews/:port` and GET
 `/runtime/previews` call the registration service. Central-Pi orbs use the
 `orb_expose_port`, `orb_unexpose_port` and `orb_list_previews` tools, which call the same
-service in-process (decided 2026-10-12: Pi agents use control-plane tools, not the CLI). Unconfigured origin returns an explicit
+service in-process (decided 2026-10-12: Pi agents use control-plane tools, not the CLI).
+Model-facing text (user-approved 2026-11-03): the `orb_expose_port` description and the
+`pi-orb expose`/`unexpose`/`previews` help carry the URL/readiness/no-autostart rules; Claude's
+system prompt keeps a fixed `## Port exposure` section pointing to `pi-orb expose`. Unconfigured origin returns an explicit
 configuration-disabled error, not a fabricated URL. Registration does not assert readiness.
 
 Migration 054 persists an orb/port allowlist with a random registration generation.
