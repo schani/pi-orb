@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { tmpdir } from "node:os";
@@ -22,6 +22,7 @@ import {
   startControlPlane,
   waitFor,
 } from "./harness.ts";
+import { repositoryFixture } from "./testkit/repository-fixture.ts";
 
 const appOrigin = "https://app.full-main.test";
 const filesOrigin = "https://files.full-main.test";
@@ -299,6 +300,31 @@ it("main Google mode authenticates public/private/files surfaces and proxies a r
       return view.body["state"] === "running" ? true : null;
     },
     { timeoutMs: 300_000 },
+  ).catch(async (error: unknown) => {
+    // A runtime that never reports ready otherwise leaves no evidence of why.
+    console.error("=== orb view ===", JSON.stringify((await api(`/api/v1/orbs/${orbId}`)).body));
+    const host = join(directory, "hosts", orbId);
+    const metadata = existsSync(join(host, "host.json"))
+      ? (JSON.parse(readFileSync(join(host, "host.json"), "utf8")) as { port?: number })
+      : {};
+    const health = await fetch(`http://127.0.0.1:${metadata.port}/v1/health`)
+      .then((response) => response.text())
+      .catch(String);
+    console.error(`=== runtime health === ${health}`);
+    console.error(`=== host size === ${execFileSync("du", ["-sk", host]).toString().trim()} KiB`);
+    for (const log of ["runtime.log", "runtime.err.log"]) {
+      const path = join(host, log);
+      const text = existsSync(path) ? readFileSync(path, "utf8") : "<absent>";
+      console.error(`=== ${log} (tail) ===\n${text.split("\n").slice(-80).join("\n")}`);
+    }
+    console.error(
+      `=== control-plane logs (tail) ===\n${cp?.logs.join("").split("\n").slice(-60).join("\n")}`,
+    );
+    throw error;
+  });
+  // The orb boots from the local repository fixture, never a GitHub clone.
+  expect((await api(`/api/v1/orbs/${orbId}`)).body["checkoutCommit"]).toBe(
+    (await repositoryFixture()).commit,
   );
   const connect = (
     surface: "live" | "terminal",

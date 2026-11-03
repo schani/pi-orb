@@ -54,17 +54,28 @@ export function gatedResourceSource(source: ResourceSource, gateUrl?: string): R
   };
 }
 
-/** Normal Git URL rewriting in the test credential adapter; no production URL exceptions. */
-export function localResourceSource(repository: string, gateUrl?: string): ResourceSource {
+/**
+ * Normal Git URL rewriting in the test credential adapter; no production URL exceptions.
+ * With `onlyUrl`, other repositories are fetched unchanged.
+ */
+export function localResourceSource(
+  repository: string,
+  gateUrl?: string,
+  onlyUrl?: string,
+): ResourceSource {
   const source = new GitResourceSource({
     environment: (url) =>
-      okAsync({
-        GIT_CONFIG_COUNT: "2",
-        GIT_CONFIG_KEY_0: `url.${pathToFileURL(repository).href}.insteadOf`,
-        GIT_CONFIG_VALUE_0: url,
-        GIT_CONFIG_KEY_1: "protocol.file.allow",
-        GIT_CONFIG_VALUE_1: "always",
-      }),
+      okAsync(
+        onlyUrl !== undefined && url !== onlyUrl
+          ? {}
+          : {
+              GIT_CONFIG_COUNT: "2",
+              GIT_CONFIG_KEY_0: `url.${repository.includes("://") ? repository : pathToFileURL(repository).href}.insteadOf`,
+              GIT_CONFIG_VALUE_0: url,
+              GIT_CONFIG_KEY_1: "protocol.file.allow",
+              GIT_CONFIG_VALUE_1: "always",
+            },
+      ),
   });
   return gatedResourceSource(source, gateUrl);
 }

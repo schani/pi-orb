@@ -26,8 +26,9 @@ export class LoopbackWebSocketConnection implements PreviewConnection {
     this.port = port;
     this.path = path;
   }
+  /** Aborts before acceptance; afterwards the sockets' own close handshakes relay the close. */
   cancel(): void {
-    this.close();
+    if (this.downstream === undefined) this.close();
   }
   get protocol(): string {
     return this.upstream?.protocol ?? "";

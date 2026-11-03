@@ -1632,6 +1632,28 @@ the acknowledgement by 500 ms reproduced the exact failure on Chromium and WebKi
 now waits for the header settings to re-enable (they are disabled while any request is pending),
 passing with the delay and in five normal runs. Evidence: `.context/pr238/`.
 
+## E2E repository fixture (2026-11-03)
+
+PR #240's first four CI runs timed out waiting for orbs to start in shifting shards
+(`full-main-auth`, `full-slice`, `orb-sleep`, `orb-alerts`, `mcp-oauth`, `idle-stop-view`,
+`durable-process`), while the same shard passed locally on the same commit. Every one created
+its orb from the real `https://github.com/schani/pi-orb`, and the runtime boots with a full,
+unbounded `git clone` (45.6 MiB). Durations were bimodal against `main`'s green run
+(`full-main-auth` 49 s on main; 325 s, 325 s and 47 s here; `orb-alerts` 27 s against 314 s), and
+`durable-independent-process`, which also uses the GitHub URL but never waits for the clone, was
+unchanged. The one captured dump showed a live runtime answering 59 health probes with empty logs
+and not ready for 294 seconds. The stalled step was not observed directly; the evidence is
+consistent with GitHub clone throughput from CI, not with product code.
+
+E2E orbs no longer clone GitHub. `e2e/testkit/repository-fixture.ts` serves a one-commit
+snapshot of the checkout with `git daemon`; `startControlPlane` points the control plane's
+resource fetch (that URL only) and every runtime clone (`PI_ORB_E2E_RUNTIME_ENV`, git URL
+rewrites for process and Docker hosts) at it, unless a test owns its repository. The cross-axis
+Docker case keeps the real repository deliberately. `full-main-auth` asserts the orb checks out
+the fixture commit. Locally all affected process files (8 files, 14 tests) and Docker
+`full-slice` (4 tests) pass. `full-slice` and `full-main-auth` failure dumps now include runtime
+logs, health and container state. Evidence: `.context/pr240/`.
+
 ## Deterministic simulation testing strategy
 
 The [`determined`](https://www.npmjs.com/package/determined) package provides cooperative deterministic scheduling, reproducible entropy, failpoints, blocking primitives, deadlock detection, and exact record/replay of failing schedules. pi-orb does not require timed mutex or condition-variable APIs: it coordinates with database compare-and-swap, explicit lifecycle state, serialized in-process mutation queues, and cancellable adapter operations. Virtual sleep/deadline timers only need to participate correctly in scheduler quiescence and cancellation.

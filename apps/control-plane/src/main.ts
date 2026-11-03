@@ -112,6 +112,7 @@ import { createSigningKeyBootstrapState, ensureActiveSigningKey } from "./domain
 import { UserScope } from "./domain/user-scope.ts";
 import { MintDenialLog } from "./domain/workload-identity.ts";
 import { E2eReconcileCheckpoints } from "./e2e-reconcile-checkpoints.ts";
+import { parseE2eRuntimeEnvironment } from "./e2e-runtime-environment.ts";
 import { createConfiguredHostingAccessPolicy, readHostingConfiguration } from "./hosting-config.ts";
 import { type AuthOutcomeSink, registerAuthRoutes } from "./http/auth-routes.ts";
 import {
@@ -405,7 +406,14 @@ export async function main(
   };
   const e2eLaunchFailureMarker = env("PI_ORB_E2E_LAUNCH_FAILURE_MARKER", "");
   const e2eHostSpec = env("PI_ORB_E2E_HOST_SPEC", "");
+  const e2eRuntimeEnv = parseE2eRuntimeEnvironment(env("PI_ORB_E2E_RUNTIME_ENV", ""));
+  if (e2eRuntimeEnv.isErr()) {
+    bootTask.error("PI_ORB_E2E_RUNTIME_ENV must be a JSON object of strings");
+    process.exitCode = 1;
+    return;
+  }
   const runtimeExtraEnv: Record<string, string> = {
+    ...e2eRuntimeEnv.value,
     ...(e2eLaunchFailureMarker === ""
       ? {}
       : { PI_ORB_E2E_LAUNCH_FAILURE_MARKER: e2eLaunchFailureMarker }),
