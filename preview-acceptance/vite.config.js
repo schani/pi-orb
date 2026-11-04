@@ -53,7 +53,7 @@ function acceptance() {
         }
         if (p === "/__revoke") {
           log("revoke requested");
-          spawn("sh", ["-c", "sleep 1; pi-orb unexpose 5173 && echo unexposed >> /tmp/accept/events.log; sleep 20; pi-orb expose 5173 >> /tmp/accept/events.log 2>&1"], { detached: true, stdio: "ignore" }).unref();
+          spawn("sh", ["-c", "sleep 1; pi-orb unexpose 5173 && echo unexposed >> ${dir}/events.log; sleep 20; pi-orb expose 5173 >> ${dir}/events.log 2>&1"], { detached: true, stdio: "ignore" }).unref();
           return res.end("ok");
         }
         if (p === "/__monitor") {
