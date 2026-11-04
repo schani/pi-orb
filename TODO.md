@@ -11,8 +11,6 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- **Qualify hosted runner capacity preparation** (2026-11-04; `docs/postmortems/2026-11-04-ci-runner-disk-budget.md`). Capture attempt-1 exact-head E2E and control-plane image jobs with before/after Android allocation and filesystem headroom, including an affected small AWS runner (or controlled capacity proof). Preserve the 15 GiB guards and first failures; larger Azure passes alone do not qualify AWS recovery.
-
 - **Finish qualification of the approved headline/deletion correction** (2026-10-29; `docs/postmortems/2026-10-29-pg17-production.md`; unwaived blocker). Focused local/PGlite tests and static checks pass (`docs/testing.md`); fresh exact-head PR CI and release qualification remain pending. Historical cause remains unproven.
 
 - **Harden CPU-starvation-sensitive tests** (2026-10-26, PR 221; [evidence](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/6e16dc75-2326-4f5a-bbfd-853e5ce5fcd0/evidence/pr221-local-load-failures.tgz)). With 8 busy loops on 2 CPUs, `adapters/pg/mcp.test.ts`, `adapters/pg/project-instructions.test.ts` and `http/mcp-oauth-routes.test.ts` exceed the 10s PGlite `beforeEach` (quiet open+migrate ≈2s, unchanged by migration 051), and four WebKit `e2e/frontend-mobile.e2e.test.ts` tail/wheel tests fail with `locator resolved to 0 elements` after ≈10s; quiet runs and CI pass. First seen when three agents ran suites concurrently. Replace wall-clock waits with explicit synchronization or bound setup cost.
@@ -39,6 +37,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 - [ ] **Qualify, release and adopt cooperative Claude SDK responsiveness** (2026-10-16; [PR 137](https://github.com/schani/pi-orb/pull/137), `docs/claude-agent-sdk.md`, `docs/testing.md`). Exact-head CI and separate landing of the validated UI correction remain required before merge/deployment. Adopt only after fresh idle/inbox review; no target operation is authorized. The October 15 tail remains unexplained; preserve original evidence, with no replay.
 
+
+- **Qualify hosted runner capacity preparation** (2026-11-04; `docs/postmortems/2026-11-04-ci-runner-disk-budget.md`). Capture attempt-1 exact-head E2E and control-plane image jobs with before/after Android allocation and filesystem headroom, including an affected small AWS runner (or controlled capacity proof). Preserve the 15 GiB guards and first failures; larger Azure passes alone do not qualify AWS recovery.
 
 - **Improve identity-smoke cleanup diagnostics** (2026-10-14; `docs/postmortems/2026-10-14-identity-smoke-cleanup.md`). Preserve Deploy 38596107385's failed identity gate; owned fixtures are now verified absent, but its original auth/transport/rejection cause is unknown. Correct premature success and silent DELETE failure diagnostics with token-safe phase/exit/HTTP/code evidence and tests-first coverage. Deferred candidate `43f059be` rejects successful array responses and is not approved for merge. Historical cause explanation waived 2026-10-15; diagnostics remain deferred.
 

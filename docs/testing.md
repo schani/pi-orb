@@ -1,11 +1,5 @@
 # Testing
 
-## Hosted Docker runner capacity (2026-11-04, PST)
-
-**Decision:** E2E and the control-plane image job reclaim only the unused preinstalled Android root on ephemeral GitHub-hosted Ubuntu 24.04, before downloads. Host ownership checks precede deletion; before/after `df` and `du` are retained in Actions logs and step summaries. The existing 15 GiB guards after installation/before builds and all deadlines remain unchanged. Missing or insufficient reclaimable tools cannot waive the guards. No Docker pruning, dependency or production change. Evidence, official source links and rationale: `docs/postmortems/2026-11-04-ci-runner-disk-budget.md`.
-
-Local qualification: `npm ci`, 49 runner/qualification/APT contracts, full `npm run test:infra` (253 Python, 34 native-VM tests and Node contracts), lint and diff whitespace pass. Thirteen cleanup tests exercise real deletion of tiny owned fixtures with synthetic disk accounting and execute both unchanged shell guards at/below 15 GiB; this is not measured AWS capacity recovery. RED and receipts remain in `.context/ci-runner-disk/`. A passing Azure host alone does not establish recovery on the previously failing smaller AWS filesystem. Hosted qualification remains pending: `TODO.md`.
-
 ## State-machine refactor gate (user-approved 2026-11-01, PST)
 
 For this task only—workspace uploads, central Durable owner close/drain, inbox admission/replay, MCP OAuth publication and frontend scroll pinning—each machine actually refactored must first have a new deterministic regression exposing a genuine bug in the original implementation. Manufactured requirements or mutation-introduced bugs do not qualify; machines without a confirmed bug are not refactored. Preserve and replay DST failures before fixing. Preserve persisted schemas, value vocabulary, file/receipt formats and intended CAS/transaction contracts; new or changed persisted representation requires user discussion. Correcting buggy effects/ordering within those contracts is permitted.
@@ -643,6 +637,12 @@ Guard RED/GREEN evidence covers actual Native/PGlite legacy header/cursor/partia
 PR57 head `601c89c` passed all ten first-attempt checks on merge `55acc87` against `3d5bc9d`. Main subsequently advanced to `290535c` through the empty-repository boot fix and Spot incident records; the earlier proof no longer qualifies this integration. Normal merge preserves the nullable checkout/last-ready drain contract alongside central initial-pin admission. Separate real-Git retained-checkout and mock pin tests avoid replacing either contract; the unborn-HEAD regression fails before integration and all five checkout cases pass afterward. Upstream migration `032_orb_last_ready_at.sql` is unchanged; unshipped Durable migrations move to034–039 without SQL changes after frozen-main `7bedf41`, preserving upstream033 Claude recovery, preserving unique sequence and append ordering. Fresh exact-integration CI, Docker and central-process shards plus actual CP image/proof remain required. Production backend selection and existing host-Pi conversation cutover remain separate decisions.
 
 **User exception (2026-10-06):** after disclosure of the unresolved historical remote-provider approval timeout and host-Pi upload continuation stall, the user explicitly cleared those historical failures as deployment blockers and authorized merge, deployment and monitoring. Their causes remain unknown; the first failures and corrective job-owned-provider/transport evidence are retained. This exception does not waive any new failure or exact-source gate.
+
+## Hosted Docker runner capacity (2026-11-04, PST)
+
+**Decision:** E2E and the control-plane image job reclaim only the unused preinstalled Android root on ephemeral GitHub-hosted Ubuntu 24.04, before downloads. Host ownership checks precede deletion; before/after `df` and `du` are retained in Actions logs and step summaries. The existing 15 GiB guards after installation/before builds and all deadlines remain unchanged. Missing or insufficient reclaimable tools cannot waive the guards. No Docker pruning, dependency or production change. Evidence, official source links and rationale: `docs/postmortems/2026-11-04-ci-runner-disk-budget.md`.
+
+Local qualification: `npm ci`, 49 runner/qualification/APT contracts, full `npm run test:infra` (253 Python, 34 native-VM tests and Node contracts), lint and diff whitespace pass. Thirteen cleanup tests exercise real deletion of tiny owned fixtures with synthetic disk accounting and execute both unchanged shell guards at/below 15 GiB; this is not measured AWS capacity recovery. RED and receipts remain in `.context/ci-runner-disk/`. A passing Azure host alone does not establish recovery on the previously failing smaller AWS filesystem. Hosted qualification remains pending: `TODO.md`.
 
 ## GitHub Durable qualification (2026-10-06)
 
