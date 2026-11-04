@@ -1659,11 +1659,13 @@ logs, health and container state. Evidence: `.context/pr240/`.
 A focused run on main `7c25f138` with pinned Vitest 5.0.5 reproduced the daemon left by
 successful suites; this is not specific to the 5.1.0 upgrade. Worker termination bypasses
 Node's process-exit cleanup. Repository fixtures belong to the test file: both Vitest configs
-load `e2e/testkit/repository-fixture-setup.ts`, whose `afterAll` awaits daemon closure before
-removing the snapshot. Hook registration stays in `setupFiles`, not the helper imported by
-global setup. Isolated fork/thread regressions assert clone refusal and snapshot removal after
-worker completion, with owned process-group cleanup on failure. Evidence, including the first
-failing regressions and original cleanup audit: `.context/fixture-cleanup/`.
+load `e2e/testkit/repository-fixture-setup.ts`, whose `aroundAll` wraps the suite in
+`try/finally`: await daemon closure, then remove the snapshot, even when caller teardown
+rejects or times out. A separate `afterAll` is insufficient: Vitest 5.0.5 reverses teardown
+hooks and stops on rejection. Hook registration stays in `setupFiles`, not the helper imported
+by global setup. Isolated fork/thread regressions observe caller teardown failures and assert
+clone refusal and snapshot removal after worker completion, with owned process-group cleanup
+on failure. Evidence: `.context/fixture-cleanup/` and its `revision-s1/` subdirectory.
 
 ## Deterministic simulation testing strategy
 

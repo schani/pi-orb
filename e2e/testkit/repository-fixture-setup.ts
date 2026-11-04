@@ -1,4 +1,10 @@
-import { afterAll } from "vitest";
+import { aroundAll } from "vitest";
 import { stopRepositoryFixture } from "./repository-fixture.ts";
 
-afterAll(stopRepositoryFixture);
+aroundAll(async (runSuite) => {
+  try {
+    await runSuite();
+  } finally {
+    await stopRepositoryFixture();
+  }
+});
