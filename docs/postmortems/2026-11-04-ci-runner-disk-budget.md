@@ -22,4 +22,4 @@ Official sources:
 
 The defect is the job's uncontrolled initial-capacity assumption. Cleanup is confined to the job-owned hosted VM and fixed unused tool root. Unsupported hosts fail closed. Before/after filesystem and Android allocation diagnostics go to Actions logs and the step summary. Existing post-install/pre-build 15 GiB assertions and job/build deadlines remain authoritative: insufficient recovery still fails, rather than hiding a capacity failure behind a test timeout.
 
-Qualification status is recorded in `docs/testing.md`; outstanding work lives in `TODO.md`.
+**Measured outcome:** attempt-1 source `19189cee` recovered an actual 72 GiB AWS E2E host from 14,003,597,312 to 25,842,200,576 free bytes; the post-install 15 GiB guard passed with 21 GiB shown free, followed by a successful runtime build and 46 tests. All four E2E shards and the Azure control-plane image job passed. Source `ff537717` passed all ten required jobs with byte-identical cleanup/workflows/tests. Exact receipts and limits are recorded in `docs/testing.md`; later documentation-only heads require their own CI receipts.
