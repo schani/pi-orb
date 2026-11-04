@@ -12,7 +12,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 ## Bugs
 
 - **Remediate the two npm audit advisories** (2026-11-03; `docs/dependency-audit.md`): minimatch GHSA-g3hv-75wg-m249 and glob GHSA-3g3m-2fjr-6pw4. Resolve Pi/static/legacy GCP chains with compatible updates or qualified scoped overrides; verify full/production audits and regression gates.
-- **Refresh native Docker/containerd security pins** (2026-11-03; `docs/dependency-audit.md`): Docker 29.9.3 and containerd 2.3.7 LTS targets, subject to Debian package availability. Refresh base/guest-agent security inputs and qualify the native image; record installed versions, not source-only assumptions.
+- **Refresh native Docker/containerd security pins** (2026-11-03; `docs/dependency-audit.md`): Docker 29.9.3 and containerd 2.3.7 LTS targets, subject to Debian package availability; paired refresh held under the 2026-10-24 decision in [docs/deployment.md](docs/deployment.md), pending [question 87](docs/open-questions.md#dependency-update-state-conversions--87). Refresh base/guest-agent security inputs and qualify the native image; record installed versions, not source-only assumptions.
 
 - **Finish qualification of the approved headline/deletion correction** (2026-10-29; `docs/postmortems/2026-10-29-pg17-production.md`; unwaived blocker). Focused local/PGlite tests and static checks pass (`docs/testing.md`); fresh exact-head PR CI and release qualification remain pending. Historical cause remains unproven.
 
