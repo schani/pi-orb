@@ -20,6 +20,10 @@ Upstream 1.3.1 lacks fixes for recycled-page corruption ([PR 429](https://github
 
 Local 1.3.1 passed 1,386 warm executions and privacy/DML/WAL-recovery checks. The 2 s benchmark gate remains negative: 9/80 concurrent reads timed out; all 20 writes passed. A controlled reproduction establishes one-CPU runqueue contention for one representative case, not the original nine costs or 1.5.1's cause. No production memory profile or contention SLO is qualified. Protocol, timings, failures and evidence: `docs/testing.md`.
 
+## PGlite packaging decision — 2026-11-04 (PST)
+
+Pin the embedded engine to **0.5.12** and its `pg_textsearch` wrapper to **0.0.14**, whose exact peer requires that engine. This is an engine/packaging update, not an extension upgrade: both runtime wrapper JS files and all 25 extracted extension files match 0.0.13 byte-for-byte; embedded **1.5.1**, native **1.3.1** and application SQL remain unchanged. Compressed archive bytes and one CJS source-map path differ. Keep the engine exact-pinned so future coupled upgrades require qualification.
+
 ## Retrieval
 
 One statement snapshot applies owner/project/orb scope: Pi uses cursor ancestry; Claude uses all committed records. Deleting projects/orbs are excluded. Public text follows transcript visibility, excluding private overflow, reasoning, image data and tool metadata. Source JSON stays lossless. SQL sanitizes active NUL/unpaired-surrogate escapes before decoding, including private fields, without selecting private text.
