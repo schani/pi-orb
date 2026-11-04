@@ -2281,3 +2281,25 @@ succeeds; ports 3210/5173 are free. No new DST failure occurred. Private receipt
 Historical `f1df6b84` receipts (2026-10-28), including superseded per-context delivery: typecheck/lint; 188 focused tests / 12 files; PGlite 91 passed / four conditional skips; two PostgreSQL 16 owner contracts (owned container removed); Chromium/WebKit 6/6; Durable process 3/3 with provider cleanup. Acquisition/error mapping changed after browser/process receipts, then passed focused regression.
 
 [Incident/evidence](postmortems/2026-10-28-github-skills-ci-qualification.md) retains first failures and attribution limits. Exact-head qualification is recorded on [PR 225](https://github.com/schani/pi-orb/pull/225); these historical receipts do not qualify later revisions or production. No merge/deployment or native release gates are claimed.
+
+## Vitest 5.1.0 qualification (2026-11-04 PST; local, undeployed)
+
+Upgrade only Vitest, required `@vitest/mocker` and `@vitest/spy` from 5.0.5 to 5.1.0;
+all other resolutions remain unchanged. Live registry tarball SHA-512 checks and the
+[upstream release](https://github.com/vitest-dev/vitest/releases/tag/v5.1.0) are retained
+in `.context/devtool-upgrades/vitest-5.1.0/` alongside commands, graph and logs.
+Clean baseline/upgraded `npm ci` pass; both retain seven moderate audit findings.
+Baseline focused scheduler/replay, timer/mock/cache, worker/project and four-shard
+inventory contracts pass 54/54. Two added Node-timer contracts cover the unchanged
+real-builtin default and explicit fake-builtin opt-in; an initial fixture wrongly
+assumed opt-in was the default. Upstream's documented option explains its retained RED.
+The complete serial `npm test` body (Vitest plus unchanged infrastructure script)
+passes 6,086 tests with 43 conditional skips; workspace/E2E typecheck and lint pass
+(existing 488 warnings/100 infos). No unexpected DST failure or new trace occurred.
+Two earlier full invocations were interrupted, not green: a code-mode 300s deadline,
+then a transport failure at 310.2s despite longer requested deadlines. The latter's
+precise cause is unknown. `interruptions.md` retains both incomplete logs and attribution;
+the completed gate used a detached, status-file wrapper under the shared heavy lock.
+The unchanged three-case Durable process E2E passes through the owned local-provider
+wrapper; provider cleanup succeeds and ports 3210/5173 are free. No full browser,
+Docker/real-PostgreSQL/image, hosted CI or deployment qualification is claimed.
