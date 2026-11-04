@@ -53,8 +53,9 @@ it.each(
       [
         resolve(import.meta.dirname, "../../node_modules/vitest/vitest.mjs"),
         "run",
-        "--config",
-        config,
+        ...(teardown === "success"
+          ? ["e2e/testkit/repository-fixture.unit.test.ts"]
+          : ["--config", config]),
         "--pool",
         pool,
         "--reporter=json",
