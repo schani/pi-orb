@@ -2291,3 +2291,44 @@ succeeds; ports 3210/5173 are free. No new DST failure occurred. Private receipt
 Historical `f1df6b84` receipts (2026-10-28), including superseded per-context delivery: typecheck/lint; 188 focused tests / 12 files; PGlite 91 passed / four conditional skips; two PostgreSQL 16 owner contracts (owned container removed); Chromium/WebKit 6/6; Durable process 3/3 with provider cleanup. Acquisition/error mapping changed after browser/process receipts, then passed focused regression.
 
 [Incident/evidence](postmortems/2026-10-28-github-skills-ci-qualification.md) retains first failures and attribution limits. Exact-head qualification is recorded on [PR 225](https://github.com/schani/pi-orb/pull/225); these historical receipts do not qualify later revisions or production. No merge/deployment or native release gates are claimed.
+
+
+## npm 12.2.1 qualification (2026-11-04; local candidate, undeployed)
+
+Node remains 26.13.0 / ABI 147. npm 12.2.1's exact registry engines admit it;
+release metadata and verified tarball integrity are retained outside the worktree
+in `/workspace/npm-upgrade-evidence/`. The candidate uses an isolated npm prefix;
+the shared checkout and globally installed npm 11.20.0 are untouched.
+
+Tests first reject missing CI/container/native pins, lifecycle approvals and root
+package-manager metadata. Fixture tests observe exact SQLite/esbuild approvals
+at the `npm ci` boundary, preserve the cloudflared denial and compare lock bytes.
+Controlled wrong-version esbuild probes reject on npm 11, incorrectly succeed
+with npm 12's original policy (hook blocked), then reject with the exact approval.
+The first npm 12 clean install also leaves Claude's CLI placeholder; the approved
+install executes `claude --version` successfully. Agent-browser works without its
+postinstall, through its own permission repair.
+
+Clean root installation applies all three unchanged Pi 1.4.0 sealed patches;
+reapplication verifies `already_applied`. Root/workspace lock bytes and patch
+SHA-256 seals match the base. A separate npm 11.20.0 install has the same 709-entry
+installed version/URL/integrity/link graph as npm 12.2.1. Integrity-verified Pi,
+Chord and nested Pi dependency tarballs contain no `npm-shrinkwrap.json`.
+Independent web/control-plane/runtime manifest-only installs pass; web builds,
+control-plane patching and both network-namespace-isolated node-pty source
+rebuild/spawn gates pass. Existing `npm_config_nodedir=/usr/local` works with
+npm 12.2.1 but warns about future removal; no global source-policy broadening.
+The unchanged graph reports seven moderate audit findings (five runtime-only);
+no audit fix or lock refresh was run.
+
+Workspace/E2E typecheck and lint pass (488 warnings, 102 informational findings).
+The first lint attempt found only formatting in the new fixture test; formatting
+was corrected before the passing gate. Focused installer/fixture tests pass 69;
+pin/build-policy contracts pass 18. Playwright Chromium/WebKit and system
+prerequisites install successfully. The first `npm test` was transport-interrupted
+after approximately five minutes, with no final receipt; an owned detached gate
+replaces the tool-call lifetime, not a product/test timeout. Full unit/infrastructure
+and process E2E results are pending. Docker CLI exists but its daemon socket is
+absent; no Docker image, real network PostgreSQL, native GCP acceptance or
+production qualification is claimed. Evidence logs and controlled failures remain
+in `/workspace/npm-upgrade-evidence/`.

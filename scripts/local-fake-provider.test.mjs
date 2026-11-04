@@ -597,6 +597,7 @@ test("conflicting or oversized npm diagnostics stay unknown", () => {
 });
 for (const [npmVersion, denied, expectedError, npmCode = "ECONNRESET", errno = -104] of [
   ["11.19.1", true, "tool_failed"],
+  ["12.2.1", true, "tool_failed"],
   ["11.19.1", true, "tool_failed", "EBADENGINE", null],
   ["10.9.4", true, "npm_version_unsupported"],
   ["11.19.1", false, "install_policy_mismatch"],
@@ -624,7 +625,7 @@ for (const [npmVersion, denied, expectedError, npmCode = "ECONNRESET", errno = -
     const calls = join(f.root, "calls");
     await fs.writeFile(
       join(bin, "npm"),
-      `#!${process.execPath}\nrequire('node:fs').appendFileSync(${JSON.stringify(calls)},JSON.stringify(process.argv.slice(2))+'\\n');if(process.argv[2]==='--version'){console.log('${npmVersion}');process.exit(0);}console.error('npm error code ${npmCode}\\nnpm error errno ${errno}\\nnpm error command sh -c secret https://token@private.invalid');process.exit(152);`,
+      `#!${process.execPath}\nrequire('node:fs').appendFileSync(${JSON.stringify(calls)},JSON.stringify(process.argv.slice(2))+'\\n');if(process.argv[2]==='--version'){console.log('${npmVersion}');process.exit(0);}require('node:fs').copyFileSync('package.json',${JSON.stringify(calls + "-policy.json")});console.error('npm error code ${npmCode}\\nnpm error errno ${errno}\\nnpm error command sh -c secret https://token@private.invalid');process.exit(152);`,
       { mode: 0o700 },
     );
     const wrapper = fileURLToPath(new URL("./local-fake-provider.mjs", import.meta.url));
@@ -647,8 +648,18 @@ for (const [npmVersion, denied, expectedError, npmCode = "ECONNRESET", errno = -
     const installs = phases.filter((p) => p.phase === "install" && p.state === "finished");
     assert.equal(installs.length, expectedError === "tool_failed" ? 1 : 0);
     if (expectedError === "tool_failed") {
+      const project = JSON.parse(await fs.readFile(calls + "-policy.json", "utf8"));
+      assert.deepEqual(project.allowScripts, {
+        cloudflared: false,
+        "better-sqlite3@12.11.1": true,
+        "esbuild@0.28.2": true,
+      });
       assert.deepEqual(installs[0].npm, { npmCode, errno, clipped: false });
       assert.equal(installs[0].code, 152);
+      assert.equal(
+        await fs.readFile(join(privateRoot, "source/package-lock.json"), "utf8"),
+        JSON.stringify(lock),
+      );
     }
     assert.equal(manifest.error, expectedError);
     assert.equal(manifest.npm, npmVersion);

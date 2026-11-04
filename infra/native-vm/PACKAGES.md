@@ -5,7 +5,7 @@ APT recommendations. `packages.tsv` records every resolved package and its
 installed size; transitive libraries remain only as dependencies of this baseline.
 
 - Google guest agent, systemd, SSH, CA certificates: VM boot and operation.
-- Node 26.13.0 LTS, runtime npm dependencies, native node-pty: agent and terminal.
+- Node 26.13.0 LTS, npm 12.2.1, runtime npm dependencies, native node-pty: agent and terminal.
 - Bun 1.4.4 (`bun`, `bunx`): project JavaScript runtime/package tooling; checksum-pinned x64 baseline archive, shared with Docker via `infra/install_bun.sh`.
 - Docker Engine 29.1.3, containerd, Buildx, Compose: project containers/builds.
 - git, git-crypt, gh and broker helpers: repository and GitHub workflows.
@@ -55,3 +55,8 @@ the non-Linux filesystem test uses `node:26.13.0-bookworm` for Python and ext4 t
 runs these as `orb`. `git-crypt` follows the Debian package baseline; Bun's official
 archive checksums are pinned in the shared installer. Version output remains in
 the existing build/acceptance logs; no keys are installed.
+
+**npm pin (2026-11-04):** the builder installs and verifies npm 12.2.1 after
+extracting Node and before installing dependencies. Native acceptance verifies
+that pin as `orb`. Node's signed archive, dependency graph and node-pty source
+rebuild remain unchanged. Policy and rationale: `docs/stack.md`.

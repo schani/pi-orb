@@ -2,6 +2,7 @@
 #   docker build -f apps/control-plane/Dockerfile -t pi-orb-control-plane:dev .
 
 FROM node:26.13.0-bookworm-slim AS web-build
+RUN npm install --global npm@12.2.1 && test "$(npm --version)" = 12.2.1
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/protocol/package.json packages/protocol/
@@ -13,6 +14,7 @@ COPY apps/web ./apps/web
 RUN npm run build --workspace @pi-orb/web
 
 FROM node:26.13.0-bookworm-slim AS dependencies
+RUN npm install --global npm@12.2.1 && test "$(npm --version)" = 12.2.1
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 build-essential git ca-certificates \
   && rm -rf /var/lib/apt/lists/*
@@ -34,6 +36,7 @@ RUN --network=none rm -rf node_modules/node-pty/prebuilds \
   && node -e "const pty = require('node-pty'); const child = pty.spawn('/bin/sh', ['-c', 'exit 0']); child.onExit(({ exitCode }) => process.exit(exitCode))"
 
 FROM node:26.13.0-bookworm-slim
+RUN npm install --global npm@12.2.1 && test "$(npm --version)" = 12.2.1
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git ca-certificates \
   && rm -rf /var/lib/apt/lists/*

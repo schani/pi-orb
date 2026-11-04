@@ -25,6 +25,8 @@ curl -fsSL https://nodejs.org/dist/v26.13.0/node-v26.13.0-linux-x64.tar.xz -o /t
 echo 'd28a96af6c38596f6d9d97c0ee531c13d238d757742387d1928de822d959e997  /tmp/node.tar.xz' | sha256sum -c -
 tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1
 rm /tmp/node.tar.xz
+npm install --global npm@12.2.1
+test "$(npm --version)" = 12.2.1
 curl -fsSL https://static.rust-lang.org/rustup/archive/1.29.2/x86_64-unknown-linux-gnu/rustup-init -o /usr/local/bin/rustup
 echo '5be191e8c70a5007074254cb74d78dbfdd25cd5a61c27de7b8e5410122ec24f4  /usr/local/bin/rustup' | sha256sum -c -
 chmod 755 /usr/local/bin/rustup

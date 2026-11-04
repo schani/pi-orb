@@ -2,6 +2,7 @@
 # the GitHub CLI and the Google Cloud CLI. Build from the repository root:
 #   docker build -f apps/orb-runtime/Dockerfile -t pi-orb-runtime:dev .
 FROM node:26.13.0-bookworm-slim
+RUN npm install --global npm@12.2.1 && test "$(npm --version)" = 12.2.1
 
 COPY infra/runtime_apt.sh /usr/local/bin/runtime-apt
 RUN chmod 755 /usr/local/bin/runtime-apt \

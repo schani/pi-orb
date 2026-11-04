@@ -31,6 +31,47 @@ class RuntimeDependenciesTests(unittest.TestCase):
         filesystem = (ROOT / 'infra/native-vm/workspace-filesystem.test.sh').read_text()
         self.assertIn('node:26.13.0-bookworm python3', filesystem)
 
+    def test_npm_pin_is_installed_and_verified_before_each_ci_install(self):
+        for name in ['ci', 'e2e', 'deploy', 'durable-qualification']:
+            source = (ROOT / f'.github/workflows/{name}.yml').read_text()
+            sections = re.split(r'      - name: Set up Node.js[^\n]*\n', source)[1:]
+            self.assertEqual(len(sections), 2 if name == 'ci' else 1)
+            for section in sections:
+                with self.subTest(workflow=name):
+                    install = section.index('npm install --global npm@12.2.1')
+                    verify = section.index('test "$(npm --version)" = 12.2.1')
+                    self.assertLess(install, verify)
+                    if 'npm ci' in section:
+                        self.assertLess(verify, section.index('npm ci'))
+
+    def test_npm_pin_covers_every_container_stage_and_native_acceptance(self):
+        for app in ['control-plane', 'orb-runtime']:
+            source = (ROOT / f'apps/{app}/Dockerfile').read_text()
+            stages = re.split(r'^FROM [^\n]+\n', source, flags=re.M)[1:]
+            for stage in stages:
+                with self.subTest(app=app):
+                    install = stage.index('npm install --global npm@12.2.1')
+                    verify = stage.index('test "$(npm --version)" = 12.2.1')
+                    self.assertLess(install, verify)
+                    if 'npm ci' in stage:
+                        self.assertLess(verify, stage.index('npm ci'))
+        native = (ROOT / 'infra/native-vm/install.sh').read_text()
+        self.assertLess(native.index('tar -xJf /tmp/node.tar.xz'),
+                        native.index('npm install --global npm@12.2.1'))
+        self.assertLess(native.index('test "$(npm --version)" = 12.2.1'),
+                        native.index('npm ci'))
+        acceptance = (ROOT / 'infra/native-vm/acceptance.sh').read_text()
+        self.assertIn('test "$(npm --version)" = 12.2.1', acceptance)
+
+    def test_npm_lifecycle_policy_allows_only_required_exact_versions(self):
+        package = json.loads((ROOT / 'package.json').read_text())
+        self.assertEqual(package['packageManager'], 'npm@12.2.1')
+        self.assertEqual(package['allowScripts'], {
+            'node-pty@1.1.0': True,
+            '@anthropic-ai/claude-code@2.1.310': True,
+            'esbuild@0.28.2': True,
+        })
+
     def test_native_node_archive_is_checksum_verified_before_extraction(self):
         source = (ROOT / 'infra/native-vm/install.sh').read_text()
         download = ('curl -fsSL https://nodejs.org/dist/v26.13.0/'

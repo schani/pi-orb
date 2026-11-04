@@ -500,6 +500,20 @@ export async function runLocalFake(command, env = process.env) {
     manifest.npm = /^\d+\.\d+\.\d+$/.test(npmVersion) ? npmVersion : null;
     const policy = validateInstallPolicy(npmVersion, project.value);
     if (policy.isErr()) return policy;
+    const approved = await boundary("install_policy_write", () =>
+      fs.writeFile(
+        join(source, "package.json"),
+        JSON.stringify({
+          ...project.value,
+          allowScripts: {
+            cloudflared: false,
+            "better-sqlite3@12.11.1": true,
+            "esbuild@0.28.2": true,
+          },
+        }),
+      ),
+    );
+    if (approved.isErr()) return approved;
     const install = await tool("npm", ["ci", "--no-audit", "--no-fund"], source);
     if (install.isErr()) return install;
     const installed = await boundary(

@@ -2,6 +2,7 @@
   "name": "pi-orb",
   "private": true,
   "type": "module",
+  "packageManager": "npm@12.2.1",
   "workspaces": [
     "packages/protocol",
     "packages/mock-openai",
@@ -36,7 +37,9 @@
     "esbuild": "0.28.2"
   },
   "allowScripts": {
-    "node-pty@1.1.0": true
+    "node-pty@1.1.0": true,
+    "@anthropic-ai/claude-code@2.1.310": true,
+    "esbuild@0.28.2": true
   },
   "overrides": {
     "@earendil-works/pi-coding-agent@1.4.0": {
