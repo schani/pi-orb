@@ -41,6 +41,11 @@ not on every retained-workspace restart. Boot edges are written to the serial jo
 Cloud publication uses the already prescribed Google Cloud CLI and adds no image
 package.
 
+**npm pin (2026-11-04):** the builder installs and verifies npm 12.2.1 after
+extracting Node and before installing dependencies. Native acceptance verifies
+that pin as `orb`. Node's signed archive, dependency graph and node-pty source
+rebuild remain unchanged. Policy and rationale: `docs/stack.md`.
+
 **Node pin (2026-10-28):** CI, Docker and native builds use Node 26.13.0
 (Lithium LTS), with the Wasm wrapper lifetime protection absent from Node 24.22.1.
 Rationale: `docs/postmortems/2026-10-28-node-wasm-wrapper-lifetime.md`.
@@ -55,8 +60,3 @@ the non-Linux filesystem test uses `node:26.13.0-bookworm` for Python and ext4 t
 runs these as `orb`. `git-crypt` follows the Debian package baseline; Bun's official
 archive checksums are pinned in the shared installer. Version output remains in
 the existing build/acceptance logs; no keys are installed.
-
-**npm pin (2026-11-04):** the builder installs and verifies npm 12.2.1 after
-extracting Node and before installing dependencies. Native acceptance verifies
-that pin as `orb`. Node's signed archive, dependency graph and node-pty source
-rebuild remain unchanged. Policy and rationale: `docs/stack.md`.

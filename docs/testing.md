@@ -2301,8 +2301,12 @@ in `/workspace/npm-upgrade-evidence/`. The candidate uses an isolated npm prefix
 the shared checkout and globally installed npm 11.20.0 are untouched.
 
 Tests first reject missing CI/container/native pins, lifecycle approvals and root
-package-manager metadata. Fixture tests observe exact SQLite/esbuild approvals
+package-manager metadata. Fixture tests observe the exact esbuild approval
 at the `npm ci` boundary, preserve the cloudflared denial and compare lock bytes.
+SQLite bundle version checks at the fixed path precede its explicit install hook; mismatch
+prevents that hook, while hook failure prevents service/test launch. Calls prove
+locked install → one SQLite hook → launch ordering; `sqlite_install` retains the
+existing bounded npm diagnostics.
 Controlled wrong-version esbuild probes reject on npm 11, incorrectly succeed
 with npm 12's original policy (hook blocked), then reject with the exact approval.
 The first npm 12 clean install also leaves Claude's CLI placeholder; the approved
@@ -2311,8 +2315,9 @@ postinstall, through its own permission repair.
 
 Clean root installation applies all three unchanged Pi 1.4.0 sealed patches;
 reapplication verifies `already_applied`. Root/workspace lock bytes and patch
-SHA-256 seals match the base. A separate npm 11.20.0 install has the same 709-entry
-installed version/URL/integrity/link graph as npm 12.2.1. Integrity-verified Pi,
+SHA-256 seals match the base. Before stacking on PR 243, separate npm 11.20.0
+and npm 12.2.1 installs have identical version/URL/integrity/link graphs: root
+709 entries, web 320, control-plane 433 and runtime 339. Integrity-verified Pi,
 Chord and nested Pi dependency tarballs contain no `npm-shrinkwrap.json`.
 Independent web/control-plane/runtime manifest-only installs pass; web builds,
 control-plane patching and both network-namespace-isolated node-pty source
@@ -2327,8 +2332,42 @@ was corrected before the passing gate. Focused installer/fixture tests pass 69;
 pin/build-policy contracts pass 18. Playwright Chromium/WebKit and system
 prerequisites install successfully. The first `npm test` was transport-interrupted
 after approximately five minutes, with no final receipt; an owned detached gate
-replaces the tool-call lifetime, not a product/test timeout. Full unit/infrastructure
-and process E2E results are pending. Docker CLI exists but its daemon socket is
+replaces the tool-call lifetime, not a product/test timeout. On old head
+`fa95558b`, the complete `npm test` passes: 6,084 tests, 43 conditional skips,
+707 passed files/15 skipped; infrastructure passes 153 Node + 243 Python + 34
+native-guest tests and filesystem checks. Old-head E2E was deliberately disabled
+before execution for the PR 243 integration; these receipts do not qualify the
+stacked source. Docker CLI exists but its daemon socket is
 absent; no Docker image, real network PostgreSQL, native GCP acceptance or
 production qualification is claimed. Evidence logs and controlled failures remain
 in `/workspace/npm-upgrade-evidence/`.
+
+
+**PR 243 integration:** npm is stacked on exact Claude head
+`87effa3bde68475f207524941ca2433ee5fad65c`; only Claude CLI `2.1.318` is approved,
+without an old-version fallback. Before that approval, a clean install reproduces
+the non-working CLI placeholder; afterward it runs the exact native version.
+Stacked clean install, exact CLI execution, seal reapplication, all 18 pin
+contracts and workspace/E2E typecheck/lint pass (488 warnings, 102 informational
+findings). Full infrastructure passes 156 Node + 243 Python + 34 native-guest
+checks, including 72 installer/fixture contracts. Lock SHA-256
+`b6982242b7f501b565dc4500a1c883266356dc2bd2918bb3b4c7bc53f3f2810d`
+and all sealed patch bytes match the exact PR 243 base. The first real npm 12 provider
+startup exposed the bundled SQLite rule that mocked install contracts missed;
+[evidence and correction](postmortems/2026-11-04-npm12-bundled-sqlite.md).
+With the narrow explicit native installation, the actual pinned wrapper reaches
+owned worker/Vite readiness, migrations and health, then executes an exit-zero
+child and cleans both groups without escalation. Exact fixture lock/generated
+hashes are retained; no fixture source/lock upgrade. Full stacked unit/E2E/image
+qualification remains pending. PR 243 itself is draft-blocked on its native
+queued-input/persistence contract; npm does not change or waive that proof.
+
+The standalone native npm paragraph sits before the Node section, preserving the
+existing git-crypt paragraph. `git merge-tree` against PR 247's `5065468f`
+source-build tree merges without conflict; no PR 247 behavior is included here.
+Final stacked startup/cleanup receipts: `stack243-wrapper-final/`; static/install
+receipts: `stack243-final-{ci,infra,typecheck,lint}.log`, all under the evidence
+root. A post-cleanup raw Python bind probe rejected a retained TCP `TIME-WAIT`
+socket, not a listener; `ss` evidence and Node-equivalent `SO_REUSEADDR` binding
+confirm both owned ports are available. No wrapper/test retry or product change
+was used to clear that diagnostic-probe assumption.
