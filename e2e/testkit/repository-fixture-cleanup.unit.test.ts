@@ -1,0 +1,73 @@
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { expect, it } from "vitest";
+
+it("can be imported by global setup without registering test hooks", () => {
+  const run = spawnSync(
+    process.execPath,
+    ["--input-type=module", "--eval", 'await import("./e2e/testkit/repository-fixture.ts")'],
+    { cwd: resolve(import.meta.dirname, "../.."), encoding: "utf8", timeout: 20_000 },
+  );
+  expect(run.status, run.stderr).toBe(0);
+});
+
+it.each(["forks", "threads"])(
+  "releases the repository fixture before the %s worker exits",
+  async (pool) => {
+    const root = mkdtempSync(join(tmpdir(), "pi-orb-repository-cleanup-test-"));
+    const report = join(root, "report.json");
+    const run = spawn(
+      process.execPath,
+      [
+        resolve(import.meta.dirname, "../../node_modules/vitest/vitest.mjs"),
+        "run",
+        "e2e/testkit/repository-fixture.unit.test.ts",
+        "--pool",
+        pool,
+        "--reporter=json",
+        "--outputFile",
+        report,
+      ],
+      {
+        cwd: resolve(import.meta.dirname, "../.."),
+        env: { ...process.env, TMPDIR: root },
+        detached: true,
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 20_000,
+      },
+    );
+    let output = "";
+    run.stdout?.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    run.stderr?.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    try {
+      const [status] = await once(run, "close");
+      expect(status, output).toBe(0);
+      const result = JSON.parse(readFileSync(report, "utf8"));
+      const fixture = result.testResults[0].assertionResults[0].meta.repositoryFixture;
+      expect(fixture.hostUrl).toMatch(/^git:\/\/127\.0\.0\.1:\d+\/pi-orb$/);
+      const probe = spawnSync("git", ["ls-remote", fixture.hostUrl], { timeout: 3_000 });
+      expect.soft(probe.error).toBeUndefined();
+      expect.soft(probe.status, `fixture still serves ${fixture.hostUrl} from ${root}`).not.toBe(0);
+      expect
+        .soft(readdirSync(root).filter((name) => name.startsWith("pi-orb-repository-fixture-")))
+        .toEqual([]);
+    } finally {
+      // This runner owns the group, including any daemon left by a failing regression.
+      if (run.pid) {
+        try {
+          process.kill(-run.pid, "SIGTERM");
+        } catch (error) {
+          expect((error as NodeJS.ErrnoException).code).toBe("ESRCH");
+        }
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);

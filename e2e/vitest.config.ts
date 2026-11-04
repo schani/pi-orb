@@ -12,6 +12,7 @@ const frontendFiles = [
 ];
 
 const shared = {
+  setupFiles: "e2e/testkit/repository-fixture-setup.ts",
   testTimeout: 720_000,
   hookTimeout: 720_000,
 } as const;
