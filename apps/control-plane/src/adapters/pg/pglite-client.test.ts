@@ -30,6 +30,11 @@ it("reopens disk databases with pg_textsearch and persisted rows", async () => {
     (await client.query("CREATE EXTENSION pg_textsearch WITH SCHEMA public"))._unsafeUnwrap();
     (await client.query("CREATE TABLE reopen_proof (body text)"))._unsafeUnwrap();
     (await client.query("INSERT INTO reopen_proof VALUES ($1)", ["persisted"]))._unsafeUnwrap();
+    (
+      await client.query(
+        "CREATE INDEX reopen_search ON reopen_proof USING bm25(body) WITH (text_config='english')",
+      )
+    )._unsafeUnwrap();
     (await client.end())._unsafeUnwrap();
     client = new PGliteClient(path);
     expect(
@@ -39,6 +44,17 @@ it("reopens disk databases with pg_textsearch and persisted rows", async () => {
         )
       )._unsafeUnwrap().rows,
     ).toEqual([{ body: "persisted", extversion: "1.5.1" }]);
+    (await client.query("INSERT INTO reopen_proof VALUES ($1)", ["retained"]))._unsafeUnwrap();
+    for (const body of ["persisted", "retained"]) {
+      expect(
+        (
+          await client.query(
+            "SELECT body FROM reopen_proof WHERE body <@> to_bm25query($1, 'reopen_search') < 0 ORDER BY body <@> to_bm25query($1, 'reopen_search') LIMIT 1",
+            [body],
+          )
+        )._unsafeUnwrap().rows,
+      ).toEqual([{ body }]);
+    }
   } finally {
     (await client.end())._unsafeUnwrap();
     rmSync(root, { recursive: true, force: true });
