@@ -1,5 +1,11 @@
 # Testing
 
+## Hosted Docker runner capacity (2026-11-04, PST)
+
+**Decision:** E2E and the control-plane image job reclaim only the unused preinstalled Android root on ephemeral GitHub-hosted Ubuntu 24.04, before downloads. Host ownership checks precede deletion; before/after `df` and `du` are retained in Actions logs and step summaries. The existing 15 GiB guards after installation/before builds and all deadlines remain unchanged. Missing or insufficient reclaimable tools cannot waive the guards. No Docker pruning, dependency or production change. Evidence, official source links and rationale: `docs/postmortems/2026-11-04-ci-runner-disk-budget.md`.
+
+Local qualification: `npm ci`, 49 runner/qualification/APT contracts, full `npm run test:infra` (253 Python, 34 native-VM tests and Node contracts), lint and diff whitespace pass. Thirteen cleanup tests exercise real deletion of tiny owned fixtures with synthetic disk accounting and execute both unchanged shell guards at/below 15 GiB; this is not measured AWS capacity recovery. RED and receipts remain in `.context/ci-runner-disk/`. A passing Azure host alone does not establish recovery on the previously failing smaller AWS filesystem. Hosted qualification remains pending: `TODO.md`.
+
 ## State-machine refactor gate (user-approved 2026-11-01, PST)
 
 For this task only—workspace uploads, central Durable owner close/drain, inbox admission/replay, MCP OAuth publication and frontend scroll pinning—each machine actually refactored must first have a new deterministic regression exposing a genuine bug in the original implementation. Manufactured requirements or mutation-introduced bugs do not qualify; machines without a confirmed bug are not refactored. Preserve and replay DST failures before fixing. Preserve persisted schemas, value vocabulary, file/receipt formats and intended CAS/transaction contracts; new or changed persisted representation requires user discussion. Correcting buggy effects/ordering within those contracts is permitted.
