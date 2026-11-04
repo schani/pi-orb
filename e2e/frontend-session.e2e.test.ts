@@ -3764,6 +3764,23 @@ describe("frontend-only browser behavior", () => {
       const emulatorHeight = await panel.locator(".wterm").evaluate((node) => node.clientHeight);
       expectPage(emulatorHeight % 20).toBe(0);
       await expectPage.poll(rowEdges).toEqual({ first: true, last: true });
+      // Ghostty must reflow a wrapped logical line without losing its tail.
+      const wrappedLine = `REFLOW_START-${"0123456789".repeat(18)}-REFLOW_END`;
+      await panel.locator("textarea").focus();
+      await page.keyboard.press("Enter");
+      await page.keyboard.insertText(wrappedLine);
+      const renderedLines = () =>
+        panel
+          .locator(".term-row")
+          .evaluateAll((rows) => rows.map((row) => (row.textContent ?? "").trimEnd()).join(""));
+      await expectPage.poll(renderedLines).toContain(wrappedLine);
+      for (const width of [700, 1000]) {
+        const previousCols = controls.at(-1)?.cols;
+        await page.setViewportSize({ width, height: 600 });
+        await expectPage.poll(() => controls.at(-1)?.cols).not.toBe(previousCols);
+        await expectPage.poll(renderedLines).toContain(wrappedLine);
+        await expectPage.poll(rowEdges).toEqual({ first: true, last: true });
+      }
       // Deliberately stop only this page's admission view; no shared fixture
       // lifecycle mutation can interfere with later cases.
       await page.route("**/api/v1/orbs/frontend-long-history", async (route) => {

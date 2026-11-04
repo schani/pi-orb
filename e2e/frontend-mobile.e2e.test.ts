@@ -1612,6 +1612,85 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     },
   );
 
+  it("keeps terminal input and cursor visible through iOS keyboard resize and pan", async () => {
+    const page = await browser.newPage({
+      viewport: { width: 390, height: 844 },
+      isMobile: true,
+      hasTouch: true,
+      userAgent:
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1",
+    });
+    await fakeVisualViewport(page, 390, 844);
+    const controls: { type: string; rows: number; cols: number }[] = [];
+    let connections = 0;
+    page.on("websocket", (socket) => {
+      if (!socket.url().endsWith("/frontend-fixture-orb/terminal")) return;
+      connections++;
+      socket.on("framesent", ({ payload }) => {
+        if (typeof payload === "string") controls.push(JSON.parse(payload));
+      });
+    });
+    try {
+      await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb");
+      await page.getByRole("button", { name: "Orb actions", exact: true }).tap();
+      await page.getByRole("button", { name: "Open terminal", exact: true }).tap();
+      const panel = page.getByRole("complementary", { name: "Interactive terminal" });
+      await expectPage(panel).toContainText("frontend fixture terminal");
+      await expectPage(panel.locator(".orb-terminal-loading")).toHaveCount(0);
+      const input = panel.locator("textarea");
+      await input.focus();
+      // Exercise the native input event path used by software keyboards, not only keydown.
+      await page.keyboard.insertText("IOS_BEFORE");
+      await expectPage(panel).toContainText("IOS_BEFORE");
+      const emulator = await panel.locator(".wterm").elementHandle();
+      const readyConnections = connections;
+      const initialRows = controls.at(-1)?.rows ?? 0;
+      expectPage(initialRows).toBeGreaterThan(5);
+      for (let line = 0; line < 20; line++) await page.keyboard.press("Enter");
+      await page.keyboard.insertText("IOS_TAIL");
+      await expectPage(panel).toContainText("IOS_TAIL");
+      await page.evaluate("window.setVisualViewport(450, 20)");
+      await expectPage.poll(() => controls.at(-1)?.rows ?? initialRows).toBeLessThan(initialRows);
+      const cursorVisible = () =>
+        panel.evaluate((element) => {
+          const viewport = element.querySelector(".wterm");
+          const cursor = element.querySelector(".term-cursor")?.getBoundingClientRect();
+          const box = viewport?.getBoundingClientRect();
+          const composer = element.ownerDocument
+            .querySelector(".composer")
+            ?.getBoundingClientRect();
+          return {
+            wholeRows: (viewport?.clientHeight ?? 1) % 20 === 0,
+            cursor: !!cursor && !!box && cursor.top >= box.top && cursor.bottom <= box.bottom,
+            aboveComposer: !!box && !!composer && box.bottom <= composer.top,
+            aboveKeyboard: !!box && box.bottom <= 470,
+          };
+        });
+      await expectPage.poll(cursorVisible).toEqual({
+        wholeRows: true,
+        cursor: true,
+        aboveComposer: true,
+        aboveKeyboard: true,
+      });
+      await expectPage(input).toBeFocused();
+      await page.keyboard.insertText("_AFTER");
+      await expectPage(panel).toContainText("IOS_TAIL_AFTER");
+      await page.evaluate("window.setVisualViewport(450, 40)");
+      await expectPage(page.locator(".app")).toHaveCSS("top", "40px");
+      await page.evaluate("window.setVisualViewport(844, 0)");
+      await expectPage.poll(() => controls.at(-1)?.rows).toBe(initialRows);
+      await expectPage(input).toBeFocused();
+      await expectPage(panel).toContainText("IOS_TAIL_AFTER");
+      expectPage(
+        await emulator?.evaluate((node) => node === node.ownerDocument.querySelector(".wterm")),
+      ).toBe(true);
+      expectPage(connections).toBe(readyConnections);
+      expectPage(await page.evaluate("window.scrollY")).toBe(0);
+    } finally {
+      await page.close();
+    }
+  });
+
   it("owns phone scrolling in one viewport through keyboard resize and pan events", async () => {
     const page = await browser.newPage({
       viewport: { width: 390, height: 844 },
