@@ -23,7 +23,7 @@ type LocalFile = {
 const finished = (row: WorkspaceUpload | null) =>
   row?.status === "notified" || row?.status === "cancelled";
 
-export function useWorkspaceUploads(orbId: string, running: boolean) {
+export function useWorkspaceUploads(orbId: string, running: boolean, available: boolean) {
   const picker = useRef<HTMLInputElement>(null);
   const controllers = useRef(new Map<string, AbortController>());
   const batches = useRef(
@@ -46,11 +46,12 @@ export function useWorkspaceUploads(orbId: string, running: boolean) {
     };
   }, []);
   useEffect(() => {
-    let active = true;
+    if (!available) return;
+    const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
-      const result = await listWorkspaceUploads(orbId);
-      if (!active) return;
+      const result = await listWorkspaceUploads(orbId, controller.signal);
+      if (controller.signal.aborted) return;
       if (result.isOk()) {
         setLoadError(null);
         setRemote(result.value);
@@ -72,10 +73,10 @@ export function useWorkspaceUploads(orbId: string, running: boolean) {
     };
     void refresh();
     return () => {
-      active = false;
+      controller.abort();
       clearTimeout(timer);
     };
-  }, [orbId]);
+  }, [orbId, available]);
   const update = (id: string, patch: Partial<LocalFile>) => {
     if (mounted.current)
       setFiles((old) => old.map((item) => (item.id === id ? { ...item, ...patch } : item)));

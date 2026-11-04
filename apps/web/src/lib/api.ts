@@ -321,9 +321,9 @@ async function apiFetch<S extends TSchema>(
   return ok(body);
 }
 
-export const listWorkspaceUploads = (orbId: string) =>
+export const listWorkspaceUploads = (orbId: string, signal: AbortSignal) =>
   apiFetch(WorkspaceUploadsSchema, `/api/v1/orbs/${orbId}/uploads`, {
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
   });
 export const beginWorkspaceUploadBatch = (orbId: string, spec: UploadBatch, signal: AbortSignal) =>
   apiFetch(WorkspaceUploadsSchema, `/api/v1/orbs/${orbId}/uploads`, {
