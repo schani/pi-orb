@@ -11,7 +11,7 @@ exit 101
 EOF
 chmod 755 /usr/sbin/policy-rc.d
 apt-get update
-apt-get install -y --no-install-recommends ca-certificates curl xz-utils git git-crypt ripgrep zip unzip sudo python3 python3-venv python-is-python3 build-essential pkg-config iproute2 util-linux openssl
+apt-get install -y --no-install-recommends ca-certificates curl xz-utils git ripgrep zip unzip sudo python3 python3-venv python-is-python3 build-essential pkg-config libssl-dev iproute2 util-linux openssl
 curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/github.gpg
 curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg -o /etc/apt/keyrings/google.asc
 curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
@@ -33,7 +33,8 @@ cd /app
 sh infra/install_bun.sh amd64
 test "$(bun --version)" = 1.4.4
 test "$(bunx --version)" = 1.4.4
-git-crypt --version
+sh infra/install_git_crypt.sh
+test "$(git-crypt --version 2>&1)" = "git-crypt 0.8.0"
 npm ci --workspace @pi-orb/orb-runtime --include-workspace-root=false --ignore-scripts
 node infra/native-vm/claude-check.mjs | tee /opt/pi-orb/claude-sdk-version
 rm -rf node_modules/node-pty/prebuilds

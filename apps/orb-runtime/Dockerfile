@@ -5,7 +5,7 @@ FROM node:26.13.0-bookworm-slim
 
 COPY infra/runtime_apt.sh /usr/local/bin/runtime-apt
 RUN chmod 755 /usr/local/bin/runtime-apt \
-  && runtime-apt git git-crypt ca-certificates ripgrep curl zip unzip sudo python3 python3-venv python-is-python3 build-essential pkg-config \
+  && runtime-apt git ca-certificates ripgrep curl zip unzip sudo python3 python3-venv python-is-python3 build-essential pkg-config libssl-dev \
   && mkdir -p -m 755 /etc/apt/keyrings \
   && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
        -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
@@ -41,8 +41,12 @@ COPY infra/install_bun.sh /tmp/install_bun.sh
 RUN sh /tmp/install_bun.sh "$TARGETARCH" \
   && test "$(bun --version)" = 1.4.4 \
   && test "$(bunx --version)" = 1.4.4 \
-  && git-crypt --version \
   && rm /tmp/install_bun.sh
+
+COPY infra/install_git_crypt.sh /tmp/install_git_crypt.sh
+RUN sh /tmp/install_git_crypt.sh \
+  && test "$(git-crypt --version 2>&1)" = "git-crypt 0.8.0" \
+  && rm /tmp/install_git_crypt.sh
 
 WORKDIR /app
 
