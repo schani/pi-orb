@@ -58,6 +58,9 @@ class RuntimeDependenciesTests(unittest.TestCase):
         native = (ROOT / 'infra/native-vm/install.sh').read_text()
         self.assertLess(native.index('tar -xJf /tmp/node.tar.xz'),
                         native.index('npm install --global npm@12.2.1'))
+        proxies = ('for proxy in cargo rustc rustdoc rustfmt cargo-clippy cargo-fmt clippy-driver; '
+                   'do ln -s rustup "/usr/local/bin/$proxy"; done')
+        self.assertLess(native.index(proxies), native.index('npm install --global npm@12.2.1'))
         self.assertLess(native.index('test "$(npm --version)" = 12.2.1'),
                         native.index('npm ci'))
         acceptance = (ROOT / 'infra/native-vm/acceptance.sh').read_text()
