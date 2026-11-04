@@ -1,5 +1,11 @@
 # Testing
 
+## Rustup 1.29.3 (2026-11-04, PST; local, undeployed)
+
+New shared-image checksum/version/order assertions and the updated Dockerfile contract rejected the old pins before implementation. After `npm ci`, all 16 runtime dependency contracts, 14 Dockerfile contracts, `test:infra` (152 Node, 241 Python, 34 native guest cases plus filesystem check), workspace/E2E typecheck, shell syntax and diff checks pass. Evidence: `.context/rustup-1-29-3/`; official archive/hash verification also remains in the combined candidate's `.context/native-security-baseline/`. The npm graph is unchanged (seven moderate audit findings).
+
+Fresh native acceptance passed on combined `0f8414e8`, which also changes the separately proposed platform baseline; all owned resources were removed. It does not establish exact-source full-suite, image/E2E or PostgreSQL qualification of this independent branch. No deployment is claimed.
+
 ## State-machine refactor gate (user-approved 2026-11-01, PST)
 
 For this task only—workspace uploads, central Durable owner close/drain, inbox admission/replay, MCP OAuth publication and frontend scroll pinning—each machine actually refactored must first have a new deterministic regression exposing a genuine bug in the original implementation. Manufactured requirements or mutation-introduced bugs do not qualify; machines without a confirmed bug are not refactored. Preserve and replay DST failures before fixing. Preserve persisted schemas, value vocabulary, file/receipt formats and intended CAS/transaction contracts; new or changed persisted representation requires user discussion. Correcting buggy effects/ordering within those contracts is permitted.
