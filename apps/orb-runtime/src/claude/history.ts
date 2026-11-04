@@ -359,7 +359,6 @@ export class ClaudeHistory {
       if (attachment !== copies.at(-1)) continue;
       if (!boundedIdentifier(this.session) || !boundedIdentifier(provenance.operationId))
         return conflict("invalid identity");
-      if (removal.index <= attachment.index) continue;
       const record: HistoryRecord = {
         id,
         parentId: additions.at(-1)?.id ?? records.at(-1)?.id ?? null,
