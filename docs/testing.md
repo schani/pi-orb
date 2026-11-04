@@ -2303,3 +2303,9 @@ the completed gate used a detached, status-file wrapper under the shared heavy l
 The unchanged three-case Durable process E2E passes through the owned local-provider
 wrapper; provider cleanup succeeds and ports 3210/5173 are free. No full browser,
 Docker/real-PostgreSQL/image, hosted CI or deployment qualification is claimed.
+
+The full serial suite left its owned git-daemon fixture running after worker exit.
+PIDs 38288/38290 were ownership-verified and terminated; fixture port 38849 and
+process E2E ports 3210/5173 are free. Cleanup evidence is retained in
+`owned-repository-cleanup.json` and `ports-final.txt` under the qualification directory.
+The cause is unattributed; no fix is claimed.
