@@ -5,7 +5,9 @@ User decision (2026-10-04): SDK/harness and workspace are co-located on the orb 
 
 ## Scope and evidence
 
-Pinned: SDK **0.3.310**, CLI **2.1.310**.
+Pinned: SDK **0.3.318**, CLI **2.1.318**.
+
+**Dependency qualification (2026-11-04, PST; local, undeployed):** registry manifests and [SDK release](https://github.com/anthropics/claude-agent-sdk-typescript/releases/tag/v0.3.318) confirm CLI parity; SDK requires Node >=18.14.0, CLI >=22. Native Linux x64 clean-install, packaging, network-denied auth PTY cancellation/exchange/group drain, retained-history recovery, child privacy, UUID projection and compaction probes pass. Native transcripts add `turnAttributionKey` on input and `promptCacheRequested` on assistants; recovery wire input uses an ephemeral-cache text block with unchanged continuation content. The canned non-summary compaction response now triggers exactly one retry, as [CLI 2.1.311](https://github.com/anthropics/claude-code/releases/tag/v2.1.311) documents. First failures and corrections: `/workspace/claude-evidence/first-native-failure-diagnosis.md`. Full-suite/E2E, other platforms, packaged images and live subscription behavior are not qualified by these probes. No prompt or persistence contract changes.
 
 No finite override list guarantees full native Claude Code functionality. `toolAliases` redirects model-issued calls, not harness-internal filesystem/process operations; aliases and `disallowedTools` are complementary, not an OS sandbox.
 Native settings, CLAUDE.md, Git context, auto-memory and session files remain local to the CLI. Native file checkpointing excludes remote/network files. Headless SDK runs also omit interactive CLI features.
