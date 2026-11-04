@@ -1,5 +1,65 @@
 # Dependency audit
 
+## Current audit — 2026-11-03
+
+Current main: `7c25f138d6c8eca615a8f9afff20690db44d3ee9`. This supersedes the **historical October 16 inventory**, retained below with its later decisions. Read-only source/registry assessment; versions are locked/pinned, not verified installed or deployed. No installs, tests, builds, deployments, dependency or source changes. npm evidence: `.context/dependency-audit-2026-11-03/REPORT.md` and adjacent inventories/audit JSON.
+
+All eight manifests and the root lock/overrides were inspected; all **717 external lockfile names** were queried. Direct: **61 names, 35 current, 26 behind latest** (87 declarations: 82 external, five workspace links). Full graph, including transitives: **286 names have older copies**; strictly transitive names: 656, of which 257 have older copies. Latest-tag equality measures freshness, not support, safety or upgrade eligibility.
+
+### All 26 outdated direct names
+
+Grouped families retain every name; versions are exact locked → observed latest.
+
+| Family / package names | Locked → latest |
+|---|---|
+| Claude: `@anthropic-ai/claude-agent-sdk`; `@anthropic-ai/claude-code` | `0.3.310 → 0.3.318`; `2.1.310 → 2.1.318` |
+| Pi: `@earendil-works/chord`, `@earendil-works/pi-ai`, `@earendil-works/pi-codemode`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-durable`, `@earendil-works/pi-mcp` | All `1.4.0 → 1.5.0` |
+| Storage: `@electric-sql/pglite`; `@electric-sql/pglite-pg_textsearch` | `0.5.11 → 0.5.15`; `0.0.13 → 0.0.17` |
+| HTTP: `fastify`; `@fastify/static`; `@fastify/websocket`; `ws` | `5.12.7 → 5.12.8`; `10.1.7 → 10.1.8`; `11.3.4 → 11.3.6`; `8.22.0 → 8.22.1` |
+| Auth/domain: `google-auth-library`; `openid-client`; `tldts` | `11.3.1 → 11.3.3`; `6.8.8 → 6.8.9`; `7.4.16 → 7.4.19` |
+| Terminal: `@wterm/dom`, `@wterm/ghostty`, `@wterm/react` | All `0.5.5 → 0.5.9` |
+| Browser: `agent-browser` | `0.39.2 → 0.41.2` |
+| Rendering: `mermaid` | `12.2.0 → 12.3.0` |
+| Transport: `undici` | `7.30.1 → 8.12.3` |
+| Development: `@biomejs/biome`; `@vitejs/plugin-react`; `vitest` | `2.6.3 → 2.6.4`; `6.1.2 → 6.2.1`; `5.0.5 → 5.1.0` |
+
+### Security and support
+
+Full and production-only lock audits agree: **two moderate advisories, seven propagated affected package names / nine lock paths; no high or critical findings**, no additional dev-only findings. These are not seven vulnerabilities. Production graph inclusion establishes neither exploit reachability nor deployed exposure.
+
+- [GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249): minimatch amplification DoS; locked `10.2.6` / `9.0.9`, fixed `>=11.0.1`.
+- [GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4): glob cancellation bypass/traversal after timeout; locked `13.0.6` / `10.5.0`, fixed `>=14.0.2`.
+
+Propagation: `@earendil-works/pi-coding-agent`, `@fastify/static`, `gaxios`, `gcp-metadata`, `glob`, `minimatch`, `rimraf`. Pi 1.5 fixes its minimatch pin, not every chain. Latest static still uses glob 13; direct Google auth updates do not remove GenAI's legacy auth/metadata/gaxios/rimraf chain. Scoped overrides are candidates requiring regression qualification, not proven fixes; avoid npm's incompatible static downgrade or blanket transitive-major overrides. Remediation is tracked in `TODO.md`.
+
+**Undici 7.30.1 is current on the supported `seven` line, with no reported audit advisory**; upgrading control-plane to 8 is optional, not security remediation. The separate Pi override already resolves to latest 8.12.3; Pi 1.5 pins that version upstream. Stable `node-pty` 1.1.0 is current; its beta is not the target.
+
+### Upgrade effort
+
+Engineer-days, not additive; shared clean-install, type/lint, unit/DST, native/image and browser/runtime E2E gates overlap. Unattended gate time is extra; no upgrade is authorized here.
+
+| Work | Estimate |
+|---|---|
+| Routine maintenance | 0.5–1d |
+| **Pi 1.4 → 1.5 migration, patches and qualification** | **8–15d** |
+| Claude SDK/CLI | 1–3d |
+| PGlite + extension | 1–2d, only after the Cloud SQL gate, explicit approval and qualification (`docs/history-search.md`) |
+| wterm family | 1–2d |
+| agent-browser | 0.5–1.5d |
+| Vitest | 0.5–2d |
+| Optional Undici 8 | 1–3d |
+
+Pi's detailed compatibility review supersedes a generic patch/minor estimate: grouped `Storage.commit` changes; removed `viewState`, `taskGraph`, `subscribeCommits`; bounded history windows; changed recovery/persistence semantics; `pi-schema` integration and persisted native document versions. Rebase **three sealed patches across 16 files**. This is a migration, not a version bump. **Persisted-state design requires user approval before implementation.**
+
+### Native/platform inventory
+
+- **Security refresh:** native Docker **29.1.3 → 29.9.3** and containerd **2.3.4 → 2.3.7 LTS** lag security fixes. Docker's Debian repository exposed only containerd **2.3.6 / 2.4.2**, so upstream LTS availability is not proof of an installable replacement. Actual deployed versions are unknown. Native Debian base **2026-09-02** and guest agent **2026-07-15** need security refresh and qualification; source cannot establish freshness of floating installed APT packages. Tracked in `TODO.md`.
+- **Search extension policy:** native `pg_textsearch` stays at **1.3.1** until Cloud SQL supports the exact target; availability alone does not authorize or qualify an upgrade. PGlite `0.0.13` already embeds **1.5.1**; that mismatch is not permission to change native. Inspect embedded versions before any npm extension update; do not bypass the Cloud SQL gate. Binding decision: `docs/history-search.md` (2026-11-04). The accepted older-version/backport risk remains; no unsupported upgrade is promised or queued. PostgreSQL **17.11** is current on its supported major; no need to move to 18.
+- **Other stale pins:** rustup **1.29.2 → 1.29.3**; CI gcloud **590.0.1 → 592.0.0**; application Google provider **7.21.0 → 7.46.2** on the current major (**8.10.0** newest); Iosevka **34.9.0 → 34.9.1**. Foundation Google provider **6.50.0** is latest on major 6.
+- **Current:** Node **26.13.0**, Bun **1.4.4**, OpenTofu **1.13.2**, all **eight GitHub Action SHAs**, TypeScript **7.0.2**, Vite **8.3.5**, Playwright **1.64.1**, React **19.3.1**.
+
+## Historical October 16 inventory and subsequent decisions
+
 **Evidence date: 2026-10-16, America/Los_Angeles.** The inventory is the pre-PR audit snapshot; the dated toolchain and Pi decisions below record subsequent approved upgrades. Registry/release queries were live; estimates are engineering judgment, not measured upgrade trials.
 
 ## Scope and reading guide

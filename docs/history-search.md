@@ -20,6 +20,12 @@ Upstream 1.3.1 lacks fixes for recycled-page corruption ([PR 429](https://github
 
 Local 1.3.1 passed 1,386 warm executions and privacy/DML/WAL-recovery checks. The 2 s benchmark gate remains negative: 9/80 concurrent reads timed out; all 20 writes passed. A controlled reproduction establishes one-CPU runqueue contention for one representative case, not the original nine costs or 1.5.1's cause. No production memory profile or contention SLO is qualified. Protocol, timings, failures and evidence: `docs/testing.md`.
 
+## Binding upgrade policy — 2026-11-04 (PST)
+
+Do not upgrade native `pg_textsearch` until Cloud SQL supports the exact target version. Cloud SQL availability is necessary, not sufficient: an upgrade still requires explicit user approval and version-specific qualification.
+
+Do not blindly update `@electric-sql/pglite-pg_textsearch` either: inspect its embedded extension version and assess hosted-version differences before approval; an npm update must not bypass the Cloud SQL gate. The existing PGlite `0.0.13` / embedded **1.5.1** versus native **1.3.1** mismatch is the current baseline, not authorization to change native or adopt another unsupported extension version. Registry freshness and upstream fixes do not authorize upgrades. Audit context: `docs/dependency-audit.md`.
+
 ## Retrieval
 
 One statement snapshot applies owner/project/orb scope: Pi uses cursor ancestry; Claude uses all committed records. Deleting projects/orbs are excluded. Public text follows transcript visibility, excluding private overflow, reasoning, image data and tool metadata. Source JSON stays lossless. SQL sanitizes active NUL/unpaired-surrogate escapes before decoding, including private fields, without selecting private text.

@@ -11,6 +11,9 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
+- **Remediate the two npm audit advisories** (2026-11-03; `docs/dependency-audit.md`): minimatch GHSA-g3hv-75wg-m249 and glob GHSA-3g3m-2fjr-6pw4. Resolve Pi/static/legacy GCP chains with compatible updates or qualified scoped overrides; verify full/production audits and regression gates.
+- **Refresh native Docker/containerd security pins** (2026-11-03; `docs/dependency-audit.md`): Docker 29.9.3 and containerd 2.3.7 LTS targets, subject to Debian package availability. Refresh base/guest-agent security inputs and qualify the native image; record installed versions, not source-only assumptions.
+
 - **Finish qualification of the approved headline/deletion correction** (2026-10-29; `docs/postmortems/2026-10-29-pg17-production.md`; unwaived blocker). Focused local/PGlite tests and static checks pass (`docs/testing.md`); fresh exact-head PR CI and release qualification remain pending. Historical cause remains unproven.
 
 - **Harden CPU-starvation-sensitive tests** (2026-10-26, PR 221; [evidence](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/6e16dc75-2326-4f5a-bbfd-853e5ce5fcd0/evidence/pr221-local-load-failures.tgz)). With 8 busy loops on 2 CPUs, `adapters/pg/mcp.test.ts`, `adapters/pg/project-instructions.test.ts` and `http/mcp-oauth-routes.test.ts` exceed the 10s PGlite `beforeEach` (quiet open+migrate ≈2s, unchanged by migration 051), and four WebKit `e2e/frontend-mobile.e2e.test.ts` tail/wheel tests fail with `locator resolved to 0 elements` after ≈10s; quiet runs and CI pass. First seen when three agents ran suites concurrently. Replace wall-clock waits with explicit synchronization or bound setup cost.
