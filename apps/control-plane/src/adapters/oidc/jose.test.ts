@@ -6,6 +6,7 @@ import {
   type PublicSigningJwk,
   rfc7638Thumbprint,
   signJwtRS256,
+  verifyJwtRS256,
 } from "./jose.ts";
 
 /**
@@ -211,5 +212,27 @@ describe("published key material", () => {
     })._unsafeUnwrap();
     const header = decodeSegment(jwt.split(".")[0] as string) as { kid: string };
     expect(rfc7638Thumbprint(published)._unsafeUnwrap()).toBe(header.kid);
+  });
+});
+
+describe("verifyJwtRS256", () => {
+  it("returns claims only for an RS256 signature by a published key", () => {
+    const key = generateRsaSigningKey()._unsafeUnwrap();
+    const other = generateRsaSigningKey()._unsafeUnwrap();
+    const claims = { sub: "orb" };
+    const jwt = signJwtRS256({ kid: key.kid, claims, privateKeyPem: key.privateKeyPem });
+    const token = jwt._unsafeUnwrap();
+    expect(verifyJwtRS256(token, [other.publicJwk, key.publicJwk])._unsafeUnwrap()).toEqual(claims);
+    const [header, , signature] = token.split(".");
+    const forged = signJwtRS256({ kid: key.kid, claims, privateKeyPem: other.privateKeyPem });
+    const none = `${base64url(JSON.stringify({ alg: "none", kid: key.kid }))}.${base64url("{}")}.`;
+    for (const candidate of [
+      `${header}.${base64url(JSON.stringify({ sub: "other" }))}.${signature}`,
+      forged._unsafeUnwrap(),
+      none,
+      "not-a-jwt",
+    ])
+      expect(verifyJwtRS256(candidate, [key.publicJwk]).isErr()).toBe(true);
+    expect(verifyJwtRS256(token, [other.publicJwk]).isErr()).toBe(true);
   });
 });

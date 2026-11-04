@@ -91,7 +91,8 @@ Project instructions, project secrets and MCP remain project/connection scoped; 
 The 2026-10-04 decision removes built-in network enrollment. Authenticated HTTP previews
 are planned separately in `docs/ports.md`; they require no viewer-device client or company
 tailnet. Preview admission follows trusted-company direct resource access, not owner-only
-access. Preview implementation is not a dependency of per-user credentials or onboarding.
+access. Orb id-tokens are the exception: same-owner only (`docs/ports.md`). Preview
+implementation is not a dependency of per-user credentials or onboarding.
 
 ## Historical delivery stages (2026-09-16; before consolidation)
 

@@ -57,6 +57,13 @@ describe("single control-plane composition", () => {
     expect(source.indexOf("registerPreviewAuth(app,")).toBeGreaterThan(
       source.indexOf("registerHostingAccessGuard(app,"),
     );
+    // A presented access token must win before preview login can redirect it.
+    expect(source.indexOf("registerPreviewAccessTokens(app,")).toBeGreaterThan(
+      source.indexOf("registerHostingAccessGuard(app,"),
+    );
+    expect(source.indexOf("registerPreviewAuth(app,")).toBeGreaterThan(
+      source.indexOf("registerPreviewAccessTokens(app,"),
+    );
     expect(source.indexOf("registerPreviewGateway(app,")).toBeGreaterThan(
       source.indexOf("registerPreviewAuth(app,"),
     );

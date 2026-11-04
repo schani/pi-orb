@@ -1618,6 +1618,14 @@ failed on a test-ordering error: an API probe preceded the preview-origin login 
 infrastructure passes 94 Node, 156 Python and 27 native-VM tests; the four other preview
 E2E files pass on Chromium and WebKit. No deployment.
 
+**Orb access tokens (2026-11-04).** Verifier, domain and admission tests preceded the
+implementation; no DST was added because verification adds no state machine and preview admission
+uses only the token's expiry. `e2e/preview-access-token.e2e.test.ts` mints through the production
+id-token mint and RS256 signer, then uses a never-logged-in Chromium context: header and
+`__Host-pi-orb-token` cookie admission, HTTP/assets/WebSocket, a hosted file, and recovery across
+stop/start plus runtime restart. An agent-browser 0.39.2 probe showed origin-scoped `--headers`
+missing on WebSocket upgrades, hence the cookie.
+
 ## HTTP preview rebase onto main `da14295e` (2026-11-01; not deployed)
 
 PR #64 is squashed and rebased over 399 main commits. Main's Tailscale additions are removed

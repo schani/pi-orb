@@ -204,6 +204,10 @@ A project-wide grant matches `project_id`. A one-orb grant matches both `project
 An incarnation-sensitive service additionally matches `host_incarnation`. Trusting only the
 issuer or audience is insecure because any authorized orb may request any audience.
 
+pi-orb is itself a relying party for audience `urn:pi-orb:access` (2026-11-04): preview and
+hosted-file hosts check 1–5 locally against the published keys, then grant same-owner access
+derived from `orb_id` (`docs/ports.md`).
+
 ## Required product interface
 
 The prescribed orb image must provide:

@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { err, ok, type Result, type ResultAsync } from "neverthrow";
 import { type ApplicationAuth, LOGIN_COOKIE_NAME } from "../domain/application-auth.ts";
 import type { PrincipalResolutionError, RequestPrincipal } from "../domain/identity.ts";
+import { presentedAccessToken } from "./access-token-admission.ts";
 import {
   type AuthOrigins,
   type AuthOutcomeSink,
@@ -70,6 +71,7 @@ export function registerAuthenticatedBrowserRoutes(
           request.method === "GET" &&
           request.url.startsWith("/s/") &&
           request.headers.authorization === undefined &&
+          presentedAccessToken(request) === undefined &&
           request.headers["sec-fetch-mode"] === "navigate" &&
           request.headers["sec-fetch-dest"] === "document" &&
           request.headers.upgrade === undefined

@@ -123,6 +123,10 @@ deletion removes every object `data` file; tests distinguish that byte namespace
 
 **Implemented 2026-09-19; not deployed:** the single application accepts uploads with runtime incarnation bearers and serves private GET/HEAD using the files origin's own Google login and host-only sealed cookie. Only unauthenticated top-level file navigation initiates login; HEAD, API and asset requests fail with typed errors. The files host exposes hosted GET/HEAD and login/callback, never ordinary APIs or WebSockets. There is no shared-domain cookie, app-token handoff, signed public download or files logout UI; its session expires independently of app logout. Authentication and exact-Origin checks: `docs/credentials.md`.
 
+Orb id-tokens for audience `urn:pi-orb:access` (`docs/ports.md`) also admit hosted reads, as header
+or files-host cookie, for orbs with the token orb's owner; the path's orb ID must be canonical. They
+never start Google login.
+
 The GCS bucket remains private. Responses use `Cache-Control: private, no-cache` plus content-hash `ETag`; there is no public-sharing or CDN contract.
 A separate serving service would allow independent scaling and failure isolation with narrower
 IAM, but the intended load does not justify another process. It would not by itself create browser

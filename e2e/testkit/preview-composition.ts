@@ -10,20 +10,35 @@ import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
 import { okAsync, ResultAsync } from "neverthrow";
 import { createOrbTools } from "../../apps/control-plane/src/adapters/durable/tools/orb-tools.ts";
+import { generateRsaSigningKey } from "../../apps/control-plane/src/adapters/oidc/jose.ts";
+import {
+  CryptoMintIdSource,
+  OidcTokenSigner,
+  OidcTokenVerifier,
+} from "../../apps/control-plane/src/adapters/oidc/signer.ts";
 import { FetchRuntimeClient } from "../../apps/control-plane/src/adapters/runtime-client/fetch-client.ts";
 import { NodePreviewClient } from "../../apps/control-plane/src/adapters/runtime-client/preview-client.ts";
+import { ACCESS_TOKEN_AUDIENCE } from "../../apps/control-plane/src/domain/access-token.ts";
+import { DEFAULT_ISSUER_CONSTANTS as constants } from "../../apps/control-plane/src/domain/constants.ts";
 import { requestOrbStart, requestOrbStop } from "../../apps/control-plane/src/domain/lifecycle.ts";
 import { createCentralOrbAgentOperations } from "../../apps/control-plane/src/domain/orb-agent-operations.ts";
 import { previewError } from "../../apps/control-plane/src/domain/preview.ts";
 import { PreviewConnections } from "../../apps/control-plane/src/domain/preview-connections.ts";
+import { SIGNING_KEY_SECRET_PROVIDER } from "../../apps/control-plane/src/domain/signing-keys.ts";
+import {
+  MintDenialLog,
+  mintIdToken,
+} from "../../apps/control-plane/src/domain/workload-identity.ts";
 import { registerPreviewGateway } from "../../apps/control-plane/src/http/preview-gateway.ts";
 import type { PreviewHosts } from "../../apps/control-plane/src/http/preview-host.ts";
 import { registerRuntimePreviewRoutes } from "../../apps/control-plane/src/http/runtime-preview-routes.ts";
+import { FakeSecretStore } from "../../apps/control-plane/src/testkit/broker.ts";
 import {
   makeHarness,
   seedRunningOrb,
   TEST_USER_ID,
 } from "../../apps/control-plane/src/testkit/fixtures.ts";
+import { FakeSigningKeyStore } from "../../apps/control-plane/src/testkit/workload-identity.ts";
 import type { OrbAgent } from "../../apps/orb-runtime/src/domain/orb-agent.ts";
 import { RuntimePreviewService } from "../../apps/orb-runtime/src/domain/preview.ts";
 import { PreviewActivity } from "../../apps/orb-runtime/src/domain/preview-activity.ts";
@@ -108,9 +123,30 @@ export async function startPreviewComposition(
     ),
   );
   let previewUrl: PreviewHosts["url"] | undefined;
+  const keys = new FakeSigningKeyStore();
+  const secrets = new FakeSecretStore();
+  const key = generateRsaSigningKey()._unsafeUnwrap();
+  keys.seedKey({
+    kid: key.kid,
+    secretVersion: secrets.seedSecret(SIGNING_KEY_SECRET_PROVIDER, {
+      privateKeyPem: key.privateKeyPem,
+    }),
+    publicJwk: key.publicJwk,
+    state: "active",
+    createdAt: 0,
+    activatedAt: 0,
+    retiredAt: null,
+    rowVersion: 1,
+  });
+  const issuerUrl = "https://issuer.orb.test";
   const auth = await startApplicationAuthFixture({
     previews: true,
     orbId,
+    accessTokens: {
+      verifier: new OidcTokenVerifier({ keys, constants }),
+      store: h.store,
+      issuerUrl,
+    },
     previewPorts: ports,
     configurePreviews: async ({ app, hosts, appOrigin }) => {
       previewUrl = (id, port) => hosts.url(id, port);
@@ -169,6 +205,24 @@ export async function startPreviewComposition(
     orbId,
     activity,
     observed: () => observed,
+    /** `pi-orb id-token --audience urn:pi-orb:access` through the production mint and signer. */
+    idToken: () =>
+      mintIdToken(
+        task,
+        {
+          store: h.store,
+          signer: new OidcTokenSigner({ keys, secrets, constants }),
+          mintIds: new CryptoMintIdSource(),
+          denials: new MintDenialLog(),
+          constants,
+          issuerUrl,
+        },
+        {
+          tokenHash: createHash("sha256").update(token).digest("hex"),
+          audience: ACCESS_TOKEN_AUDIENCE,
+          ttlSeconds: 3600,
+        },
+      ).map(({ token }) => token),
     /** Runs a central-Pi orb tool with the orb's real admission identity; returns its structured output. */
     tool: async (name: string, args: Record<string, unknown>) => {
       const url = previewUrl;
