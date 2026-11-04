@@ -1,13 +1,5 @@
 # Testing
 
-## PGlite packaging qualification (2026-11-04, PST; local, undeployed)
-
-Engine **0.5.12** and wrapper **0.0.14** satisfy the exact peer; extension versions remain embedded **1.5.1** / native **1.3.1** (`docs/history-search.md`). Independent npm pack/direct-download SHA-512 and SHA-1 checks pass for both wrappers and the candidate engine. Both runtime wrapper JS files and all 25 extracted extension files are byte-identical; compressed bytes and only a CJS source-map path differ.
-
-Clean baseline/candidate `npm ci` pass. Tests-first exact-pin RED precedes dependency edits; frozen payload/JS checks already pass on baseline. The initial retained-search fixture used parameterized `text <@> text`, which cannot infer an index (typed invariant, SQLSTATE 42704); explicit `to_bm25query` matches production SQL and passes before upgrading. The corrected retained-directory test preserves indexed rows and accepts new indexed writes. A separate actual **0.5.11-created** directory reopens under **0.5.12** with its **1.5.1** extension, retained BM25 search and new indexed writes; no binary fixture is committed.
-
-Scoped qualification passes **40 tests / nine files**, with two existing native-PostgreSQL skips; scoped Biome and diff checks pass. Only the two existing package nodes and workspace specs change; Pi/Chord 1.4.0 and all three patch seals are unchanged. Evidence and commands: `.context/pglite-upgrade/`. Full checks, native PostgreSQL and process/browser E2E remain separate gates; no cloud or production qualification is claimed.
-
 ## State-machine refactor gate (user-approved 2026-11-01, PST)
 
 For this task only—workspace uploads, central Durable owner close/drain, inbox admission/replay, MCP OAuth publication and frontend scroll pinning—each machine actually refactored must first have a new deterministic regression exposing a genuine bug in the original implementation. Manufactured requirements or mutation-introduced bugs do not qualify; machines without a confirmed bug are not refactored. Preserve and replay DST failures before fixing. Preserve persisted schemas, value vocabulary, file/receipt formats and intended CAS/transaction contracts; new or changed persisted representation requires user discussion. Correcting buggy effects/ordering within those contracts is permitted.
@@ -2022,6 +2014,14 @@ Initial prepare (15:03:43–15:06:17 PDT) exited 1: `runner changed while prepar
 Correction: freeze source **before** separate `prepare-frozen` (15:07:06–15:07:32 PDT, exit 0), reusing the same owned index/build receipt, extractor and snapshot SQL. Manifest runner SHA-256 `05622cfd33ff06443de38b1b9571c9474c78488d7e04eb32461fe6248e2f8134` matches frozen/current source; the ~26 s preparation reused the **127.311 s** build, not a new 26 s build. `qualification-summary.json` records 35/35 private harness unit tests (33 in `unit-tests-final.log`, two in `unit-tests-diagnostic.log`); the original failure remains recorded and aggregate qualification remains negative.
 This benchmark did not qualify VM reboot, a bounded-memory production profile, ingestion/compaction stress or hosted behavior. No production mutation occurred.
 The 1.5.1 spill/force-merge fix ([PR 540](https://github.com/timescale/pg_textsearch/pull/540)) is not a 1.3.1 defect: later nonblocking spills ([PR 517](https://github.com/timescale/pg_textsearch/pull/517)) introduced it; 1.3.1 serializes under the lock.
+
+## PGlite packaging qualification (2026-11-04, PST; local, undeployed)
+
+Engine **0.5.12** and wrapper **0.0.14** satisfy the exact peer; extension versions remain embedded **1.5.1** / native **1.3.1** (`docs/history-search.md`). Independent npm pack/direct-download SHA-512 and SHA-1 checks pass for both wrappers and the candidate engine. Both runtime wrapper JS files and all 25 extracted extension files are byte-identical; compressed bytes and only a CJS source-map path differ.
+
+Clean baseline/candidate `npm ci` pass. Tests-first exact-pin RED precedes dependency edits; frozen payload/JS checks already pass on baseline. The initial retained-search fixture used parameterized `text <@> text`, which cannot infer an index (typed invariant, SQLSTATE 42704); explicit `to_bm25query` matches production SQL and passes before upgrading. The corrected retained-directory test preserves indexed rows and accepts new indexed writes. A separate actual **0.5.11-created** directory reopens under **0.5.12** with its **1.5.1** extension, retained BM25 search and new indexed writes; no binary fixture is committed.
+
+Scoped qualification passes **40 tests / nine files**, with two existing native-PostgreSQL skips; scoped Biome and diff checks pass. Only the two existing package nodes and workspace specs change; Pi/Chord 1.4.0 and all three patch seals are unchanged. Evidence and commands: `.context/pglite-upgrade/`. Full checks, native PostgreSQL and process/browser E2E remain separate gates; no cloud or production qualification is claimed.
 
 ## Native history search implementation (2026-10-29, PDT; local, undeployed)
 
