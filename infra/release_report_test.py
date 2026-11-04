@@ -107,6 +107,17 @@ class QualificationReportTest(unittest.TestCase):
 
 
 class WorkflowContractTest(unittest.TestCase):
+    def test_cloud_sdk_version_and_beta_component_are_pinned(self):
+        sdk_steps = [body for name, body in steps('deploy.yml')
+                     if name == 'Set up Google Cloud SDK']
+        self.assertEqual(len(sdk_steps), 1)
+        self.assertEqual(sdk_steps[0].strip().splitlines(), [
+            'uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3',
+            '        with:',
+            "          version: '592.0.0'",
+            '          install_components: beta',
+        ])
+
     def test_only_release_job_holds_non_cancelling_production_concurrency(self):
         workflow = Path('.github/workflows/deploy.yml').read_text()
         qualification, release = workflow.split('  release:\n', 1)
