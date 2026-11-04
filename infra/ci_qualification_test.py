@@ -7,6 +7,7 @@ import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 from infra.ci_qualification import EXPECTED, REPOSITORY, GitHub, Result, inspect, wait, valid_evidence, main
+from infra.runner_disk_test import RunnerDiskTests
 
 SHA = 'a' * 40
 
