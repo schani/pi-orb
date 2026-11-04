@@ -1,5 +1,13 @@
 # Testing
 
+## Claude queued-input proof order (2026-11-04, PST; user-approved, local, undeployed)
+
+The correction removes only the single-copy append-order exclusion; multi-copy proof and committed receipts retain their guards. The regression uses the exact retained native removal 18/attachment 19 pair, matching both identities with saved provenance. Both prefix orders require the complete pair before acknowledgement; tests cover indexed backfill, immutable native bytes/fingerprints/ancestry, rescans/reopen, wrong identities/provenance, child/sidechain exclusions, duplicates/conflicts and failed commit. Composed steering checks drain, real agent reattach, persisted duplicate acknowledgement without resubmission and one receipt. Boot projection checks all five input kinds, with human authority at attachment rather than the earlier removal or appended receipt.
+
+Fresh `npm ci` preceded checks. Initial tests-first run: 103 passed/10 failed; nine expected reverse-proof regressions and one test-oracle error (the forward receipt's parent is the native removal at the journal tail, not its attachment). After correcting only that ancestry oracle: 103 passed/nine expected failures on the original guard. Removing the guard passes all 112 cases. Expanded saved-provenance/restart coverage and final focused run: 269 passed across 20 files, including five existing DST suites; no new DST failure or trace. Genuine SDK 0.3.318/CLI 2.1.318 native qualification: 36 passed—full contract 28, unchanged steering 2, handoff 2, instructions 4. A further 122 lifecycle/initialization/lifetime/idle-fence safety cases pass across five files. Runtime typecheck and scoped Biome pass (eight existing informational diagnostics).
+
+Evidence: `/workspace/claude-evidence/q88-approved/` (first failures, diagnosis, commands, native artifacts and fixture/process/disk checks). Earlier original CI, root-compaction, baseline and graceful failures remain in their original evidence directories; original CI raw ordering remains unproven. Current contract/rationale: `docs/claude-agent-sdk.md`, findings: `docs/claude-sdk-capabilities.md`. Hosted exact-head full CI/E2E, packaged images, live subscription and deployment remain unqualified by these local gates.
+
 ## Claude SDK 0.3.318 queued compaction (2026-11-04, PST)
 
 Accepted public interrupt leaves queued `/compact` runnable. The fixed native fixture
@@ -1190,8 +1198,8 @@ With the narrow explicit native installation, the actual pinned wrapper reaches
 owned worker/Vite readiness, migrations and health, then executes an exit-zero
 child and cleans both groups without escalation. Exact fixture lock/generated
 hashes are retained; no fixture source/lock upgrade. Full stacked unit/E2E/image
-qualification remains pending. PR 243 itself is draft-blocked on its native
-queued-input/persistence contract; npm does not change or waive that proof.
+qualification remained pending at that checkpoint. PR 243 was then draft-blocked
+on its native queued-input/persistence contract; npm did not change or waive that proof.
 
 The standalone native npm paragraph sits before the Node section, preserving the
 existing git-crypt paragraph. `git merge-tree` against PR 247's `5065468f`
@@ -1218,8 +1226,8 @@ The rebase onto PR 243's `c5c332e4` changed only three upstream documentation
 files relative to reviewed `c81e8bba`; at that checkpoint, application behavior,
 manifests, lock, patches and tests were byte-identical. This qualification entry then updates
 attribution only. Repeated `git merge-tree` retains conflict-free independence
-from PR 247. No full stacked unit/E2E/image pass or native-proof clearance is
-claimed; PR 243's question 88 remains open.
+from PR 247. That checkpoint claimed no full stacked unit/E2E/image pass or
+native-proof clearance; PR 243's question 88 was then open.
 
 
 **Native build ordering:** install and verify pinned npm after the existing Rustup
@@ -1230,7 +1238,7 @@ behavior are unchanged. Earlier full-slice receipts do not exercise this image
 build ordering. The qualification section is colocated with dependency-tree
 ownership rather than appended at EOF to keep independent toolchain edits apart.
 
-**CI base integration (2026-11-04, PST):** merged frozen PR 243 head
+**Prior CI base integration (2026-11-04, PST):** merged frozen PR 243 head
 `c02e49cf6238443e67e63a28b18ee774b2710840`, preserving its Claude `c5c332e4`
 and qualified PR 257 `df34bed1` ancestry. Runner cleanup is inherited unchanged;
 npm policy, execution pins, patches, dependency/lock bytes and fixture behavior
@@ -1241,9 +1249,9 @@ remains preserved. At `78d67878`, [checks 126734259051](https://github.com/schan
 again fails only `steering-native.test.ts:24` (undefined receipt): 6,315 pass,
 one fail, nine skip; the other nine jobs pass, including Docker E2E and Durable.
 That run retained no native journal, so it establishes no observed proof ordering.
-Its 19 DST JSON artifacts are historical, not new failures. Question 88 remains
-on hold; no receipt-proof/parser/state/assertion change or independent npm fix
-is proposed.
+Its 19 DST JSON artifacts are historical, not new failures. Question 88 was then
+on hold; that integration made no receipt-proof/parser/state/assertion change
+or independent npm fix.
 
 On the integrated tree, fresh isolated npm 12 `ci`, 72 patch/provider tests,
 67 pin/capacity/qualification/APT contracts, workspace/E2E typecheck, lint,
@@ -1252,6 +1260,31 @@ pass. Global Node 26.13.0/npm 11.20.0 remain untouched. No new full unit/E2E run
 cloud, Docker or production qualification is claimed. Receipts and source/scope
 identities: `/workspace/npm-upgrade-evidence/ci-base-fix/`; prior first-failure
 evidence: `/workspace/npm-upgrade-evidence/checks-fix/`.
+
+**Approved proof-base integration (2026-11-04, PST; local, undeployed):** merged
+frozen PR 243 `62e8a8111ba23af27f22f05d7348becaa5852b3c`. Question 88 is resolved
+by explicit human approval of the inherited single-copy proof correction, not a
+failure waiver. The upstream parser, assertions, tests and native harness are
+byte-identical to that head. Own scope remains 17 paths; every own file except
+this qualification doc is byte-identical to `fa885638`, including npm policy,
+pins, execution behavior, manifests, locks and patches. No new own behavior or
+independent Claude change is introduced; existing scoped npm reviews apply.
+
+Fresh isolated npm 12 `ci` preceded validation. The unchanged genuine native
+`steering-native.test.ts` passes both tests on its first run, including the formerly
+failing receipt assertion. Another 148 history/steering/boot/native cases pass
+(including 34 genuine SDK/CLI cases), plus 36 dependency/container contracts,
+72 patch/provider tests and 80 pin/capacity/qualification/API/APT contracts.
+Workspace/E2E typecheck, lint (488 warnings, 97 informational diagnostics), seal
+reapplication, shell/syntax checks and exact CLI `2.1.318` execution pass.
+Global Node 26.13.0/npm 11.20.0 remain unchanged. No new validation failed;
+the native steering harness deletes its temporary journals during cleanup.
+Receipts and byte proofs: `/workspace/npm-upgrade-evidence/q88-base-fix/`.
+
+Earlier first failures remain preserved, not relabelled as passes. Local native
+success qualifies this focused integration only: fresh exact-head hosted CI/E2E
+is still required before clearing CI status. No full-suite, image, live-subscription
+or production qualification, push or deployment is claimed.
 
 ## Shared dependency-tree ownership (2026-09-29)
 

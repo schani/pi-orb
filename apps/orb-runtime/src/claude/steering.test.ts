@@ -1,12 +1,17 @@
+import { join } from "node:path";
 import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { ok } from "neverthrow";
 import { expect, it } from "vitest";
 import {
   ComposedClaudeFixture,
   childEdge,
   rootRequest,
   rootResult,
-  type ScheduledClaudeQuery,
+  ScheduledClaudeQuery,
 } from "../testkit/claude-composed.ts";
+import { ClaudeOrbAgent } from "./agent.ts";
+import { ClaudeHistory } from "./history.ts";
+import { qualifyClaudeRestart } from "./restore.ts";
 
 const content = (text: string) => [{ type: "text" as const, text }];
 const resultFor = (...uuids: string[]) =>
@@ -90,6 +95,114 @@ it("sends human input with now priority and steers the active operation without 
     f.dispose();
   }
 });
+
+it.each([false, true])(
+  "queued steering reconciles drain and reopen once (removal first=%s)",
+  async (reverse) => {
+    const f = new ComposedClaudeFixture();
+    try {
+      const first = await start(f);
+      const accepted = (
+        await f.agent.deliverInboxMessage("steer", ["steer"], content("change"))
+      )._unsafeUnwrap();
+      const input = await nextInput(f.query);
+      const attachment = {
+        type: "attachment",
+        uuid: "steer-attachment",
+        sessionId: f.state.id,
+        attachment: { type: "queued_command", source_uuid: input.uuid, delivery_id: "delivery" },
+      };
+      const consumed = {
+        type: "queue-operation",
+        operation: "remove",
+        reason: "absorbed_mid_turn",
+        commandUuid: input.uuid,
+        deliveryId: "delivery",
+        sessionId: f.state.id,
+      };
+      f.append(reverse ? consumed : attachment);
+      expect(
+        (await f.agent.deliverInboxMessage("steer", ["steer"], content("change")))._unsafeUnwrap(),
+      ).toMatchObject({ status: "queued", duplicate: true });
+      expect(qualifyClaudeRestart(f.journal(), f.history.view, "host").isErr()).toBe(true);
+      f.append(reverse ? attachment : consumed);
+      expect(
+        (await f.agent.deliverInboxMessage("steer", ["steer"], content("change")))._unsafeUnwrap(),
+      ).toMatchObject({ ...accepted, status: "persisted", duplicate: true });
+      expect(
+        qualifyClaudeRestart(f.journal(), f.history.view, "host")._unsafeUnwrap()
+          .interruptedOperations,
+      ).toEqual([first.accepted.operationId]);
+      await f.query.emitUnscheduled(resultFor(first.input.uuid, input.uuid));
+      expect(f.query.closeRequested).toBe(true);
+      f.query.exit();
+      f.query.endOutput();
+      await f.agent.closeExtensions();
+      expect(f.agent.getHealth()).toMatchObject({ status: "ready", activity: "idle" });
+      const reopened = new ClaudeHistory(
+        join(f.dir, "claude"),
+        f.state.id,
+        f.state.timestamp,
+        f.files,
+      );
+      const records = reopened.scan(f.nativePath)._unsafeUnwrap();
+      expect(records.filter((record) => record.id === input.uuid)).toEqual([
+        expect.objectContaining({ eventType: "claude.input_receipt", inboxMessageIds: ["steer"] }),
+      ]);
+      expect(
+        qualifyClaudeRestart(f.journal(), records, "host")._unsafeUnwrap().interruptedOperations,
+      ).toEqual([]);
+      expect(
+        (await f.agent.deliverInboxMessage("steer", ["steer"], content("change")))._unsafeUnwrap(),
+      ).toMatchObject({ status: "persisted", duplicate: true });
+      expect(f.queries).toHaveLength(2);
+      expect(reopened.scan(f.nativePath)._unsafeUnwrap()).toEqual(records);
+      const queries: ScheduledClaudeQuery[] = [];
+      const restarted = new ClaudeOrbAgent({
+        orbId: "orb-a",
+        repositoryUrl: "https://example.com/repo",
+        workDir: f.dir,
+        skillsDir: null,
+        broker: null,
+        incarnation: "0",
+        files: f.files,
+        sdkFactory: (input, options) => {
+          const query = new ScheduledClaudeQuery(input, options, true);
+          queries.push(query);
+          return ok({
+            query,
+            exited: query.processExit.promise,
+            stdoutEnded: query.stdoutEnded,
+            requestShutdown: () => query.requestShutdown(),
+          });
+        },
+      });
+      try {
+        (
+          await restarted.attachSession(f.journal(), reopened, f.configDir, "commit-0")
+        )._unsafeUnwrap();
+        expect(restarted.getHealth()).toMatchObject({ status: "ready", activity: "idle" });
+        expect(
+          (
+            await restarted.deliverInboxMessage("steer", ["steer"], content("change"))
+          )._unsafeUnwrap(),
+        ).toMatchObject({ ...accepted, status: "persisted", duplicate: true });
+        expect(queries).toHaveLength(1);
+        expect(reopened.view.filter((record) => record.id === input.uuid)).toHaveLength(1);
+      } finally {
+        for (const query of queries) {
+          query.exit();
+          query.endOutput();
+        }
+        await restarted.closeExtensions();
+      }
+    } finally {
+      f.query.exit();
+      f.query.endOutput();
+      f.dispose();
+    }
+  },
+);
 
 it("keeps the query open when now interrupts the old turn before the steering turn runs", async () => {
   const f = new ComposedClaudeFixture();
