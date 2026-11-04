@@ -228,7 +228,9 @@ upstream application logs. Their configuration and deployed absence evidence are
 for exposure; no all-sinks no-query-logging guarantee is claimed from local contracts.
 The first deployed filter never matched because of doubled backslashes
 (`docs/postmortems/2026-11-03-preview-request-log-exclusion.md`); the corrected regex was verified
-against live entries.
+against live entries. After [Deploy 41740623270](https://github.com/schani/pi-orb/actions/runs/41740623270)
+(`1ea12c28`), preview requests carrying a fresh query marker left no Cloud Logging entry, no
+preview-host request log appeared, and other Cloud Run request logs were still retained.
 
 **Live acceptance (2026-11-03, Firefox, Claude orb):** HTTP, cookies (`x-forwarded-proto: https`),
 SSE first byte before the end, WebSocket text/binary echo, a 70-second stream, a 50 MiB download
