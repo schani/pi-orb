@@ -103,6 +103,8 @@ Latest Pi `1.4.0` pins Undici `8.10.2`; upgrading the family cannot fix it. An n
 
 Mermaid `12.2.0` first accepts fixed KaTeX: `11.17.2`, `12.0.0` and `12.1.0` constrain it below the [trust-bypass fix](https://github.com/advisories/GHSA-238p-pmpm-9mq7) in `0.18.2`. Its `^0.18.0` range locks `0.18.10`; no `0.19` upgrade. Presentation/security policy: `docs/web-ui.md`; qualification: `docs/testing.md`. These remediate dependencies, not demonstrated application exploits. External fake-provider/Fling/esbuild inputs are excluded.
 
+**Mermaid upgrade (2026-11-04).** Use [`12.3.0`](https://github.com/mermaid-js/mermaid/releases/tag/mermaid%4012.3.0) for corrected flowchart edge-ID parsing beside node shapes ([#8459](https://github.com/mermaid-js/mermaid/pull/8459)) and renderer fixes. Its required ELK dependency resolves to `0.12.0`; the adapter still selects Dagre. DOMPurify `3.4.17` already meets the release’s security floor, and KaTeX remains `0.18.10`: this bump claims no additional security remediation. Keep unrelated resolutions and the Pi/Chord `1.4.0` family and patches unchanged. Built-browser qualification: `docs/testing.md`.
+
 ## HTTP, WebSocket, and schemas
 
 Keep Fastify, `@fastify/websocket`, and TypeBox because replacing them would mean writing and securing our own router, request body handling, upgrade lifecycle, and runtime validators. Share TypeBox schemas through `packages/protocol` and infer types from them.

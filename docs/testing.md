@@ -1,5 +1,11 @@
 # Testing
 
+## Mermaid 12.3.0 (2026-11-04, PST; local, undeployed)
+
+Tests preceded the bump: both built-app browser engines rejected adjacent edge IDs on `12.2.0`, after passing privacy, sanitization, KaTeX, actor, source/dialog and parse-fallback assertions. `12.3.0` renders the same shapes and named edges. The built-shell fixture blocks external requests and asserts source-free render telemetry and lazy hashed assets. Existing Mermaid browser cases retain measurement-cleanup coverage.
+
+Local checks pass: **980 web tests**, **25 built-shell/Mermaid browser cases** across Chromium/WebKit, web build/typecheck, E2E typecheck and scoped Biome. Build retains large-chunk warnings. Initial fixture failures were corrected canonical display projection, safe-link expectations and diagram-prefixed SVG IDs; no deadlines changed. Commands, first-failure logs and registry receipts: `/tmp/mermaid-implementation.md`. This is scoped frontend qualification, not full runtime/process E2E, hosted CI or deployment.
+
 ## State-machine refactor gate (user-approved 2026-11-01, PST)
 
 For this task only—workspace uploads, central Durable owner close/drain, inbox admission/replay, MCP OAuth publication and frontend scroll pinning—each machine actually refactored must first have a new deterministic regression exposing a genuine bug in the original implementation. Manufactured requirements or mutation-introduced bugs do not qualify; machines without a confirmed bug are not refactored. Preserve and replay DST failures before fixing. Preserve persisted schemas, value vocabulary, file/receipt formats and intended CAS/transaction contracts; new or changed persisted representation requires user discussion. Correcting buggy effects/ordering within those contracts is permitted.
