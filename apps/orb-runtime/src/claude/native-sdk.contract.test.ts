@@ -484,7 +484,7 @@ for (const cancelAt of [
       // before the caller observes the result and closes the process.
       expect(result.compaction.hasSummary).toBe(cancelAt === "queued");
       expect(result.compaction.providerRequests).toBe(
-        cancelAt === "in-progress" || cancelAt === "queued" ? 1 : 0,
+        cancelAt === "queued" ? 2 : cancelAt === "in-progress" ? 1 : 0,
       );
       expect(result.compaction.ordinaryAssistantContinuation).toBe(false);
     },

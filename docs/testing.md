@@ -1,5 +1,15 @@
 # Testing
 
+## Claude SDK 0.3.318 queued compaction (2026-11-04, PST)
+
+Accepted public interrupt leaves queued `/compact` runnable. The fixed native fixture
+returns no structured summary; [CLI 2.1.311](https://github.com/anthropics/claude-code/releases/tag/v2.1.311)
+added one missing-summary retry. Require exactly two provider requests for queued
+compaction, one for interrupted in-progress compaction and zero before dispatch.
+Cancellation, queue receipt, summary and continuation assertions remain unchanged.
+The original full-root failure and synthetic request capture are retained in
+`/workspace/claude-evidence/full/`; no production behavior changed.
+
 ## State-machine refactor gate (user-approved 2026-11-01, PST)
 
 For this task only—workspace uploads, central Durable owner close/drain, inbox admission/replay, MCP OAuth publication and frontend scroll pinning—each machine actually refactored must first have a new deterministic regression exposing a genuine bug in the original implementation. Manufactured requirements or mutation-introduced bugs do not qualify; machines without a confirmed bug are not refactored. Preserve and replay DST failures before fixing. Preserve persisted schemas, value vocabulary, file/receipt formats and intended CAS/transaction contracts; new or changed persisted representation requires user discussion. Correcting buggy effects/ordering within those contracts is permitted.
