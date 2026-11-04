@@ -79,6 +79,37 @@ describe("web assets", () => {
     expect(response.body).toBe("export {};");
   });
 
+  it("enumerates nested glob routes, encoded names, ranges and cache validators", async () => {
+    mkdirSync(join(root, "assets", "nested"));
+    writeFileSync(join(root, "assets", "nested", "a b.js"), "0123456789");
+    const server = await app();
+    try {
+      const url = "/assets/nested/a%20b.js";
+      const get = await server.inject({ method: "GET", url });
+      expect(get.statusCode).toBe(200);
+      expect(get.body).toBe("0123456789");
+      expect(get.headers["content-type"]).toContain("javascript");
+      const head = await server.inject({ method: "HEAD", url });
+      expect(head.statusCode).toBe(200);
+      expect(head.body).toBe("");
+      expect(head.headers["content-length"]).toBe("10");
+      const range = await server.inject({ method: "GET", url, headers: { range: "bytes=2-4" } });
+      expect(range.statusCode).toBe(206);
+      expect(range.body).toBe("234");
+      expect(range.headers["content-range"]).toBe("bytes 2-4/10");
+      const cached = await server.inject({
+        method: "GET",
+        url,
+        headers: { "if-none-match": String(get.headers.etag) },
+      });
+      expect(get.headers.etag).toBeTruthy();
+      expect(cached.statusCode).toBe(304);
+      expect(cached.body).toBe("");
+    } finally {
+      await server.close();
+    }
+  });
+
   it("returns an honest page 404 when the build has no index", async () => {
     unlinkSync(join(root, "index.html"));
     const server = await app();

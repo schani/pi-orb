@@ -343,7 +343,7 @@ test("guest execution and Claude load no patched dependency files", () => {
   );
 });
 
-test("Pi release inputs align on stable 1.4.0 with a scoped Undici security override", () => {
+test("Pi release inputs align on stable 1.4.0 with scoped security overrides", () => {
   for (const path of [
     "apps/control-plane/package.json",
     "apps/orb-runtime/package.json",
@@ -361,14 +361,16 @@ test("Pi release inputs align on stable 1.4.0 with a scoped Undici security over
   assert.equal(family.length, 9);
   for (const [path, entry] of family) assert.equal(entry.version, "1.4.0", path);
   for (const [owner, version] of [
-    ["apps/control-plane", "7.30.1"],
+    ["apps/control-plane", "8.12.3"],
     ["node_modules/@earendil-works/pi-coding-agent", "8.12.3"],
   ]) {
     const require = createRequire(join(repository, owner, "package.json"));
     assert.equal(require("undici/package.json").version, version, owner);
   }
   assert.deepEqual(JSON.parse(readFileSync(join(repository, "package.json"), "utf8")).overrides, {
-    "@earendil-works/pi-coding-agent@1.4.0": { undici: "8.12.3" },
+    "@earendil-works/pi-coding-agent@1.4.0": { undici: "8.12.3", minimatch: "11.0.1" },
+    "@fastify/static@10.1.8": { glob: "14.0.3" },
+    "gcp-metadata@8.1.4": { gaxios: "7.3.0" },
   });
 });
 
