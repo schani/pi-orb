@@ -1,4 +1,5 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -25,8 +26,15 @@ export function repositoryRewrite(target: string): Record<string, string> {
 }
 
 let started: Promise<RepositoryFixture> | undefined;
+let cleanup: (() => void | Promise<void>) | undefined;
 
-/** One-commit snapshot of this checkout served by `git daemon`, shared per worker process. */
+export async function stopRepositoryFixture(): Promise<void> {
+  await cleanup?.();
+  cleanup = undefined;
+  started = undefined;
+}
+
+/** One-commit snapshot of this checkout served by `git daemon`, shared by the test file. */
 export function repositoryFixture(): Promise<RepositoryFixture> {
   started ??= start();
   return started;
@@ -34,6 +42,7 @@ export function repositoryFixture(): Promise<RepositoryFixture> {
 
 async function start(): Promise<RepositoryFixture> {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-repository-fixture-"));
+  cleanup = () => rmSync(root, { recursive: true, force: true });
   const repository = join(root, "pi-orb");
   mkdirSync(repository);
   const git = (args: string[], input?: Buffer) =>
@@ -70,11 +79,14 @@ async function start(): Promise<RepositoryFixture> {
     ["daemon", "--reuseaddr", "--export-all", `--base-path=${root}`, `--port=${port}`, root],
     { stdio: "ignore" },
   );
-  daemon.unref();
-  process.once("exit", () => {
-    daemon.kill();
+  cleanup = async () => {
+    if (daemon.exitCode === null && daemon.signalCode === null) {
+      const closed = once(daemon, "close");
+      daemon.kill();
+      await closed;
+    }
     rmSync(root, { recursive: true, force: true });
-  });
+  };
   const hostUrl = `git://127.0.0.1:${port}/pi-orb`;
   for (let attempt = 0; spawnSync("git", ["ls-remote", hostUrl]).status !== 0; attempt++) {
     if (attempt >= 50) throw new Error("repository fixture daemon did not start");

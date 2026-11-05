@@ -1672,6 +1672,19 @@ the fixture commit. Locally all affected process files (8 files, 14 tests) and D
 `full-slice` (4 tests) pass. `full-slice` and `full-main-auth` failure dumps now include runtime
 logs, health and container state. Evidence: `.context/pr240/`.
 
+### Repository fixture ownership (2026-11-04)
+
+A focused run on main `7c25f138` with pinned Vitest 5.0.5 reproduced the daemon left by
+successful suites; this is not specific to the 5.1.0 upgrade. Worker termination bypasses
+Node's process-exit cleanup. Repository fixtures belong to the test file: both Vitest configs
+load `e2e/testkit/repository-fixture-setup.ts`, whose `aroundAll` wraps the suite in
+`try/finally`: await daemon closure, then remove the snapshot, even when caller teardown
+rejects or times out. A separate `afterAll` is insufficient: Vitest 5.0.5 reverses teardown
+hooks and stops on rejection. Hook registration stays in `setupFiles`, not the helper imported
+by global setup. Isolated fork/thread regressions observe caller teardown failures and assert
+clone refusal and snapshot removal after worker completion, with owned process-group cleanup
+on failure. Evidence: `.context/fixture-cleanup/` and its `revision-s1/` subdirectory.
+
 ## Deterministic simulation testing strategy
 
 The [`determined`](https://www.npmjs.com/package/determined) package provides cooperative deterministic scheduling, reproducible entropy, failpoints, blocking primitives, deadlock detection, and exact record/replay of failing schedules. pi-orb does not require timed mutex or condition-variable APIs: it coordinates with database compare-and-swap, explicit lifecycle state, serialized in-process mutation queues, and cancellable adapter operations. Virtual sleep/deadline timers only need to participate correctly in scheduler quiescence and cancellation.

@@ -6,8 +6,9 @@ import {
   repositoryRewrite,
 } from "./repository-fixture.ts";
 
-it("serves a snapshot of this checkout in place of the GitHub repository", async () => {
+it("serves a snapshot of this checkout in place of the GitHub repository", async ({ task }) => {
   const fixture = await repositoryFixture();
+  Object.assign(task.meta, { repositoryFixture: fixture });
   expect(fixture.containerUrl).toMatch(/^git:\/\/host\.docker\.internal:\d+\/pi-orb$/);
   const listed = execFileSync("git", ["ls-remote", REPOSITORY_FIXTURE_URL, "refs/heads/main"], {
     env: { PATH: process.env.PATH, ...repositoryRewrite(fixture.hostUrl) },
