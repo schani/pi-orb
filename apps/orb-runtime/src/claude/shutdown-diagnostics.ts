@@ -107,6 +107,7 @@ export class ClaudeShutdownDiagnostics {
     if (message === null) return;
     let fields: JsonObject;
     if (message.type === "user") {
+      if (message.parent_tool_use_id != null) return;
       for (const block of blocks(record(message.message)?.content))
         if (block.type === "tool_result")
           this.edge(message, {

@@ -4,4 +4,6 @@
 
 Decision (2026-11-05): capture immutable first-close state and bounded close-time SDK identities/order, without changing quiescence or recovery. Contract: `docs/claude-agent-sdk.md`. Attribution follow-up: `TODO.md`.
 
-Full investigation and original diff: ignored `.context/shutdown-diagnostics/superseded/`; source evidence and hashes: `.context/claude-rotation-1f315657/`. No repair or causal fix is claimed here.
+Recovery (2026-11-05): a later missing-receipt tester report blocked boot. Explicitly approved report retirement and targeted journal abandonment restored startup without replay; native history stayed unchanged. Stock recovery interrupted five old handoffs and admitted existing human input once. Evidence: `.context/claude-rotation-1f315657/recovery-20261105T162252Z/repair-receipt.md`.
+
+Full investigation and original diff: ignored `.context/shutdown-diagnostics/superseded/`; source evidence and hashes: `.context/claude-rotation-1f315657/`. The shutdown race's cause remains unproven.

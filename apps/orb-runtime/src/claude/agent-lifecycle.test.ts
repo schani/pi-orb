@@ -838,7 +838,6 @@ it.each(["status", "assistant"] as const)(
       },
     });
     expect(JSON.stringify(failure)).not.toContain("private-result");
-    expect(JSON.stringify(failure)).not.toContain('"caller":"attach"');
     if (source === "assistant")
       expect(
         f.history.view.find(

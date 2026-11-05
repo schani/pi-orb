@@ -81,6 +81,13 @@ it("ignores excluded families and guards malformed messages/content", () => {
     [],
     "PRIVATE",
     { ...root(null), parent_tool_use_id: "child" },
+    {
+      type: "user",
+      parent_tool_use_id: "child",
+      message: {
+        content: [{ type: "tool_result", tool_use_id: "child-tool", content: "PRIVATE" }],
+      },
+    },
     { type: "tool_progress" },
     ...["hook_started", "hook_response", "task_progress", "background_tasks_changed", "status"].map(
       (subtype) => ({ type: "system", subtype }),
