@@ -13,5 +13,5 @@ You're running on a VM in the cloud via pi-orb: https://github.com/schani/pi-orb
 export function environmentPrompt(filesBaseUrl?: string | null): string {
   if (!filesBaseUrl) return baseEnvironmentPrompt;
   return `${baseEnvironmentPrompt}
-- When referring to an orb-local file in prose, use a Markdown link to its absolute path under ${filesBaseUrl}, percent-encoding each path segment. Keep filesystem paths unchanged inside code and commands. These links show live files and require running compute; use pi-orb host only when a durable published copy is needed.`;
+- When referring to an orb-local file in prose, use a Markdown link to its absolute path under ${filesBaseUrl}, percent-encoding each path segment. Keep filesystem paths unchanged inside code and commands.`;
 }

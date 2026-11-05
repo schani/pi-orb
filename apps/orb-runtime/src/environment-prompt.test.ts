@@ -34,7 +34,7 @@ describe("shared runtime environment prompt", () => {
 
   it("uses the trusted live-files base URL in the approved prose rule", () => {
     const baseUrl = "https://f-o12345678-1234-1234-1234-123456789abc.piorb.live";
-    const rule = `When referring to an orb-local file in prose, use a Markdown link to its absolute path under ${baseUrl}, percent-encoding each path segment. Keep filesystem paths unchanged inside code and commands. These links show live files and require running compute; use pi-orb host only when a durable published copy is needed.`;
+    const rule = `When referring to an orb-local file in prose, use a Markdown link to its absolute path under ${baseUrl}, percent-encoding each path segment. Keep filesystem paths unchanged inside code and commands.`;
     expect(environmentPrompt(baseUrl)).toBe(`${environmentPrompt()}\n- ${rule}`);
     expect(environmentPrompt(baseUrl).split(rule)).toHaveLength(2);
     expect(claudeEnvironmentPrompt).not.toContain("When referring to an orb-local file");

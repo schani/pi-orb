@@ -5,11 +5,8 @@ description: Publish and share HTML explainers, design documents, or other files
 
 # Host files
 
-For live orb-local files, use the Markdown links described in the environment prompt. They show
-current bytes and require running compute. Keep filesystem paths unchanged in code and commands.
-
-Use `pi-orb host` only when a durable published copy is needed, including access while compute is
-stopped or after archival. Publish it and return the exact URL printed by the successful command:
+When the user asks for a file they can open or share, including an HTML explainer or design document,
+publish it and return the exact URL printed by the successful command:
 
 ```bash
 pi-orb host file.html design/index.html
