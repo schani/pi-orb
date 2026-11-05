@@ -1519,6 +1519,20 @@ assertions and timeouts. Raw first-failure and corrected-run logs remain in
 `.context/native-final-unit-dst-bounded.log`.
 
 
+## Rustup 1.29.3 (2026-11-04, PST; local, undeployed)
+
+New shared-image checksum/version/order assertions and the updated Dockerfile contract rejected the old pins before implementation. After `npm ci`, all 16 runtime dependency contracts, 14 Dockerfile contracts, `test:infra` (152 Node, 241 Python, 34 native guest cases plus filesystem check), workspace/E2E typecheck, shell syntax and diff checks pass. Evidence: `.context/rustup-1-29-3/`; official archive/hash verification also remains in the combined candidate's `.context/native-security-baseline/`. The npm graph is unchanged (seven moderate audit findings).
+
+Fresh native acceptance passed on combined `0f8414e8`, which also changes the separately proposed platform baseline; all owned resources were removed. It does not establish exact-source full-suite, image/E2E or PostgreSQL qualification of this independent branch. The earlier local full-suite invocation was cancelled at its 300s caller budget: addressed as a tool-budget limit, not a passing full-suite gate. No deployment is claimed.
+
+**PR 253 first hosted failure (2026-11-04, PST):** source `e8db89a726cb5c3973755da8ee5d2c806c8f1562`, tested merge `9cc87c03eefbabd6f0e5bfe3d746fdaa34dc6374`, [E2E run 41875776428, attempt 1, shard 2](https://github.com/schani/pi-orb/actions/runs/41875776428/job/126734636867). At 10:03:55 PST the unchanged `15728640` KiB (15 GiB) pre-build guard failed with only 9.2 GiB available on the AWS runner's 72 GiB `/dev/mapper/cow-root` (63 GiB used). This was insufficient initial runner capacity, not an ENOSPC write, Rustup installation failure or test timeout; no image build/application tests/DST ran on this shard. Nine other required jobs passed: CI `41875776044`, Durable `41875776258`, E2E shards 1/3/4. Those receipts qualify only that source, not the integrated head.
+
+First evidence remains in `.context/pr253-first-failure/`: `job126734636867.log` (guard at lines 1519–1534), `artifacts.json`, run/check API snapshots and `SHA256SUMS`. Artifact `13350471175` was downloaded through `gh api`; its 42,348-byte ZIP matches API SHA-256 `c6bef7d103e92f1c81cdf916f4e4f21427d05e9c0afdd5cc2d71f0e4c9720072`. `artifact-verification.txt` verifies all 19 entries byte-identical to tracked historical fixtures; none requires a new DST replay.
+
+**Corrective integration:** merge the frozen [PR 257](https://github.com/schani/pi-orb/pull/257) base `df34bed10a67b17d6ee583ef5674c27890be83dd`, preserving Rustup history and its separate scope. The queried current base has all ten required checks green (CI `41887288706`, E2E `41887288679`, Durable `41887288742`). It prepares hosted-runner capacity before downloads, removes only unused Android tools, preserves the 15 GiB guards/deadlines and records before/after measurements in Actions logs/summary; rationale and measured AWS recovery: `docs/postmortems/2026-11-04-ci-runner-disk-budget.md`.
+
+After integration and `npm ci`, focused contracts pass: 49 Python cases (16 runtime dependency, 20 qualification, 13 inherited runner-disk) and 14 Dockerfile cases, plus installer shell syntax and diff checks. The inherited disk cases already cover bounded deletion, insufficient reclamation and unchanged guards/workflow ordering; no duplicate test was added. Logs remain beside the first evidence. Existing broader local qualification above is retained, not rerun. Sol round 2 is required before push; fresh exact-head hosted qualification is required before merge. No full local suite or deployment was run for this correction.
+
 ## HTTP preview verification (implementation authorized, 2026-10-06)
 
 `docs/ports.md` owns the tests-first sequence, forced/entropy DST matrix, named checkpoints,

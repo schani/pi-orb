@@ -273,3 +273,20 @@ esac
         for command in scripts.values():
             for path in re.findall(r'node (apps/[^ ]+\.ts)', command):
                 self.assertTrue((ROOT / path).is_file(), path)
+
+    def test_rustup_archives_match_both_image_builds(self):
+        native = (ROOT / 'infra/native-vm/install.sh').read_text()
+        for architecture, checksum in [
+            ('x86_64', 'b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55'),
+            ('aarch64', '9f608c142e0e38a78957d0661ba1dfaf0b6fb37184cfaa4b9a0aa57af6184282'),
+        ]:
+            with self.subTest(architecture=architecture):
+                self.assertIn(f'rust_arch={architecture}; rustup_sha={checksum}', self.dockerfile)
+                if architecture == 'x86_64':
+                    self.assertIn('1.29.3/x86_64-unknown-linux-gnu/rustup-init', native)
+                    self.assertIn(checksum, native)
+        for source in [native, self.dockerfile]:
+            self.assertIn('rustup/archive/1.29.3/', source)
+            rustup = source[source.index('rustup/archive/1.29.3/') :]
+            self.assertLess(rustup.index('sha256sum'), rustup.index('chmod 755 /usr/local/bin/rustup')
+                            if source == native else rustup.index('install -m 755 /tmp/rustup-init'))
