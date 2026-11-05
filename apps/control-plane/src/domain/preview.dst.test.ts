@@ -5,22 +5,38 @@ import { FAILPOINTS } from "../testkit/failpoints.ts";
 import { makeHarness, seedRunningOrb, type TestHarness } from "../testkit/fixtures.ts";
 import { runDst } from "../testkit/sim.ts";
 import { reconcileOrbOnce, requestOrbStop } from "./lifecycle.ts";
-import { admitPreview, revalidatePreview } from "./preview.ts";
+import {
+  admitPreview,
+  PREVIEW_MAX_DURATION_MS,
+  PREVIEW_REVALIDATE_MS,
+  previewError,
+  recordPreviewTransport,
+  revalidatePreview,
+} from "./preview.ts";
 
 function fixture() {
   const h = makeHarness();
   const client = h.deps.runtimeClient;
+  const provider = h.deps.hostProvider;
+  const observe = provider.observe.bind(provider);
+  const calls = { observe: 0, health: 0 };
+  provider.observe = (...args) => {
+    calls.observe++;
+    return observe(...args);
+  };
   let execution = "execution-1";
   const deps = {
     ...h.deps,
     runtimeClient: {
       ...client,
-      health: (...args: Parameters<typeof client.health>) =>
-        client
+      health: (...args: Parameters<typeof client.health>) => {
+        calls.health++;
+        return client
           .health(...args)
           .map((value) =>
             value.status === "ready" ? { ...value, incarnation: 0, executionId: execution } : value,
-          ),
+          );
+      },
       prepareIdleStop: client.prepareIdleStop.bind(client),
       pullHistory: client.pullHistory.bind(client),
       deliverMessage: client.deliverMessage.bind(client),
@@ -32,6 +48,7 @@ function fixture() {
   return {
     h,
     deps,
+    calls,
     replaceExecution: () => {
       execution = "execution-2";
     },
@@ -51,6 +68,14 @@ async function seed(task: SimulationTask, h: TestHarness) {
     now: task.wallNow(),
   });
   expect(result._unsafeUnwrap().type).toBe("registered");
+}
+/** A preview already in use: the held lease means admission no longer bumps `stateVersion`. */
+async function seedInUse(task: SimulationTask, h: TestHarness) {
+  await seed(task, h);
+  h.store.seedOrb({
+    ...h.store.orbSnapshot("orb-a")!,
+    previewActiveUntil: task.wallNow() + PREVIEW_MAX_DURATION_MS,
+  });
 }
 const request = (task: SimulationTask) => ({
   orbId: "orb-a",
@@ -383,6 +408,166 @@ it("admission defeats the actual idle reconciler CAS after its stale row read", 
             await held.wait(task);
             expect((await admitPreview(task, deps, request(task))).isOk()).toBe(true);
             held.release(task);
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    },
+  );
+});
+
+it("a page-load burst shares one compute validation", async () => {
+  await runDst(
+    { name: "preview-admission-burst", iterations: 30, lateTimerProbability: 0 },
+    async (sim) => {
+      const { h, deps, calls } = fixture();
+      const ready = new ConditionVariable("document admitted");
+      let documentAdmitted = false;
+      const runtimeInstances = new Set<string>();
+      const modules = Array.from({ length: 8 }, (_, index) => ({
+        name: `module-${index}`,
+        f: async (task: SimulationTask) => {
+          while (!documentAdmitted) await ready.wait(task, "await document");
+          const admission = await admitPreview(task, deps, request(task));
+          runtimeInstances.add(admission._unsafeUnwrap().target.runtimeInstanceId);
+        },
+      }));
+      const result = await sim.runTasks([
+        {
+          name: "document",
+          f: async (task) => {
+            await seed(task, h);
+            expect((await admitPreview(task, deps, request(task))).isOk()).toBe(true);
+            documentAdmitted = true;
+            ready.notifyAll(task, "document admitted");
+          },
+        },
+        ...modules,
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      // The document's lease acquisition is a state transition, so the burst validates once more.
+      expect(calls).toEqual({ observe: 2, health: 2 });
+      expect([...runtimeInstances]).toEqual([h.world.runtimeInstanceIdOf("orb-a")]);
+    },
+  );
+});
+
+it("a lifecycle transition with a new runtime is never served from the cached identity", async () => {
+  await runDst(
+    { name: "preview-identity-transition", iterations: 3, lateTimerProbability: 0 },
+    async (sim) => {
+      const { h, deps, calls } = fixture();
+      const result = await sim.runTasks([
+        {
+          name: "request",
+          f: async (task) => {
+            await seedInUse(task, h);
+            expect((await admitPreview(task, deps, request(task))).isOk()).toBe(true);
+            h.world.restartRuntimeProcess(task, "orb-a");
+            const orb = h.store.orbSnapshot("orb-a")!;
+            h.store.seedOrb({ ...orb, stateVersion: orb.stateVersion + 1 });
+            const route = (await admitPreview(task, deps, request(task)))._unsafeUnwrap();
+            expect(route.target.runtimeInstanceId).toBe(h.world.runtimeInstanceIdOf("orb-a"));
+            expect(calls).toEqual({ observe: 2, health: 2 });
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    },
+  );
+});
+
+it("a failed compute validation is never cached", async () => {
+  await runDst(
+    { name: "preview-identity-failure", iterations: 3, lateTimerProbability: 0 },
+    async (sim) => {
+      const { h, deps, calls } = fixture();
+      const result = await sim.runTasks([
+        {
+          name: "request",
+          f: async (task) => {
+            await seedInUse(task, h);
+            h.world.setHealth("orb-a", {
+              type: "runtime_client_error",
+              answered: false,
+              code: "unreachable",
+              message: "no answer",
+              retryable: true,
+            });
+            const failed = await admitPreview(task, deps, request(task));
+            expect(failed.isErr() && failed.error.code).toBe("stale_target");
+            h.world.setHealth("orb-a", null);
+            expect((await admitPreview(task, deps, request(task))).isOk()).toBe(true);
+            expect(calls).toEqual({ observe: 2, health: 2 });
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    },
+  );
+});
+
+it("the cached identity expires after the revalidation interval", async () => {
+  await runDst(
+    { name: "preview-identity-ttl", iterations: 3, lateTimerProbability: 0 },
+    async (sim) => {
+      const { h, deps, calls } = fixture();
+      const result = await sim.runTasks([
+        {
+          name: "request",
+          f: async (task) => {
+            await seedInUse(task, h);
+            expect((await admitPreview(task, deps, request(task))).isOk()).toBe(true);
+            await task.sleep(PREVIEW_REVALIDATE_MS / 5, "inside TTL");
+            expect((await admitPreview(task, deps, request(task))).isOk()).toBe(true);
+            expect(calls).toEqual({ observe: 1, health: 1 });
+            await task.sleep(PREVIEW_REVALIDATE_MS, "past TTL");
+            expect((await admitPreview(task, deps, request(task))).isOk()).toBe(true);
+            expect(calls).toEqual({ observe: 2, health: 2 });
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    },
+  );
+});
+
+it("a runtime stale_target refusal drops the cached identity", async () => {
+  await runDst(
+    { name: "preview-identity-refused", iterations: 10, lateTimerProbability: 0 },
+    async (sim) => {
+      const { h, deps, calls } = fixture();
+      const restarted = new ConditionVariable("runtime restarted");
+      let refused = false;
+      const result = await sim.runTasks([
+        {
+          name: "forwarding",
+          f: async (task) => {
+            await seedInUse(task, h);
+            expect((await admitPreview(task, deps, request(task))).isOk()).toBe(true);
+            h.world.restartRuntimeProcess(task, "orb-a");
+            const route = (await admitPreview(task, deps, request(task)))._unsafeUnwrap();
+            // The runtime checks the exact target, so the stale identity fails closed.
+            expect(route.target.runtimeInstanceId).not.toBe(h.world.runtimeInstanceIdOf("orb-a"));
+            await task.checkpoint("preview.test.forward");
+            recordPreviewTransport(
+              task,
+              deps,
+              route,
+              "connect",
+              previewError("stale_target", "Preview runtime forwarding failed"),
+            );
+            refused = true;
+            restarted.notifyAll(task, "refused");
+          },
+        },
+        {
+          name: "next-request",
+          f: async (task) => {
+            while (!refused) await restarted.wait(task, "await refusal");
+            const next = (await admitPreview(task, deps, request(task)))._unsafeUnwrap();
+            expect(next.target.runtimeInstanceId).toBe(h.world.runtimeInstanceIdOf("orb-a"));
+            expect(calls).toEqual({ observe: 2, health: 2 });
           },
         },
       ]);

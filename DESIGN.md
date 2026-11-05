@@ -335,5 +335,6 @@ Reference material:
 - [docs/postmortems/2026-10-23-frontend-chart-qualification.md](docs/postmortems/2026-10-23-frontend-chart-qualification.md) — responsive focus ownership and isolated Mermaid measurement
 - [docs/postmortems/2026-10-20-stopped-central-agent-recovery.md](docs/postmortems/2026-10-20-stopped-central-agent-recovery.md) — release shutdown during stopped-VM admission exposed a central recovery eligibility gap
 - [docs/postmortems/2026-11-03-preview-request-log-exclusion.md](docs/postmortems/2026-11-03-preview-request-log-exclusion.md) — doubled backslashes made the preview request-log exclusion match nothing
+- [docs/postmortems/2026-11-05-preview-admission-burst-503.md](docs/postmortems/2026-11-05-preview-admission-burst-503.md) — per-request compute validation made dev-page reloads spuriously 503
 - [docs/postmortems/2026-11-03-preview-admission-clock-skew.md](docs/postmortems/2026-11-03-preview-admission-clock-skew.md) — preview admissions signed at the runtime's expiry limit failed under clock skew
 - [docs/postmortems/2026-10-24-claude-terminal-failure.md](docs/postmortems/2026-10-24-claude-terminal-failure.md) — subscription-limit failure retained a task synthesis handoff and busy ownership
