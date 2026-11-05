@@ -2331,4 +2331,12 @@ The full serial suite left its owned git-daemon fixture running after worker exi
 PIDs 38288/38290 were ownership-verified and terminated; fixture port 38849 and
 process E2E ports 3210/5173 are free. Cleanup evidence is retained in
 `owned-repository-cleanup.json` and `ports-final.txt` under the qualification directory.
-The cause is unattributed; no fix is claimed.
+A later focused reproduction on main `7c25f138` with Vitest 5.0.5 showed worker
+termination bypassing Node's process-exit callback. PR #260's qualified
+`aroundAll`/`finally` fixture owner is integrated (see repository fixture ownership
+above). This does not retroactively attribute the original audit.
+
+Integration ancestor `35ba0ae5` passed 143 targeted E2E unit tests and 54 focused
+scheduler/replay/timer checks, workspace/E2E typecheck, lint and resource audit.
+Reviewed receipts remain unchanged in the qualification directory's `integration260/`.
+The historical 6,086-test full pass predates this cleanup; full new-head CI is pending.
