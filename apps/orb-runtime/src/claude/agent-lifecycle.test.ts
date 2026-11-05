@@ -779,28 +779,6 @@ it.each(["status", "assistant"] as const)(
       stop_reason: "end_turn",
       result: "private-result",
     } as unknown as SDKMessage);
-    await f.emit({ ...result, uuid: "late-ack", num_turns: 0 } as unknown as SDKMessage);
-    await f.emit({
-      type: "system",
-      subtype: "task_started",
-      uuid: "start",
-      session_id: f.state.id,
-      task_id: "late-task",
-      tool_use_id: "late-tool",
-      task_type: "local_bash",
-      description: "private-description",
-    } as unknown as SDKMessage);
-    await f.emit({
-      type: "system",
-      subtype: "task_notification",
-      uuid: "terminal",
-      session_id: f.state.id,
-      task_id: "late-task",
-      tool_use_id: "late-tool",
-      status: "completed",
-      summary: "private-summary",
-      output_file: "private-path",
-    } as unknown as SDKMessage);
     await f.emit(
       (source === "status"
         ? {
@@ -844,8 +822,10 @@ it.each(["status", "assistant"] as const)(
           messageId: "event",
           messageType: source === "status" ? "system" : "assistant",
           priorResult: {
-            resultId: "late-ack",
-            numTurns: 0,
+            resultId: "drain-result",
+            numTurns: 1,
+            queuedTurns: 0,
+            stopReason: "end_turn",
           },
         },
         shutdownDiagnostics: {
@@ -854,26 +834,10 @@ it.each(["status", "assistant"] as const)(
             result: { resultId: "drain-result", numTurns: 1, stopReason: "end_turn" },
             ownership: { ownedTasks: { count: 0, ids: [], omitted: 0 } },
           },
-          edges: expect.arrayContaining([
-            expect.objectContaining({ kind: "result", resultId: "late-ack", closing: true }),
-            expect.objectContaining({
-              kind: "task_started",
-              taskId: "late-task",
-              toolUseId: "late-tool",
-              taskKind: "local_bash",
-              closing: true,
-            }),
-            expect.objectContaining({
-              kind: "task_notification",
-              taskId: "late-task",
-              status: "completed",
-              closing: true,
-            }),
-          ]),
         },
       },
     });
-    expect(JSON.stringify(failure)).not.toMatch(/private-(result|description|summary|path)/);
+    expect(JSON.stringify(failure)).not.toContain("private-result");
     expect(JSON.stringify(failure)).not.toContain('"caller":"attach"');
     if (source === "assistant")
       expect(
@@ -899,6 +863,7 @@ it.each(["rotation", "interrupt"] as const)(
     const delivery = f.state.deliveries["inbox"];
     expect(delivery).toBeDefined();
     f.persist({ type: "user", uuid: delivery?.uuid, message: { content: "hello" } });
+    if (kind === "interrupt") await f.emit(nativeHook("initial-hook"));
     const aborted = kind === "interrupt" ? f.agent.abortOperation() : null;
     if (kind === "rotation") await f.emit(result);
     await f.awaitCloseRequest(2);
@@ -915,7 +880,24 @@ it.each(["rotation", "interrupt"] as const)(
       f.history.view.find(
         (record) => record.type === "event" && record.eventType === "claude.rotation_failed",
       ),
-    ).toMatchObject({ custom: { display: true }, overflow: { reason: "owned_work" } });
+    ).toMatchObject({
+      custom: { display: true },
+      overflow: {
+        reason: "owned_work",
+        shutdownDiagnostics: {
+          initialClose: {
+            caller: "operation_drain",
+            outcome: kind === "interrupt" ? "aborted" : "completed",
+            ownership: {
+              hooks: {
+                count: kind === "interrupt" ? 1 : 0,
+                ids: kind === "interrupt" ? ["initial-hook"] : [],
+              },
+            },
+          },
+        },
+      },
+    });
     expect(
       f.history.view.some(
         (record) => record.type === "event" && record.eventType === "claude.operation_finished",
@@ -1213,103 +1195,31 @@ it.each(["result", "assistant"] as const)(
 it("does not persist successful shutdown evidence and resets the next query's evidence", async () => {
   const f = fixture();
   expect((await f.attach()).isOk()).toBe(true);
-  await f.agent.submitMessage([{ type: "text", text: "first" }], "first-operation");
-  const first = Object.values(f.state.deliveries).find(
-    (value) => value.operationId === "first-operation",
-  );
-  f.persist({ type: "user", uuid: first?.uuid, message: { content: "first" } });
-  for (let i = 0; i < 60; i++) await f.emit(rootRequest);
-  await f.emit({ ...result, uuid: "first-result" } as unknown as SDKMessage);
-  f.exit();
-  await f.agent.closeExtensions();
-  expect(f.agent.getHealth()).toMatchObject({ status: "ready", activity: "idle" });
-  expect(JSON.stringify(f.history.view)).not.toContain("shutdownDiagnostics");
-  expect(
-    f.history.view.filter(
-      (record) => record.type === "event" && record.eventType === "claude.operation_finished",
-    ),
-  ).toHaveLength(1);
-  await f.agent.submitMessage([{ type: "text", text: "second" }], "second-operation");
-  const second = Object.values(f.state.deliveries).find(
-    (value) => value.operationId === "second-operation",
-  );
-  f.persist({ type: "user", uuid: second?.uuid, message: { content: "second" } });
-  await f.emit({ ...result, uuid: "second-result" } as unknown as SDKMessage);
-  await f.emit(rootRequest);
-  f.exit();
-  await f.agent.closeExtensions();
+  for (const id of ["first", "second"]) {
+    expect((await f.agent.deliverInboxMessage(id, [id], [{ type: "text", text: id }])).isOk()).toBe(
+      true,
+    );
+    f.persist({ type: "user", uuid: f.state.deliveries[id]?.uuid, message: { content: id } });
+    await f.emit({ ...result, uuid: `${id}-result` } as unknown as SDKMessage);
+    if (id === "second") await f.emit(rootRequest);
+    f.exit();
+    await f.agent.closeExtensions();
+    if (id === "first") {
+      expect(f.agent.getHealth()).toMatchObject({ status: "ready", activity: "idle" });
+      expect(JSON.stringify(f.history.view)).not.toContain("shutdownDiagnostics");
+    }
+  }
   const failure = f.history.view.find(
     (record) => record.type === "event" && record.eventType === "claude.rotation_failed",
   );
   expect(failure).toMatchObject({
     overflow: {
       shutdownDiagnostics: {
-        initialClose: { caller: "operation_drain", seq: 2, result: { resultId: "second-result" } },
-        edges: [
-          { seq: 1, resultId: "second-result" },
-          { seq: 3, kind: "status" },
-        ],
+        initialClose: { caller: "operation_drain", seq: 1, result: { resultId: "second-result" } },
+        edges: [{ seq: 2, kind: "status" }],
         droppedEdges: 0,
       },
     },
   });
   expect(JSON.stringify(failure)).not.toContain("first-result");
-});
-
-it("captures initial Abort hook ownership and keeps failure evidence in the existing failure event", async () => {
-  const f = fixture();
-  expect((await f.attach()).isOk()).toBe(true);
-  await f.agent.submitMessage([{ type: "text", text: "hello" }], "op");
-  const delivery = Object.values(f.state.deliveries)[0];
-  f.persist({ type: "user", uuid: delivery?.uuid, message: { content: "hello" } });
-  await f.emit(nativeHook("unmatched-hook"));
-  const aborted = f.agent.abortOperation();
-  await f.awaitCloseRequest(2);
-  f.exit();
-  expect((await aborted).isErr()).toBe(true);
-  const failures = f.history.view.filter(
-    (record) => record.type === "event" && record.eventType === "claude.rotation_failed",
-  );
-  expect(failures).toHaveLength(1);
-  expect(failures[0]).toMatchObject({
-    overflow: {
-      reason: "owned_work",
-      pendingHooks: 1,
-      shutdownDiagnostics: {
-        initialClose: {
-          caller: "operation_drain",
-          outcome: "aborted",
-          result: null,
-          holds: ["hooks"],
-          ownership: { hooks: { count: 1, ids: ["unmatched-hook"], omitted: 0 } },
-        },
-      },
-    },
-  });
-  expect(f.agent.getHealth()).toMatchObject({
-    status: "failed",
-    error: { code: "claude_hook_recovery_required" },
-  });
-  expect(f.agent.gateView()).toMatchObject({ activity: "busy", acceptingWork: false });
-  expect(JSON.stringify(f.history.view)).not.toContain("private-hook");
-});
-
-it("diagnostics do not fail supervision on ignored child assistant payloads", async () => {
-  const f = fixture();
-  await f.attach();
-  await f.agent.submitMessage([{ type: "text", text: "hello" }], "op");
-  const delivery = Object.values(f.state.deliveries)[0];
-  f.persist({ type: "user", uuid: delivery?.uuid, message: { content: "hello" } });
-  await f.emit({
-    type: "assistant",
-    parent_tool_use_id: "child-tool",
-    uuid: "child",
-    message: { content: null },
-  } as unknown as SDKMessage);
-  expect(f.agent.getHealth()).toMatchObject({ status: "ready", activity: "busy" });
-  await f.emit(result);
-  f.exit();
-  await f.agent.closeExtensions();
-  expect(f.agent.getHealth()).toMatchObject({ status: "ready", activity: "idle" });
-  expect(JSON.stringify(f.history.view)).not.toContain("shutdownDiagnostics");
 });

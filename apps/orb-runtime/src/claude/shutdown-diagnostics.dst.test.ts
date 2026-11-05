@@ -42,7 +42,6 @@ it.each(["before", "after"] as const)(
                 ] as SDKMessage[];
                 const toolResult = {
                   type: "user",
-                  parent_tool_use_id: null,
                   message: {
                     content: [
                       {
@@ -63,54 +62,6 @@ it.each(["before", "after"] as const)(
                 ).toEqual([true, true, true, true, true]);
                 f.query.endOutput();
                 await f.agent.closeExtensions();
-                const failure = f.history.view.find(
-                  (record) =>
-                    record.type === "event" && record.eventType === "claude.rotation_failed",
-                );
-                expect(failure).toMatchObject({
-                  overflow: {
-                    reason: "root_work",
-                    shutdownDiagnostics: {
-                      initialClose: {
-                        caller: "operation_drain",
-                        seq: 2,
-                        result: { resultId: "initial-result", numTurns: 9 },
-                        ownership: { ownedTasks: { count: 0 } },
-                      },
-                      droppedEdges: 0,
-                      edges: [
-                        { seq: 1, kind: "result", closing: false, resultId: "initial-result" },
-                        ...messages.map((message, index) =>
-                          expect.objectContaining({
-                            seq: index + 3,
-                            closing: true,
-                            kind:
-                              message.type === "system"
-                                ? message.subtype
-                                : message.type === "user"
-                                  ? "tool_result"
-                                  : message.type,
-                          }),
-                        ),
-                      ],
-                    },
-                  },
-                });
-                expect(JSON.stringify(failure)).not.toContain("PRIVATE_TOOL_OUTPUT");
-                expect(f.agent.gateView()).toMatchObject({
-                  activity: "busy",
-                  acceptingWork: false,
-                });
-                expect(f.agent.getHealth()).toMatchObject({
-                  status: "failed",
-                  error: { code: "claude_rotation_uncertain" },
-                });
-                expect(
-                  f.history.view.some(
-                    (record) =>
-                      record.type === "event" && record.eventType === "claude.operation_finished",
-                  ),
-                ).toBe(false);
               },
             },
             {
@@ -123,6 +74,44 @@ it.each(["before", "after"] as const)(
             },
           ]);
           expect(scheduled.isErr() ? scheduled.error : null).toBeNull();
+          const failure = f.history.view.find(
+            (record) => record.type === "event" && record.eventType === "claude.rotation_failed",
+          );
+          const diagnostics =
+            failure?.type === "event" ? failure.overflow?.shutdownDiagnostics : null;
+          const bookends = [
+            { kind: "task_started", taskId: "child", taskKind: "local_bash", toolUseId: "tool" },
+            { kind: "task_notification", taskId: "child", status: "completed", toolUseId: "tool" },
+          ];
+          const ack = { kind: "result", resultId: "late-ack", numTurns: 0 };
+          const toolResult = { kind: "tool_result", toolUseId: "tool", isError: false };
+          const request = { kind: "status", status: "requesting" };
+          const expected =
+            acknowledgment === "before"
+              ? [ack, ...bookends, toolResult, request]
+              : [...bookends, request, toolResult, ack];
+          expect(diagnostics).toMatchObject({
+            initialClose: {
+              caller: "operation_drain",
+              seq: 1,
+              result: { resultId: "initial-result", numTurns: 9 },
+              ownership: { ownedTasks: { count: 0 } },
+            },
+            droppedEdges: 0,
+            edges: expected.map((edge, index) => ({ ...edge, seq: index + 2 })),
+          });
+          expect(JSON.stringify(failure)).not.toContain("PRIVATE_TOOL_OUTPUT");
+          expect(f.agent.gateView()).toMatchObject({ activity: "busy", acceptingWork: false });
+          expect(f.agent.getHealth()).toMatchObject({
+            status: "failed",
+            error: { code: "claude_rotation_uncertain" },
+          });
+          expect(
+            f.history.view.some(
+              (record) =>
+                record.type === "event" && record.eventType === "claude.operation_finished",
+            ),
+          ).toBe(false);
         } finally {
           f.query.exit();
           f.query.endOutput();

@@ -1389,7 +1389,7 @@ export class ClaudeOrbAgent implements OrbAgent {
     return ok(undefined);
   }
   private onMessage(message: SDKMessage): void {
-    this.shutdownDiagnostics.observe(message, this.closing !== null);
+    if (this.closing !== null) this.shutdownDiagnostics.observe(message);
     if (
       this.closing !== null &&
       ((message.type === "system" &&

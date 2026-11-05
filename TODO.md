@@ -12,9 +12,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- **Recover orb 1f315657 without replay** (2026-11-05; `docs/postmortems/2026-11-04-claude-query-rotation-1f315657.md`). Preserve a fresh read-only disk capture; qualify the proposed journal repair against stock restore/boot functions. Obtain approval before failing only tester-report batch `5dd1ab6e` centrally, then remove its missing-receipt delivery and record truthful abandonment/aborted-operation evidence. Preserve queued human input `3d45cef0`; qualify stale handoffs with compute-disposal evidence, never blind ownership clearing. Back up every changed row/file; restart only under approval.
-
-- **Attribute Claude shutdown race 1f315657** (2026-11-04; `docs/postmortems/2026-11-04-claude-query-rotation-1f315657.md`). Capture a future rotation failure and reproduce its initial-close/late-edge ordering before changing quiescence logic. Establish the initiating cause; neither zero-turn filtering nor Monitor deduplication is justified. Preserve original evidence; target replay requires explicit authorization.
+- **Attribute Claude shutdown race 1f315657** (2026-11-04): capture and reproduce the initial-close/late-edge ordering before changing quiescence logic. See `docs/postmortems/2026-11-04-claude-query-rotation-1f315657.md`.
 - **Remediate the two npm audit advisories** (2026-11-03; `docs/dependency-audit.md`): minimatch GHSA-g3hv-75wg-m249 and glob GHSA-3g3m-2fjr-6pw4. Resolve Pi/static/legacy GCP chains with compatible updates or qualified scoped overrides; verify full/production audits and regression gates.
 - **Refresh native Docker/containerd security pins** (2026-11-03; `docs/dependency-audit.md`): Docker 29.9.3 and containerd 2.3.7 LTS targets, subject to Debian package availability; paired refresh held under the 2026-10-24 decision in [docs/deployment.md](docs/deployment.md), pending [question 87](docs/open-questions.md#dependency-update-state-conversions--87). Refresh base/guest-agent security inputs and qualify the native image; record installed versions, not source-only assumptions.
 
