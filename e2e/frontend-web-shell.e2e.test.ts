@@ -898,7 +898,10 @@ flowchart LR
     }
     expect(scripts.some((path) => /mermaid-render-.*\.js$/.test(path))).toBe(true);
     expect(scripts.every((path) => path.startsWith("/assets/"))).toBe(true);
-    await unsafe.getByRole("button", { name: "Show Mermaid source" }).click();
+    const sourceToggle = unsafe.getByRole("button", { name: "Show Mermaid source" });
+    await sourceToggle.focus();
+    await expectPage(sourceToggle).toBeFocused();
+    await sourceToggle.click();
     await expectPage(unsafe.locator("pre code")).toHaveText(hostile);
     await unsafe.getByRole("button", { name: "Show diagram" }).click();
     await unsafe.getByRole("button", { name: "Open diagram" }).click();
