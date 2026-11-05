@@ -128,6 +128,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-11-04-claude-query-rotation-1f315657.md](docs/postmortems/2026-11-04-claude-query-rotation-1f315657.md) — retained late root/task shutdown edges; initial close trigger and task classification unproven
 - [docs/postmortems/2026-11-04-npm12-bundled-sqlite.md](docs/postmortems/2026-11-04-npm12-bundled-sqlite.md) — npm 12 bundled-script denial, explicit pinned SQLite installation and qualification limits
 
 - [docs/postmortems/2026-10-29-pg17-production.md](docs/postmortems/2026-10-29-pg17-production.md) — production upgrade and ANALYZE guard; release validated, rollout monitor failed on headline/deletion overlap

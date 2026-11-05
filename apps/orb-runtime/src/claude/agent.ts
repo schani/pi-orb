@@ -94,6 +94,7 @@ import {
   reconcileClaudeComputeOwnership,
   reconcileClaudeHandoffs,
 } from "./restore.ts";
+import { type ClaudeCloseCaller, ClaudeShutdownDiagnostics } from "./shutdown-diagnostics.ts";
 import { readWorkflowChildTerminals, workflowTerminalIdentity } from "./workflow-journal.ts";
 
 const NativeStateSchema = Type.Object({
@@ -277,6 +278,7 @@ export class ClaudeOrbAgent implements OrbAgent {
   private closing: Promise<void> | null = null;
   private queryId = "";
   private readonly passiveContextUuids = new Set<string>();
+  private shutdownDiagnostics = new ClaudeShutdownDiagnostics();
   private lastRootResult: JsonObject | null = null;
   private rotationRootWork: JsonObject | null = null;
   private observeContinuation = false;
@@ -728,7 +730,7 @@ export class ClaudeOrbAgent implements OrbAgent {
     this.activity.beginDrain();
     this.recordModelUsageUnavailable();
     return this.startQuery()
-      .andThen(() => ResultAsync.fromSafePromise(this.closeExtensions()))
+      .andThen(() => ResultAsync.fromSafePromise(this.closeExtensions("attach")))
       .andThen(() => {
         const finished = this.finishMetadata("attach");
         if (finished.isErr()) return err(finished.error);
@@ -934,7 +936,9 @@ export class ClaudeOrbAgent implements OrbAgent {
           false,
           captured.diagnostics,
         );
-      return ResultAsync.fromSafePromise(this.closeExtensions()).andThen(() => err({ message }));
+      return ResultAsync.fromSafePromise(this.closeExtensions("initialization_failure")).andThen(
+        () => err({ message }),
+      );
     });
   }
   private initializeQuery(
@@ -988,6 +992,7 @@ export class ClaudeOrbAgent implements OrbAgent {
     this.input = input;
     this.queryId = randomUUID();
     this.passiveContextUuids.clear();
+    this.shutdownDiagnostics = new ClaudeShutdownDiagnostics();
     this.lastRootResult = null;
     this.rotationRootWork = null;
     const queryId = this.queryId;
@@ -1384,6 +1389,7 @@ export class ClaudeOrbAgent implements OrbAgent {
     return ok(undefined);
   }
   private onMessage(message: SDKMessage): void {
+    this.shutdownDiagnostics.observe(message, this.closing !== null);
     if (
       this.closing !== null &&
       ((message.type === "system" &&
@@ -1712,7 +1718,7 @@ export class ClaudeOrbAgent implements OrbAgent {
             () => ({ code: "claude_interrupt_failed" as const }),
           )().mapErr((error) => this.cleanupFailed(error.code));
         // Establish closing now; cleanup must not await its own message consumer.
-        void this.closeExtensions();
+        void this.closeExtensions("rate_limit");
         return;
       }
       const previousHandoffs = Object.keys(this.state?.pendingHandoffs ?? {}).sort();
@@ -1840,7 +1846,7 @@ export class ClaudeOrbAgent implements OrbAgent {
     const operationId = this.activity.operationId;
     if (operationId === null) return;
     this.activity.beginDrain();
-    await this.closeExtensions();
+    await this.closeExtensions("operation_drain");
     for (const id of this.interruptedThinkingBlocks) {
       const block = this.blocks.get(id);
       if (
@@ -1867,6 +1873,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       const recorded = this.platformEvent("claude.rotation_failed", message, {
         reason: "root_work",
         rootWork: this.rotationRootWork,
+        shutdownDiagnostics: this.shutdownDiagnostics.snapshot(),
       });
       if (recorded.isErr()) this.fail("claude_rotation_publication_failed", recorded.error.message);
     }
@@ -1886,6 +1893,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       );
       const recorded = this.platformEvent("claude.rotation_failed", message, {
         reason: "owned_work",
+        shutdownDiagnostics: this.shutdownDiagnostics.snapshot(),
         ...(this.activity.hookCount > 0 ? { pendingHooks: this.activity.hookCount } : {}),
       });
       if (recorded.isErr()) this.fail("claude_rotation_publication_failed", recorded.error.message);
@@ -1969,9 +1977,20 @@ export class ClaudeOrbAgent implements OrbAgent {
           }),
     );
   }
-  closeExtensions(): Promise<void> {
+  closeExtensions(caller: ClaudeCloseCaller = "external"): Promise<void> {
     this.queryReady = false;
     if (this.closing !== null) return this.closing;
+    this.shutdownDiagnostics.beginClose(caller, this.lastRootResult, {
+      outcome: this.outcome,
+      holds: this.activity.drainHolds,
+      ownership: {
+        ...this.activity.shutdownOwnership,
+        ownedChildren: Object.keys(this.state?.ownedChildren ?? {}),
+        ownedTasks: Object.keys(this.state?.ownedTasks ?? {}),
+        ownedBackgroundTasks: Object.keys(this.state?.ownedBackgroundTasks ?? {}),
+        pendingHandoffs: Object.keys(this.state?.pendingHandoffs ?? {}),
+      },
+    });
     const sdk = this.sdk;
     // Start on the next microtask so every native edge sees the closing guard first.
     this.closing = Promise.resolve().then(async () => {
@@ -2243,7 +2262,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       return err(saved.error);
     }
     if (this.sdk !== null) {
-      void this.closeExtensions();
+      void this.closeExtensions("idle_stop");
       return ok(false);
     }
     return this.flushHistory().map(() => true);
@@ -2793,7 +2812,7 @@ export class ClaudeOrbAgent implements OrbAgent {
               };
               this.event(this.settings);
             }
-            await this.closeExtensions();
+            await this.closeExtensions("settings");
             const finished = this.finishMetadata("settings");
             if (finished.isErr())
               return err({ code: "internal" as const, message: finished.error.message });
@@ -2809,7 +2828,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       .orElse((error) => {
         if (this.health.status !== "failed")
           this.fail("claude_settings_failed", "Claude settings outcome is uncertain.");
-        return ResultAsync.fromSafePromise(this.closeExtensions()).andThen(() => {
+        return ResultAsync.fromSafePromise(this.closeExtensions("settings_failure")).andThen(() => {
           this.configuring = false;
           if (this.settings !== null) {
             this.settings = { ...this.settings, writable: false };
