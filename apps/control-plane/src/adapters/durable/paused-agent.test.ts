@@ -204,7 +204,7 @@ it("keeps sleeping recovery demand across reopen until its controlled wake", asy
   }
 });
 
-it("reports a parked background task without failing root health or leaking private facts", async () => {
+it("ends a restart-limited background task without failing root health or leaking private facts", async () => {
   const { okAsync } = await import("neverthrow");
   const authority = new MemoryAgentPersistence();
   const storage = (await authority.openOrb("parked", false))._unsafeUnwrap().storage;
@@ -236,18 +236,25 @@ it("reports a parked background task without failing root health or leaking priv
   const record = (await storage.task(id, BACKGROUND_CONTEXT))!;
   await storage.commit(
     [
-      {
-        type: "task",
-        value: {
-          ...record,
-          restarts: 5,
-          state: { status: "pending", checkpoint: { phase: "run" } },
+      [
+        {
+          type: "task",
+          value: {
+            ...record,
+            restarts: 5,
+            state: { status: "pending", checkpoint: { phase: "run" } },
+          },
         },
-      },
+      ],
     ],
+    () => undefined,
     BACKGROUND_CONTEXT,
   );
   const edges: unknown[] = [];
+  let reported!: () => void;
+  const failureReported = new Promise<void>((resolve) => {
+    reported = resolve;
+  });
   const agent = (
     await DurableAgent.open({
       orbId: "parked",
@@ -259,27 +266,36 @@ it("reports a parked background task without failing root health or leaking priv
       instructions: "test",
       edge: (code, facts) => {
         edges.push({ code, ...facts });
+        if (code === "harness.reported_failure" && facts.task === id) reported();
         return okAsync(undefined);
       },
     })
   )._unsafeUnwrap();
   try {
-    expect(agent.health()).toMatchObject({ status: "ready", activity: "busy" });
+    await failureReported;
+    (await agent.waitForIdle())._unsafeUnwrap();
+    expect(agent.health()).toMatchObject({ status: "ready", activity: "idle" });
     expect(agent.snapshot()._unsafeUnwrap().notice).toMatchObject({
-      code: "central_agent_paused",
-      message: "Background task paused after five consecutive interruptions without progress",
+      code: "central_agent_task_failed",
+      message: "Agent task failed",
     });
     expect(edges).toContainEqual(
       expect.objectContaining({
-        code: "harness.execution_blocked",
-        type: "task_parked",
+        code: "harness.reported_failure",
+        type: "task_faulted",
+        reason: "restart_limit",
         task: id,
         conversation: root.id,
         kind: "parked-work",
-        restarts: 5,
         limit: 5,
       }),
     );
+    expect(await storage.task(id, BACKGROUND_CONTEXT)).toMatchObject({
+      state: {
+        status: "terminal",
+        outcome: { status: "faulted", error: { detail: { reason: "restart_limit" } } },
+      },
+    });
     expect(JSON.stringify(edges)).not.toContain("PRIVATE");
   } finally {
     await agent.close();

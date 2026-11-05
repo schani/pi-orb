@@ -68,12 +68,14 @@ it.each(["singleton", "batch"] as const)(
               const result = await target.commit(...args);
               if (
                 batchId !== undefined &&
-                args[0].some(
-                  (write) =>
-                    write.type === "submission" &&
-                    write.value.requestId === `inbox:${batchId}` &&
-                    write.value.status === "queued",
-                )
+                args[0]
+                  .flat()
+                  .some(
+                    (write) =>
+                      write.type === "submission" &&
+                      write.value.requestId === `inbox:${batchId}` &&
+                      write.value.status === "queued",
+                  )
               ) {
                 committed.resolve();
                 await releaseCommit.promise;

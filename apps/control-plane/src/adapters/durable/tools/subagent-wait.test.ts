@@ -39,11 +39,11 @@ it("nonwaiting status does not acquire a watch or interrupt", async () => {
 });
 
 it.each([
-  { reason: "cancelled" },
-  { reason: "session_closed" },
-  { reason: "retired" },
-  { reason: "listener_error", error: new Error("listener failed") },
-] satisfies WatchEnd[])("watch end $reason is not parent input", async (end) => {
+  { kind: "aborted" },
+  { kind: "ended" },
+  { kind: "listener_error", error: new Error("listener failed") },
+  { kind: "failed", error: new Error("source failed") },
+] satisfies WatchEnd[])("watch end $kind is not parent input", async (end) => {
   await using boundary = await WaitBoundary.open();
   const execution = wait.execute(args, boundary.api, ctx);
   try {
@@ -51,6 +51,9 @@ it.each([
     boundary.close(end);
     const output = await execution;
     expect(output.isError).toBe(true);
+    expect(output.diagnostics).toContainEqual(
+      expect.objectContaining({ code: end.kind === "aborted" ? "cancelled" : "unavailable" }),
+    );
     expect(JSON.stringify(output)).not.toContain('"interrupted":"parent_input"');
     expect(boundary.child.state.status).toBe("running");
     expect(boundary.watches.size).toBe(0);
@@ -84,7 +87,7 @@ it.each(["acquireFailure", "startFailure", "stopFailure", "readFailure", "waitFa
 
 it("abnormal close during input-winner cleanup cannot masquerade as parent input", async () => {
   await using boundary = await WaitBoundary.open();
-  boundary.stopEnd = { reason: "session_closed" };
+  boundary.stopEnd = { kind: "ended" };
   await boundary.queue("steer");
   const output = await wait.execute(args, boundary.api, ctx);
   expect(output.isError).toBe(true);
@@ -93,3 +96,34 @@ it("abnormal close during input-winner cleanup cannot masquerade as parent input
   expect(boundary.waiters.size).toBe(0);
   expect(boundary.watches.size).toBe(0);
 });
+
+it.each(["failed", "retired"] as const)(
+  "watch frame %s cannot masquerade as parent input",
+  async (kind) => {
+    await using boundary = await WaitBoundary.open();
+    const execution = wait.execute(args, boundary.api, ctx);
+    try {
+      await boundary.registered.promise;
+      const inbox = await boundary.inbox;
+      if (!inbox) return expect.fail("Native inbox missing");
+      await boundary.frame(
+        kind === "failed"
+          ? { kind, error: new Error("WATCH_FRAME_CANARY_SECRET") }
+          : { kind: "value", value: inbox, ops: [], retired: true },
+      );
+      const output = await execution;
+      expect(output.isError).toBe(true);
+      expect(output.diagnostics).toContainEqual(
+        expect.objectContaining({ code: "unavailable", message: `Subagent wait inbox ${kind}` }),
+      );
+      expect(JSON.stringify(output)).not.toContain('"interrupted":"parent_input"');
+      expect(JSON.stringify(output)).not.toContain("WATCH_FRAME_CANARY_SECRET");
+      expect(boundary.child.state.status).toBe("running");
+      expect(boundary.watches.size).toBe(0);
+      expect(boundary.waiters.size).toBe(0);
+    } finally {
+      boundary.complete();
+      await execution;
+    }
+  },
+);

@@ -17,9 +17,9 @@ import { afterEach, describe, expect, it } from "vitest";
 const root = join(import.meta.dirname, "../../..");
 const helper = join(root, "scripts/apply-dependency-patches.mjs");
 const names = [
-  "@earendil-works+pi-ai+1.4.0.patch",
-  "@earendil-works+pi-codemode+1.4.0.patch",
-  "@earendil-works+pi-durable+1.4.0.patch",
+  "@earendil-works+pi-ai+1.5.0.patch",
+  "@earendil-works+pi-codemode+1.5.0.patch",
+  "@earendil-works+pi-durable+1.5.0.patch",
 ];
 const scratch: string[] = [];
 const sha = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex");
@@ -193,7 +193,7 @@ describe("sealed dependency patch application", () => {
         kind === "package"
           ? "node_modules/@earendil-works/pi-durable/package.json"
           : kind === "patch"
-            ? "patches/@earendil-works+pi-durable+1.4.0.patch"
+            ? "patches/@earendil-works+pi-durable+1.5.0.patch"
             : "node_modules/@earendil-works/pi-durable/dist/codemode/index.js";
       const target = join(dir, files(names[0] as string)[0] as string);
       const before = sha(target);
@@ -260,9 +260,9 @@ describe("sealed dependency patch application", () => {
     expect(sha(target)).toBe(before);
   });
   it("preserves every shipped patch checksum", () => {
-    const evidence = `a6b44d4207768ed1479a7eef0b25402e241763f5a8265098937d42adb702002e  patches/@earendil-works+pi-ai+1.4.0.patch
- ea061d76229729c166606d292dadd124a8568d6cd147e4229dca77ac0102935a  patches/@earendil-works+pi-codemode+1.4.0.patch
- 3326dd20ce27c8b1679fa98a136fa6f18df6441f289011aae7b35c664cbf070f  patches/@earendil-works+pi-durable+1.4.0.patch`;
+    const evidence = `f7d82a2a5b31d2d2ea11ce3674bb9adcd726bafd1cce43a0de62eada03ccaa37  patches/@earendil-works+pi-ai+1.5.0.patch
+ 18890f0e765665ea62739c8211bd456353e84c06b57f6910a1d26ca7f17221ad  patches/@earendil-works+pi-codemode+1.5.0.patch
+ 2c448708ded63a7528a3751091e15df49f0a8b25af48a920c51ba1f840ea86ac  patches/@earendil-works+pi-durable+1.5.0.patch`;
     for (const line of evidence.trim().split("\n")) {
       const [hash, path] = line.trim().split(/\s+/);
       expect(sha(join(root, path as string))).toBe(hash);

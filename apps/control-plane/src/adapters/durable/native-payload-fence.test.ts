@@ -60,10 +60,12 @@ it.each(["payload", "batch", "missing", "sleep"] as const)(
           if (key === "commit")
             return async (...args: Parameters<Storage["commit"]>) => {
               if (
-                args[0].some(
-                  (write) =>
-                    write.type === "submission" && write.value.requestId === `inbox:${messageId}`,
-                )
+                args[0]
+                  .flat()
+                  .some(
+                    (write) =>
+                      write.type === "submission" && write.value.requestId === `inbox:${messageId}`,
+                  )
               ) {
                 entered();
                 await held;

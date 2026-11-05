@@ -1,5 +1,4 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   fauxAssistantMessage,
@@ -19,6 +18,7 @@ import {
   CodemodeRunDoc,
 } from "@earendil-works/pi-durable/codemode";
 import { errAsync, okAsync } from "neverthrow";
+import { Type } from "typebox";
 import { Check } from "typebox/value";
 import { assert, describe, expect, it, vi } from "vitest";
 import { MemoryAgentPersistence } from "../memory-persistence.testkit.ts";
@@ -259,59 +259,62 @@ describe("native codemode interrupted journal recovery", () => {
         const storage = (await authority.openOrb("recovery", false))._unsafeUnwrap().storage;
         const opened = await Harness.open(storage, { models, registry }, context);
         opened.subscribeClose(() => trace("harness-close"));
-        opened.subscribeCommits((publication) => {
-          for (const change of publication.changes) {
-            if (change.type === "task") {
-              const task = change.value;
-              const input = task.kind === "pi.tool" ? (task.input as ToolTaskInput) : undefined;
-              const checkpoint = task.state.checkpoint;
-              if (input?.kind === "nested")
-                children.set(task.id, {
+        opened.observeCommits({
+          advance: (publication) => {
+            for (const change of publication.changes) {
+              if (change.type === "task") {
+                const task = change.value;
+                const input = task.kind === "pi.tool" ? (task.input as ToolTaskInput) : undefined;
+                const checkpoint = task.state.checkpoint;
+                if (input?.kind === "nested")
+                  children.set(task.id, {
+                    taskId: task.id,
+                    parent: input.parent,
+                    key: input.key,
+                    name: input.call.name,
+                  });
+                trace("task-commit", {
+                  seq: publication.seq,
                   taskId: task.id,
-                  parent: input.parent,
-                  key: input.key,
-                  name: input.call.name,
+                  owner: task.owner,
+                  kind: task.kind,
+                  version: task.version,
+                  parent: input?.kind === "nested" ? input.parent : undefined,
+                  key: input?.kind === "nested" ? input.key : undefined,
+                  status: task.state.status,
+                  phase:
+                    checkpoint && typeof checkpoint === "object" && "phase" in checkpoint
+                      ? checkpoint.phase
+                      : undefined,
+                  abortRequested: task.abortRequested,
                 });
-              trace("task-commit", {
-                seq: publication.seq,
-                taskId: task.id,
-                owner: task.owner,
-                kind: task.kind,
-                version: task.version,
-                parent: input?.kind === "nested" ? input.parent : undefined,
-                key: input?.kind === "nested" ? input.key : undefined,
-                status: task.state.status,
-                phase:
-                  checkpoint && typeof checkpoint === "object" && "phase" in checkpoint
-                    ? checkpoint.phase
-                    : undefined,
-                abortRequested: task.abortRequested,
-              });
+              }
+              if (
+                change.type === "document" &&
+                (change.record.kind.startsWith("pi.codemode.") ||
+                  change.record.kind === "pi.tool.nested-call")
+              ) {
+                const value = change.kind === "retire" ? undefined : change.value;
+                const runStart = value?.start;
+                trace("codemode-commit", {
+                  seq: publication.seq,
+                  kind: change.record.kind,
+                  scope: change.record.scope,
+                  key: change.record.key,
+                  taskId: value?.taskId,
+                  runVersion:
+                    runStart && typeof runStart === "object" && "version" in runStart
+                      ? runStart.version
+                      : undefined,
+                  entries: Array.isArray(value?.entries) ? value.entries.length : undefined,
+                  firstIssued: value?.firstIssued,
+                  decided: value?.result !== undefined,
+                  retired: change.kind === "retire",
+                });
+              }
             }
-            if (
-              change.type === "document" &&
-              (change.record.kind.startsWith("pi.codemode.") ||
-                change.record.kind === "pi.tool.nested-call")
-            ) {
-              const value = change.value;
-              const runStart = value?.start;
-              trace("codemode-commit", {
-                seq: publication.seq,
-                kind: change.record.kind,
-                scope: change.record.scope,
-                key: change.record.key,
-                taskId: value?.taskId,
-                runVersion:
-                  runStart && typeof runStart === "object" && "version" in runStart
-                    ? runStart.version
-                    : undefined,
-                entries: Array.isArray(value?.entries) ? value.entries.length : undefined,
-                firstIssued: value?.firstIssued,
-                decided: value?.result !== undefined,
-                retired: value === null,
-              });
-            }
-          }
+          },
+          end() {},
         });
         trace("harness-open");
         return opened;

@@ -1,8 +1,8 @@
 diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js b/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js
-index 774212f..ac547ab 100644
+index 9ef1da0..4d20e81 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js
 +++ b/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js
-@@ -232,7 +232,12 @@ class CodemodeCall {
+@@ -234,7 +234,12 @@ class CodemodeCall {
              ...models.map((name) => ({ name, spread: true })),
              ...(this.options.globals ?? []).map((global) => ({ name: global.name, spread: global.spread === true })),
          ];
@@ -16,7 +16,7 @@ index 774212f..ac547ab 100644
          for (const tool of callable) {
              const namespace = namespaceOf(tool.name, this.options.namespaces ?? []);
              if (namespace === undefined)
-@@ -633,7 +638,7 @@ class CodemodeCall {
+@@ -635,7 +640,7 @@ class CodemodeCall {
          const made = input.call;
          if (call.target === "tool" && made.name === call.name && sameJson(made.arguments, call.args ?? {}))
              return undefined;
@@ -25,7 +25,7 @@ index 774212f..ac547ab 100644
      }
      /** Run one live call and journal its result. */
      launch(call) {
-@@ -668,7 +673,7 @@ class CodemodeCall {
+@@ -670,7 +675,7 @@ class CodemodeCall {
      }
      async callTool(call) {
          // Passed as the script gave them; validation reports arguments that are not an object.
@@ -34,7 +34,7 @@ index 774212f..ac547ab 100644
          const model = call.name.startsWith(CODEMODE_INTERNAL_PREFIX);
          if (model) {
              await this.modelSlot();
-@@ -697,7 +702,7 @@ class CodemodeCall {
+@@ -699,7 +704,7 @@ class CodemodeCall {
      started(call) {
          if (this.rows.has(call.id))
              return;
@@ -43,16 +43,7 @@ index 774212f..ac547ab 100644
          const name = call.name.startsWith(CODEMODE_INTERNAL_PREFIX)
              ? call.name.slice(CODEMODE_INTERNAL_PREFIX.length)
              : call.name;
-@@ -761,7 +766,7 @@ class CodemodeCall {
-         const { namespaces } = this.start;
-         const tools = this.start.tools.filter((tool) => tool.hidden !== true);
-         const namespaceOfTool = (name) => namespaces.find((namespace) => namespace.tools.includes(name));
--        const matchesNamespace = (namespace, query) => namespace.name === query || toCodemodeIdentifier(namespace.name) === toCodemodeIdentifier(query);
-+        const matchesNamespace = (namespace, query) => namespace.name === query || toCodemodeIdentifier(namespace.name) === toCodemodeIdentifier(query) || namespace.name.split("__").at(-1) === query || toCodemodeIdentifier(namespace.name).split("__").at(-1) === toCodemodeIdentifier(query);
-         if (call.name === "describeTool") {
-             const [name] = args;
-             if (typeof name !== "string")
-@@ -875,8 +880,11 @@ function countImages(value) {
+@@ -872,8 +877,11 @@ function countImages(value) {
      const output = typeof value === "object" && value !== null ? value.output : undefined;
      return Array.isArray(output) ? output.filter((item) => item?.type === "image").length : 0;
  }
@@ -102,24 +93,24 @@ index d28306e..27d7672 100644
          // A failed write must not discard the result of a script whose calls already ran: it becomes part of the label.
          const saved = await write(`image-${index}${IMAGE_EXTENSIONS[mimeType] ?? ".bin"}`, bytes);
 diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/harness.js b/node_modules/@earendil-works/pi-durable/dist/harness/harness.js
-index 29ef22e..588370a 100644
+index e286f00..5675ed9 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/harness/harness.js
 +++ b/node_modules/@earendil-works/pi-durable/dist/harness/harness.js
-@@ -38,6 +38,9 @@ class ConversationImpl {
-     submit(submission, context) {
-         return this.#host.submissions.submit(this.id, submission, context);
+@@ -43,6 +43,9 @@ class ConversationImpl {
+             return this.#host.submissions.submit(this.id, first, second);
+         return this.#host.submissions.admit(first, this.id, second);
      }
 +    submitMany(inputs, context) {
 +        return this.#host.submissions.submitMany(this.id, inputs, context);
 +    }
-     compact(instructions, context) {
+     async compact(instructions, context) {
          this.#host.tasks.resume();
          const input = { reason: "manual", ...(instructions === undefined ? {} : { instructions }) };
 diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js b/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js
-index 8496124..3bd3ad8 100644
+index 6e882a8..8695590 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js
 +++ b/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js
-@@ -54,6 +54,73 @@ export class Submissions {
+@@ -72,6 +72,75 @@ export class Submissions {
              }
          });
      }
@@ -148,6 +139,8 @@ index 8496124..3bd3ad8 100644
 +                    const busy = live.run !== undefined;
 +                    if (busy && inputs.some((input, index) => existing[index] === undefined && input.whenBusy === "reject"))
 +                        throw new ConversationBusy(conversationId);
++                    if (!busy && inputs.some((input, index) => existing[index] === undefined && input.whenIdle === "reject"))
++                        throw new ConversationIdle(conversationId);
 +                    if (live.run !== undefined && span.propagation !== undefined && inputs.some((input) => input.whenBusy === "steer")) {
 +                        const run = await tx.task(live.run.taskId);
 +                        if (run?.trace !== undefined)
@@ -171,9 +164,9 @@ index 8496124..3bd3ad8 100644
 +                        ids.push(id);
 +                    }
 +                    if (live.run === undefined) {
-+                        const { users } = await applyBoundary(tx, boundary, "final", this.#now());
++                        const { users, first } = await applyBoundary(tx, boundary, "final", this.#now());
 +                        if (users.length > 0)
-+                            await startRun(tx, conversationId, live, users);
++                            await startRun(tx, conversationId, live, { inputs: users, first });
 +                    }
 +                    return { ids, busy, inputId: live.run?.inputs[0] };
 +                }, withTelemetry(span, context));
@@ -192,8 +185,8 @@ index 8496124..3bd3ad8 100644
 +    }
      /** Handle for an existing submission, or `undefined`. */
      async get(id, context) {
-         const record = await this.#session.readOnLine(() => this.#storage.submission(id, context));
-@@ -179,24 +246,8 @@ export async function admitSubmission(tx, conversationId, draft, now, queueModes
+         const record = await this.#session.readOnLine((storage) => storage.submission(id, context));
+@@ -216,24 +285,8 @@ export async function admitSubmission(tx, conversationId, draft, now, queueModes
      // A boundary reads the table, so it is prepared before the first table write; a busy one needs none.
      const boundary = busy ? undefined : await prepareBoundary(tx, conversationId, queueModes);
      if (boundary === undefined || boundary.inbox.items.length > 0) {
@@ -219,9 +212,9 @@ index 8496124..3bd3ad8 100644
 +        const id = await queueSubmission(tx, draft, inbox, fields);
          if (boundary === undefined)
              return { id, status: "queued" };
-         const { users } = await applyBoundary(tx, boundary, "final", now);
-@@ -222,4 +273,27 @@ export async function admitSubmission(tx, conversationId, draft, now, queueModes
-     await startRun(tx, conversationId, live, [id]);
+         const { users, first } = await applyBoundary(tx, boundary, "final", now);
+@@ -259,4 +312,27 @@ export async function admitSubmission(tx, conversationId, draft, now, queueModes
+     await startRun(tx, conversationId, live, { inputs: [id], first: entry.id });
      return { id, status: "placed" };
  }
 +
@@ -250,11 +243,11 @@ index 8496124..3bd3ad8 100644
  //# sourceMappingURL=submissions.js.map
 \ No newline at end of file
 diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts b/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts
-index 192a9cc..fc951e4 100644
+index eb64e47..54cb9ff 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts
 +++ b/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts
-@@ -681,6 +681,12 @@ export interface Conversation {
-      * even mid-run, as it changes nothing the model sees.
+@@ -756,6 +756,12 @@ export interface Conversation {
+      * it is, after placing queued items; a busy conversation rejects it with `ConversationBusy`, as it never queues.
       */
      submit(submission: SubmissionDraft, context: Context): Promise<Submission>;
 +    /** Admit a finite input snapshot atomically before scheduling; an empty snapshot advances an idle inbox. */
@@ -264,5 +257,5 @@ index 192a9cc..fc951e4 100644
 +        readonly inputId?: SubmissionId;
 +    }>;
      /**
-      * Admit a write of a `pi.reset` entry that starts a new context, carrying `handoff` as a user message when given.
-      * Resolves after admission; while busy, it is placed at the next boundary.
+      * Admit a submission inside the caller's commit `tx` (`Harness.commit()`, `Conversation.commit()`, a task's
+      * `runtime.commit()`), with the same rules, and return its ID: the admission is stored with that commit, or not at all

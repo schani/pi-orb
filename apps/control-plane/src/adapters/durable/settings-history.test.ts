@@ -23,8 +23,9 @@ describe("Durable public settings history", () => {
     const open = async () => {
       const storage = (await authority.openOrb("orb", false))._unsafeUnwrap().storage;
       const commit = storage.commit.bind(storage);
-      storage.commit = async (writes, context) => {
-        const sequence = await commit(writes, context);
+      storage.commit = async (...args) => {
+        const writes = args[0].flat();
+        const sequence = await commit(...args);
         for (const write of writes)
           if (write.type === "document.create")
             documentKinds.set(write.record.id, write.record.kind);

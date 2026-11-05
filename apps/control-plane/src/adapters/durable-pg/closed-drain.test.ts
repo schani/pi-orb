@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   fauxAssistantMessage,
@@ -13,6 +12,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
 import { errAsync, okAsync, type Result, ResultAsync } from "neverthrow";
+import { Type } from "typebox";
 import { expect, it, vi } from "vitest";
 import type { StoreError } from "../../domain/errors.ts";
 import { reconcileOrbOnce, requestOrbDeletion } from "../../domain/lifecycle.ts";
@@ -118,7 +118,7 @@ it.each(["before", "after_commit", "foreign", "revoked", "expired", "unavailable
       );
       if (schedule === "before" || schedule === "after_commit") {
         expect(result.isOk(), JSON.stringify(result)).toBe(true);
-        await expect(storage.commit([], ctx)).rejects.toThrow(/closed/i);
+        await expect(storage.commit([], () => undefined, ctx)).rejects.toThrow(/closed/i);
         expect((await authority.validate(owner)).isOk()).toBe(true);
       } else if (schedule === "revoked" || schedule === "expired") {
         expect(result._unsafeUnwrap()).toMatchObject({

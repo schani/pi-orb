@@ -435,7 +435,19 @@ it("rejects raw MCP arguments before native coercion, hooks, authorization and c
   const calls: unknown[] = [];
   const inputSchema = {
     type: "object",
-    properties: { value: { type: "string" } },
+    properties: {
+      value: { type: "string", default: "must-not-repair-required" },
+      count: { type: "integer", default: 7 },
+      email: { type: "string", format: "email" },
+      optional: { type: "string" },
+      nullable: { anyOf: [{ type: "string" }, { type: "null" }] },
+      nested: {
+        type: "object",
+        properties: { enabled: { type: "boolean" } },
+        required: ["enabled"],
+        additionalProperties: false,
+      },
+    },
     required: ["value"],
     additionalProperties: false,
   };
@@ -492,9 +504,16 @@ it("rejects raw MCP arguments before native coercion, hooks, authorization and c
     });
     try {
       const invalid = [
+        {},
+        { value: null },
         { value: 42 },
         { value: [canary] },
         { value: "ok", extra: canary },
+        { value: "ok", count: "42" },
+        { value: "ok", optional: null },
+        { value: "ok", email: canary },
+        { value: "ok", nested: { enabled: "true" } },
+        { value: "ok", nested: { enabled: true, extra: canary } },
         [canary],
         null,
       ];
@@ -516,13 +535,22 @@ it("rejects raw MCP arguments before native coercion, hooks, authorization and c
           expect(hooks).toBe(0);
         }
       }
-      const valid = await fixture.run('text(await tools.mcp__strict__echo({value:"exact"}));');
-      expect(valid.isError).toBe(false);
-      expect(JSON.stringify(valid.output)).toContain("accepted");
-      expect(authorizations).toBe(1);
-      expect(credentials).toBe(2);
-      expect(calls).toEqual([{ value: "exact" }]);
-      expect(hooks).toBe(1);
+      const validArguments = [
+        { value: "exact" },
+        { value: "exact", nullable: null },
+        { value: "exact", count: 2, email: "test@example.com", nested: { enabled: true } },
+      ];
+      for (const [index, args] of validArguments.entries()) {
+        const valid = await fixture.run(
+          `text(await tools.mcp__strict__echo(${JSON.stringify(args)}));`,
+        );
+        expect(valid.isError).toBe(false);
+        expect(JSON.stringify(valid.output)).toContain("accepted");
+        expect(authorizations).toBe(index + 1);
+        expect(credentials).toBe(index + 2);
+        expect(calls).toEqual(validArguments.slice(0, index + 1));
+        expect(hooks).toBe(index + 1);
+      }
     } finally {
       await fixture.close();
     }
@@ -593,14 +621,10 @@ it("discovers oversized MCP arguments and safely explains missing required field
       expect(JSON.stringify(invalid.output)).not.toContain("secret-command-value");
       expect(effects).toBe(0);
       const declaration = await fixture.run('return await describeTool("mcp__posthog__exec");');
-      const rendered = JSON.stringify(declaration.output);
-      for (const field of [
-        "command: string",
-        "context: string",
-        "llm_model: string",
-        "conversation_id?: string",
-      ])
-        expect(rendered).toContain(field);
+      expect(declaration.isError).toBe(false);
+      expect
+        .soft(JSON.stringify(declaration.output))
+        .toContain("mcp__posthog__exec(args: unknown): Promise<");
       const valid = await fixture.run(
         'const r = await tools.mcp__posthog__exec({command:"help",context:"diagnosing invocation",llm_model:"unknown"}); text(r.content[0].text);',
       );

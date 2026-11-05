@@ -98,29 +98,29 @@ async function twoTurns(transport?: SimpleStreamOptions["transport"]) {
   expect(second.stopReason).toBe("stop");
 }
 
-it("omitted transport and explicit auto send identical full then continuation requests", async () => {
-  const omitted = mockTransport();
-  await twoTurns();
-  expect(omitted.sockets).toHaveLength(1);
-  expect(omitted.fetch).not.toHaveBeenCalled();
-  expect(omitted.requests.map((request) => request.input.length)).toEqual([1, 1]);
-  expect(omitted.requests[1]?.previous_response_id).toBe("resp_1");
+it.each([
+  [undefined, false],
+  ["websocket", false],
+  ["auto", true],
+  ["websocket-cached", true],
+] as const)("uses native context caching for transport %s", async (transport, cached) => {
+  const mock = mockTransport();
+  await twoTurns(transport);
+  expect(mock.sockets).toHaveLength(1);
+  expect(mock.fetch).not.toHaveBeenCalled();
+  expect(mock.requests.map((request) => request.input.length)).toEqual([1, cached ? 1 : 3]);
+  expect(mock.requests[1]?.previous_response_id).toBe(cached ? "resp_1" : undefined);
+  expect(mock.requests.every((request) => request.store === false)).toBe(true);
   expect(getOpenAICodexWebSocketDebugStats(sessionId)).toMatchObject({
     connectionsCreated: 1,
     connectionsReused: 1,
-    fullContextRequests: 1,
-    deltaRequests: 1,
+    cachedContextRequests: cached ? 2 : 0,
+    fullContextRequests: cached ? 1 : 2,
+    deltaRequests: cached ? 1 : 0,
   });
-  closeOpenAICodexWebSocketSessions();
-  resetOpenAICodexWebSocketDebugStats();
-  const explicit = mockTransport();
-  await twoTurns("auto");
-  expect(explicit.requests).toEqual(omitted.requests);
-  expect(explicit.sockets).toHaveLength(1);
-  expect(explicit.fetch).not.toHaveBeenCalled();
 });
 
-it.each([undefined, "auto"] as const)(
+it.each(["auto", "websocket-cached"] as const)(
   "retries missing continuation with full context for %s",
   async (transport) => {
     const mock = mockTransport("missing-continuation");

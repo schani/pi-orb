@@ -63,19 +63,26 @@ it.skipIf(!connection)(
           },
         })
       )._unsafeUnwrap();
-      await storage.commit([{ type: "conversation", value: { id: 1 as ConversationId } }], ctx);
+      await storage.commit(
+        [[{ type: "conversation", value: { id: 1 as ConversationId } }]],
+        () => undefined,
+        ctx,
+      );
       await storage.commit(
         [
-          {
-            type: "entry",
-            value: {
-              id: 2 as EntryId,
-              conversationId: 1 as ConversationId,
-              kind: "public",
-              data: "answer",
+          [
+            {
+              type: "entry",
+              value: {
+                id: 2 as EntryId,
+                conversationId: 1 as ConversationId,
+                kind: "public",
+                data: "answer",
+              },
             },
-          },
+          ],
         ],
+        () => undefined,
         ctx,
       );
       expect(
@@ -92,16 +99,19 @@ it.skipIf(!connection)(
       await expect(
         conflict.commit(
           [
-            {
-              type: "entry",
-              value: {
-                id: 3 as EntryId,
-                conversationId: 1 as ConversationId,
-                kind: "public",
-                data: "never-visible",
+            [
+              {
+                type: "entry",
+                value: {
+                  id: 3 as EntryId,
+                  conversationId: 1 as ConversationId,
+                  kind: "public",
+                  data: "never-visible",
+                },
               },
-            },
+            ],
           ],
+          () => undefined,
           ctx,
         ),
       ).rejects.toThrow();
@@ -114,8 +124,16 @@ it.skipIf(!connection)(
       const a = (await authority.open(owner, { project }))._unsafeUnwrap();
       const b = (await concurrentAuthority.open(owner, { project }))._unsafeUnwrap();
       await Promise.all([
-        a.commit([{ type: "conversation", value: { id: 4 as ConversationId } }], ctx),
-        b.commit([{ type: "conversation", value: { id: 5 as ConversationId } }], ctx),
+        a.commit(
+          [[{ type: "conversation", value: { id: 4 as ConversationId } }]],
+          () => undefined,
+          ctx,
+        ),
+        b.commit(
+          [[{ type: "conversation", value: { id: 5 as ConversationId } }]],
+          () => undefined,
+          ctx,
+        ),
       ]);
       await a.close(ctx);
       await b.close(ctx);
@@ -126,7 +144,7 @@ it.skipIf(!connection)(
         await successorAuthority.acquire(orb, "successor", 0, time, 30)
       )._unsafeUnwrap();
       expect((await authority.validate(owner)).isErr()).toBe(true);
-      await expect(storage.commit([], ctx)).rejects.toThrow("revoked");
+      await expect(storage.commit([], () => undefined, ctx)).rejects.toThrow("revoked");
       const reopened = (
         await successorAuthority.open(successor, { project: async () => ok(undefined) })
       )._unsafeUnwrap();

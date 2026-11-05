@@ -115,7 +115,7 @@ it("DST: completion races steer at the final read; caller cancellation stays dis
             },
           };
           const output = await wait.execute(args, api, BACKGROUND_CONTEXT);
-          expect(output.isError).not.toBe(true);
+          expect(output.isError, JSON.stringify(output)).not.toBe(true);
           if (atRead === "terminal") {
             expect(data(output)).toMatchObject({
               status: "completed",

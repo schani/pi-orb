@@ -1,5 +1,4 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
 import {
   type ConversationId,
   type DocumentId,
@@ -9,6 +8,7 @@ import {
 import { CodemodeStoreDoc } from "@earendil-works/pi-durable/codemode";
 import { NoSimulationTask } from "determined";
 import { okAsync } from "neverthrow";
+import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import { MemoryAgentPersistence } from "../memory-persistence.testkit.ts";
 import { CallableCatalog } from "./catalog.ts";
@@ -103,46 +103,52 @@ describe("Durable native code-mode store", () => {
     // Essential logical records from the patched 1.3 store, without model/task history.
     await storage.commit(
       [
-        { type: "conversation", value: { id: root } },
-        {
-          type: "document.create",
-          record: {
-            id: store,
-            kind: "pi.codemode.store",
-            scope: { kind: "conversation", conversationId: root },
-            history: "rewindable",
-            fork: "asOf",
+        [
+          { type: "conversation", value: { id: root } },
+          {
+            type: "document.create",
+            record: {
+              id: store,
+              kind: "pi.codemode.store",
+              scope: { kind: "conversation", conversationId: root },
+              history: "rewindable",
+              fork: "asOf",
+            },
+            content: { version: 1, kind: "base", value: { values: {} } },
           },
-          content: { version: 1, kind: "base", value: { values: {} } },
-        },
+        ],
       ],
+      () => {},
       context,
     );
     const saved = { version: "1.3.0", nested: [1, true, null] };
     await storage.commit(
       [
-        {
-          type: "document.change",
-          id: store,
-          content: {
-            version: 1,
-            kind: "delta",
-            ops: [
-              ["s", ["values", "counter"], 0],
-              ["s", ["values", "old"], saved],
-            ],
+        [
+          {
+            type: "document.change",
+            id: store,
+            content: {
+              version: 1,
+              kind: "delta",
+              ops: [
+                ["s", ["values", "counter"], 0],
+                ["s", ["values", "old"], saved],
+              ],
+            },
           },
-        },
-        {
-          type: "entry",
-          value: {
-            id: marker,
-            conversationId: root,
-            kind: "fixture.marker",
-            data: { counter: 0 },
+          {
+            type: "entry",
+            value: {
+              id: marker,
+              conversationId: root,
+              kind: "fixture.marker",
+              data: { counter: 0 },
+            },
           },
-        },
+        ],
       ],
+      () => {},
       context,
     );
     let fixture = await openCodemodeHarness(new CallableCatalog([]), { storage });

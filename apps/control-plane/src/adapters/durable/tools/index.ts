@@ -84,25 +84,6 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
       },
     },
   });
-  all.metadata("read", {
-    outputSchema: {
-      anyOf: [
-        { type: "string" },
-        {
-          type: "array",
-          items: {
-            type: "object",
-            required: ["type", "data", "mimeType"],
-            properties: {
-              type: { const: "image" },
-              data: { type: "string" },
-              mimeType: { type: "string" },
-            },
-          },
-        },
-      ],
-    },
-  });
   const catalog = all.without(["notify_parent"]);
   const running = new Set<CodemodeSandbox>();
   const mcp = new McpTools(options.mcp ?? [], catalog, options.mcpDiscovery, (status, previous) => {

@@ -1,8 +1,8 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ToolExecutionApi } from "@earendil-works/pi-durable";
 import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
 import { errAsync, okAsync } from "neverthrow";
+import { Type } from "typebox";
 import { expect, it } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
 import { type McpServerStatus, McpTools } from "./mcp.ts";
@@ -57,6 +57,51 @@ async function invoke(catalog: CallableCatalog, name: string, args: unknown = {}
     await catalog.invoke(name, args, {} as ToolExecutionApi, BACKGROUND_CONTEXT)
   )._unsafeUnwrap();
 }
+
+it("discovers canonical and normalized namespaces but not final-suffix aliases", async () => {
+  const server = endpoint("prod-us", ["ping"]);
+  const catalog = new CallableCatalog([]);
+  const mcp = new McpTools([server], catalog);
+  let native: Awaited<ReturnType<typeof openCodemodeHarness>> | undefined;
+  try {
+    (await mcp.discover(BACKGROUND_CONTEXT))._unsafeUnwrap();
+    native = await openCodemodeHarness(catalog);
+    for (const name of ["mcp__prod-us", "mcp__prod_us"]) {
+      const discovery = await native.run(
+        `const ns = await describeNamespace(${JSON.stringify(name)}); return JSON.stringify([ns.name, ns.instructions, ns.tools]);`,
+      );
+      expect(discovery.isError).toBe(false);
+      expect(discovery.output).toContainEqual({
+        type: "text",
+        text: JSON.stringify(["mcp__prod-us", "prod-us instructions", ["mcp__prod_us__ping"]]),
+      });
+      const search = await native.run(
+        `return JSON.stringify((await searchTools("ping", { namespace: ${JSON.stringify(name)} })).map(tool => tool.name));`,
+      );
+      expect(search.isError).toBe(false);
+      expect(search.output).toContainEqual({
+        type: "text",
+        text: JSON.stringify(["mcp__prod_us__ping"]),
+      });
+    }
+    for (const name of ["prod-us", "prod_us"]) {
+      const discovery = await native.run(
+        `return typeof await describeNamespace(${JSON.stringify(name)});`,
+      );
+      expect.soft(discovery.isError).toBe(false);
+      expect.soft(discovery.output).toContainEqual({ type: "text", text: "undefined" });
+      const search = await native.run(
+        `return JSON.stringify(await searchTools("ping", { namespace: ${JSON.stringify(name)} }));`,
+      );
+      expect.soft(search.isError).toBe(false);
+      expect.soft(search.output).toContainEqual({ type: "text", text: "[]" });
+    }
+    expect(server.state.calls).toEqual([]);
+  } finally {
+    await native?.close();
+    await mcp.close();
+  }
+});
 
 it.each([
   ["prod-us", "delete", "prod_us", ["delete"], "mcp__prod_us__delete"],

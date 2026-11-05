@@ -1,9 +1,9 @@
-import { EventEmitter } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { copyJson } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { createAssistantMessageEventStream, Type } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   type FauxResponseFactory,
@@ -20,18 +20,18 @@ import {
   LiveDoc,
   MemoryStorage,
   ROOT_CONVERSATION_ID,
+  type Seq,
   type Storage,
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { type ServerFrame, ServerFrameSchema } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
+import { Type } from "typebox";
 import { Check } from "typebox/value";
 import { describe, expect, it, vi } from "vitest";
-import { attachCentralLive } from "../../http/central-live.ts";
 import { StorageFailure } from "../durable-pg/storage-boundary.ts";
 import { DurableAgent } from "./agent.ts";
-import { StableAgentHandle } from "./handle.ts";
 import { durableError } from "./manager.ts";
 import { MemoryAgentPersistence } from "./memory-persistence.testkit.ts";
 import { sectionExtension } from "./prompt.ts";
@@ -297,6 +297,39 @@ describe("central Durable agent", () => {
     expect(opened.isErr()).toBe(true);
     expect(JSON.stringify(opened)).not.toContain("PRIVATE");
     expect(closes).toBe(1);
+    expect(activateResources).not.toHaveBeenCalled();
+  });
+
+  it("returns a typed ownership failure and releases resources when native storage fails before owner assignment", async () => {
+    const storage = new MemoryStorage();
+    storage.commit = async () => {
+      throw new StorageFailure("PRIVATE startup storage", {
+        cause: { type: "authority_error", code: "stale_owner", message: "Owner revoked" },
+      });
+    };
+    const closeResources = vi.fn(() => okAsync(undefined));
+    const activateResources = vi.fn();
+    const opened = await DurableAgent.open({
+      orbId: "startup-storage",
+      storage,
+      models: createModels(),
+      registry: createRegistry(),
+      env: new NodeExecutionEnv({ cwd: "/tmp" }),
+      instructions: "",
+      checkoutCommit: null,
+      closeResources,
+      activateResources,
+    });
+    expect(opened.isErr()).toBe(true);
+    if (opened.isErr())
+      expect(opened.error).toMatchObject({
+        type: "runtime_client_error",
+        code: "history_unavailable",
+        message: "Owner revoked",
+        retryable: false,
+      });
+    expect(JSON.stringify(opened)).not.toContain("PRIVATE");
+    expect(closeResources).toHaveBeenCalledOnce();
     expect(activateResources).not.toHaveBeenCalled();
   });
 
@@ -1572,7 +1605,7 @@ it.each([false, true])(
       expect(JSON.stringify(agent.snapshot()._unsafeUnwrap())).not.toContain(secret);
       expect(JSON.stringify(frames)).not.toContain(secret);
       const tasks = await storage.scanTasks({ kind: "pi.tool" }, 10, undefined, BACKGROUND_CONTEXT);
-      expect(tasks.items.every((task) => task.version === 2)).toBe(true);
+      expect(tasks.items.every((task) => task.version === 3)).toBe(true);
       expect(
         tasks.items.some(
           (task) =>
@@ -1589,17 +1622,28 @@ it.each([false, true])(
   },
 );
 
-it.each(["running", "pending"] as const)(
-  "recovers a parked real generation through public Abort after reopening %s work",
-  async (status) => {
+it.each([
+  { status: "running", partial: false },
+  { status: "pending", partial: false },
+  { status: "running", partial: true },
+] as const)(
+  "ends a restart-limited generation visibly and preserves its native receipt after reopening $status work (saved partial: $partial)",
+  async ({ status, partial }) => {
     const backend = new MemoryStorage();
     let cutOff = false;
     const storage = new Proxy(backend, {
       get(target, key) {
         if (key === "close") return async () => undefined;
         if (key === "commit")
-          return async (...args: Parameters<Storage["commit"]>) =>
-            cutOff ? 1 : target.commit(...args);
+          return async (...args: Parameters<Storage["commit"]>) => {
+            if (cutOff) {
+              args[0].forEach((_, index) => {
+                args[1](index, (index + 1) as Seq);
+              });
+              return { stored: args[0].length };
+            }
+            return target.commit(...args);
+          };
         const value = Reflect.get(target, key);
         return typeof value === "function" ? value.bind(target) : value;
       },
@@ -1647,93 +1691,124 @@ it.each(["running", "pending"] as const)(
       const generation = running.find((task) => task.kind === GenerationTask.definition.name)!;
       expect(generation).toBeDefined();
       if (generation.state.status !== "running") expect.fail("Expected interrupted generation");
+      if (partial) {
+        const document = (await backend.findDocument(
+          {
+            kind: LiveDoc.definition.kind,
+            scope: { kind: "conversation", conversationId: generation.conversationId },
+          },
+          "current",
+          BACKGROUND_CONTEXT,
+        ))!;
+        const stored = (await backend.document(document.id, "current", BACKGROUND_CONTEXT))!;
+        await backend.commit(
+          [
+            [
+              {
+                type: "document.change",
+                id: document.id,
+                content: {
+                  kind: "base",
+                  version: stored.version,
+                  value: {
+                    ...stored.value,
+                    generation: {
+                      attempt: 1,
+                      message: copyJson(fauxAssistantMessage("saved partial"), {
+                        omitUndefinedProperties: true,
+                      }),
+                    },
+                  },
+                },
+              },
+            ],
+          ],
+          () => undefined,
+          BACKGROUND_CONTEXT,
+        );
+      }
       await backend.commit(
         [
-          {
-            type: "task",
-            value: {
-              ...generation,
-              restarts: status === "running" ? 4 : 5,
-              state: { status, checkpoint: generation.state.checkpoint },
+          [
+            {
+              type: "task",
+              value: {
+                ...generation,
+                restarts: status === "running" ? 4 : 5,
+                state: { status, checkpoint: generation.state.checkpoint },
+              },
             },
-          },
+          ],
         ],
+        () => undefined,
         BACKGROUND_CONTEXT,
       );
       agent = (await DurableAgent.open(options))._unsafeUnwrap();
-      expect(agent.snapshot().isOk()).toBe(true);
-      expect(agent.health()).toMatchObject({ status: "ready", activity: "busy" });
       const frames: ServerFrame[] = [];
-      const socket = Object.assign(new EventEmitter(), {
-        bufferedAmount: 0,
-        send: (value: string) => {
-          frames.push(JSON.parse(value) as ServerFrame);
-        },
-        close: () => undefined,
+      agent.subscribe((frame) => frames.push(frame));
+      (await agent.waitForIdle())._unsafeUnwrap();
+      expect(agent.health()).toMatchObject({ status: "ready", activity: "idle" });
+      expect(agent.snapshot()._unsafeUnwrap().notice).toMatchObject({
+        code: "central_agent_task_failed",
+        message: "Agent task failed after repeated interruptions without progress",
       });
-      const handle = new StableAgentHandle("parked-generation", () => okAsync(agent));
-      handle.attach(agent);
-      const disconnect = attachCentralLive(socket, handle, [
-        JSON.stringify({
-          v: 1,
-          type: "client.hello",
-          clientInstanceId: "parked-browser",
-          afterRecordId: null,
-        }),
-      ]);
-      await agent.pullHistory(null, 100);
+      expect(await backend.task(generation.id, BACKGROUND_CONTEXT)).toMatchObject({
+        state: {
+          status: "terminal",
+          outcome: { status: "failed", error: { detail: { reason: "restart_limit" } } },
+        },
+      });
       expect(frames).toContainEqual(
         expect.objectContaining({
-          type: "server.welcome",
-          capabilities: expect.arrayContaining(["abort"]),
+          type: "runtime.event",
+          event: expect.objectContaining({ type: "operation_finished", outcome: "failed" }),
         }),
       );
       expect(frames).toContainEqual(
         expect.objectContaining({
           type: "server.error",
-          error: expect.objectContaining({
-            code: "central_agent_paused",
-            message:
-              "Agent paused after five consecutive interruptions without progress; abort the interrupted turn to continue",
-          }),
+          error: expect.objectContaining({ code: "central_agent_task_failed" }),
         }),
       );
-      expect(frames.findIndex((frame) => frame.type === "server.error")).toBeGreaterThan(
-        frames.findIndex((frame) => frame.type === "server.welcome"),
+      if (partial)
+        expect(agent.snapshot()._unsafeUnwrap().records).toContainEqual(
+          expect.objectContaining({
+            type: "message",
+            role: "assistant",
+            finishReason: "aborted",
+            content: [{ type: "text", text: "saved partial" }],
+          }),
+        );
+      const receipt = await backend.submissionByRequest(
+        generation.conversationId,
+        "inbox:input",
+        BACKGROUND_CONTEXT,
       );
-      const operation = frames.find(
-        (frame) => frame.type === "runtime.event" && frame.event.type === "operation_started",
-      );
-      if (operation?.type !== "runtime.event" || operation.event.type !== "operation_started")
-        expect.fail("No restored public Abort operation");
-      const operationId = operation.event.operationId;
-      disconnect();
-      expect(await backend.task(generation.id, BACKGROUND_CONTEXT)).toMatchObject({ restarts: 5 });
-      (
-        await agent.deliver({ ...input, messageId: "queued-before-abort", messageIds: [] })
-      )._unsafeUnwrap();
+      expect(receipt).toMatchObject({ status: "unanswered", reason: "restart_limit" });
       expect(calls).toBe(1);
-      expect(await backend.task(generation.id, BACKGROUND_CONTEXT)).toMatchObject({ restarts: 5 });
-      expect(
-        (await agent.request("abort-parked", { type: "abort", operationId }))._unsafeUnwrap(),
-      ).toMatchObject({ type: "accepted" });
+      const duplicate = (await agent.deliver(input))._unsafeUnwrap();
+      expect(duplicate.duplicate).toBe(true);
       (await agent.waitForIdle())._unsafeUnwrap();
-      expect(await backend.task(generation.id, BACKGROUND_CONTEXT)).toMatchObject({
-        state: { status: "terminal", outcome: { status: "aborted" } },
+      expect(calls).toBe(1);
+      await agent.close();
+      agent = (await DurableAgent.open(options))._unsafeUnwrap();
+      expect(agent.snapshot()._unsafeUnwrap().notice).toMatchObject({
+        code: "central_agent_task_failed",
       });
-      expect(await backend.task(generation.id, BACKGROUND_CONTEXT)).not.toHaveProperty("restarts");
-      for (const record of [
-        ...(await backend.scanTasks({}, 100, undefined, BACKGROUND_CONTEXT)).items,
-        ...(await backend.scanSubmissions({}, 100, undefined, BACKGROUND_CONTEXT)).items,
-      ]) {
-        expect(record).not.toHaveProperty("trace");
-        expect(record).not.toHaveProperty("links");
-      }
-      expect(agent.snapshot()._unsafeUnwrap()).not.toHaveProperty("notice");
+      expect(
+        await backend.submissionByRequest(
+          generation.conversationId,
+          "inbox:input",
+          BACKGROUND_CONTEXT,
+        ),
+      ).toEqual(receipt);
+      expect((await agent.deliver(input))._unsafeUnwrap().duplicate).toBe(true);
+      expect(calls).toBe(1);
       (await agent.deliver({ ...input, messageId: "fresh", messageIds: [] }))._unsafeUnwrap();
       (await agent.waitForIdle())._unsafeUnwrap();
       expect(calls).toBe(2);
       expect(JSON.stringify(agent.snapshot()._unsafeUnwrap().records)).toContain("fresh answer");
+      expect(agent.snapshot()._unsafeUnwrap()).not.toHaveProperty("notice");
     } finally {
       cutOff = false;
       await agent.close();

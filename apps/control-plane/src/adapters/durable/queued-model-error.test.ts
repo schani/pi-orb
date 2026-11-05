@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
+import type { WatchHandle } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   fauxAssistantMessage,
@@ -10,15 +10,18 @@ import {
 import {
   createRegistry,
   defineTool,
-  type Harness,
+  Harness,
   InboxDoc,
   LiveDoc,
+  type LiveState,
   ROOT_CONVERSATION_ID,
   type Storage,
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import { errAsync } from "neverthrow";
-import { expect, it } from "vitest";
+import { NoSimulationTask } from "determined";
+import { errAsync, okAsync } from "neverthrow";
+import { Type } from "typebox";
+import { expect, it, vi } from "vitest";
 import { DurableAgent, type DurableAgentOptions } from "./agent.ts";
 import { durableError } from "./manager.ts";
 import { MemoryAgentPersistence } from "./memory-persistence.testkit.ts";
@@ -38,7 +41,7 @@ function barrier() {
   return { promise, resolve };
 }
 
-it.each(["terminal", "duplicate", "reopen"] as const)(
+it.each(["terminal", "duplicate", "reopen", "coalesced"] as const)(
   "drains the %s inbox without replaying failed input or unsafe effects",
   async (scenario) => {
     const authority = new MemoryAgentPersistence();
@@ -49,6 +52,82 @@ it.each(["terminal", "duplicate", "reopen"] as const)(
     models.setProvider(faux.provider);
     let effects = 0;
     const settlements: string[] = [];
+    const outcomes: string[] = [];
+    const summaries: string[] = [];
+    const notified = barrier();
+    const observations = barrier(),
+      viewBlocked = barrier(),
+      nativeIdle = barrier();
+    let folding = false;
+    let queuedRun: number | undefined;
+    const deliveredRuns: (number | undefined)[] = [];
+    const spies: { mockRestore(): void }[] = [];
+    if (scenario === "coalesced") {
+      // Hold both real watch listeners across the whole continuation, letting Chord fold revisions.
+      const fold = <T>(watch: WatchHandle<T>, view = false) => {
+        const start = watch.start.bind(watch);
+        spies.push(
+          vi.spyOn(watch, "start").mockImplementation((listener) =>
+            start(async (call, ctx) => {
+              if (folding) {
+                if (view) viewBlocked.resolve();
+                await observations.promise;
+              }
+              if (view && call.kind === "value")
+                deliveredRuns.push(
+                  ((call.value as { docs: Record<string, unknown> }).docs["pi.live"] as LiveState)
+                    .run?.taskId,
+                );
+              await listener(call, ctx);
+            }),
+          ),
+        );
+        return watch;
+      };
+      const open = Harness.open;
+      spies.push(
+        vi.spyOn(Harness, "open").mockImplementation(async (...args) => {
+          const harness = await open(...args);
+          const root = harness.root.bind(harness);
+          spies.push(
+            vi.spyOn(harness, "root").mockImplementation(async (...args) => {
+              const conversation = await root(...args);
+              const watch = conversation.watch.bind(conversation);
+              spies.push(
+                vi
+                  .spyOn(conversation, "watch")
+                  .mockImplementation(async (...args) => fold(await watch(...args), true)),
+              );
+              return conversation;
+            }),
+          );
+          const graph = harness.watchTaskGraph.bind(harness);
+          spies.push(
+            vi
+              .spyOn(harness, "watchTaskGraph")
+              .mockImplementation(async (...args) => fold(await graph(...args))),
+          );
+          harness.observeCommits({
+            advance: ({ changes }) => {
+              for (const change of changes) {
+                if (
+                  change.type !== "document" ||
+                  change.kind !== "change" ||
+                  change.record.kind !== "pi.live" ||
+                  change.conversationId !== ROOT_CONVERSATION_ID
+                )
+                  continue;
+                const live = change.value as LiveState;
+                if (live.run && live.runFailure) queuedRun = live.run.taskId;
+                if (queuedRun !== undefined && !live.run) nativeIdle.resolve();
+              }
+            },
+            end: () => {},
+          });
+          return harness;
+        }),
+      );
+    }
     faux.setResponses([
       fauxAssistantMessage(fauxToolCall("effect", {}), { stopReason: "toolUse" }),
       async () => {
@@ -83,7 +162,7 @@ it.each(["terminal", "duplicate", "reopen"] as const)(
           if (key === "commit")
             return async (...args: Parameters<Storage["commit"]>) => {
               const seq = await target.commit(...args);
-              for (const write of args[0])
+              for (const write of args[0].flat())
                 if (
                   write.type === "submission" &&
                   ["done", "unanswered"].includes(write.value.status)
@@ -95,7 +174,7 @@ it.each(["terminal", "duplicate", "reopen"] as const)(
           return typeof value === "function" ? value.bind(target) : value;
         },
       });
-      return DurableAgent.open({
+      const opened = await DurableAgent.open({
         orbId: "orb",
         storage,
         models,
@@ -107,8 +186,24 @@ it.each(["terminal", "duplicate", "reopen"] as const)(
         bindNativeConversation: (resolve) => {
           conversation = resolve;
         },
+        turnSummary: {
+          task: new NoSimulationTask("queued-model-error-summary", false),
+          summarizer: {
+            summarize: (input) => {
+              summaries.push(input.transcript);
+              return okAsync("Queued answer.");
+            },
+          },
+        },
         ...options,
       });
+      if (opened.isOk())
+        opened.value.subscribe((frame) => {
+          if (frame.type !== "runtime.event") return;
+          if (frame.event.type === "operation_finished") outcomes.push(frame.event.outcome);
+          if (frame.event.type === "turn_notification") notified.resolve();
+        });
+      return opened;
     };
     let agent = (await open())._unsafeUnwrap();
     const submission = (id: string) =>
@@ -117,18 +212,24 @@ it.each(["terminal", "duplicate", "reopen"] as const)(
       (await agent.deliver(input("failed")))._unsafeUnwrap();
       await entered.promise;
       let queuedId: number | undefined;
-      if (scenario === "terminal") {
+      if (scenario === "terminal" || scenario === "coalesced") {
+        folding = scenario === "coalesced";
         (await agent.deliver(input("queued")))._unsafeUnwrap();
         queuedId = (await submission("queued"))!.id;
         expect(await submission("queued")).toMatchObject({ status: "queued" });
       }
+      if (scenario === "coalesced") await viewBlocked.promise;
       release.resolve();
+      if (scenario === "coalesced") {
+        await nativeIdle.promise;
+        observations.resolve();
+      }
       (await agent.waitForIdle())._unsafeUnwrap();
       expect(await submission("failed")).toMatchObject({
         status: "unanswered",
         reason: "model_error",
       });
-      if (scenario !== "terminal") {
+      if (scenario === "duplicate" || scenario === "reopen") {
         // Reproduce an idle, terminal pre-fix inbox without retaining the bug.
         const root = await conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT);
         assert(root);
@@ -194,10 +295,24 @@ it.each(["terminal", "duplicate", "reopen"] as const)(
       expect(faux.state.callCount).toBe(3);
       expect((await submission("queued"))?.id).toBe(queuedId);
       expect(settlements.toSorted()).toEqual(["inbox:failed", "inbox:queued"]);
+      if (scenario === "coalesced") {
+        expect(queuedRun).toBeDefined();
+        expect(deliveredRuns).not.toContain(queuedRun);
+      }
+      expect(outcomes).toEqual(
+        scenario === "terminal" || scenario === "coalesced"
+          ? ["completed"]
+          : ["failed", "completed"],
+      );
+      await notified.promise;
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]).toContain("Agent: queued answer");
     } finally {
       release.resolve();
+      observations.resolve();
       (await agent.close())._unsafeUnwrap();
       await authority.close();
+      for (const spy of spies.reverse()) spy.mockRestore();
     }
   },
 );

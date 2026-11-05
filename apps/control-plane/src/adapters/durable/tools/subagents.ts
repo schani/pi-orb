@@ -1,6 +1,5 @@
 import type { Context, JsonValue } from "@earendil-works/chord";
 import { withCancel } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
 import {
   AgentDoc,
   type ConversationId,
@@ -14,6 +13,7 @@ import {
   type ToolExecutionApi,
 } from "@earendil-works/pi-durable";
 import { err, ok, Result, ResultAsync } from "neverthrow";
+import { Type } from "typebox";
 import {
   eligibleCodexModels,
   SELECTABLE_CODEX_MODELS,
@@ -219,8 +219,12 @@ function waitForChild(api: ToolExecutionApi, id: TaskId, ctx: Context) {
       pending(watch.value);
       const started = Result.fromThrowable(
         () =>
-          watch.start(async (value) => {
-            pending(value);
+          watch.start(async (call) => {
+            if (call.kind === "failed")
+              steer(err({ code: "unavailable", message: "Subagent wait inbox failed" }));
+            else if (call.retired)
+              steer(err({ code: "unavailable", message: "Subagent wait inbox retired" }));
+            else pending(call.value);
           }),
         waitError("watch start", ctx),
       )();
@@ -236,8 +240,8 @@ function waitForChild(api: ToolExecutionApi, id: TaskId, ctx: Context) {
         waitError("watch close", ctx),
       )().andThen((end) =>
         err<never, WaitError>({
-          code: end.reason === "cancelled" ? "cancelled" : "unavailable",
-          message: `Subagent wait watch ended: ${end.reason}`,
+          code: end.kind === "aborted" ? "cancelled" : "unavailable",
+          message: `Subagent wait watch ended: ${end.kind}`,
         }),
       );
       const winner = completion ? await Promise.race([completion, input, closed]) : started;
@@ -249,10 +253,10 @@ function waitForChild(api: ToolExecutionApi, id: TaskId, ctx: Context) {
         waitError("watch cleanup", ctx),
       )();
       if (stopped.isErr()) return err(stopped.error);
-      if (stopped.value.reason !== "stopped")
+      if (stopped.value.kind !== "stopped")
         return err<never, WaitError>({
-          code: stopped.value.reason === "cancelled" ? "cancelled" : "unavailable",
-          message: `Subagent wait watch ended: ${stopped.value.reason}`,
+          code: stopped.value.kind === "aborted" ? "cancelled" : "unavailable",
+          message: `Subagent wait watch ended: ${stopped.value.kind}`,
         });
       if (winner.isErr()) return err(winner.error);
       const task = await ResultAsync.fromThrowable(

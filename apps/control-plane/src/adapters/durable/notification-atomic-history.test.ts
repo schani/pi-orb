@@ -292,11 +292,13 @@ it.for([
             return async (...args: Parameters<Storage["commit"]>) => {
               if (
                 !intercepted &&
-                args[0].some(
-                  (write) =>
-                    write.type === "submission" &&
-                    write.value.requestId?.startsWith("subagent-notify:"),
-                )
+                args[0]
+                  .flat()
+                  .some(
+                    (write) =>
+                      write.type === "submission" &&
+                      write.value.requestId?.startsWith("subagent-notify:"),
+                  )
               ) {
                 intercepted = true;
                 entered.resolve();

@@ -1,5 +1,4 @@
 import type { Context, JsonValue } from "@earendil-works/chord";
-import { type TSchema, Type } from "@earendil-works/pi-ai";
 import {
   defineTool,
   ROOT_CONVERSATION_ID,
@@ -17,6 +16,7 @@ import {
   OrbTranscriptSchema,
 } from "@pi-orb/protocol";
 import { err, type ResultAsync } from "neverthrow";
+import { type TSchema, Type } from "typebox";
 import type {
   OrbAgentError,
   OrbAgentOperations,

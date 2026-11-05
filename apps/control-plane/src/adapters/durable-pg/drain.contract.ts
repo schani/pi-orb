@@ -18,24 +18,28 @@ export async function assertDrainIsolation(db: PostgreSQLClient) {
   const undrained = (await authority.open(owner, { project }))._unsafeUnwrap();
   onTestFinished(() => undrained.close(ctx));
   (await db.query("UPDATE orbs SET agent_admission_version=1"))._unsafeUnwrap();
-  await expect(storage.commit([], ctx)).rejects.toThrow("admission");
+  await expect(storage.commit([], () => undefined, ctx)).rejects.toThrow("admission");
   expect((await authority.beginDrain(owner, storage)).isOk()).toBe(true);
   expect((await authority.validate(owner)).isErr()).toBe(true);
   expect((await authority.ownedTransaction(owner, async () => ok(undefined))).isErr()).toBe(true);
-  await expect(undrained.commit([], ctx)).rejects.toThrow("admission");
+  await expect(undrained.commit([], () => undefined, ctx)).rejects.toThrow("admission");
   await storage.mintId();
-  await storage.commit([{ type: "conversation", value: { id: 1 as ConversationId } }], ctx);
+  await storage.commit(
+    [[{ type: "conversation", value: { id: 1 as ConversationId } }]],
+    () => undefined,
+    ctx,
+  );
   expect((await authority.release(owner)).isOk()).toBe(true);
   expect((await authority.release(owner)).isOk()).toBe(true);
   const successor = (await authority.acquire(orb, "new", 1, 0, 100))._unsafeUnwrap();
   expect((await authority.release(owner)).isErr()).toBe(true);
   expect((await authority.validate(successor)).isOk()).toBe(true);
-  await expect(storage.commit([], ctx)).rejects.toThrow("revoked");
+  await expect(storage.commit([], () => undefined, ctx)).rejects.toThrow("revoked");
   expect((await authority.beginDrain(owner, storage))._unsafeUnwrap()).toMatchObject({
     type: "owner_lost",
     cause: { type: "authority_error", code: "stale_owner" },
   });
-  await expect(storage.commit([], ctx)).rejects.toThrow("revoked");
+  await expect(storage.commit([], () => undefined, ctx)).rejects.toThrow("revoked");
   expect((await authority.validate(successor)).isOk()).toBe(true);
   const fresh = (await authority.open(successor, { project }))._unsafeUnwrap();
   onTestFinished(() => fresh.close(ctx));

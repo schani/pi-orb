@@ -42,7 +42,9 @@ it("expires the exact owner and prevents stale release from revoking its replace
   )._unsafeUnwrap();
   expect(old.signal.aborted).toBe(true);
   expect((await old.check()).isErr()).toBe(true);
-  await expect(old.storage.commit([], BACKGROUND_CONTEXT)).rejects.toThrow("owner revoked");
+  await expect(old.storage.commit([], () => undefined, BACKGROUND_CONTEXT)).rejects.toThrow(
+    "owner revoked",
+  );
   await old.release();
   expect(fresh.signal.aborted).toBe(false);
   expect((await fresh.check()).isOk()).toBe(true);

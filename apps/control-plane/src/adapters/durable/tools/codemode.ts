@@ -227,37 +227,41 @@ export function codemodeTool(
             ),
           }));
         },
-        commit: (change, ctx) =>
-          api.commit(async (tx) => {
-            const result = await change(tx);
-            const run = await tx.doc(CodemodeRunDoc, api.taskId);
-            const recorded = chartEntries(
-              copyJson((await tx.doc(CodemodeJournalDoc, api.taskId)).entries),
-            );
-            if (recorded.length !== charts.length) {
-              charts = recorded;
-              const live = await tx.doc(LiveDoc, api.conversationId);
-              const slot = [...(live.tools ?? []), ...(live.nestedTools ?? [])].find(
-                (item) => item.taskId === api.taskId,
+        commit: (change, ctx, commitOptions) =>
+          api.commit(
+            async (tx) => {
+              const result = await change(tx);
+              const run = await tx.doc(CodemodeRunDoc, api.taskId);
+              const recorded = chartEntries(
+                copyJson((await tx.doc(CodemodeJournalDoc, api.taskId)).entries),
               );
-              if (slot)
-                slot.details = {
-                  ...(object(slot.details) ? slot.details : {}),
-                  charts: copyJson(charts),
-                };
-            }
-            if (run.result !== undefined) {
-              // Artifact paths and chart rows commit with the native outcome, before it can be replayed.
-              run.result = copyJson(present(run.result as ToolExecutionResult), {
-                omitUndefinedProperties: true,
-              }) as JsonObject;
-            }
-            return object(result) && Array.isArray(result.output)
-              ? (copyJson(present(result as ToolExecutionResult), {
+              if (recorded.length !== charts.length) {
+                charts = recorded;
+                const live = await tx.doc(LiveDoc, api.conversationId);
+                const slot = [...(live.tools ?? []), ...(live.nestedTools ?? [])].find(
+                  (item) => item.taskId === api.taskId,
+                );
+                if (slot)
+                  slot.details = {
+                    ...(object(slot.details) ? slot.details : {}),
+                    charts: copyJson(charts),
+                  };
+              }
+              if (run.result !== undefined) {
+                // Artifact paths and chart rows commit with the native outcome, before it can be replayed.
+                run.result = copyJson(present(run.result as ToolExecutionResult), {
                   omitUndefinedProperties: true,
-                }) as typeof result)
-              : result;
-          }, ctx),
+                }) as JsonObject;
+              }
+              return object(result) && Array.isArray(result.output)
+                ? (copyJson(present(result as ToolExecutionResult), {
+                    omitUndefinedProperties: true,
+                  }) as typeof result)
+                : result;
+            },
+            ctx,
+            commitOptions,
+          ),
       };
       const executed = await ResultAsync.fromPromise(
         (async () => {

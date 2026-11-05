@@ -5,6 +5,7 @@ import type {
   DocumentCreate,
   DocumentId,
   EntryId,
+  Seq,
   Storage,
   SubmissionId,
   TaskId,
@@ -132,46 +133,52 @@ for (const backend of ["pglite", ...(postgres ? ["postgres"] : [])]) {
       [a, "a"],
       [b, "b"],
     ] as const) {
-      const seq = await storage.commit(
+      let seq!: Seq;
+      await storage.commit(
         [
-          { type: "conversation", value: { id: root } },
-          { type: "conversation", value: { id: child, owner: { conversationId: root, taskId } } },
-          ...[10, 11, 12].map((id) => ({
-            type: "entry" as const,
-            value: {
-              id: id as EntryId,
-              conversationId: root,
-              kind: "message",
-              data: tenant,
-              ...(id === 11 ? { head: 10 as EntryId } : {}),
+          [
+            { type: "conversation", value: { id: root } },
+            { type: "conversation", value: { id: child, owner: { conversationId: root, taskId } } },
+            ...[10, 11, 12].map((id) => ({
+              type: "entry" as const,
+              value: {
+                id: id as EntryId,
+                conversationId: root,
+                kind: "message",
+                data: tenant,
+                ...(id === 11 ? { head: 10 as EntryId } : {}),
+              },
+            })),
+            ...[20, 21].map((id) => ({
+              type: "task" as const,
+              value: pending(id as TaskId<string>, tenant),
+            })),
+            { type: "task", value: { ...pending(22 as TaskId<string>, tenant), kind: "excluded" } },
+            ...[30, 31].map((id) => ({
+              type: "submission" as const,
+              value: {
+                id: id as SubmissionId,
+                conversationId: root,
+                requestId: `request?'${id}`,
+                type: "input" as const,
+                status: "queued" as const,
+              },
+            })),
+            ...[40, 41].map((id) => ({
+              type: "document.create" as const,
+              record: doc(id as DocumentId, `key?${id}`),
+              content: { kind: "base" as const, version: 1, value: { tenant, count: 0 } },
+            })),
+            {
+              type: "document.create",
+              record: { ...doc(latestId, "latest"), history: "latest", fork: "current" },
+              content: { kind: "base", version: 1, value: { tenant } },
             },
-          })),
-          ...[20, 21].map((id) => ({
-            type: "task" as const,
-            value: pending(id as TaskId<string>, tenant),
-          })),
-          { type: "task", value: { ...pending(22 as TaskId<string>, tenant), kind: "excluded" } },
-          ...[30, 31].map((id) => ({
-            type: "submission" as const,
-            value: {
-              id: id as SubmissionId,
-              conversationId: root,
-              requestId: `request?'${id}`,
-              type: "input" as const,
-              status: "queued" as const,
-            },
-          })),
-          ...[40, 41].map((id) => ({
-            type: "document.create" as const,
-            record: doc(id as DocumentId, `key?${id}`),
-            content: { kind: "base" as const, version: 1, value: { tenant, count: 0 } },
-          })),
-          {
-            type: "document.create",
-            record: { ...doc(latestId, "latest"), history: "latest", fork: "current" },
-            content: { kind: "base", version: 1, value: { tenant } },
-          },
+          ],
         ],
+        (_index, received) => {
+          seq = received;
+        },
         ctx,
       );
       initial.push(seq);
@@ -266,31 +273,37 @@ for (const backend of ["pglite", ...(postgres ? ["postgres"] : [])]) {
 
     const originalB = await b.document(documentId, "current", ctx);
     expect(originalB?.value).toEqual({ tenant: "b", count: 0 });
-    const changed = await a.commit(
+    let changed!: Seq;
+    await a.commit(
       [
-        { type: "task", value: { ...pending(taskId, "a"), abortRequested: true } },
-        {
-          type: "submission",
-          value: {
-            id: 30 as SubmissionId,
-            conversationId: root,
-            requestId: "request?'30",
-            type: "input",
-            status: "placed",
-            entry: 10 as EntryId,
+        [
+          { type: "task", value: { ...pending(taskId, "a"), abortRequested: true } },
+          {
+            type: "submission",
+            value: {
+              id: 30 as SubmissionId,
+              conversationId: root,
+              requestId: "request?'30",
+              type: "input",
+              status: "placed",
+              entry: 10 as EntryId,
+            },
           },
-        },
-        {
-          type: "document.change",
-          id: documentId,
-          content: { kind: "delta", version: 1, ops: [["s", ["count"], 1]] },
-        },
-        {
-          type: "document.change",
-          id: latestId,
-          content: { kind: "base", version: 2, value: { tenant: "a", replaced: true } },
-        },
+          {
+            type: "document.change",
+            id: documentId,
+            content: { kind: "delta", version: 1, ops: [["s", ["count"], 1]] },
+          },
+          {
+            type: "document.change",
+            id: latestId,
+            content: { kind: "base", version: 2, value: { tenant: "a", replaced: true } },
+          },
+        ],
       ],
+      (_index, received) => {
+        changed = received;
+      },
       ctx,
     );
     expect(changed).toBeGreaterThan(initial[0]!);
@@ -318,12 +331,15 @@ for (const backend of ["pglite", ...(postgres ? ["postgres"] : [])]) {
     ] as const) {
       await storage.commit(
         [
-          {
-            type: "document.copy",
-            record: doc(copyId, "key?40", child),
-            source: { id: documentId, at },
-          },
+          [
+            {
+              type: "document.copy",
+              record: doc(copyId, "key?40", child),
+              source: { id: documentId, at },
+            },
+          ],
         ],
+        () => undefined,
         ctx,
       );
     }
@@ -331,9 +347,12 @@ for (const backend of ["pglite", ...(postgres ? ["postgres"] : [])]) {
     expect((await b.document(copyId, "current", ctx))?.value).toEqual({ tenant: "b", count: 0 });
     await a.commit(
       [
-        { type: "document.retire", id: documentId },
-        { type: "document.retire", id: latestId },
+        [
+          { type: "document.retire", id: documentId },
+          { type: "document.retire", id: latestId },
+        ],
       ],
+      () => undefined,
       ctx,
     );
     expect(await a.document(documentId, "current", ctx)).toBeUndefined();

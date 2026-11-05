@@ -1,5 +1,4 @@
 import { type Context, isJsonValue, type JsonValue } from "@earendil-works/chord";
-import { type TSchema, Type } from "@earendil-works/pi-ai";
 import { toCodemodeIdentifier } from "@earendil-works/pi-codemode";
 import {
   defineTool,
@@ -15,6 +14,7 @@ import {
   toLlmContent,
 } from "@earendil-works/pi-mcp";
 import { err, errAsync, ok, okAsync, Result, ResultAsync } from "neverthrow";
+import { type TSchema, Type } from "typebox";
 import { Check } from "typebox/value";
 import { type CallableCatalog, errorResult, type ToolError } from "./catalog.ts";
 

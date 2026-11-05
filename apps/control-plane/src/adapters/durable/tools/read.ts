@@ -4,6 +4,7 @@ import {
   type ImageProcessor,
   type PreparedImage,
 } from "@earendil-works/pi-durable/tools";
+import { Type } from "typebox";
 import { errorResult } from "./catalog.ts";
 import type { AgentToolFiles } from "./files.ts";
 
@@ -24,15 +25,36 @@ export function imageReadTool(files: AgentToolFiles = {}): ToolRegistration {
   const read = createReadTool({ images: rawImages });
   return defineTool({
     ...read,
+    structuredOutputSchema: Type.Union([
+      Type.String(),
+      Type.Array(
+        Type.Object({ type: Type.Literal("image"), data: Type.String(), mimeType: Type.String() }),
+      ),
+    ]),
     description:
       "Read text or image files. Text is truncated to 2000 lines or 50 KiB; use offset/limit to continue. Scripts receive text or image blocks; show blocks with image().",
     execute: async (args, api, ctx) => {
       if (files.read) {
-        const resource = await files.read(args, api, ctx);
+        const resource = await files.read(
+          {
+            path: args.path,
+            ...(args.offset === undefined ? {} : { offset: args.offset }),
+            ...(args.limit === undefined ? {} : { limit: args.limit }),
+          },
+          api,
+          ctx,
+        );
         if (resource.isErr()) return errorResult(resource.error);
         if (resource.value !== undefined) return resource.value;
       }
-      return read.execute(args, api, ctx);
+      const result = await read.execute(args, api, ctx);
+      const value = result.structuredOutput;
+      return typeof value === "object" &&
+        value !== null &&
+        "type" in value &&
+        value.type === "image"
+        ? { ...result, structuredOutput: [value] }
+        : result;
     },
   });
 }

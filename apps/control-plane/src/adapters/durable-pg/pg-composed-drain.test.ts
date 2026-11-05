@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   type FauxResponseFactory,
@@ -17,6 +16,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { NoSimulationTask } from "determined";
+import { Type } from "typebox";
 import { expect, it, onTestFailed } from "vitest";
 import { makeOrbRow, makeProjectRow } from "../../testkit/fixtures.ts";
 import { composeControlPlaneDatabase } from "../database.ts";
@@ -111,7 +111,7 @@ it.for([
                 await commitRelease.promise;
               }
               const result = await target.commit(...args);
-              for (const write of args[0])
+              for (const write of args[0].slice(0, result.stored).flat())
                 if (write.type === "task") taskRecords.set(write.value.id, write.value);
               return result;
             };
@@ -246,7 +246,7 @@ it.for([
         )
       )._unsafeUnwrap().rows;
       expect(nativeTools.some((row) => row.input_kind === "nested")).toBe(true);
-      expect(nativeTools.every((row) => row.version === "2")).toBe(true);
+      expect(nativeTools.every((row) => row.version === "3")).toBe(true);
       expect(
         (
           await db.query("SELECT id FROM durable_pg_conversations WHERE orb_id=$1", [orb.id])
@@ -375,7 +375,7 @@ it.for([
           if (key === "commit")
             return async (...args: Parameters<Storage["commit"]>) => {
               const result = await target.commit(...args);
-              for (const write of args[0])
+              for (const write of args[0].slice(0, result.stored).flat())
                 if (write.type === "task") {
                   expect(write.value).not.toHaveProperty("restarts");
                   taskRecords.set(write.value.id, write.value);

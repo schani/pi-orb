@@ -1,6 +1,5 @@
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   fauxAssistantMessage,
@@ -9,7 +8,9 @@ import {
 } from "@earendil-works/pi-ai/providers/faux";
 import {
   createRegistry,
+  type DocumentReader,
   defineTool,
+  type EnvTarget,
   LiveDoc,
   type LiveState,
   ROOT_CONVERSATION_ID,
@@ -17,6 +18,7 @@ import {
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import type { ServerFrame } from "@pi-orb/protocol";
 import { ResultAsync } from "neverthrow";
+import { Type } from "typebox";
 import { expect, it } from "vitest";
 import { LazyExecutionEnv } from "../execution-client/lazy-env.ts";
 import { DurableAgent } from "./agent.ts";
@@ -174,13 +176,17 @@ it.each(["resolve", "abort", "pause"] as const)(
     ]);
     const models = createModels();
     models.setProvider(faux.provider);
+    let read!: DocumentReader;
     const options = {
       orbId: "orb",
       storage,
       models,
       registry,
       env,
-      envFor: () => env.invocation(),
+      envFor: (target: EnvTarget) => {
+        read = target.read;
+        return env.invocation();
+      },
       modelTools: bundle.modelTools,
       checkoutCommit: null,
       instructions: "",
@@ -189,7 +195,9 @@ it.each(["resolve", "abort", "pause"] as const)(
     let agent = (await DurableAgent.open(options))._unsafeUnwrap();
     const frames: ServerFrame[] = [];
     agent.subscribe((frame) => frames.push(frame));
-    const nativeLive = async () => {
+    const nativeLive = async () =>
+      (await read.snapshot(LiveDoc, ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT))!;
+    const storedLive = async () => {
       const record = await storage.findDocument(
         {
           kind: LiveDoc.definition.kind,
@@ -292,12 +300,33 @@ it.each(["resolve", "abort", "pause"] as const)(
         expect((await nativeLive()).nestedTools ?? []).toEqual([]);
       } else {
         (await agent.close())._unsafeUnwrap();
+        expect((await storedLive()).nestedTools).toContainEqual(
+          expect.objectContaining({
+            arguments: { token: privateArgument },
+            output: privateOutput,
+            details: expect.objectContaining({ private: privateDetails }),
+          }),
+        );
+        expect(
+          await storage.submissionByRequest(ROOT_CONVERSATION_ID, "inbox:wait", BACKGROUND_CONTEXT),
+        ).toMatchObject({ status: "placed" });
         const calls = acquired;
         agent = (await DurableAgent.open({ ...options, resume: false }))._unsafeUnwrap();
         expect(agent.workActive()).toBe(false);
         expect((await agent.prepareIdleStop())._unsafeUnwrap()).toEqual({ v: 1, prepared: true });
         expect(acquired).toBe(calls);
         expect(executed).toBe(0);
+      }
+      if (outcome !== "pause") {
+        const committed = await storedLive();
+        expect(committed.run).toBeUndefined();
+        expect(committed.generation).toBeUndefined();
+        expect(committed.nestedTools ?? []).toEqual([]);
+        expect(
+          await storage.submissionByRequest(ROOT_CONVERSATION_ID, "inbox:wait", BACKGROUND_CONTEXT),
+        ).toMatchObject(
+          outcome === "resolve" ? { status: "done" } : { status: "unanswered", reason: "aborted" },
+        );
       }
       expect(agent.liveView()).toBeNull();
       assertPrivate();

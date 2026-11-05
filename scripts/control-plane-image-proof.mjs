@@ -6,7 +6,6 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   fauxAssistantMessage,
@@ -21,6 +20,7 @@ import {
   MemoryStorage,
 } from "@earendil-works/pi-durable";
 import { okAsync, ResultAsync } from "neverthrow";
+import { Type } from "typebox";
 import { loadPlatformResources } from "./apps/control-plane/src/adapters/durable/platform-resources.ts";
 import {
   CALLBACK_LIMIT_MESSAGE,

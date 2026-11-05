@@ -46,12 +46,17 @@ it("discovers resources-only servers without tools/list and preserves namespace 
     expect(methods).not.toContain("tools/list");
     const fixture = await openCodemodeHarness(bundle.catalog);
     try {
-      const discovery = await fixture.run('return (await describeNamespace("docs")).instructions;');
+      const discovery = await fixture.run(
+        'const ns = await describeNamespace("mcp__docs"); return JSON.stringify([ns.name, ns.instructions, ns.tools]);',
+      );
       expect(discovery.isError).toBe(false);
       expect(discovery.output).toContainEqual({
         type: "text",
-        text: "Resolve project before reading",
+        text: JSON.stringify(["mcp__docs", "Resolve project before reading", []]),
       });
+      const short = await fixture.run('return typeof await describeNamespace("docs");');
+      expect(short.isError).toBe(false);
+      expect.soft(short.output).toContainEqual({ type: "text", text: "undefined" });
     } finally {
       await fixture.close();
     }

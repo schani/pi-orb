@@ -49,7 +49,11 @@ it("rolls native history back when public projection rejects and recovers commit
       })
     )._unsafeUnwrap();
     await expect(
-      failed.commit([{ type: "conversation", value: { id: 1 as ConversationId } }], ctx),
+      failed.commit(
+        [[{ type: "conversation", value: { id: 1 as ConversationId } }]],
+        () => undefined,
+        ctx,
+      ),
     ).rejects.toBeDefined();
     expect(await failed.conversation(1 as ConversationId, ctx)).toBeUndefined();
     await failed.close(ctx);
@@ -64,7 +68,11 @@ it("rolls native history back when public projection rejects and recovers commit
         },
       })
     )._unsafeUnwrap();
-    await storage.commit([{ type: "conversation", value: { id: 1 as ConversationId } }], ctx);
+    await storage.commit(
+      [[{ type: "conversation", value: { id: 1 as ConversationId } }]],
+      () => undefined,
+      ctx,
+    );
     const reader = (await authority.read(orb))._unsafeUnwrap();
     expect(await reader.conversation(1 as ConversationId, ctx)).toEqual({ id: 1 });
     await reader.close(ctx);
@@ -84,7 +92,11 @@ it("fences expired owners and admission ABA while retaining independently sealed
     setTime(10);
     const next = (await authority.acquire(orb, "new", 0, 10, 20))._unsafeUnwrap();
     await expect(
-      storage.commit([{ type: "conversation", value: { id: 1 as ConversationId } }], ctx),
+      storage.commit(
+        [[{ type: "conversation", value: { id: 1 as ConversationId } }]],
+        () => undefined,
+        ctx,
+      ),
     ).rejects.toBeDefined();
     (
       await db.query("UPDATE orbs SET agent_admission_version=2 WHERE id=$1", [orb])
@@ -154,7 +166,7 @@ it.each(["read", "write"] as const)(
               }, ctx);
         await expect(failed).rejects.not.toBeInstanceOf(StorageRequestError);
         await expect(session.commit(() => undefined, ctx)).rejects.toBeInstanceOf(SessionFailed);
-        expect(await session.closed).toMatchObject({ reason: "failed" });
+        expect(await session.closed).toMatchObject({ kind: "failed" });
       } finally {
         spy.mockRestore();
         await session.close(ctx);
@@ -183,7 +195,7 @@ it("retains the typed owner fence through terminal SessionFailed", async () => {
     const later = await session.commit(() => undefined, ctx).catch((error: unknown) => error);
     expect(later).toBeInstanceOf(SessionFailed);
     expect(storageAuthorityError(later)).toEqual(storageAuthorityError(first));
-    expect(await session.closed).toMatchObject({ reason: "failed" });
+    expect(await session.closed).toMatchObject({ kind: "failed" });
   } finally {
     (await db.end())._unsafeUnwrap();
   }
@@ -227,10 +239,13 @@ it("reopens completed 1.1 tool receipts and transcript content without rewriting
     };
     await storage.commit(
       [
-        { type: "conversation", value: { id: 1 as ConversationId } },
-        { type: "entry", value: entry },
-        { type: "task", value: task },
+        [
+          { type: "conversation", value: { id: 1 as ConversationId } },
+          { type: "entry", value: entry },
+          { type: "task", value: task },
+        ],
       ],
+      () => undefined,
       ctx,
     );
     await storage.close(ctx);
@@ -267,21 +282,24 @@ it("persists native nested-call task documents across reopen and retires their s
     const taskId = 2 as TaskId<JsonValue>;
     await storage.commit(
       [
-        { type: "conversation", value: { id: 1 as ConversationId } },
-        {
-          type: "task",
-          value: {
-            id: taskId,
-            conversationId: 1 as ConversationId,
-            kind: "pi.tool",
-            version: 2,
-            input: { kind: "model", assistant: 3, callId: "parent" },
-            background: false,
-            abortRequested: false,
-            state: { status: "pending", checkpoint: { phase: "call" } },
+        [
+          { type: "conversation", value: { id: 1 as ConversationId } },
+          {
+            type: "task",
+            value: {
+              id: taskId,
+              conversationId: 1 as ConversationId,
+              kind: "pi.tool",
+              version: 2,
+              input: { kind: "model", assistant: 3, callId: "parent" },
+              background: false,
+              abortRequested: false,
+              state: { status: "pending", checkpoint: { phase: "call" } },
+            },
           },
-        },
+        ],
       ],
+      () => undefined,
       ctx,
     );
     const session = createSession(storage);
@@ -361,19 +379,22 @@ it("isolates colliding native IDs through reads, replacement, retirement and arc
       storages.push(storage);
       await storage.commit(
         [
-          { type: "conversation", value: { id: conversationId } },
-          {
-            type: "document.create",
-            record: {
-              id,
-              kind: "tenant",
-              scope: { kind: "conversation", conversationId },
-              history: "latest",
-              fork: "current",
+          [
+            { type: "conversation", value: { id: conversationId } },
+            {
+              type: "document.create",
+              record: {
+                id,
+                kind: "tenant",
+                scope: { kind: "conversation", conversationId },
+                history: "latest",
+                fork: "current",
+              },
+              content: { kind: "base", version: 1, value: { tenant: index } },
             },
-            content: { kind: "base", version: 1, value: { tenant: index } },
-          },
+          ],
         ],
+        () => undefined,
         ctx,
       );
     }
@@ -385,17 +406,20 @@ it("isolates colliding native IDs through reads, replacement, retirement and arc
     expect((await a.document(id, "current", ctx))?.value).toEqual({ tenant: 0 });
     await a.commit(
       [
-        {
-          type: "document.change",
-          id,
-          content: { kind: "base", version: 1, value: { tenant: "changed" } },
-        },
+        [
+          {
+            type: "document.change",
+            id,
+            content: { kind: "base", version: 1, value: { tenant: "changed" } },
+          },
+        ],
       ],
+      () => undefined,
       ctx,
     );
     expect((await a.document(id, "current", ctx))?.value).toEqual({ tenant: "changed" });
     expect(await b.document(id, "current", ctx)).toEqual(original);
-    await a.commit([{ type: "document.retire", id }], ctx);
+    await a.commit([[{ type: "document.retire", id }]], () => undefined, ctx);
     expect(await a.document(id, "current", ctx)).toBeUndefined();
     expect(await b.document(id, "current", ctx)).toEqual(original);
     expect(

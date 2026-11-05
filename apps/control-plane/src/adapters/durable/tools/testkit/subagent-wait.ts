@@ -1,4 +1,4 @@
-import type { Context, JsonValue } from "@earendil-works/chord";
+import type { Context, JsonValue, WatchCall } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
@@ -85,7 +85,11 @@ export class WaitBoundary {
   acquireFailure: unknown;
   startFailure: unknown;
   stopFailure: unknown;
-  stopEnd: WatchEnd = { reason: "stopped" };
+  stopEnd: WatchEnd = { kind: "stopped" };
+  private readonly listeners = new Map<
+    DocumentWatch<InboxState>,
+    Parameters<DocumentWatch<InboxState>["start"]>[0]
+  >();
   readFailure: unknown;
   waitFailure: unknown;
 
@@ -143,6 +147,7 @@ export class WaitBoundary {
         closed: closed.promise,
         start: (callback) => {
           if (this.startFailure) throw this.startFailure;
+          this.listeners.set(watch, callback);
           native.start(callback);
         },
         stop: async () => {
@@ -156,7 +161,10 @@ export class WaitBoundary {
         closed.resolve(reason);
         void native.stop();
       });
-      void closed.promise.then(() => this.watches.delete(watch));
+      void closed.promise.then(() => {
+        this.watches.delete(watch);
+        this.listeners.delete(watch);
+      });
       await this.afterAcquire();
       return watch;
     },
@@ -180,6 +188,10 @@ export class WaitBoundary {
 
   close(reason: WatchEnd) {
     for (const end of this.watches.values()) end(reason);
+  }
+
+  async frame(call: WatchCall<InboxState>) {
+    for (const listener of this.listeners.values()) await listener(call, BACKGROUND_CONTEXT);
   }
 
   complete() {

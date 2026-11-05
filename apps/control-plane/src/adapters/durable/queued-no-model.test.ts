@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
@@ -8,7 +7,6 @@ import {
   type Harness,
   MemoryStorage,
   ROOT_CONVERSATION_ID,
-  type StorageWrite,
   section,
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
@@ -30,8 +28,9 @@ it.each(["available", "missing"] as const)(
       release = barrier();
     const settlements: string[] = [];
     class SettlementStorage extends MemoryStorage {
-      override async commit(writes: readonly StorageWrite[], context: Context) {
-        const seq = await super.commit(writes, context);
+      override async commit(...args: Parameters<MemoryStorage["commit"]>) {
+        const writes = args[0].flat();
+        const seq = await super.commit(...args);
         for (const write of writes)
           if (write.type === "submission" && ["done", "unanswered"].includes(write.value.status))
             settlements.push(write.value.requestId ?? "missing-request-id");

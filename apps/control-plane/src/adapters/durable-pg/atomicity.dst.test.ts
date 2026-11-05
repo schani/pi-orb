@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
-import type { ConversationId, EntryId } from "@earendil-works/pi-durable";
+import type { ConversationId, EntryId, StorageWrite } from "@earendil-works/pi-durable";
 import { ok, ResultAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import { runDst } from "../../testkit/sim.ts";
@@ -44,19 +44,27 @@ for (const failAt of [
       await initialize(db);
       const authority = new PgDurableAuthority(db, () => 0);
       const owner = (await authority.acquire(orb, "writer", 0, 0, 10))._unsafeUnwrap();
+      const receipts: number[] = [];
+      let projections = 0;
       const storage = (
         await authority.open(owner, {
           checkpoint: async (phase) => {
-            if (phase === failAt) {
+            if (
+              phase === failAt &&
+              (phase === "before_native" ||
+                phase === "after_commit" ||
+                (phase === "after_native" ? projections === 1 : projections === 2))
+            ) {
               // biome-ignore lint/plugin/no-throw: crash injection into third-party callback.
               throw new Error("simulated crash");
             }
           },
           project: async (query) => {
+            projections++;
             const reader = await readTransactionStorage(query, orb);
             expect(await reader.conversation(1 as ConversationId, ctx)).toEqual({ id: 1 });
             await reader.close(ctx);
-            return (await query("INSERT INTO public_transcript(id) VALUES(1)")).map(
+            return (await query("INSERT INTO public_transcript(id) VALUES($1)", [projections])).map(
               () => undefined,
             );
           },
@@ -67,16 +75,27 @@ for (const failAt of [
         })
       )._unsafeUnwrap();
       const committed = await ResultAsync.fromPromise(
-        storage.commit([{ type: "conversation", value: { id: 1 as ConversationId } }], ctx),
+        storage.commit(
+          [
+            [{ type: "conversation", value: { id: 1 as ConversationId } }],
+            [{ type: "conversation", value: { id: 2 as ConversationId } }],
+          ],
+          (index) => receipts.push(index),
+          ctx,
+        ),
         () => "crashed",
       );
       const expected = failAt === "after_commit";
       expect(committed.isOk()).toBe(expected);
+      expect(receipts).toEqual(expected ? [0, 1] : []);
+      expect(await storage.conversation(2 as ConversationId, ctx)).toEqual(
+        expected ? { id: 2 } : undefined,
+      );
       expect(await storage.conversation(1 as ConversationId, ctx)).toEqual(
         expected ? { id: 1 } : undefined,
       );
       expect((await db.query("SELECT * FROM public_transcript"))._unsafeUnwrap().rows).toHaveLength(
-        expected ? 1 : 0,
+        expected ? 2 : 0,
       );
       await storage.close(ctx);
     } finally {
@@ -111,7 +130,11 @@ it("DST schedules old-owner commits, Stop ABA and archive cleanup without half-p
       const setup = (
         await authority.open(owner, { project: async () => ok(undefined) })
       )._unsafeUnwrap();
-      await setup.commit([{ type: "conversation", value: { id: 1 as ConversationId } }], ctx);
+      await setup.commit(
+        [[{ type: "conversation", value: { id: 1 as ConversationId } }]],
+        () => undefined,
+        ctx,
+      );
       await setup.close(ctx);
       const result = await sim.runTasks([
         {
@@ -119,8 +142,12 @@ it("DST schedules old-owner commits, Stop ABA and archive cleanup without half-p
           f: async (task) => {
             const opened = await authority.open(owner, {
               checkpoint: (phase) => task.checkpoint(phase),
-              project: async (query) =>
-                (await query("INSERT INTO public_transcript(id) VALUES(2)")).map(() => undefined),
+              project: async (query, writes) =>
+                (
+                  await query("INSERT INTO public_transcript(id) VALUES($1)", [
+                    writes.find((write) => write.type === "entry")!.value.id,
+                  ])
+                ).map(() => undefined),
             });
             // Archive may have already removed authority before this stale owner opens it.
             if (opened.isErr()) {
@@ -132,23 +159,26 @@ it("DST schedules old-owner commits, Stop ABA and archive cleanup without half-p
             const drained = await authority.beginDrain(owner, storage);
             if (drained.isErr()) expect(drained.error.code).toBe("stale_owner");
             await task.checkpoint("before-old-commit");
+            const receipts: number[] = [];
             const committed = await ResultAsync.fromPromise(
               storage.commit(
-                [
+                [2, 3].map((id): readonly StorageWrite[] => [
                   {
                     type: "entry",
                     value: {
-                      id: 2 as EntryId,
+                      id: id as EntryId,
                       conversationId: 1 as ConversationId,
                       kind: "public",
                       data: "visible",
                     },
                   },
-                ],
+                ]),
+                (index) => receipts.push(index),
                 ctx,
               ),
               storageAuthorityError,
             );
+            expect(receipts).toEqual(committed.isOk() ? [0, 1] : []);
             if (committed.isErr()) expect(committed.error).toMatchObject({ code: "stale_owner" });
             await storage.close(ctx);
           },
@@ -185,6 +215,7 @@ it("DST schedules old-owner commits, Stop ABA and archive cleanup without half-p
       )._unsafeUnwrap().rows[0]?.archived;
       expect(archived).toBe(true);
       expect(native).toHaveLength(0);
+      expect([0, 2]).toContain(publicRows.length);
       expect(publicRows.every((row) => row.sealed)).toBe(true);
       expect((await authority.validate(owner)).isErr()).toBe(true);
     });

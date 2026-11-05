@@ -72,13 +72,16 @@ it("steers an inherited child, waits for its persistent receipt and lists it", a
   registry.install(tools.childExtension);
   const storage = new MemoryStorage();
   const harness = await Harness.open(storage, { models, registry }, ctx);
-  const unsubscribe = harness.subscribeCommits((publication) => {
-    if (
-      publication.changes.some(
-        (c) => c.type === "submission" && c.value.requestId?.startsWith("steer:"),
+  const observation = harness.observeCommits({
+    advance(publication) {
+      if (
+        publication.changes.some(
+          (c) => c.type === "submission" && c.value.requestId?.startsWith("steer:"),
+        )
       )
-    )
-      release();
+        release();
+    },
+    end() {},
   });
   try {
     const root = await harness.root(ctx, {
@@ -162,7 +165,7 @@ it("steers an inherited child, waits for its persistent receipt and lists it", a
     expect((await harness.inspect(ctx)).tasks).toHaveLength(0);
   } finally {
     release();
-    unsubscribe();
+    observation.detach();
     await harness.close(ctx);
     await tools.close();
   }

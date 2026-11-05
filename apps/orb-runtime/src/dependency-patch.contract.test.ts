@@ -20,7 +20,7 @@ const json = (
     devDependencies?: Record<string, string>;
   };
 
-const piVersion = "1.4.0";
+const piVersion = "1.5.0";
 const helperPath = "scripts/apply-dependency-patches.mjs";
 
 describe("Pi dependency patch installation", () => {
@@ -94,7 +94,15 @@ describe("Pi dependency patch installation", () => {
     expect(read(helperPath)).not.toContain(
       'package: "node_modules/@earendil-works/pi-coding-agent"',
     );
-    expect(read("apps/control-plane/Dockerfile")).not.toContain("pi-coding-agent+1.4.0.patch");
+    expect(read("apps/control-plane/Dockerfile")).not.toContain("pi-coding-agent+1.5.0.patch");
+  });
+
+  it("keeps code-mode declarations pristine", () => {
+    const path = "node_modules/@earendil-works/pi-codemode/dist/declarations.js";
+    expect(createHash("sha256").update(read(path)).digest("hex")).toBe(
+      "00ab54f850a7412d029f8d9699fcb51b1346f3cb2c58e47b63f9189292ec260c",
+    );
+    expect(read("patches/@earendil-works+pi-codemode+1.5.0.patch")).not.toContain(path);
   });
 
   it("keeps native Durable journals, namespace discovery and previews on the public contract", () => {
@@ -104,10 +112,11 @@ describe("Pi dependency patch installation", () => {
     }
     const native = read(`${base}codemode.js`);
     expect(native).toContain("const namespaces = (this.options.namespaces ?? []).map(");
-    expect(native).toContain('namespace.name.split("__").at(-1) === query');
-    expect(native).toContain(
-      'toCodemodeIdentifier(namespace.name).split("__").at(-1) === toCodemodeIdentifier(query)',
+    expect(native.match(/const matchesNamespace = [^\n]+/)?.[0]).toBe(
+      "const matchesNamespace = (namespace, query) => namespace.name === query || toCodemodeIdentifier(namespace.name) === toCodemodeIdentifier(query);",
     );
+    expect(native).not.toContain('namespace.name.split("__").at(-1)');
+    expect(native).not.toContain('toCodemodeIdentifier(namespace.name).split("__").at(-1)');
     expect(native).toContain("Object.keys(value).slice(0, 16)");
     expect(native).toContain(": typeof value).slice(0, 256)");
     expect(native).toContain(
@@ -134,14 +143,31 @@ describe("Pi dependency patch installation", () => {
         .slice(adapter.indexOf("harness = await Harness.open("))
         .match(/settings: \{[^}]*\}/)?.[0],
     ).toContain('afterFailedRun: "continue"');
-    const patch = read("patches/@earendil-works+pi-durable+1.4.0.patch");
+    const patch = read("patches/@earendil-works+pi-durable+1.5.0.patch");
     expect(patch).not.toContain("dist/harness/generation.js");
     const native = read("node_modules/@earendil-works/pi-durable/dist/harness/generation.js");
     expect(createHash("sha256").update(native).digest("hex")).toBe(
-      "b7b8c610e23f100edd9cde336c28f70ae8c82f6e988f4b4564e1a732a2e1b531",
+      "65a11a5164ffdb95b2031c3ae937da848a8897e57d1823ff34f97692eec7c570",
     );
     expect(native).toContain("const policy = settings.afterFailedRun;");
     expect(native).not.toContain('prepareFailure(tx, runtime, "continue")');
+  });
+
+  it("preserves native transactional admission alongside atomic snapshots", () => {
+    const base = "node_modules/@earendil-works/pi-durable/dist/harness/";
+    const native = read(`${base}submissions.js`);
+    expect(native).toContain('throw new ReadAfterWrite("submit(tx, draft)")');
+    expect(native).toContain('input.whenIdle === "reject"');
+    expect(native).toContain(
+      'const { users, first } = await applyBoundary(tx, boundary, "final", this.#now());',
+    );
+    expect(native).toContain("await startRun(tx, conversationId, live, { inputs: users, first });");
+    expect(read(`${base}harness.js`)).toContain(
+      "return this.#host.submissions.admit(first, this.id, second);",
+    );
+    expect(read(`${base}types.d.ts`)).toContain(
+      "submit(tx: Tx, submission: SubmissionDraft): Promise<SubmissionId>;",
+    );
   });
 
   it("decodes native image saves with a bounded portable byte loop", () => {
@@ -209,9 +235,9 @@ describe("Pi dependency patch installation", () => {
     );
 
     const patchFiles = [
-      "@earendil-works+pi-ai+1.4.0.patch",
-      "@earendil-works+pi-codemode+1.4.0.patch",
-      "@earendil-works+pi-durable+1.4.0.patch",
+      "@earendil-works+pi-ai+1.5.0.patch",
+      "@earendil-works+pi-codemode+1.5.0.patch",
+      "@earendil-works+pi-durable+1.5.0.patch",
     ];
     expect(
       readdirSync(join(root, "patches"))

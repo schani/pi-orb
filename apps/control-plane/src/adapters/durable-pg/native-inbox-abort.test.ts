@@ -71,12 +71,15 @@ it.for(["pglite", "postgres"] as const)(
             return async (...args: Parameters<Storage["commit"]>) => {
               const result = await target.commit(...args);
               if (
-                args[0].some(
-                  (write) =>
-                    write.type === "submission" &&
-                    write.value.requestId === `inbox:${batchId}` &&
-                    write.value.status === "queued",
-                )
+                args[0]
+                  .slice(0, result.stored)
+                  .flat()
+                  .some(
+                    (write) =>
+                      write.type === "submission" &&
+                      write.value.requestId === `inbox:${batchId}` &&
+                      write.value.status === "queued",
+                  )
               ) {
                 committed.resolve();
                 await releaseCommit.promise;
