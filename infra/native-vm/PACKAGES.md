@@ -8,11 +8,11 @@ installed size; transitive libraries remain only as dependencies of this baselin
 - Node 26.13.0 LTS, runtime npm dependencies, native node-pty: agent and terminal.
 - Bun 1.4.4 (`bun`, `bunx`): project JavaScript runtime/package tooling; checksum-pinned x64 baseline archive, shared with Docker via `infra/install_bun.sh`.
 - Docker Engine 29.1.3, containerd, Buildx, Compose: project containers/builds.
-- git, git-crypt, gh and broker helpers: repository and GitHub workflows.
+- git, git-crypt 0.8.0, gh and broker helpers: repository and GitHub workflows.
 - gcloud: prescribed GCP tooling.
 - Chromium and agent-browser: prescribed browser automation.
 - Python, venv, zip/unzip, curl, ripgrep: prescribed agent tools.
-- build-essential, pkg-config: native addon builds, including project addons.
+- build-essential, pkg-config, libssl-dev: native addon and git-crypt source builds.
 - rustup and its proxies: prescribed Rust bootstrap; no toolchain is preinstalled, and explicit installs use durable home.
 - sudo: repository setup hooks; orb UID/GID is fixed at 2000 in this experiment.
 - iproute2, util-linux, OpenSSL: isolated synthetic Claude acceptance namespaces and owned TLS fixture.
@@ -50,8 +50,11 @@ and pinned in `infra/native-vm/install.sh`; builds retain the installed version
 in `/opt/pi-orb/node-version`. Docker stages use `node:26.13.0-bookworm-slim`;
 the non-Linux filesystem test uses `node:26.13.0-bookworm` for Python and ext4 tools.
 
-**Bun/git-crypt addition (2026-10-22; not deployed):** build checks and production
-`acceptance.sh` verify Bun/bunx 1.4.4 and execute `git-crypt --version`; acceptance
-runs these as `orb`. `git-crypt` follows the Debian package baseline; Bun's official
-archive checksums are pinned in the shared installer. Version output remains in
-the existing build/acceptance logs; no keys are installed.
+**Bun/git-crypt qualification (2026-11-04; not deployed):** build checks and
+production `acceptance.sh` require Bun/bunx 1.4.4 and git-crypt 0.8.0; acceptance
+runs these as `orb`. Both images use `infra/install_git_crypt.sh` to build the
+checksum-pinned upstream release source against Debian OpenSSL, avoiding the
+upstream x86_64 binary's newer glibc requirement. Source and GPL license remain
+in `/usr/local/share/doc/git-crypt/`; commit/checksum/version remain in build logs.
+Source verification and architecture rationale: `docs/host-provider.md`.
+No keys are installed.

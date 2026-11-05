@@ -83,20 +83,95 @@ class RuntimeDependenciesTests(unittest.TestCase):
                     self.assertFalse((root / 'calls').exists())
                     self.assertFalse(list(root.glob('tmp.*')))
 
+    def test_git_crypt_installer_pins_source_and_checks_before_build(self):
+        source = (ROOT / 'infra/install_git_crypt.sh').read_text()
+        self.assertIn('160cf642e1c0f83c1668ad0d59e879d97b97a95b', source)
+        self.assertIn('2e01dd367d5c415f9ee8841741a74c1da6d698977fd344995268e5b1cddfa29f', source)
+        self.assertIn('https://github.com/AGWA/git-crypt/archive/${commit}.tar.gz', source)
+        self.assertIn('--proto "=https" --tlsv1.2', source)
+        self.assertLess(source.index('sha256sum --check'), source.index('tar -xzf'))
+        self.assertLess(source.index('tar -xzf'), source.index('make -C'))
+        self.assertLess(source.index('--version'), source.index('install -m 755'))
+        self.assertIn('"$prefix/share/doc/git-crypt/COPYING"', source)
+        self.assertIn('"$prefix/share/doc/git-crypt/source.tar.gz"', source)
+
+    def test_git_crypt_checksum_failure_prevents_build_and_install(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            curl = root / 'curl'
+            curl.write_text('#!/bin/sh\nfor output; do :; done\nprintf corrupt > "$output"\n')
+            curl.chmod(0o755)
+            for command in ['tar', 'make', 'install']:
+                stub = root / command
+                stub.write_text('#!/bin/sh\necho reached >> "$CALLS"\nexit 99\n')
+                stub.chmod(0o755)
+            result = subprocess.run(
+                ['/bin/sh', str(ROOT / 'infra/install_git_crypt.sh'), str(root / 'prefix')],
+                env=dict(os.environ, PATH=str(root) + ':' + os.environ['PATH'],
+                         TMPDIR=directory, CALLS=str(root / 'calls')),
+                capture_output=True, text=True, timeout=5)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('FAILED', result.stdout)
+            self.assertFalse((root / 'calls').exists())
+            self.assertFalse((root / 'prefix').exists())
+            self.assertFalse(list(root.glob('tmp.*')))
+
+    def test_git_crypt_install_gates_and_owned_prefix(self):
+        for failure, version, expected in [
+            ('curl', '0.8.0', 42), ('make', '0.8.0', 42),
+            ('', '0.7.0', 1), ('', '0.8.0', 0),
+        ]:
+            with self.subTest(failure=failure, version=version), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                stubs = {
+                    'curl': '#!/bin/sh\n[ "$FAILURE" != curl ] || exit 42\nfor output; do :; done\nprintf archive > "$output"\n',
+                    'sha256sum': '#!/bin/sh\ncat >/dev/null\n',
+                    'tar': '''#!/bin/sh
+while [ "$1" != -C ]; do shift; done
+source=$2
+printf '#!/bin/sh\\necho "git-crypt $TEST_VERSION" >&2\\n' > "$source/git-crypt"
+chmod 755 "$source/git-crypt"
+printf license > "$source/COPYING"
+''',
+                    'make': '#!/bin/sh\n[ "$FAILURE" != make ] || exit 42\n',
+                }
+                for command, content in stubs.items():
+                    stub = root / command
+                    stub.write_text(content)
+                    stub.chmod(0o755)
+                prefix = root / 'prefix'
+                result = subprocess.run(
+                    ['/bin/sh', str(ROOT / 'infra/install_git_crypt.sh'), str(prefix)],
+                    env=dict(os.environ, PATH=str(root) + ':' + os.environ['PATH'],
+                             TMPDIR=directory, FAILURE=failure, TEST_VERSION=version),
+                    capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, expected, result.stderr)
+                if expected == 0:
+                    self.assertTrue(os.access(prefix / 'bin/git-crypt', os.X_OK))
+                    self.assertEqual((prefix / 'share/doc/git-crypt/COPYING').read_text(), 'license')
+                    self.assertEqual((prefix / 'share/doc/git-crypt/source.tar.gz').read_text(), 'archive')
+                else:
+                    self.assertFalse(prefix.exists())
+                self.assertFalse(list(root.glob('tmp.*')))
+
     def test_both_images_install_and_qualify_bun_and_git_crypt(self):
         native = (ROOT / 'infra/native-vm/install.sh').read_text()
         self.assertIn('COPY infra/install_bun.sh /tmp/install_bun.sh', self.dockerfile)
         self.assertIn('sh /tmp/install_bun.sh "$TARGETARCH"', self.dockerfile)
         self.assertIn('sh infra/install_bun.sh amd64', native)
-        self.assertRegex(self.dockerfile, r'&& runtime-apt[^\n]*\bgit-crypt\b')
-        self.assertRegex(native, r'apt-get install[^\n]*\bgit-crypt\b')
+        self.assertIn('COPY infra/install_git_crypt.sh /tmp/install_git_crypt.sh', self.dockerfile)
+        self.assertIn('sh /tmp/install_git_crypt.sh', self.dockerfile)
+        self.assertIn('sh infra/install_git_crypt.sh', native)
+        for source in [self.dockerfile, native]:
+            self.assertRegex(source, r'(?:runtime-apt|apt-get install)[^\n]*\blibssl-dev\b')
+            self.assertNotRegex(source, r'(?:runtime-apt|apt-get install)[^\n]*\bgit-crypt\b')
         acceptance = (ROOT / 'infra/native-vm/acceptance.sh').read_text()
         self.assertIn("sudo -u orb sh -ec '", acceptance)
         for source in [self.dockerfile, native, acceptance]:
             with self.subTest(source=source[:30]):
                 self.assertIn('test "$(bun --version)" = 1.4.4', source)
                 self.assertIn('test "$(bunx --version)" = 1.4.4', source)
-                self.assertIn('git-crypt --version', source)
+                self.assertIn('test "$(git-crypt --version 2>&1)" = "git-crypt 0.8.0"', source)
 
     def test_install_patch_and_rebuild_are_distinct_cacheable_layers(self):
         self.assertNotEqual(self.install, self.rebuild)

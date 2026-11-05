@@ -18,6 +18,7 @@ sudo -u orb sh -ec '
   test "$(bun --version)" = 1.4.4
   test "$(bunx --version)" = 1.4.4
   git-crypt --version
+  test "$(git-crypt --version 2>&1)" = "git-crypt 0.8.0"
 '
 
 test -z "$(command -v tailscale || true)"

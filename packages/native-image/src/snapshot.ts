@@ -15,6 +15,7 @@ export const UPLOADED_SOURCE_PATHS = [
   "scripts/pi-orb-gcp-identity",
   "infra/native-vm",
   "infra/install_bun.sh",
+  "infra/install_git_crypt.sh",
 ] as const;
 
 export const TOOLING_SOURCE_PATHS = ["packages/native-image"] as const;
