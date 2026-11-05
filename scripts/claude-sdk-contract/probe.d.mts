@@ -1,4 +1,4 @@
-import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
 export interface Shape {
   type: string;
@@ -98,7 +98,7 @@ export interface NativeProbeOptions {
     rootPath: string;
     sessionId: string;
     submittedUuid: string;
-  }) => string | SDKUserMessage[] | Promise<string | SDKUserMessage[]>;
+  }) => string | Promise<string>;
   onRoot?: (context: {
     home: string;
     rootPath: string;
