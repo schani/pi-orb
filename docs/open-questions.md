@@ -238,6 +238,10 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 
 **Merged numbering note (2026-11-01):** the browser-preview branch's 72–77 merged after 77–86 above. Preserve all numbers; references require topic qualifiers. New questions start at 87.
 
+## Dependency-update state conversions — 87
+
+87. **Open (2026-11-04, PST):** approve provider-managed OpenTofu state serialization and Docker retained-configuration normalization for the planned dependency updates? The 2026-10-24 deferral in [docs/deployment.md](deployment.md) remains binding; the later “all updates except Pi” authorization does not explicitly approve these conversions. Approval was requested November 4 and awaits a reply. Google provider 8 upgrades application secret-version state schema **0 → 1**, converting unused `secret_data_wo_version` **0 → empty string**, and foundation bucket schema **3 → 4**, converting `retention_period` from number to string when present (our buckets have none). Staying on provider 7 also introduces persisted `deletion_policy` defaults. Docker **29.9.3** normalizes retained container configuration during upstream daemon initialization ([implementation](https://github.com/moby/moby/blob/docker-v29.9.3/daemon/daemon.go#L419)); the paired Docker/containerd refresh remains held. No resource redesign is intended; reviewed plans and normal qualification remain required even if approved. No state changes, apply or deployment have occurred.
+
 ## Browser-preview ingress
 
 72. **(browser preview) Resolved (2026-10-06):** authenticated separate-origin HTTP/WebSocket/SSE reverse-proxy implementation through private runtime connectivity is authorized, without built-in Tailscale or arbitrary TCP exposure. Deployment is not authorized. Domain/ingress selection remains in question 74 (browser preview); implemented contracts and rationale are in `docs/ports.md`.
