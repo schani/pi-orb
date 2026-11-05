@@ -930,7 +930,7 @@ not duplicate the deployment algorithm. The first-release policy is recorded in
 immutable dispatched SHA, verifies checkout equality, and creates local branch
 `main` at that exact SHA before authentication. The shared command requires a
 clean checkout and re-verifies trusted same-repository `push`/`main` qualification
-for the selected SHA before acquiring the release lock. Node 26.13.0, SDK 590.0.1 with its explicit beta component and checksum-verified
+for the selected SHA before acquiring the release lock. Node 26.13.0, SDK 592.0.0 with its explicit beta component and checksum-verified
 OpenTofu 1.13.2 are pinned; actions use immutable SHAs, the runner is Ubuntu 24.04,
 and provider lock files are read-only. The 240-minute job budget accommodates
 checks, fresh native acceptance, migration/apply and up to 75 minutes of retirement.
@@ -951,6 +951,8 @@ infrastructure apply exposed this missing component during reconciliation;
 That release added a separate `repair` phase. Current `infra/deploy.sh` verifies the
 single application's files routing and prunes drained revisions; Monitoring evidence,
 not deletion, establishes retirement.
+
+**CI SDK qualification (2026-11-04):** Google's [592.0.0 release notes](https://docs.cloud.google.com/sdk/docs/release-notes#59200_2026-11-03), [archive checksums](https://docs.cloud.google.com/sdk/docs/downloads-versioned-archives) and [component manifest](https://dl.google.com/dl/cloudsdk/channels/rapid/components-2.json) were verified live. Checksum-verified Linux x86_64 SDK and beta installation plus credential-disabled command-loading smokes passed. The Docker-image and Java-emulator breaking changes do not affect this Ubuntu archive installation. Evidence: `.context/ci-gcloud-592/`; no cloud release was exercised.
 
 An empty `validate_release` input performs a release. An explicit release ID or
 `latest` invokes validation-only recovery. Inputs enter through quoted environment
