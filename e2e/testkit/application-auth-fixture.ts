@@ -12,7 +12,12 @@ import { errAsync, ok, okAsync } from "neverthrow";
 import { createGoogleLoginProvider } from "../../apps/control-plane/src/adapters/google-application-auth.ts";
 import { createSealedAuthCookies } from "../../apps/control-plane/src/adapters/sealed-auth-cookies.ts";
 import { createSealedPreviewAuth } from "../../apps/control-plane/src/adapters/sealed-preview-cookies.ts";
+import type { AccessTokenDeps } from "../../apps/control-plane/src/domain/access-token.ts";
 import { createApplicationAuth } from "../../apps/control-plane/src/domain/application-auth.ts";
+import {
+  registerPreviewAccessTokens,
+  withFilesAccessTokens,
+} from "../../apps/control-plane/src/http/access-token-admission.ts";
 import {
   type AuthOutcomeSink,
   registerAuthRoutes,
@@ -37,6 +42,8 @@ export async function startApplicationAuthFixture(
   options: {
     previews?: boolean;
     orbId?: string;
+    /** Admits orb id-tokens on preview and files hosts, composed as in main.ts. */
+    accessTokens?: AccessTokenDeps;
     previewPorts?: readonly number[];
     configurePreviews?: (context: {
       app: FastifyInstance;
@@ -315,6 +322,11 @@ export async function startApplicationAuthFixture(
       options.previews ? previewHosts : undefined,
     );
     if (options.previews) {
+      if (options.accessTokens)
+        registerPreviewAccessTokens(app, task, {
+          hosts: previewHosts,
+          tokens: options.accessTokens,
+        });
       registerPreviewAuth(app, {
         hosts: previewHosts,
         appOrigin,
@@ -349,8 +361,19 @@ export async function startApplicationAuthFixture(
     );
     registerAuthenticatedBrowserRoutes(
       app,
-      createGoogleRequestPrincipalResolver(origins, auth),
+      options.accessTokens
+        ? withFilesAccessTokens(createGoogleRequestPrincipalResolver(origins, auth), task, {
+            filesOrigin,
+            tokens: options.accessTokens,
+          })
+        : createGoogleRequestPrincipalResolver(origins, auth),
       (scope) => {
+        scope.get(`/s/${orbId}/token.html`, async (_request, reply) =>
+          reply
+            .header("cache-control", "private, no-store")
+            .type("text/html")
+            .send("<p>Token file</p>"),
+        );
         scope.get("/api/private", async (request) => ({ principal: request.principal }));
         scope.post("/api/mutate", async () => {
           mutations++;

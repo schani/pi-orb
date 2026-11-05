@@ -70,8 +70,10 @@ export function registerPreviewAuth(app: FastifyInstance, options: PreviewAuthOp
   const appHost = parseUrl(appOrigin)
     .map((url) => url.host)
     .unwrapOr("");
-  app.decorateRequest("previewIdentity", undefined);
+  if (!app.hasRequestDecorator("previewIdentity"))
+    app.decorateRequest("previewIdentity", undefined);
   app.addHook("onRequest", async (request, reply) => {
+    if (request.previewIdentity) return;
     const target = hosts.parse(request.headers.host);
     const parsed = parseUrl(`https://request.invalid${request.originalUrl}`);
     if (parsed.isErr()) return target ? sendAuthFailure(reply, "unauthenticated") : undefined;

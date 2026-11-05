@@ -13,6 +13,8 @@ or membership-polling guarantee. Platform cookies are stripped upstream; applica
 is independent. Private runtime admission uses a purpose-separated HMAC keyed by runtime token
 hash, never forwarding the hash/bearer. Project preview request-log exclusion is not an audit-log
 exclusion or an all-sinks privacy guarantee; edge/custom/ancestor sinks require qualification.
+Orb id-tokens for audience `urn:pi-orb:access` also authenticate preview and files hosts, scoped to
+the token orb's project owner's orbs and revoked only by expiry (`docs/ports.md`).
 
 
 **Production validated 2026-10-06.** The single `pi-orb-issuer` application uses Google login and stateless sealed cookies. `docs/control-plane-consolidation.md` records decisions and cutover gates; `docs/deployment.md` records the current topology and live release evidence. Earlier dated evidence below describes its respective release.
