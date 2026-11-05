@@ -9,6 +9,7 @@ import {
   probeNetworkGuard,
 } from "../../../../scripts/claude-sdk-contract/probe.mjs";
 import { ComposedClaudeFixture } from "../testkit/claude-composed.ts";
+import { bootNotificationModelText, pendingBootContext } from "./boot-notification.ts";
 import { BOOT_BASELINE_TYPE, planBootNotification } from "./boot-policy.ts";
 import { ClaudeHistory } from "./history.ts";
 
@@ -334,7 +335,7 @@ nativeIt(
           shape: "unanswered_user_message",
         });
         continuation = plan.marker.content;
-        return continuation;
+        return bootNotificationModelText(continuation);
       },
     });
     expect(result.sdkVersion).toBe(fixture.sdkVersion);
@@ -362,11 +363,109 @@ nativeIt(
     const conversational = messages?.filter((message) => message.role !== "system");
     expect(conversational?.at(-1)).toEqual({
       role: "user",
-      content: [{ type: "text", text: continuation, cache_control: { type: "ephemeral" } }],
+      content: [
+        {
+          type: "text",
+          text: `<system-reminder>\n${continuation}\n</system-reminder>`,
+          cache_control: { type: "ephemeral" },
+        },
+      ],
     });
     expect(JSON.stringify(messages).split(continuation)).toHaveLength(2);
     expect(result.childFiles).toHaveLength(1);
     expect(result.rootContainsChildAssistant).toBe(false);
+  },
+  60_000,
+);
+
+nativeIt(
+  "merges passive restart context with unchanged human input outside its system reminder",
+  async () => {
+    const composed = new ComposedClaudeFixture();
+    const humanText = 'Please inspect the checkout.\nKeep this exact human text: <tag>& "quoted".';
+    try {
+      composed.history
+        .appendPlatform({
+          id: "old-boot",
+          type: "event",
+          eventType: BOOT_BASELINE_TYPE,
+          parentId: null,
+          timestamp: composed.state.timestamp,
+          overflow: { runtimeInstanceId: "before", executionId: "old-host", incarnation: "0" },
+        })
+        ._unsafeUnwrap();
+      composed.append({
+        type: "user",
+        uuid: "old-human",
+        message: { role: "user", content: "previous task" },
+      });
+      composed.append({
+        type: "assistant",
+        uuid: "old-done",
+        message: { role: "assistant", content: "done", stop_reason: "end_turn" },
+      });
+      (
+        await composed.agent.attachSession(
+          composed.state,
+          composed.history,
+          composed.configDir,
+          "commit",
+          null,
+        )
+      )._unsafeUnwrap();
+      expect(composed.agent.getHealth()).toMatchObject({
+        status: "ready",
+        activity: "idle",
+        turnResume: { outcome: "notified_restart" },
+      });
+      const [marker] = pendingBootContext(composed.history.view);
+      if (!marker) throw new Error("Passive restart marker missing.");
+      const notice = (marker.content ?? [])
+        .flatMap((block) => (block.type === "text" ? [block.text] : []))
+        .join("\n");
+      (
+        await composed.agent.submitMessage([{ type: "text", text: humanText }], "native-human")
+      )._unsafeUnwrap();
+      const context = await composed.query.input.next();
+      const human = await composed.query.input.next();
+      if (context.done || human.done) throw new Error("Restart inputs missing.");
+      expect(context.value).toMatchObject({ isSynthetic: true, shouldQuery: false });
+      expect(human.value).toMatchObject({ origin: { kind: "human" } });
+      const result = await probeNativeSdk({
+        withRestart: () => [context.value, human.value],
+      });
+      expect(result.sdkVersion).toBe(fixture.sdkVersion);
+      expect(result.cliVersion).toBe(fixture.cliVersion);
+      expect(result.requestCount).toBe(3);
+      expect(result.restart).toMatchObject({
+        requestCount: 1,
+        prefixPreserved: true,
+        continuationCount: 1,
+        result: { subtype: "success", isError: false },
+      });
+      const conversational = result.restart?.requestMessages.filter(
+        (message) => message.role !== "system",
+      );
+      expect(conversational?.at(-1)).toEqual({
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: `[MESSAGE FROM NON-USER SOURCE - NOT USER INPUT]\n<system-reminder>\n${notice}\n</system-reminder>\n`,
+          },
+          {
+            type: "text",
+            text: humanText,
+            cache_control: { type: "ephemeral" },
+          },
+        ],
+      });
+    } finally {
+      composed.query.exit();
+      composed.query.endOutput();
+      await composed.agent.closeExtensions();
+      composed.dispose();
+    }
   },
   60_000,
 );

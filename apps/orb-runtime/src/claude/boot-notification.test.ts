@@ -346,7 +346,17 @@ it.each([
       )._unsafeUnwrap();
       const context = await input(),
         human = await input();
-      expect(context).toMatchObject({ isSynthetic: true, shouldQuery: false });
+      expect(context).toMatchObject({
+        isSynthetic: true,
+        shouldQuery: false,
+        message: {
+          content: marker.content?.map((block) => ({
+            type: "text",
+            text: `<system-reminder>\n${block.type === "text" ? block.text : ""}\n</system-reminder>`,
+          })),
+        },
+      });
+      expect(JSON.stringify(marker.content)).not.toContain("<system-reminder>");
       expect(context.origin).toBeUndefined();
       expect(f.history.correlation(context.uuid)).toMatchObject({
         boot: true,
@@ -420,6 +430,126 @@ it.each([
     } finally {
       f.query.exit();
       f.query.endOutput();
+      f.dispose();
+    }
+  },
+);
+
+it("wraps passive boot context FIFO without changing human text or image input", async () => {
+  const f = new ComposedClaudeFixture();
+  const content = [
+    { type: "text" as const, text: "Keep <system-reminder>literal human text</system-reminder>." },
+    { type: "image" as const, mediaType: "image/png", data: "aW1hZ2U=" },
+  ];
+  try {
+    const markers = [
+      {
+        ...boot("first", "pi-orb.host-restarted"),
+        content: [{ type: "text" as const, text: "First restart." }],
+      },
+      {
+        ...boot("second", "pi-orb.host-restarted"),
+        content: [{ type: "text" as const, text: "Second restart." }],
+      },
+    ];
+    for (const marker of markers) f.history.appendPlatform(marker)._unsafeUnwrap();
+    (await f.attach())._unsafeUnwrap();
+    (await f.agent.submitMessage(content, "human-operation"))._unsafeUnwrap();
+    for (const marker of markers) {
+      const next = await f.query.input.next();
+      expect(next.done).toBe(false);
+      expect(next.value).toMatchObject({
+        type: "user",
+        isSynthetic: true,
+        shouldQuery: false,
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `<system-reminder>\n${marker.content[0]?.text}\n</system-reminder>`,
+            },
+          ],
+        },
+      });
+      expect(next.value?.origin).toBeUndefined();
+      expect(f.history.correlation(next.value?.uuid ?? "")).toMatchObject({
+        boot: true,
+        operationId: marker.id,
+      });
+      expect(f.history.view.find((record) => record.id === marker.id)).toMatchObject({
+        content: marker.content,
+      });
+    }
+    expect((await f.query.input.next()).value).toMatchObject({
+      type: "user",
+      priority: "now",
+      origin: { kind: "human" },
+      message: {
+        content: [
+          content[0],
+          { type: "image", source: { type: "base64", media_type: "image/png", data: "aW1hZ2U=" } },
+        ],
+      },
+    });
+    expect(Object.values(f.state.deliveries)).toMatchObject([{ content }]);
+  } finally {
+    f.query.exit();
+    f.query.endOutput();
+    await f.agent.closeExtensions();
+    f.dispose();
+  }
+});
+
+it.each([
+  null,
+  {
+    messageId: "wake",
+    messageIds: ["wake"],
+    content: [{ type: "text", text: "Wake now." }],
+    system: { kind: "sleep_wake", sleepUntil: base.timestamp },
+  },
+] satisfies (OrbBootContext | null)[])(
+  "wraps triggering boot input, not its persisted notice (%j)",
+  async (wake) => {
+    const f = new ComposedClaudeFixture();
+    try {
+      f.append({ type: "user", uuid: "human", message: { role: "user", content: "work" } });
+      (
+        await f.agent.attachSession(f.state, f.history, f.configDir, "commit", wake)
+      )._unsafeUnwrap();
+      const marker = f.history.view.find(
+        (record) =>
+          record.type === "event" &&
+          record.eventType === (wake === null ? "pi-orb.turn-resume" : "pi-orb.sleep-wake"),
+      );
+      if (marker?.type !== "event") throw new Error("Triggering boot marker missing.");
+      const next = await f.query.input.next();
+      expect(next.done).toBe(false);
+      expect(next.value).toMatchObject({
+        type: "user",
+        priority: "now",
+        message: {
+          role: "user",
+          content: marker.content?.map((block) => ({
+            type: "text",
+            text: `<system-reminder>\n${block.type === "text" ? block.text : ""}\n</system-reminder>`,
+          })),
+        },
+      });
+      expect(next.value?.origin).toBeUndefined();
+      expect(next.value?.shouldQuery).toBeUndefined();
+      expect(next.value?.isSynthetic).toBeUndefined();
+      expect(f.history.correlation(next.value?.uuid ?? "")).toMatchObject({
+        boot: true,
+        operationId: marker.overflow.operationId,
+      });
+      expect(JSON.stringify(marker.content)).not.toContain("<system-reminder>");
+      expect(f.state.deliveries).toEqual({});
+    } finally {
+      f.query.exit();
+      f.query.endOutput();
+      await f.agent.closeExtensions();
       f.dispose();
     }
   },

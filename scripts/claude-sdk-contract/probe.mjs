@@ -474,19 +474,23 @@ export async function probeNativeSdk({
         );
       const beforeChildren = await childSnapshot();
       const continuation = await withRestart({ home, rootPath, sessionId, submittedUuid });
-      if (typeof continuation !== "string" || continuation.length === 0)
-        throw new Error("Restart requires explicit synthetic continuation content.");
-      const continuationUuid = randomUUID();
+      const continuationInputs =
+        typeof continuation === "string"
+          ? [
+              {
+                type: "user",
+                uuid: randomUUID(),
+                parent_tool_use_id: null,
+                message: { role: "user", content: continuation },
+              },
+            ]
+          : continuation;
+      if (!continuationInputs?.length)
+        throw new Error("Restart requires explicit continuation input.");
       const restartMessages = [];
       const restartInput = {
         async *[Symbol.asyncIterator]() {
-          yield {
-            type: "user",
-            uuid: continuationUuid,
-            session_id: sessionId,
-            parent_tool_use_id: null,
-            message: { role: "user", content: continuation },
-          };
+          for (const input of continuationInputs) yield { ...input, session_id: sessionId };
           await new Promise((resolve) => {
             release = resolve;
           });
@@ -530,8 +534,11 @@ export async function probeNativeSdk({
           .filter(
             (record) =>
               record.type === "user" &&
-              record.uuid === continuationUuid &&
-              record.message?.content === continuation,
+              continuationInputs.some(
+                (input) =>
+                  record.uuid === input.uuid &&
+                  JSON.stringify(record.message?.content) === JSON.stringify(input.message.content),
+              ),
           ).length,
         result: { subtype: restartResult?.subtype, isError: restartResult?.is_error },
       };

@@ -3,6 +3,10 @@ import { BOOT_BASELINE_TYPE, HOST_RESTARTED_TYPE } from "./boot-policy.ts";
 
 type BootMarker = Extract<HistoryRecord, { type: "event" }>;
 
+export function bootNotificationModelText(text: string): string {
+  return `<system-reminder>\n${text}\n</system-reminder>`;
+}
+
 function passiveBootMarker(record: HistoryRecord): boolean {
   return (
     record.type === "event" &&
