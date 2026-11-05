@@ -1,5 +1,9 @@
 # Cloud deployment direction
 
+## Restart-notice release (2026-11-05, PST)
+
+[Deploy 42102894164](https://github.com/schani/pi-orb/actions/runs/42102894164) (default inputs) deployed exact-main `1c8d072d` (#264) as `r-1793911721-ce18aeb5-b8a2-4b6e-8150-ad5477d88083`: **validated**, all 12 gates passed. First-attempt push qualification: CI `42102355177`, E2E `42102355209`, Durable `42102355019`. Rollout monitor **observed** (14 samples, 21:23:39–21:42:26Z): health `ok`, zero ERROR/429/5xx, central inference unobserved; workflow succeeded. Independent reads after the monitor window: `pi-orb-issuer-00086-n65` Ready at 100%, digest `sha256:d96f02cad54efb123329bea9688146f0a6b3fc8ac64b6a974f8e2f00eb6e0927`, generation `1793912841` matching the record; prior `00085-zlp` retired with zeroes; native/workspace images `1835037574947754131`/`4899381987707539649` READY; four fixtures 404; no `v-1c8d072d` instances/disks, migration jobs, pending Compute operations or release lock. Evidence: `/workspace/deploy-42102894164/` on the deploying orb.
+
 ## Startup diagnostics (2026-10-30, PDT; proposed, not deployed)
 
 The candidate image's default command adds Node `--import` for a builtin-only bootstrap before linking/evaluating `main.ts`. It emits `control-plane-startup` JSON edges with an enumerated `phase` and monotonic `elapsed_ms`, sharing the clock with main. No environment values, URLs, error details or bodies enter these breadcrumbs. Main records boundaries for module/main entry, platform skills, auth-directory creation, database open/local migration, secret/host/hosting construction, HTTP/central-agent/auth composition, browser/WebSocket registration, static assets, hosting routes and listen. `complete` means the call returned, not that its Result succeeded; existing failure handling is unchanged. Browser initialization executes when Fastify loads its registered plugin, which can occur inside static/hosting registration or listen.
