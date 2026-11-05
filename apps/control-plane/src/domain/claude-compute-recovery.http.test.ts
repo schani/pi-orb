@@ -334,7 +334,12 @@ it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
       const continuation = await bootQuery.input.next();
       expect(continuation.done).toBe(false);
       expect(continuation.value?.uuid).not.toBe(input.value!.uuid);
-      expect(continuation.value?.message.content).toEqual(claims[0]!.content);
+      expect(continuation.value?.message.content).toEqual(
+        claims[0]!.content?.map((block) => ({
+          type: "text",
+          text: `<system-reminder>\n${block.type === "text" ? block.text : ""}\n</system-reminder>`,
+        })),
+      );
       f.receipt(continuation.value!);
       await bootQuery.emit(task, rootResult);
       expect(bootQuery.closeRequested).toBe(false);
