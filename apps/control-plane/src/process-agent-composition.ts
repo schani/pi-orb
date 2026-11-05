@@ -190,6 +190,7 @@ export function createProcessAgentContext(
     mcpOAuth: McpOAuth;
     modelUsage: ModelUsageLedger;
     appOrigin: string;
+    filesBaseUrl?: (orbId: string) => string | null;
     previews?: NonNullable<OrbAgentOptions["previews"]>;
     inferenceBaseUrl?: (userId: string) => string | undefined;
     notifyParent?: (
@@ -270,6 +271,7 @@ export function createProcessAgentContext(
       const saved = await nativeContext.save(platformSnapshot, prepared.value.managed);
       if (saved.isErr()) return err(durableError("Resource context publication unavailable"));
       const instructions = renderPrompt({
+        filesBaseUrl: options.filesBaseUrl?.(orb.id) ?? null,
         personal: personal.value.content,
         project: projectInstructions.value.content,
         repository: prepared.value.instructions,

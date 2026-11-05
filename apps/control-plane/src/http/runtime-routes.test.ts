@@ -94,6 +94,7 @@ describe("runtime broker routes", () => {
   const invoke = vi.fn<OrbAgentOperations["invoke"]>();
   const agentOperations = vi.fn<RuntimeRouteDeps["agentOperations"]>(() => ({ invoke }));
   const spawnNudge = vi.fn();
+  const filesBaseUrl = vi.fn<NonNullable<RuntimeRouteDeps["filesBaseUrl"]>>();
   const initialCheckoutCommit = vi.fn(() => okAsync<string | null, StoreError>(null));
   const alertWriter = {
     appendAlert: vi.fn(() => okAsync({ recordId: "alert-record", duplicate: false })),
@@ -481,6 +482,7 @@ describe("runtime broker routes", () => {
       );
     registerRuntimeRoutes(app, task, {
       appOrigin: "https://browser.test",
+      filesBaseUrl,
       agentOperations,
       send: (task, caller, request) => sendGuestOrbMessage(task, spawnDeps, caller, request),
       spawn: (task, caller, orbId, request) => spawnOrb(task, spawnDeps, caller, orbId, request),
@@ -541,6 +543,7 @@ describe("runtime broker routes", () => {
   }
 
   beforeEach(async () => {
+    filesBaseUrl.mockImplementation((orbId) => `https://f-o${orbId}.preview.example.net`);
     agentOperations.mockClear();
     invoke.mockReset().mockReturnValue(okAsync({ hits: [] }));
     initialCheckoutCommit.mockClear();
@@ -1138,9 +1141,23 @@ describe("runtime broker routes", () => {
       expect(response.json()).toEqual({
         v: 1,
         context: null,
+        filesBaseUrl: `https://f-o${ORB}.preview.example.net`,
         ...(model === null ? {} : { initialModel: model }),
         userTimeZone: null,
       });
+    });
+
+    it("omits file serving configuration when unconfigured", async () => {
+      filesBaseUrl.mockReturnValue(null);
+      store.seedOrb(makeOrbRow(ORB, PROJECT, "starting", { runtimeTokenHash: sha256(TOKEN) }));
+      const response = await app.inject({
+        method: "POST",
+        url: "/runtime/v1/orb/boot-context",
+        headers: { authorization: `Bearer ${TOKEN}` },
+        payload: { v: 1 },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).not.toHaveProperty("filesBaseUrl");
     });
 
     it("returns only a FIFO-head sleep wake and does not acknowledge it", async () => {

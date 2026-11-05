@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { err, ok, Result, type Result as ResultType } from "neverthrow";
-import type { PreviewHosts } from "./preview-host.ts";
+import type { IsolatedHosts } from "./preview-host.ts";
 
 export interface HostingAccessConfig {
   readonly filesOrigin: string;
@@ -215,7 +215,7 @@ export function registerHostingAccessGuard(
   policy: HostingAccessPolicy,
   dashboardUrl: string,
   outcome?: HostingAccessOutcomeSink,
-  previewHosts?: PreviewHosts,
+  previewHosts?: IsolatedHosts,
 ): void {
   app.addHook("onRequest", async (request, reply) => {
     if (previewHosts?.parse(request.headers.host)) return;

@@ -49,8 +49,12 @@ vi.mock("../owner-skills/endpoint.ts", () => ({
 vi.mock("../project-instructions/endpoint.ts", () => ({
   fetchProjectInstructions: () => okAsync({ content: "PROJECT", revision: 1 }),
 }));
+const bootContext = vi.hoisted(() => ({
+  filesBaseUrl: "https://f-o12345678-1234-1234-1234-123456789abc.piorb.live" as string | undefined,
+}));
 vi.mock("./boot-context.ts", () => ({
-  fetchBootContext: () => okAsync({ context: null, userTimeZone: "America/Los_Angeles" }),
+  fetchBootContext: () =>
+    okAsync({ context: null, userTimeZone: "America/Los_Angeles", ...bootContext }),
 }));
 vi.mock("./auth.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./auth.ts")>()),
@@ -80,7 +84,7 @@ it("appends the shared environment then Claude suffix exactly once before existi
       type: "preset",
       preset: "claude_code",
       append: [
-        environmentPrompt,
+        environmentPrompt(bootContext.filesBaseUrl),
         claudeEnvironmentPrompt,
         "PERSONAL",
         "PROJECT",
@@ -89,19 +93,22 @@ it("appends the shared environment then Claude suffix exactly once before existi
       ].join("\n\n"),
     });
     const append = typeof system === "object" && "append" in system ? (system.append ?? "") : "";
-    expect(append.split(environmentPrompt)).toHaveLength(2);
+    expect(append.split(environmentPrompt(bootContext.filesBaseUrl))).toHaveLength(2);
     expect(append.split(claudeEnvironmentPrompt)).toHaveLength(2);
     expect(claudePortExposurePrompt).toBe(
       "## Port exposure\n\nTo expose a port on this VM to the user, use the `pi-orb expose` CLI command",
     );
     expect(append).not.toContain("Use the available orb tools");
+    expect(append).toContain(`absolute path under ${bootContext.filesBaseUrl},`);
   } finally {
     agent.shutdownHooks();
     rmSync(workDir, { recursive: true, force: true });
   }
 });
 
-it("boots Claude in a repository-free workspace with managed instructions", async () => {
+it("boots Claude without live-file guidance when the origin is unconfigured", async () => {
+  const filesBaseUrl = bootContext.filesBaseUrl;
+  bootContext.filesBaseUrl = undefined;
   const workDir = mkdtempSync(join(tmpdir(), "claude-no-repo-"));
   const options: Options[] = [];
   const agent = new ClaudeOrbAgent({
@@ -121,9 +128,13 @@ it("boots Claude in a repository-free workspace with managed instructions", asyn
     expect(options[0]?.cwd).toBe(join(workDir, "repo"));
     expect(JSON.stringify(options[0]?.systemPrompt)).toContain("PERSONAL");
     expect(JSON.stringify(options[0]?.systemPrompt)).toContain("PROJECT");
+    expect(JSON.stringify(options[0]?.systemPrompt)).not.toContain(
+      "When referring to an orb-local file",
+    );
     expect(existsSync(join(workDir, "repo"))).toBe(true);
     expect(existsSync(join(workDir, "repo", ".git"))).toBe(false);
   } finally {
+    bootContext.filesBaseUrl = filesBaseUrl;
     agent.shutdownHooks();
     rmSync(workDir, { recursive: true, force: true });
   }

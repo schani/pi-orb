@@ -45,6 +45,7 @@ import {
   OidcTokenSigner,
   OidcTokenVerifier,
 } from "./adapters/oidc/signer.ts";
+import { NodeOrbFilesTransport } from "./adapters/orb-files-http.ts";
 import { PiAuthGate } from "./adapters/pi-auth/gate.ts";
 import { PiActivityHeadlineGenerator } from "./adapters/pi-headline-generator.ts";
 import { PiOrbNameGenerator } from "./adapters/pi-name-generator.ts";
@@ -134,9 +135,10 @@ import { registerIssuerRoutes } from "./http/issuer-routes.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
 import { MCP_OAUTH_CALLBACK, registerMcpOAuthRoutes } from "./http/mcp-oauth-routes.ts";
 import { registerMcpRoutes } from "./http/mcp-routes.ts";
+import { registerOrbFilesBoundary, registerOrbFilesGateway } from "./http/orb-files-gateway.ts";
 import { registerPreviewAuth } from "./http/preview-auth-routes.ts";
 import { previewRoutingUrl, registerPreviewGateway } from "./http/preview-gateway.ts";
-import { createPreviewHosts, type PreviewHosts } from "./http/preview-host.ts";
+import { createPreviewHosts, orbFilesBaseUrl, type PreviewHosts } from "./http/preview-host.ts";
 import { registerResponseDrain } from "./http/response-drain.ts";
 import { registerRoutes } from "./http/routes.ts";
 import { registerRuntimePreviewRoutes } from "./http/runtime-preview-routes.ts";
@@ -633,6 +635,13 @@ export async function main(
     logger: false,
     rewriteUrl: (request) => previewRoutingUrl(previewHosts, request),
   });
+  const isolatedHosts = {
+    parse: (authority: string | undefined) =>
+      previewHosts?.parse(authority) ?? previewHosts?.files.parse(authority),
+  };
+  const filesBaseUrl = (orbId: string): string | null =>
+    orbFilesBaseUrl(previewHosts, deps.hostProvider.kind, orbId);
+  if (previewHosts) registerOrbFilesBoundary(app, { hosts: previewHosts.files, appOrigin });
   startupPhase("http.complete");
   const stop = new AbortController();
   registerResponseDrain(app, stop.signal);
@@ -761,6 +770,7 @@ export async function main(
       mcpOAuth,
       modelUsage: database.modelUsage,
       appOrigin: appOrigin || `http://127.0.0.1:${port}`,
+      filesBaseUrl,
       previews: { url: previewHosts?.url ?? null, newId: randomUUID, reservedPort: 8080 },
       inferenceBaseUrl: (userId) =>
         (adapters.mockOpenAiForUser?.(userId) ?? mockOpenAi)?.inferenceBaseUrl,
@@ -811,7 +821,7 @@ export async function main(
     appOrigin,
     ({ reason, surface, requestId, method, route }) =>
       logEvent(httpTask, "auth-hosting-denied", { reason, surface, requestId, method, route }),
-    previewHosts,
+    isolatedHosts,
   );
   app.get("/health", async () => ({ status: "ok" }));
   const signingKeyDeps: SigningKeyDeps = {
@@ -886,7 +896,7 @@ export async function main(
   startupPhase("auth.complete");
   if (previewHosts !== undefined) {
     registerPreviewAccessTokens(app, httpTask, {
-      hosts: previewHosts,
+      hosts: isolatedHosts,
       tokens,
       outcome: ({ outcome, requestId }) =>
         logEvent(httpTask, "preview-auth-admission", { outcome, requestId }),
@@ -900,7 +910,7 @@ export async function main(
         return;
       }
       registerPreviewAuth(app, {
-        hosts: previewHosts,
+        hosts: isolatedHosts,
         appOrigin,
         applicationAuth,
         previewAuth: previewAuth.value,
@@ -909,7 +919,7 @@ export async function main(
       });
     } else {
       app.addHook("onRequest", async (request, reply) => {
-        if (request.previewIdentity || previewHosts?.parse(request.headers.host) === undefined)
+        if (request.previewIdentity || isolatedHosts.parse(request.headers.host) === undefined)
           return;
         const principal = await principalResolver(request);
         if (principal.isErr() || principal.value.kind !== "user")
@@ -920,6 +930,12 @@ export async function main(
         };
       });
     }
+    registerOrbFilesGateway(app, httpTask, {
+      deps,
+      hosts: previewHosts.files,
+      appOrigin,
+      transport: new NodeOrbFilesTransport(),
+    });
     const connections = new PreviewConnections(deps, (orbId, operation) =>
       ResultAsync.fromPromise(operation(new ControlPlaneTask(`preview:${orbId}`)), () =>
         previewError("upstream_failed", "Preview watcher failed"),
@@ -1010,6 +1026,7 @@ export async function main(
     sleepSelf: (task, orbId, caller, durationSeconds, sleepId) =>
       requestOrbSleep(task, deps, orbId, caller, durationSeconds, sleepId),
     readBootContext: (task, orbId, caller) => readOrbBootContext(task, deps, orbId, caller),
+    filesBaseUrl,
     archiveSelf: (task, orbId, caller) => requestOrbArchive(task, deps, orbId, caller),
     deleteSelf: (task, orbId, caller) => requestOrbDeletion(task, deps, orbId, caller),
     store: deps.store,

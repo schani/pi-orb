@@ -16,6 +16,7 @@ import {
   OidcTokenSigner,
   OidcTokenVerifier,
 } from "../../apps/control-plane/src/adapters/oidc/signer.ts";
+import { NodeOrbFilesTransport } from "../../apps/control-plane/src/adapters/orb-files-http.ts";
 import { FetchRuntimeClient } from "../../apps/control-plane/src/adapters/runtime-client/fetch-client.ts";
 import { NodePreviewClient } from "../../apps/control-plane/src/adapters/runtime-client/preview-client.ts";
 import { ACCESS_TOKEN_AUDIENCE } from "../../apps/control-plane/src/domain/access-token.ts";
@@ -29,6 +30,7 @@ import {
   MintDenialLog,
   mintIdToken,
 } from "../../apps/control-plane/src/domain/workload-identity.ts";
+import { registerOrbFilesGateway } from "../../apps/control-plane/src/http/orb-files-gateway.ts";
 import { registerPreviewGateway } from "../../apps/control-plane/src/http/preview-gateway.ts";
 import type { PreviewHosts } from "../../apps/control-plane/src/http/preview-host.ts";
 import { registerRuntimePreviewRoutes } from "../../apps/control-plane/src/http/runtime-preview-routes.ts";
@@ -57,6 +59,7 @@ export async function startPreviewComposition(
     cli?: (brokerPort: number, args: string[]) => Promise<string>;
     brokerSocket?: string;
   },
+  options: { files?: boolean; missingOrbId?: string } = {},
 ) {
   const task = new NoSimulationTask("preview composed integration", false);
   const orbId = external?.orbId ?? randomUUID();
@@ -116,6 +119,17 @@ export async function startPreviewComposition(
       runtimeAddress: { baseUrl: external?.baseUrl ?? baseUrl },
     });
   };
+  if (options.files) {
+    if (!external) throw new Error("Live files require the Docker runtime fixture");
+    Object.defineProperty(h.deps.hostProvider, "kind", { value: "docker" });
+    h.deps.hostProvider.executionBinding = () =>
+      okAsync({
+        baseUrl: external.baseUrl,
+        token,
+        incarnation: String(seeded.hostIncarnation),
+        cwd: "/workspace",
+      });
+  }
   const deps = { ...h.deps, runtimeClient: new FetchRuntimeClient() };
   const connections = new PreviewConnections(deps, (_orb, operation) =>
     ResultAsync.fromPromise(operation(task), () =>
@@ -148,8 +162,16 @@ export async function startPreviewComposition(
       issuerUrl,
     },
     previewPorts: ports,
+    filesOrbIds: [orbId, ...(options.missingOrbId ? [options.missingOrbId] : [])],
     configurePreviews: async ({ app, hosts, appOrigin }) => {
       previewUrl = (id, port) => hosts.url(id, port);
+      if (options.files)
+        registerOrbFilesGateway(app, task, {
+          deps,
+          hosts: hosts.files,
+          appOrigin,
+          transport: new NodeOrbFilesTransport(),
+        });
       registerRuntimePreviewRoutes(app, task, {
         store: h.store,
         url: (id, port) => hosts.url(id, port),
@@ -203,10 +225,12 @@ export async function startPreviewComposition(
     h,
     task,
     orbId,
+    liveFilesOrigin: auth.liveFilesOrigins[0],
+    missingFilesOrigin: auth.liveFilesOrigins[1],
     activity,
     observed: () => observed,
     /** `pi-orb id-token --audience urn:pi-orb:access` through the production mint and signer. */
-    idToken: () =>
+    idToken: (sourceToken = token) =>
       mintIdToken(
         task,
         {
@@ -218,7 +242,7 @@ export async function startPreviewComposition(
           issuerUrl,
         },
         {
-          tokenHash: createHash("sha256").update(token).digest("hex"),
+          tokenHash: createHash("sha256").update(sourceToken).digest("hex"),
           audience: ACCESS_TOKEN_AUDIENCE,
           ttlSeconds: 3600,
         },

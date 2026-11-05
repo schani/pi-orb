@@ -14,6 +14,7 @@ import { piEnvironmentPrompt } from "./environment-prompt.ts";
 const SECTION = "orb-instructions";
 
 export interface PromptSnapshot {
+  readonly filesBaseUrl?: string | null;
   readonly personal?: string;
   readonly repository: readonly { path: string; content: string }[];
   readonly project?: string;
@@ -32,7 +33,7 @@ export function renderPrompt(snapshot: PromptSnapshot): string {
     .join("\n\n");
   return [
     "You are a coding assistant. Use tools to inspect and change the project. Be concise. Produce Markdown. Mermaid is supported.",
-    environmentPrompt,
+    environmentPrompt(snapshot.filesBaseUrl),
     instructions ? `<project_instructions>\n${instructions}\n</project_instructions>` : "",
     snapshot.appendSystem ?? "",
     piEnvironmentPrompt,

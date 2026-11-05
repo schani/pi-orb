@@ -5,20 +5,24 @@ import { environmentPrompt } from "./environment-prompt.ts";
 describe("shared runtime environment prompt", () => {
   it("requires an explicit request for progress updates to other orbs", () => {
     const rule = "Do not send progress updates to other orbs unless explicitly asked.";
-    expect(environmentPrompt.split(rule)).toHaveLength(2);
+    expect(environmentPrompt().split(rule)).toHaveLength(2);
     expect(claudeEnvironmentPrompt).not.toContain(rule);
   });
 
   it("introduces pi-orb before the runtime tools", () => {
     expect(
-      environmentPrompt.startsWith(
+      environmentPrompt().startsWith(
         "## pi-orb\n\nYou're running on a VM in the cloud via pi-orb: https://github.com/schani/pi-orb\n\n- Python 3",
       ),
     ).toBe(true);
   });
 
   it("preserves the exact user-edited runtime bullets", () => {
-    expect(environmentPrompt.split("\n").filter((line) => line.startsWith("- "))).toEqual([
+    expect(
+      environmentPrompt()
+        .split("\n")
+        .filter((line) => line.startsWith("- ")),
+    ).toEqual([
       "- Python 3 (`python`, `python3`, virtual environments) and rustup; no default Rust toolchain. Select via `rust-toolchain.toml` or install with rustup. Toolchains/Cargo persist in `$HOME`.",
       '- Chromium and `agent-browser`: `agent-browser open <url>`, then `agent-browser snapshot`; inspect/interact via refs like `@e1`. For pi-orb preview and hosted-file URLs, first `agent-browser cookies set __Host-pi-orb-token "$(pi-orb id-token --audience urn:pi-orb:access --ttl-seconds 3600)" --url <origin> --secure --httpOnly`; scripts send that token as header `x-pi-orb-token`.',
       "- Do not use subagents to start processes that the user interacts with, because it's too finicky.",
@@ -28,9 +32,23 @@ describe("shared runtime environment prompt", () => {
     ]);
   });
 
+  it("uses the trusted live-files base URL in the approved prose rule", () => {
+    const baseUrl = "https://f-o12345678-1234-1234-1234-123456789abc.piorb.live";
+    const rule = `When referring to an orb-local file in prose, use a Markdown link to its absolute path under ${baseUrl}, percent-encoding each path segment. Keep filesystem paths unchanged inside code and commands. These links show live files and require running compute; use pi-orb host only when a durable published copy is needed.`;
+    expect(environmentPrompt(baseUrl)).toBe(`${environmentPrompt()}\n- ${rule}`);
+    expect(environmentPrompt(baseUrl).split(rule)).toHaveLength(2);
+    expect(claudeEnvironmentPrompt).not.toContain("When referring to an orb-local file");
+  });
+
+  it("omits live-file guidance when the serving origin is unconfigured", () => {
+    expect(environmentPrompt(null)).toBe(environmentPrompt());
+    expect(environmentPrompt()).not.toContain("<files-base-url>");
+    expect(environmentPrompt()).not.toContain("When referring to an orb-local file");
+  });
+
   it("keeps harness-specific CLI guidance out of the shared base", () => {
-    expect(environmentPrompt).not.toContain("pi-orb mcp add");
-    expect(environmentPrompt).not.toMatch(/`pi-orb /);
-    expect(environmentPrompt).not.toContain("## Orb tools");
+    expect(environmentPrompt()).not.toContain("pi-orb mcp add");
+    expect(environmentPrompt()).not.toMatch(/`pi-orb /);
+    expect(environmentPrompt()).not.toContain("## Orb tools");
   });
 });

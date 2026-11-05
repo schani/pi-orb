@@ -42,7 +42,9 @@ class PreviewTest(unittest.TestCase):
         self.assertNotIn('\\\\', pattern)
         host = 'p5173-o00000000-0000-4000-8000-000000000001'
         self.assertRegex(f'https://{host}.preview.example.net/oauth?code=secret', pattern)
-        for value in [f'https://{host}.preview.example.net.attacker.test/', 'https://app.example.net/', f'https://{host}.other.example.net/', f'https://{host}Xpreview.example.net/']:
+        file_host = 'f-o00000000-0000-4000-8000-000000000001'
+        self.assertRegex(f'https://{file_host}.preview.example.net/workspace/secret?key=secret', pattern)
+        for value in [f'https://{file_host}.preview.example.net.attacker.test/', f'https://{host}.preview.example.net.attacker.test/', 'https://app.example.net/', f'https://{host}.other.example.net/', f'https://{host}Xpreview.example.net/']:
             self.assertNotRegex(value, pattern)
 
 

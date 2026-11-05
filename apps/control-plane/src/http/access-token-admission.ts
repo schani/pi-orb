@@ -10,7 +10,7 @@ import {
 import { requestCookie, sendAuthFailure } from "./auth-routes.ts";
 import type { RequestPrincipalResolver } from "./browser-identity.ts";
 import type {} from "./preview-auth-routes.ts";
-import type { PreviewHosts } from "./preview-host.ts";
+import type { IsolatedHosts } from "./preview-host.ts";
 
 const invalid = { type: "unauthenticated", message: "Invalid access token" } as const;
 /** The header wins over the cookie; neither ever reaches the preview application. */
@@ -30,7 +30,7 @@ export function registerPreviewAccessTokens(
   app: FastifyInstance,
   task: SimulationTask,
   options: {
-    readonly hosts: PreviewHosts;
+    readonly hosts: IsolatedHosts;
     readonly tokens: AccessTokenDeps;
     readonly outcome?: (event: { outcome: string; requestId: string }) => void;
   },

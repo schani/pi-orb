@@ -108,6 +108,7 @@ export interface RuntimeRouteDeps {
     import("../domain/claude-auth.ts").ClaudeAuthError
   >;
   readonly appOrigin: string;
+  readonly filesBaseUrl?: (orbId: string) => string | null;
   readonly spawn: (
     task: SimulationTask,
     caller: OrbRow,
@@ -539,9 +540,11 @@ export function registerRuntimeRoutes(
           retryable: context.error.retryable,
         },
       });
+    const filesBaseUrl = deps.filesBaseUrl?.(auth.orb.id);
     return reply.send({
       v: 1,
       context: context.value,
+      ...(filesBaseUrl ? { filesBaseUrl } : {}),
       userTimeZone: auth.orb.userTimeZone,
       ...(auth.orb.initialModel === null ? {} : { initialModel: auth.orb.initialModel }),
     });

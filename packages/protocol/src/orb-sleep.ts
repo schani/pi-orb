@@ -60,6 +60,7 @@ export const OrbBootContextResponseSchema = Type.Object(
     v: Type.Literal(1),
     context: Type.Union([OrbBootContextSchema, Type.Null()]),
     userTimeZone: Type.Union([Type.String(), Type.Null()]),
+    filesBaseUrl: Type.Optional(Type.String()),
     initialModel: Type.Optional(ModelRefSchema),
   },
   closed,

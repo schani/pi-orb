@@ -27,6 +27,7 @@ import {
   createHostingAccessPolicy,
   registerHostingAccessGuard,
 } from "../../apps/control-plane/src/http/hosting-access.ts";
+import { registerOrbFilesBoundary } from "../../apps/control-plane/src/http/orb-files-gateway.ts";
 import { registerPreviewAuth } from "../../apps/control-plane/src/http/preview-auth-routes.ts";
 import { previewRoutingUrl } from "../../apps/control-plane/src/http/preview-gateway.ts";
 import {
@@ -45,6 +46,7 @@ export async function startApplicationAuthFixture(
     /** Admits orb id-tokens on preview and files hosts, composed as in main.ts. */
     accessTokens?: AccessTokenDeps;
     previewPorts?: readonly number[];
+    filesOrbIds?: readonly string[];
     configurePreviews?: (context: {
       app: FastifyInstance;
       hosts: PreviewHosts;
@@ -143,12 +145,20 @@ export async function startApplicationAuthFixture(
     })._unsafeUnwrap();
     if (options.previews) routingHosts = previewHosts;
     const previewOrigins = previewHostnames.map((host) => `https://${host}:${port(app.server)}`);
+    const liveFilesOrigins = (options.filesOrbIds ?? [orbId]).map((id) =>
+      previewHosts.files.url(id)._unsafeUnwrap(),
+    );
+    const isolatedHosts = {
+      ...previewHosts,
+      parse: (authority: string | undefined) =>
+        previewHosts.parse(authority) ?? previewHosts.files.parse(authority),
+    };
     const proxy = await startAuthConnectProxy(
       new Map([
         [new URL(appOrigin).host, port(app.server)],
         [new URL(filesOrigin).host, port(app.server)],
         [new URL(issuer).host, port(google.server)],
-        ...previewOrigins.map((origin): [string, number] => [
+        ...[...previewOrigins, ...liveFilesOrigins].map((origin): [string, number] => [
           new URL(origin).host,
           port(app.server),
         ]),
@@ -314,21 +324,22 @@ export async function startApplicationAuthFixture(
       },
     });
     if (!options.configurePreviews) await app.register(websocket);
+    if (options.previews) registerOrbFilesBoundary(app, { hosts: previewHosts.files, appOrigin });
     registerHostingAccessGuard(
       app,
       createHostingAccessPolicy(origins)._unsafeUnwrap(),
       appOrigin,
       undefined,
-      options.previews ? previewHosts : undefined,
+      options.previews ? isolatedHosts : undefined,
     );
     if (options.previews) {
       if (options.accessTokens)
         registerPreviewAccessTokens(app, task, {
-          hosts: previewHosts,
+          hosts: isolatedHosts,
           tokens: options.accessTokens,
         });
       registerPreviewAuth(app, {
-        hosts: previewHosts,
+        hosts: isolatedHosts,
         appOrigin,
         applicationAuth: auth,
         previewAuth: createSealedPreviewAuth(
@@ -401,6 +412,7 @@ export async function startApplicationAuthFixture(
       ...origins,
       proxyUrl: proxy.url,
       previewOrigins,
+      liveFilesOrigins,
       orbId,
       applicationPort: port(app.server),
       advance: (ms: number) => {
