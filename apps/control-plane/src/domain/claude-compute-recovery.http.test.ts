@@ -141,7 +141,7 @@ it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
       const input = await f.query.input.next();
       expect(input.done).not.toBe(true);
       f.receipt(input.value!);
-      await f.query.emit(task, rootResult);
+      await f.query.emit(task, f.resultForInitial());
       await childHook(task, f);
       f.query.exit();
       f.query.endOutput();
@@ -341,7 +341,10 @@ it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
         })),
       );
       f.receipt(continuation.value!);
-      await bootQuery.emit(task, rootResult);
+      await bootQuery.emit(task, {
+        ...rootResult,
+        user_message_uuid: continuation.value!.uuid,
+      } as SDKMessage);
       expect(bootQuery.closeRequested).toBe(false);
       const steering = (await bootQuery.input.next()).value!;
       expect(steering).toMatchObject({
@@ -408,7 +411,10 @@ it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
       expect(next.value?.uuid).not.toBe(continuation.value!.uuid);
       expect(replacementQueries).toHaveLength(3);
       f.receipt(next.value!);
-      await replacementQuery!.emit(task, rootResult);
+      await replacementQuery!.emit(task, {
+        ...rootResult,
+        user_message_uuid: next.value!.uuid,
+      } as SDKMessage);
       replacementQuery!.exit();
       replacementQuery!.endOutput();
       await replacement!.closeExtensions();

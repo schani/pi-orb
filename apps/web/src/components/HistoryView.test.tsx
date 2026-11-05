@@ -825,7 +825,10 @@ describe("HistoryView turn structure", () => {
             status: null,
             compact_result: "failed",
           } as typeof rootResult);
-        await query.emit(task, rootResult);
+        await query.emit(task, {
+          ...rootResult,
+          user_message_uuid: command.value.uuid,
+        } as typeof rootResult);
         query.exit();
         query.endOutput();
         await aborting;

@@ -1,3 +1,4 @@
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { ok } from "neverthrow";
 import { expect, it } from "vitest";
 import {
@@ -32,7 +33,7 @@ it("native child hooks, independent inventories, process exit, stdout and final 
             await childHook(task, f);
             f.childFile();
             await f.query.emit(task, background([]));
-            await f.query.emit(task, rootResult);
+            await f.query.emit(task, f.resultForInitial());
             expect(f.agent.gateView().activity).toBe("busy");
             expect(f.agent.prepareIdleStop()._unsafeUnwrap()).toBe(false);
             expect(f.query.closeRequested).toBe(false);
@@ -44,7 +45,7 @@ it("native child hooks, independent inventories, process exit, stdout and final 
               background([{ task_id: "inventory-task", description: "inventory-only work" }]),
             );
             await f.query.emit(task, rootRequest);
-            await f.query.emit(task, rootResult);
+            await f.query.emit(task, f.resultForInitial());
             expect(f.query.closeRequested).toBe(false);
             expect(f.state.ownedBackgroundTasks).toEqual({
               "inventory-task": "inventory-only work",
@@ -109,7 +110,7 @@ it.each(["paired", "unmatched"] as const)(
             name: "operation-owner",
             f: async (task) => {
               const input = await submitReceipt(task, f);
-              await f.query.emit(task, rootResult);
+              await f.query.emit(task, f.resultForInitial());
               expect(f.query.closeRequested).toBe(true);
               rotating = true;
               await f.agent.closeExtensions();
@@ -213,7 +214,7 @@ it.each(["sync", "commit"] as const)(
             name: "native-driver",
             f: async (task) => {
               await submitReceipt(task, f);
-              await f.query.emit(task, rootResult);
+              await f.query.emit(task, f.resultForInitial());
               await task.checkpoint("final persistence failpoint armed after root result");
               f.append({ type: "assistant", uuid: "late", message: { content: "late" } });
               if (failure === "sync") f.failSync = true;
@@ -260,7 +261,7 @@ it("independently scheduled process exit and trailing stdout cannot outrun final
             name: "owner",
             f: async (task) => {
               await submitReceipt(task, f);
-              await f.query.emit(task, rootResult);
+              await f.query.emit(task, f.resultForInitial());
               expect(f.query.closeRequested).toBe(true);
               draining = true;
               await f.agent.closeExtensions();
@@ -446,7 +447,10 @@ it.each(["receipt", "uncertain", "child"] as const)(
                 if (manual === undefined) throw new Error("manual message missing");
                 expect(manual.uuid).not.toBe(input.uuid);
                 f.receipt(manual);
-                await manualQuery.emit(task, rootResult);
+                await manualQuery.emit(task, {
+                  ...rootResult,
+                  user_message_uuid: manual.uuid,
+                } as SDKMessage);
                 manualQuery.exit();
                 manualQuery.endOutput();
                 await replacement.closeExtensions();

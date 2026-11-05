@@ -147,7 +147,7 @@ it("archive seals real normalized root history only after child handoff, native 
               await childHook(task, f);
               f.childFile();
               await f.query.emit(task, background([]));
-              await f.query.emit(task, rootResult);
+              await f.query.emit(task, f.resultForInitial());
               expect((await requestOrbArchive(task, deps, "orb-a")).isOk()).toBe(true);
               for (let i = 0; i < 4; i++) {
                 await task.sleep(
@@ -165,7 +165,7 @@ it("archive seals real normalized root history only after child handoff, native 
               );
               expect(sealed).toBe(false);
               await f.query.emit(task, rootRequest);
-              await f.query.emit(task, rootResult);
+              await f.query.emit(task, f.resultForInitial());
               f.query.exit();
               await task.sleep(
                 TEST_CONSTANTS.idleStopAfterMs,
@@ -254,7 +254,7 @@ it("real child-only activity survives CP restart, stale pulls and wall-clock jum
                   seedClaudeOrb(task, harness);
                   await submitReceipt(task, f);
                   await f.query.emit(task, childEdge("task_started"));
-                  await f.query.emit(task, rootResult);
+                  await f.query.emit(task, f.resultForInitial());
                 }
                 await waitUntil(
                   task,
@@ -274,7 +274,7 @@ it("real child-only activity survives CP restart, stale pulls and wall-clock jum
                 if (phase === 1) {
                   await f.query.emit(task, childEdge("task_notification"));
                   await f.query.emit(task, rootRequest);
-                  await f.query.emit(task, rootResult);
+                  await f.query.emit(task, f.resultForInitial());
                   f.query.exit();
                   f.query.endOutput();
                   await f.agent.closeExtensions();
@@ -420,7 +420,7 @@ it("archive cannot seal or destroy retained native files after final history com
               seedClaudeOrb(task, harness);
               await submitReceipt(task, f);
               expect((await requestOrbArchive(task, deps, "orb-a")).isOk()).toBe(true);
-              await f.query.emit(task, rootResult);
+              await f.query.emit(task, f.resultForInitial());
               f.append({
                 type: "assistant",
                 uuid: "uncommitted-final",
@@ -572,7 +572,7 @@ it("explicit deletion retains whole-host authority over an uncooperative real na
               seedClaudeOrb(task, harness);
               await submitReceipt(task, f);
               await childHook(task, f);
-              await f.query.emit(task, rootResult);
+              await f.query.emit(task, f.resultForInitial());
               expect((await requestOrbDeletion(task, deps, "orb-a")).isOk()).toBe(true);
               await waitUntil(
                 task,

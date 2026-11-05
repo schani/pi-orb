@@ -5,7 +5,6 @@ import {
   childEdge,
   childHook,
   rootRequest,
-  rootResult,
   submitReceipt,
 } from "../testkit/claude-composed.ts";
 import { runDst } from "../testkit/sim.ts";
@@ -32,20 +31,20 @@ it.each(
               name: "native-stdout",
               f: async (task) => {
                 await submitReceipt(task, f);
-                await f.query.emit(task, rootResult);
+                await f.query.emit(task, f.resultForInitial());
                 expect(f.query.closeRequested).toBe(true);
-                if (results === "before-start") await f.query.emit(task, rootResult);
+                if (results === "before-start") await f.query.emit(task, f.resultForInitial());
                 await f.query.emit(task, childEdge("task_started"));
-                if (results === "between-bookends") await f.query.emit(task, rootResult);
+                if (results === "between-bookends") await f.query.emit(task, f.resultForInitial());
                 await f.query.emit(task, {
                   ...childEdge("task_notification"),
                   status,
                 } as ReturnType<typeof childEdge>);
                 if (results === "after-terminal" || results === "trailing-results")
-                  await f.query.emit(task, rootResult);
+                  await f.query.emit(task, f.resultForInitial());
                 if (results === "trailing-results")
                   await f.query.emit(task, {
-                    ...rootResult,
+                    ...f.resultForInitial(),
                     uuid: "33333333-3333-4333-8333-333333333333",
                   });
                 terminal = true;
@@ -117,7 +116,7 @@ it.each(
                 expect(next.done).toBe(false);
                 expect(next.value?.message.content).toEqual([{ type: "text", text: "next input" }]);
                 f.receipt(next.value!);
-                await f.query.emit(task, rootResult);
+                await f.query.emit(task, f.resultForInitial());
                 f.query.exit();
                 f.query.endOutput();
                 await f.agent.closeExtensions();
@@ -152,13 +151,13 @@ it("keeps a known pre-result task handoff until a subsequent root result", async
           f: async (task) => {
             await submitReceipt(task, f);
             await f.query.emit(task, childEdge("task_started"));
-            await f.query.emit(task, rootResult);
+            await f.query.emit(task, f.resultForInitial());
             await f.query.emit(task, childEdge("task_notification"));
             expect(f.query.closeRequested).toBe(false);
             expect(f.agent.gateView().activity).toBe("busy");
             expect(Object.keys(f.journal().pendingHandoffs ?? {})).toEqual(["child"]);
             await f.query.emit(task, rootRequest);
-            await f.query.emit(task, rootResult);
+            await f.query.emit(task, f.resultForInitial());
             f.query.exit();
             f.query.endOutput();
             await f.agent.closeExtensions();
@@ -192,7 +191,7 @@ it.each(["missing-start", "other-session"] as const)(
             name: "native",
             f: async (task) => {
               await submitReceipt(task, f);
-              await f.query.emit(task, rootResult);
+              await f.query.emit(task, f.resultForInitial());
               if (kind === "missing-start")
                 await f.query.emit(
                   task,
@@ -203,9 +202,9 @@ it.each(["missing-start", "other-session"] as const)(
                 ...childEdge("task_notification"),
                 session_id: kind === "other-session" ? "other-session" : "session",
               } as ReturnType<typeof childEdge>);
-              await f.query.emit(task, rootResult);
+              await f.query.emit(task, f.resultForInitial());
               await f.query.emit(task, {
-                ...rootResult,
+                ...f.resultForInitial(),
                 uuid: "33333333-3333-4333-8333-333333333333",
               });
               f.query.exit();
@@ -249,7 +248,7 @@ it.each(["unmatched-child", "same-id-child", "background"] as const)(
             name: "native",
             f: async (task) => {
               await submitReceipt(task, f);
-              await f.query.emit(task, rootResult);
+              await f.query.emit(task, f.resultForInitial());
               if (kind !== "background") {
                 await childHook(task, f);
                 const taskId = kind === "same-id-child" ? "child" : "other";
@@ -269,9 +268,9 @@ it.each(["unmatched-child", "same-id-child", "background"] as const)(
                 await f.query.emit(task, childEdge("task_started"));
                 await f.query.emit(task, childEdge("task_notification"));
               }
-              await f.query.emit(task, rootResult);
+              await f.query.emit(task, f.resultForInitial());
               await f.query.emit(task, {
-                ...rootResult,
+                ...f.resultForInitial(),
                 uuid: "33333333-3333-4333-8333-333333333333",
               });
               f.query.exit();

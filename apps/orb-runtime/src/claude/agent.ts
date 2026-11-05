@@ -302,6 +302,7 @@ export class ClaudeOrbAgent implements OrbAgent {
   private configuring = false;
   private submissionEpoch = 0;
   private readonly pendingSteers = new Set<string>();
+  private initialInput: { uuid: string | null } | null = null;
   private compaction: ManualCompaction | null = null;
   private queryAbort: AbortController | null = null;
   private drainingOperation: Promise<void> | null = null;
@@ -911,9 +912,17 @@ export class ClaudeOrbAgent implements OrbAgent {
         .filter(([key]) => /token|secret|password|key|credential|auth/i.test(key))
         .map(([, value]) => value ?? ""),
     ]);
-    return this.initializeQuery(progress, diagnostics).orElse((error) => {
-      if (this.compaction !== null && this.outcome === "aborted")
-        return errAsync({ message: "Context compaction cancelled during initialization." });
+    const initialized = this.initializeQuery(progress, diagnostics);
+    const queryId = this.queryId;
+    const sdk = this.sdk;
+    return initialized.orElse((error) => {
+      if (
+        queryId !== this.queryId ||
+        sdk !== this.sdk ||
+        this.closing !== null ||
+        this.outcome === "aborted"
+      )
+        return errAsync({ message: "Claude query initialization was cancelled." });
       const code =
         this.health.status === "failed" ? this.health.error.code : "claude_initialization_failed";
       const captured =
@@ -1206,13 +1215,18 @@ export class ClaudeOrbAgent implements OrbAgent {
     return ResultAsync.fromThrowable(
       async () => {
         progress.stage = "account";
-        const verified = verifyClaudeAccount(await sdk.accountInfo());
+        const account = await sdk.accountInfo();
+        if (this.queryId !== queryId || this.sdk !== sdk || this.closing !== null)
+          return err({ message: "Claude query initialization was cancelled." });
+        const verified = verifyClaudeAccount(account);
         if (verified.isErr()) {
           this.fail(verified.error.code, verified.error.message);
           return err(verified.error);
         }
         progress.stage = "models";
         const models = await sdk.supportedModels();
+        if (this.queryId !== queryId || this.sdk !== sdk || this.closing !== null)
+          return err({ message: "Claude query initialization was cancelled." });
         this.nativeModels = models;
         const selected = this.state?.model ?? DEFAULT_CLAUDE_MODEL;
         if (this.state !== null) {
@@ -1232,8 +1246,12 @@ export class ClaudeOrbAgent implements OrbAgent {
             });
           progress.stage = "set_model";
           await sdk.setModel(selected);
+          if (this.queryId !== queryId || this.sdk !== sdk || this.closing !== null)
+            return err({ message: "Claude query initialization was cancelled." });
           progress.stage = "flags";
           if (effort !== undefined) await sdk.applyFlagSettings({ effortLevel: effort });
+          if (this.queryId !== queryId || this.sdk !== sdk || this.closing !== null)
+            return err({ message: "Claude query initialization was cancelled." });
           this.state.authentication = {
             source: "CLAUDE_CODE_OAUTH_TOKEN",
             generation: this.generation,
@@ -1661,7 +1679,9 @@ export class ClaudeOrbAgent implements OrbAgent {
         queuedTurns: message.queued_turn_count ?? null,
         stopReason: message.stop_reason ?? null,
       };
-      const pending = [...this.pendingSteers];
+      const initial = this.initialInput;
+      const pendingSteers = [...this.pendingSteers];
+      const pending = [...(initial?.uuid == null ? [] : [initial.uuid]), ...pendingSteers];
       const answered = new Set(message.user_message_uuids ?? [message.user_message_uuid]);
       const latest = pending.at(-1);
       // The native UUID echo is capped at 64; a drained batch must not strand its omitted inputs.
@@ -1679,8 +1699,20 @@ export class ClaudeOrbAgent implements OrbAgent {
         if (pending.every((uuid) => this.history?.view.some((record) => record.id === uuid)))
           for (const uuid of pending) answered.add(uuid);
       }
+      if (initial !== null) {
+        if (initial.uuid !== null && answered.has(initial.uuid)) this.initialInput = null;
+        else if (ids.length === 0 && (message.is_error || message.subtype !== "success")) {
+          // Session-scoped failures have no input echo. Release only into a failed operation.
+          if (this.outcome !== "aborted") {
+            this.outcome = "failed";
+            this.operationError = "Claude turn failed.";
+          }
+          if (initial.uuid === null) this.submissionEpoch++;
+          this.initialInput = null;
+        } else this.observeContinuation = true;
+      }
       for (const uuid of answered) if (uuid !== undefined) this.pendingSteers.delete(uuid);
-      if (pending.length > 0) {
+      if (pendingSteers.length > 0) {
         const recorded = this.platformEvent(
           "claude.steering_result",
           "Native steering result.",
@@ -1688,7 +1720,7 @@ export class ClaudeOrbAgent implements OrbAgent {
             operationId: this.activity.operationId,
             queryId: this.queryId,
             resultId: message.uuid ?? null,
-            answeredInputs: pending.filter((uuid) => answered.has(uuid)),
+            answeredInputs: pendingSteers.filter((uuid) => answered.has(uuid)),
             pendingInputs: [...this.pendingSteers],
             queuedTurns: message.queued_turn_count ?? null,
           },
@@ -1705,6 +1737,7 @@ export class ClaudeOrbAgent implements OrbAgent {
         message.is_error &&
         message.api_error_status === 429 &&
         this.outcome !== "aborted" &&
+        this.initialInput === null &&
         this.pendingSteers.size === 0 &&
         (message.queued_turn_count ?? 0) === 0 &&
         this.compaction === null &&
@@ -1728,7 +1761,11 @@ export class ClaudeOrbAgent implements OrbAgent {
       const previousHandoffs = Object.keys(this.state?.pendingHandoffs ?? {}).sort();
       let completedHandoffs: string[] = [];
       if (this.closing === null) {
-        if (this.pendingSteers.size === 0 && (message.queued_turn_count ?? 0) === 0)
+        if (
+          this.initialInput === null &&
+          this.pendingSteers.size === 0 &&
+          (message.queued_turn_count ?? 0) === 0
+        )
           completedHandoffs = this.activity.rootFinished(message.num_turns > 0);
         else this.activity.rootStarted();
         if (previousHandoffs.length > 0) {
@@ -1961,6 +1998,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       }
     }
     this.activity.processExited(true);
+    this.initialInput = null;
     this.pendingSteers.clear();
     this.blocks.clear();
     this.tools.clear();
@@ -2314,6 +2352,8 @@ export class ClaudeOrbAgent implements OrbAgent {
     )
       return errAsync({ message: "Claude session is not accepting work." });
     const epoch = ++this.submissionEpoch;
+    const initial = { uuid: null as string | null };
+    this.initialInput = initial;
     this.outcome = "completed";
     this.operationError = undefined;
     this.closing = null;
@@ -2327,8 +2367,10 @@ export class ClaudeOrbAgent implements OrbAgent {
           : err({ message: "Claude submission was cancelled before inference." }),
       )
       .mapErr((error) => {
+        if (this.activity.operationId !== operationId) return error;
+        if (this.initialInput === initial) this.initialInput = null;
         if (this.outcome !== "aborted") this.outcome = "failed";
-        this.operationError = error.message;
+        this.operationError ??= error.message;
         this.activity.rootFinished();
         void this.drainOperation();
         return error;
@@ -2422,6 +2464,7 @@ export class ClaudeOrbAgent implements OrbAgent {
         return err(persisted.error);
       }
     }
+    if (kind === "turn" && this.initialInput !== null) this.initialInput.uuid = uuid;
     if (kind === "steer") {
       this.pendingSteers.add(uuid);
       this.activity.rootStarted();
@@ -2557,6 +2600,7 @@ export class ClaudeOrbAgent implements OrbAgent {
   }
   abortOperation(): ResultAsync<void, { message: string }> {
     this.submissionEpoch++;
+    this.initialInput = null;
     this.activity.cancel();
     this.outcome = "aborted";
     this.publishChildren();
@@ -2598,6 +2642,8 @@ export class ClaudeOrbAgent implements OrbAgent {
     if (!this.activity.claim(operationId))
       return errAsync({ code: "busy", message: "Wait for the current operation to finish." });
     const epoch = ++this.submissionEpoch;
+    const initial = { uuid: null as string | null };
+    this.initialInput = initial;
     let finish: ManualCompaction["finish"] = () => undefined;
     const completed = new Promise<Result<void, CompactError>>((resolve) => {
       finish = resolve;
@@ -2650,6 +2696,7 @@ export class ClaudeOrbAgent implements OrbAgent {
         this.closing !== null
       ) {
         this.outcome = "failed";
+        if (this.initialInput === initial) this.initialInput = null;
         this.operationError = "Context compaction could not start.";
         this.activity.rootFinished();
         void this.drainOperation();
@@ -2670,6 +2717,7 @@ export class ClaudeOrbAgent implements OrbAgent {
         this.fail("claude_compaction_persistence_failed", saved.error.message);
         return;
       }
+      initial.uuid = commandUuid;
       input.push({
         type: "user",
         uuid: commandUuid,

@@ -888,7 +888,7 @@ for line in sys.stdin:
     elif value['type'] == 'user':
         with open(os.environ['OWNED_NATIVE_PATH'], 'a') as native:
             native.write(json.dumps({'type': 'user', 'uuid': value['uuid'], 'message': value['message']}) + '\n')
-        send({'type': 'result', 'subtype': 'success', 'is_error': False, 'num_turns': 1, 'result': 'done'})
+        send({'type': 'result', 'subtype': 'success', 'is_error': False, 'num_turns': 1, 'result': 'done', 'user_message_uuid': value['uuid'], 'user_message_uuids': [value['uuid']]})
 if os.environ['HOLD_TAIL'] == '1' and os.fork() == 0:
     command = os.read(3, 65536).decode().strip()
     if command:
@@ -1230,7 +1230,13 @@ it("late root work after an operation result keeps the drained runtime failed an
   );
   const task = new NoSimulationTask("root-race", false);
   expect(
-    await f.emit(task, { type: "result", subtype: "success", is_error: false } as SDKMessage),
+    await f.emit(task, {
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      user_message_uuid: delivery?.uuid,
+      user_message_uuids: [delivery?.uuid],
+    } as SDKMessage),
   ).toBe(true);
   await f.closed();
   await lateWork(f, "requesting", task);
@@ -1287,6 +1293,8 @@ it.each(["sdk", "mcp"] as const)(
         type: "result",
         subtype: "success",
         is_error: false,
+        user_message_uuid: delivery?.uuid,
+        user_message_uuids: [delivery?.uuid],
       } as SDKMessage),
     ).toBe(true);
     await f.agent.closeExtensions();

@@ -3,7 +3,6 @@ import {
   ComposedClaudeFixture,
   childEdge,
   rootRequest,
-  rootResult,
   submitReceipt,
 } from "../testkit/claude-composed.ts";
 import { runDst } from "../testkit/sim.ts";
@@ -35,13 +34,13 @@ it("bounds affected-query diagnostics without dropping ownership or the drain su
               { signal: new AbortController().signal },
             );
             await f.query.emit(task, childEdge("task_started"));
-            for (let i = 0; i < 40; i++) await f.query.emit(task, rootResult);
+            for (let i = 0; i < 40; i++) await f.query.emit(task, f.resultForInitial());
             expect(f.query.closeRequested).toBe(false);
             expect(f.journal().ownedTasks).toHaveProperty("child");
             await f.query.emit(task, childEdge("task_notification"));
             expect(f.query.closeRequested).toBe(false);
             await f.query.emit(task, rootRequest);
-            await f.query.emit(task, rootResult);
+            await f.query.emit(task, f.resultForInitial());
             f.query.exit();
             f.query.endOutput();
             await f.agent.closeExtensions();

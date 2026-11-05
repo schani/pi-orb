@@ -25,7 +25,7 @@ it.each(["before", "after"] as const)(
               f: async (task) => {
                 await submitReceipt(task, f);
                 await f.query.emit(task, {
-                  ...rootResult,
+                  ...f.resultForInitial(),
                   uuid: "initial-result",
                   num_turns: 9,
                 } as unknown as SDKMessage);

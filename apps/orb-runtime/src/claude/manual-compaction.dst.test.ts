@@ -45,7 +45,7 @@ it.each([false, true])(
                   message: { content: "native summary" },
                 });
               }
-              await query.emit(task, rootResult);
+              await query.emit(task, f.resultForInitial());
               await task.checkpoint("result is not idle");
               query.exit();
               await task.checkpoint("process exit before trailing stdout EOF");

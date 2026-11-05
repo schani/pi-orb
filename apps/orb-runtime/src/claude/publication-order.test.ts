@@ -202,7 +202,12 @@ it.each([
       event: { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
     } as unknown as SDKMessage);
   }
-  await f.emit({ type: "result", subtype: "success", is_error: false } as unknown as SDKMessage);
+  await f.emit({
+    type: "result",
+    user_message_uuid: Object.values(f.state.deliveries)[0]?.uuid,
+    subtype: "success",
+    is_error: false,
+  } as unknown as SDKMessage);
   await f.awaitCloseRequest(2);
   const beforeExitReads = f.nativeReads();
   f.persist({
@@ -319,7 +324,12 @@ it("bounds diagnostic samples and redacts unsafe identities and content", async 
     message: { role: "assistant", content },
     metadata: "PRIVATE",
   });
-  await emit({ type: "result", subtype: "success", is_error: false });
+  await emit({
+    type: "result",
+    user_message_uuid: Object.values(f.state.deliveries)[0]?.uuid,
+    subtype: "success",
+    is_error: false,
+  });
   await f.awaitCloseRequest(2);
   f.exit();
   await f.agent.closeExtensions();
@@ -399,6 +409,7 @@ it.each([
     });
   await emit({
     type: "result",
+    user_message_uuid: Object.values(f.state.deliveries)[0]?.uuid,
     subtype: "success",
     is_error: false,
     num_turns: 1,
@@ -416,7 +427,13 @@ it.each([
       uuid: "late-owner",
       message: { role: "assistant", content: [] },
     });
-    await emit({ type: "result", subtype: "success", is_error: false, num_turns: 1 });
+    await emit({
+      type: "result",
+      user_message_uuid: Object.values(f.state.deliveries)[0]?.uuid,
+      subtype: "success",
+      is_error: false,
+      num_turns: 1,
+    });
   }
   await f.awaitCloseRequest(2);
   expect(f.agent.liveView()?.blocks.map((block) => block.blockId)).toContain("current:0");

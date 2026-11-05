@@ -4,7 +4,6 @@ import {
   ComposedClaudeFixture,
   childEdge,
   rootRequest,
-  rootResult,
   submitReceipt,
 } from "../testkit/claude-composed.ts";
 import { runDst } from "../testkit/sim.ts";
@@ -46,7 +45,7 @@ it.for(["before-result", "after-result"] as const)(
                 await f.query.emit(task, childEdge("task_started"));
                 await f.query.emit(task, roster);
                 await f.query.emit(task, roster);
-                await f.query.emit(task, rootResult);
+                await f.query.emit(task, f.resultForInitial());
                 await f.query.emit(task, childEdge("task_notification"));
                 expect(f.query.closeRequested).toBe(false);
                 if (cut === "before-result") {
@@ -55,7 +54,7 @@ it.for(["before-result", "after-result"] as const)(
                   expect(Object.keys(f.journal().pendingHandoffs ?? {})).toEqual(["child"]);
                 }
                 await f.query.emit(task, rootRequest);
-                await f.query.emit(task, rootResult);
+                await f.query.emit(task, f.resultForInitial());
                 if (cut === "after-result") {
                   expect(f.query.closeRequested).toBe(false);
                   expect(f.journal().ownedBackgroundTasks).toEqual({

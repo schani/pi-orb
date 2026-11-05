@@ -6,7 +6,6 @@ import {
   ComposedClaudeFixture,
   nativeHook,
   nativeHookResponse,
-  rootResult,
 } from "../testkit/claude-composed.ts";
 import { claudeBootEntries } from "./boot-notification.ts";
 import { planBootNotification } from "./boot-policy.ts";
@@ -94,7 +93,7 @@ it("claims native compaction before initialization, freezes the published fronti
       compact_result: "success",
     } as SDKMessage);
     expect(f.agent.gateView().activity).toBe("busy");
-    await query.emit(task, rootResult);
+    await query.emit(task, f.resultForInitial());
     query.exit();
     expect(f.agent.gateView().activity).toBe("busy");
     query.endOutput();
@@ -129,7 +128,7 @@ it("claims native compaction before initialization, freezes the published fronti
     expect(delivered.isOk()).toBe(true);
     const input = await f.query.input.next();
     f.receipt(input.value!);
-    await f.query.emit(task, rootResult);
+    await f.query.emit(task, f.resultForInitial());
     f.query.exit();
     f.query.endOutput();
     await f.agent.closeExtensions();
@@ -164,7 +163,7 @@ it.each(["failed", "aborted"] as const)(
           compact_result: "failed",
           compact_error: "private provider error content",
         } as SDKMessage);
-      await query.emit(task, rootResult);
+      await query.emit(task, f.resultForInitial());
       query.exit();
       query.endOutput();
       await aborting;
@@ -244,7 +243,7 @@ it.each(["completed", "failed", "aborted"] as const)(
           status: null,
           compact_result: "failed",
         } as SDKMessage);
-      await query.emit(task, rootResult);
+      await query.emit(task, f.resultForInitial());
       query.exit();
       query.endOutput();
       await aborting;
@@ -302,7 +301,7 @@ it("holds child/hook ownership and fails busy on missing durable summary or pers
     const query = await next;
     await query.input.next();
     await query.emit(task, nativeHook("hook"));
-    await query.emit(task, rootResult);
+    await query.emit(task, f.resultForInitial());
     expect(query.closeRequested).toBe(false);
     expect(f.agent.canCompact().isErr()).toBe(true);
     await query.emit(task, nativeHookResponse(nativeHook("hook")));
@@ -387,7 +386,7 @@ it("never releases the compaction gate after a native fsync failure", async () =
     await query.input.next();
     summary(f);
     f.failSync = true;
-    await query.emit(task, rootResult);
+    await query.emit(task, f.resultForInitial());
     query.exit();
     query.endOutput();
     await f.agent.closeExtensions();

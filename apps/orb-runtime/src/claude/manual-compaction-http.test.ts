@@ -6,7 +6,7 @@ import { expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { buildRuntimeServer } from "../http/server.ts";
 import type { TerminalManager } from "../terminal/manager.ts";
-import { ComposedClaudeFixture, rootResult } from "../testkit/claude-composed.ts";
+import { ComposedClaudeFixture, type rootResult } from "../testkit/claude-composed.ts";
 
 const task = new NoSimulationTask("claude-compact-http", false);
 async function connect(port: number) {
@@ -152,8 +152,8 @@ it.each(["completed", "failed", "aborted"] as const)(
       await query.emit(
         task,
         outcome === "failed"
-          ? ({ ...rootResult, is_error: true } as typeof rootResult)
-          : rootResult,
+          ? ({ ...f.resultForInitial(), is_error: true } as typeof rootResult)
+          : f.resultForInitial(),
       );
       query.exit();
       expect(f.agent.gateView().activity).toBe("busy");

@@ -305,17 +305,17 @@ it("settles a coalesced steering batch when the SDK caps its echoed UUID list at
 it("retains later steering when an earlier steer has finished", async () => {
   const f = new ComposedClaudeFixture();
   try {
-    await start(f);
-    const uuids: string[] = [];
+    const first = await start(f);
+    const uuids: string[] = [first.input.uuid];
     for (const id of ["steer-one", "steer-two"]) {
       expect((await f.agent.deliverInboxMessage(id, [id], content(id))).isOk()).toBe(true);
       const input = await nextInput(f.query);
       f.receipt(input);
       uuids.push(input.uuid);
     }
-    await f.query.emitUnscheduled(resultFor(uuids[0] ?? "missing"));
+    await f.query.emitUnscheduled(resultFor(...uuids.slice(0, 2)));
     expect(f.query.closeRequested).toBe(false);
-    await f.query.emitUnscheduled(resultFor(uuids[1] ?? "missing"));
+    await f.query.emitUnscheduled(resultFor(uuids[2] ?? "missing"));
     expect(f.query.closeRequested).toBe(true);
   } finally {
     f.query.exit();
