@@ -46,6 +46,12 @@ Local evidence: `.context/native-pg-process-acceptance/`, including snapshots, S
 
 This qualifies synthetic-inference process acceptance, not live-provider inference/billing, crash recovery, database failover or deployment.
 
+## Mermaid 12.3.0 (2026-11-04, PST; local, undeployed)
+
+Tests preceded the bump: both built-app browser engines rejected adjacent edge IDs on `12.2.0`, after passing privacy, sanitization, KaTeX, actor, source/dialog and parse-fallback assertions. `12.3.0` renders the same shapes and named edges. The built-shell fixture blocks external requests and asserts source-free render telemetry and lazy hashed assets. Existing Mermaid browser cases retain measurement-cleanup coverage.
+
+Local checks pass: **980 web tests**, **25 built-shell/Mermaid browser cases** across Chromium/WebKit, web build/typecheck, E2E typecheck and scoped Biome. Build retains large-chunk warnings. Initial fixture failures were corrected canonical display projection, safe-link expectations and diagram-prefixed SVG IDs; no deadlines changed. Commands, first-failure logs and registry receipts: `/tmp/mermaid-implementation.md`. This is scoped frontend qualification, not full runtime/process E2E, hosted CI or deployment.
+
 ## First-party security refresh (2026-10-24, PDT; local, undeployed)
 
 Clean `npm ci` applies four unchanged sealed patches. Retained graph, patch-application, native provider, auth/DST, MCP security, worker and Mermaid configuration checks pass **102 tests / 13 files**; installer contracts pass **27/27**, including zero patched files in the loaded guest closure. Full/production audits and `npm ls --all` pass; typecheck and lint pass. The prior production build passed with large-chunk warnings.
