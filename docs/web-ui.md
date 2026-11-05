@@ -1,5 +1,9 @@
 # Web UI
 
+## React Vite plugin (decided 2026-11-04)
+
+Pin `@vitejs/plugin-react` to [6.2.1](https://github.com/vitejs/vite-plugin-react/releases/tag/plugin-react%406.2.1), taking the corrected Fast Refresh include/exclude support and expanded optional compiler peer ranges. Keep plain `react()`, Vite 8.3.5 and the browser targets unchanged; install no optional compiler peers. Registry tarball SHA-512/SHA-1 and upstream tag commit were verified. Baseline and updated installs, web builds and two Vite configuration tests pass; updated root typecheck/lint pass (existing warnings). Evidence: `.context/devtool-upgrades/react-plugin-6.2.1/`. Browser/HMR and full E2E were not run; no runtime, persistence, prompt or telemetry changes.
+
 ## Current-URL sharing (decided and implemented locally 2026-10-28; not deployed)
 
 **Selected:** icon-pair variant A, three connected nodes for Share with the existing tray Upload. Connected nodes distinguish sharing from uploading without changing Upload. The title flexes; icon-only pencil then Share form a right-aligned group inside the orb identity cell, before lifecycle state, not immediately after the title text. Share remains available during rename and independently of busy, runtime connection or stopped state.
