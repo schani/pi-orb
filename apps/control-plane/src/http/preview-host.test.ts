@@ -29,7 +29,7 @@ describe("preview hosts", () => {
       expect(hosts.parse(host)).toBeUndefined();
     expect(hosts.url(orb, 1.5).isErr()).toBe(true);
   });
-  it("isolates registration-free file origins and omits them without isolated compute", () => {
+  it("isolates registration-free file origins and omits them for unsupported providers", () => {
     const hosts = createPreviewHosts(config)._unsafeUnwrap();
     const origin = `https://f-o${orb}.preview.example.net`;
     expect(hosts.files.url(orb)._unsafeUnwrap()).toBe(origin);
@@ -43,7 +43,8 @@ describe("preview hosts", () => {
       expect(hosts.files.parse(host)).toBeUndefined();
     expect(orbFilesBaseUrl(hosts, "docker", orb)).toBe(origin);
     expect(orbFilesBaseUrl(hosts, "gce", orb)).toBe(origin);
-    expect(orbFilesBaseUrl(hosts, "process", orb)).toBeNull();
+    expect(orbFilesBaseUrl(hosts, "process", orb)).toBe(origin);
+    expect(orbFilesBaseUrl(hosts, "unknown", orb)).toBeNull();
     expect(orbFilesBaseUrl(undefined, "docker", orb)).toBeNull();
   });
   it("requires exact HTTPS origin and isolated PSL registrable domain", () => {
@@ -64,13 +65,13 @@ describe("preview hosts", () => {
           ...(previewOrigin === "https://a.co.uk" ? { appOrigin: "https://b.a.co.uk" } : {}),
         }).isErr(),
       ).toBe(true);
-    expect(
-      createPreviewHosts({
-        ...config,
-        previewOrigin: "http://preview.localhost:8080",
-        local: true,
-      }).isOk(),
-    ).toBe(true);
+    const local = createPreviewHosts({
+      ...config,
+      previewOrigin: "http://preview.localhost:3000",
+      local: true,
+    })._unsafeUnwrap();
+    expect(orbFilesBaseUrl(local, "process", orb)).toBe(`http://f-o${orb}.preview.localhost:3000`);
+    expect(createPreviewHosts({ ...config, previewOrigin: local.baseOrigin }).isErr()).toBe(true);
     expect(
       createPreviewHosts({
         ...config,

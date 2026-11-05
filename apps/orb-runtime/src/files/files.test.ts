@@ -19,11 +19,14 @@ let dir: string;
 const apps: FastifyInstance[] = [];
 const headers = { authorization: "Bearer secret", "x-orb-incarnation": "7" };
 beforeEach(async () => {
+  vi.stubEnv("PI_ORB_CONTAINER", "1");
+  vi.stubEnv("PI_ORB_WORK_DIR", "");
   dir = await fs.realpath(await fs.mkdtemp(join(tmpdir(), "live-files-")));
 });
 afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
   vi.mocked(fs.statfs).mockRestore();
+  vi.unstubAllEnvs();
   await fs.rm(dir, { recursive: true, force: true });
 });
 
@@ -65,6 +68,38 @@ it("rejects invalid, absent, directory, pseudo and fs.symlink-component paths", 
     expect((await openLiveFile(path))._unsafeUnwrapErr().status).toBe(403);
   }
   expect((await openLiveFile(join(dir, "absent")))._unsafeUnwrapErr().status).toBe(404);
+});
+
+it("bounds canonical paths to the real workspace, rejecting aliases and sibling prefixes", async () => {
+  const root = join(dir, "workspace");
+  await fs.mkdir(root);
+  await fs.mkdir(`${root}-other`);
+  for (const path of [join(root, "file"), join(dir, "outside"), `${root}-other/file`])
+    await fs.writeFile(path, "data");
+  const alias = join(dir, "alias");
+  await fs.symlink(root, alias);
+  await fs.symlink(dir, join(root, "escape"));
+  const file = (await openLiveFile(join(root, "file"), alias))._unsafeUnwrap();
+  expect((await file.close()).isOk()).toBe(true);
+  for (const path of [
+    join(dir, "outside"),
+    `${root}-other/file`,
+    `${root}/../outside`,
+    `${root}/../workspace/file`,
+    `${root}//file`,
+    `${root}/./file`,
+    `${alias}/file`,
+    `${root}/escape/outside`,
+  ]) {
+    const result = await openLiveFile(path, root);
+    if (result.isOk()) await result.value.close();
+    expect(result._unsafeUnwrapErr().status).toBe(403);
+  }
+  expect((await openLiveFile(join(dir, "outside"), root))._unsafeUnwrapErr().message).toContain(
+    "workspace",
+  );
+  for (const invalid of ["", "relative", join(dir, "absent")])
+    expect((await openLiveFile(join(root, "file"), invalid))._unsafeUnwrapErr().status).toBe(503);
 });
 
 it("rejects special files without waiting on them", async () => {
@@ -111,6 +146,37 @@ function appFor(harness: "pi" | "claude", ready = true) {
   return app;
 }
 for (const harness of ["pi", "claude"] as const) {
+  it(`${harness}: restricts process file HTTP to its workspace and fails closed without it`, async () => {
+    const root = join(dir, "workspace");
+    await fs.mkdir(root);
+    const paths = ["repo/report.html", "home/report.html", "uploads/report.html"].map((path) =>
+      join(root, path),
+    );
+    for (const path of paths) {
+      await fs.mkdir(join(path, ".."));
+      await fs.writeFile(path, "data");
+    }
+    const outside = join(dir, "control-plane");
+    await fs.writeFile(outside, "private");
+    vi.stubEnv("PI_ORB_CONTAINER", "0");
+    for (const configured of [root, "", undefined]) {
+      vi.stubEnv("PI_ORB_WORK_DIR", configured);
+      const app = appFor(harness);
+      for (const method of ["GET", "HEAD"] as const)
+        for (const [requested, status] of [
+          ...paths.map((path) => [path, configured ? 200 : 503] as const),
+          [outside, configured ? 403 : 503],
+        ] as const) {
+          const response = await app.inject({
+            method,
+            url: `/v1/files?path=${encodeURIComponent(requested)}`,
+            headers,
+          });
+          expect(response.statusCode).toBe(status);
+          if (status === 200) expect(response.body).toBe(method === "GET" ? "data" : "");
+        }
+    }
+  });
   it(`${harness}: authenticates GET/HEAD before reading, with typed errors`, async () => {
     for (const method of ["GET", "HEAD"] as const) {
       const app = appFor(harness);

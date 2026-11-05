@@ -175,7 +175,9 @@ it("checks owner, existence, running compute and current binding at admission", 
   expect((await read({ orbId: "missing" }))._unsafeUnwrapErr().status).toBe(404);
   expect(f.binding).not.toHaveBeenCalled();
   f.deps.hostProvider.kind = "process";
-  expect((await read()).isErr()).toBe(true);
+  expect((await read()).isOk()).toBe(true);
+  expect(f.open).toHaveBeenCalledOnce();
+  f.open.mockClear();
   f.deps.hostProvider.kind = "docker";
   f.binding.mockReturnValue(
     okAsync({ baseUrl: "http://private", token: "secret", incarnation: "1", cwd: "/" }),

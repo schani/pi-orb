@@ -42,6 +42,8 @@ export function registerFileRoutes(
   app: FastifyInstance,
   options: { token: string | undefined; incarnation: string | undefined; ready: () => boolean },
 ): void {
+  const root =
+    process.env.PI_ORB_CONTAINER === "0" ? (process.env.PI_ORB_WORK_DIR ?? "") : undefined;
   const expected = Buffer.from(`Bearer ${options.token ?? ""}`);
   app.route<{ Querystring: { path?: unknown } }>({
     method: ["GET", "HEAD"],
@@ -62,7 +64,7 @@ export function registerFileRoutes(
       if (!options.incarnation || request.headers["x-orb-incarnation"] !== options.incarnation)
         return sendError(reply, fileError(409, "stale runtime incarnation"));
       if (!options.ready()) return sendError(reply, fileError(503, "runtime is not ready"));
-      const opened = await openLiveFile(request.query.path);
+      const opened = await openLiveFile(request.query.path, root);
       if (opened.isErr()) return sendError(reply, opened.error);
       const { size, stream, close } = opened.value;
       reply

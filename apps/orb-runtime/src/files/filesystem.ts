@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
-import { lstat, open, statfs } from "node:fs/promises";
-import { normalize } from "node:path";
+import { lstat, open, realpath, statfs } from "node:fs/promises";
+import { isAbsolute, normalize, relative, sep } from "node:path";
 import { Readable } from "node:stream";
 import { err, ok, ResultAsync } from "neverthrow";
 
@@ -23,9 +23,23 @@ const ioError = (cause: unknown): FileError => {
 };
 const io = <T>(fn: () => Promise<T>) => ResultAsync.fromThrowable(fn, ioError)();
 
-export async function openLiveFile(path: unknown) {
+export async function openLiveFile(path: unknown, root?: string) {
   if (typeof path !== "string" || !path.startsWith("/") || path.includes("\0"))
     return err(fileError(400, "an absolute file path is required"));
+  if (root !== undefined) {
+    const unavailable = () => fileError(503, "file workspace is unavailable");
+    if (!isAbsolute(root)) return err(unavailable());
+    const canonical = await ResultAsync.fromThrowable(() => realpath(root), unavailable)();
+    if (canonical.isErr()) return err(canonical.error);
+    const within = relative(canonical.value, path);
+    if (
+      path !== normalize(path) ||
+      within === ".." ||
+      within.startsWith(`..${sep}`) ||
+      isAbsolute(within)
+    )
+      return err(fileError(403, "file must use a canonical path inside this orb's workspace"));
+  }
   if (/^\/(proc|sys|dev)(\/|$)/u.test(normalize(path))) return err(denied());
   // Check raw components so link/../file cannot hide a symlink.
   let prefix = "";

@@ -53,8 +53,8 @@ export async function readOrbFile(
   )
     return err({ status: 503, message: `Orb is ${orb.state}; files require running compute` });
   const provider = deps.hostProvider;
-  if (!["docker", "gce"].includes(provider.kind) || !provider.executionBinding)
-    return err({ status: 503, message: "Live files require isolated compute" });
+  if (!["docker", "gce", "process"].includes(provider.kind) || !provider.executionBinding)
+    return err({ status: 503, message: "Live files require supported compute" });
   await task.checkpoint("files.binding");
   if (signal.aborted) return unavailable();
   const binding = await provider.executionBinding(

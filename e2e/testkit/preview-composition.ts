@@ -23,6 +23,7 @@ import { ACCESS_TOKEN_AUDIENCE } from "../../apps/control-plane/src/domain/acces
 import { DEFAULT_ISSUER_CONSTANTS as constants } from "../../apps/control-plane/src/domain/constants.ts";
 import { requestOrbStart, requestOrbStop } from "../../apps/control-plane/src/domain/lifecycle.ts";
 import { createCentralOrbAgentOperations } from "../../apps/control-plane/src/domain/orb-agent-operations.ts";
+import type { OrbHostProvider, OrbHostRef } from "../../apps/control-plane/src/domain/ports.ts";
 import { previewError } from "../../apps/control-plane/src/domain/preview.ts";
 import { PreviewConnections } from "../../apps/control-plane/src/domain/preview-connections.ts";
 import { SIGNING_KEY_SECRET_PROVIDER } from "../../apps/control-plane/src/domain/signing-keys.ts";
@@ -32,7 +33,10 @@ import {
 } from "../../apps/control-plane/src/domain/workload-identity.ts";
 import { registerOrbFilesGateway } from "../../apps/control-plane/src/http/orb-files-gateway.ts";
 import { registerPreviewGateway } from "../../apps/control-plane/src/http/preview-gateway.ts";
-import type { PreviewHosts } from "../../apps/control-plane/src/http/preview-host.ts";
+import {
+  orbFilesBaseUrl,
+  type PreviewHosts,
+} from "../../apps/control-plane/src/http/preview-host.ts";
 import { registerRuntimePreviewRoutes } from "../../apps/control-plane/src/http/runtime-preview-routes.ts";
 import { FakeSecretStore } from "../../apps/control-plane/src/testkit/broker.ts";
 import {
@@ -48,7 +52,7 @@ import { registerPreviewRoutes } from "../../apps/orb-runtime/src/http/preview-r
 import { HmacPreviewVerifier } from "../../apps/orb-runtime/src/preview/admission.ts";
 import { startApplicationAuthFixture } from "./application-auth-fixture.ts";
 
-/** Real HTTP/auth/forwarding adapters, in-memory authority and fake host inventory; not namespace isolation. */
+/** Real HTTP/auth/forwarding adapters, in-memory authority and optional real host provider. */
 export async function startPreviewComposition(
   ports: readonly number[],
   external?: {
@@ -59,7 +63,11 @@ export async function startPreviewComposition(
     cli?: (brokerPort: number, args: string[]) => Promise<string>;
     brokerSocket?: string;
   },
-  options: { files?: boolean; missingOrbId?: string } = {},
+  options: {
+    files?: boolean;
+    missingOrbId?: string;
+    host?: { provider: OrbHostProvider; ref: OrbHostRef };
+  } = {},
 ) {
   const task = new NoSimulationTask("preview composed integration", false);
   const orbId = external?.orbId ?? randomUUID();
@@ -71,6 +79,7 @@ export async function startPreviewComposition(
   h.store.seedOrb({
     ...seeded,
     runtimeTokenHash: createHash("sha256").update(token).digest("hex"),
+    ...(options.host ? { hostRef: options.host.ref.resourceId } : {}),
   });
   const health = {
     v: 1 as const,
@@ -119,8 +128,8 @@ export async function startPreviewComposition(
       runtimeAddress: { baseUrl: external?.baseUrl ?? baseUrl },
     });
   };
-  if (options.files) {
-    if (!external) throw new Error("Live files require the Docker runtime fixture");
+  if (options.files && !options.host) {
+    if (!external) throw new Error("Live files require an external runtime fixture");
     Object.defineProperty(h.deps.hostProvider, "kind", { value: "docker" });
     h.deps.hostProvider.executionBinding = () =>
       okAsync({
@@ -130,13 +139,18 @@ export async function startPreviewComposition(
         cwd: "/workspace",
       });
   }
-  const deps = { ...h.deps, runtimeClient: new FetchRuntimeClient() };
+  const deps = {
+    ...h.deps,
+    ...(options.host ? { hostProvider: options.host.provider } : {}),
+    runtimeClient: new FetchRuntimeClient(),
+  };
   const connections = new PreviewConnections(deps, (_orb, operation) =>
     ResultAsync.fromPromise(operation(task), () =>
       previewError("cancelled", "Fixture watcher closed"),
     ),
   );
   let previewUrl: PreviewHosts["url"] | undefined;
+  let filesBaseUrl: string | null = null;
   const keys = new FakeSigningKeyStore();
   const secrets = new FakeSecretStore();
   const key = generateRsaSigningKey()._unsafeUnwrap();
@@ -165,6 +179,7 @@ export async function startPreviewComposition(
     filesOrbIds: [orbId, ...(options.missingOrbId ? [options.missingOrbId] : [])],
     configurePreviews: async ({ app, hosts, appOrigin }) => {
       previewUrl = (id, port) => hosts.url(id, port);
+      filesBaseUrl = orbFilesBaseUrl(hosts, deps.hostProvider.kind, orbId);
       if (options.files)
         registerOrbFilesGateway(app, task, {
           deps,
@@ -226,6 +241,7 @@ export async function startPreviewComposition(
     task,
     orbId,
     liveFilesOrigin: auth.liveFilesOrigins[0],
+    filesBaseUrl,
     missingFilesOrigin: auth.liveFilesOrigins[1],
     activity,
     observed: () => observed,

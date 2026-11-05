@@ -96,7 +96,7 @@ export function orbFilesBaseUrl(
   provider: string,
   orbId: string,
 ): string | null {
-  return provider === "docker" || provider === "gce"
+  return provider === "docker" || provider === "gce" || provider === "process"
     ? (hosts?.files.url(orbId).unwrapOr(null) ?? null)
     : null;
 }
