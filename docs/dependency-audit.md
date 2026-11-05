@@ -295,6 +295,16 @@ All have actual `.github/workflows/*` consumers. SHA prefixes below identify the
 | Iosevka Etoile **34.9.0 → 34.9.0**; JetBrains Mono **2.304 → 2.304** | `apps/web/public/fonts/manifest.json`: product font subsets/OFL/hash provenance; ≥250d/H equivalent type design | Current [Iosevka](https://github.com/be5invis/Iosevka/releases/tag/v34.9.0)/[JetBrains](https://github.com/JetBrains/JetBrainsMono/releases/tag/v2.304). Replacement <1d code but design/geometry risk; regenerate renamed licensed subsets/CSS/hash, real loading/shaping/terminal-column tests. |
 | DejaVuSansMono.ttf fixture: bundled version **not extracted** → upstream **2.37** | `e2e/fixtures/fonts` fixed historical geometry; ≥250d/H type design | Retain fixed fixture, don't automatically refresh [release](https://github.com/dejavu-fonts/dejavu-fonts/releases/tag/version_2_37). |
 
+**Iosevka update (2026-11-04, America/Los_Angeles):** product Etoile and the study's Iosevka/Aile/Etoile subsets use [34.9.1](https://github.com/be5invis/Iosevka/releases/tag/v34.9.1), tag commit `cea353b17b9b5c6e22da4f0fcae66f16d68a4edf`. Unhinted webfont archives match both GitHub release-asset digests and the publisher's [SHA-256.txt](https://github.com/be5invis/Iosevka/releases/download/v34.9.1/SHA-256.txt):
+
+| Archive | SHA-256 |
+|---|---|
+| [PkgWebFont-Unhinted-Iosevka-34.9.1.zip](https://github.com/be5invis/Iosevka/releases/download/v34.9.1/PkgWebFont-Unhinted-Iosevka-34.9.1.zip) | `7ad47936ff8a476d15858cb68535c5ec376cd4b384d2f68d556b8a7e62b406a4` |
+| [PkgWebFont-Unhinted-IosevkaAile-34.9.1.zip](https://github.com/be5invis/Iosevka/releases/download/v34.9.1/PkgWebFont-Unhinted-IosevkaAile-34.9.1.zip) | `a861abf4f624f659081768486be82e54b0a2c8764e4f0ff499e998403a0c5f4a` |
+| [PkgWebFont-Unhinted-IosevkaEtoile-34.9.1.zip](https://github.com/be5invis/Iosevka/releases/download/v34.9.1/PkgWebFont-Unhinted-IosevkaEtoile-34.9.1.zip) | `d8d9c490b1e014a825dd309d2c754717a86bb0b51f66b5e188effd9109646d7e` |
+
+FontTools 4.68.0/Brotli 1.2.1 subsets retain the existing 1,809-codepoint cmap, all layout features, glyph names and name records; family/style naming stays unchanged. All nine outputs identify `Version 34.9.1`; product hashes are in `apps/web/public/fonts/manifest.json`. The OFL text is byte-identical to the tagged license. JetBrains Mono and the DejaVu fixture are unchanged.
+
 `apps/web/src/components/HarnessIcon.tsx` vendors Claude's asterisk SVG from [Simple Icons](https://simpleicons.org/) under CC0; no source-version pin is recorded, no meaningful package upgrade applies, and the small static SVG is already maintained locally.
 
 Bash/POSIX tools, coreutils, tar/gzip/SHA256, OpenSSH/IAP and Linux namespace/ext4 tools are platform contracts managed by the distro, not individually downloaded app libraries. No pip requirements, Go modules or preinstalled Rust compiler pin were found in these install paths. `octocat/Hello-World` is a live clone validation fixture, not a released dependency. Cloud/vendor availability can fail independently of local locks.
