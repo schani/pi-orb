@@ -32,6 +32,15 @@ export class ClaudeActivity {
   get hookCount(): number {
     return this.hooks.size;
   }
+  get shutdownOwnership() {
+    return {
+      hooks: [...this.hooks],
+      children: [...this.admittedChildren.keys()],
+      tasks: [...this.edgeTasks.keys()],
+      inventory: [...this.tasks.keys()],
+      handoffs: [...this.handoffs.keys()],
+    };
+  }
   get drainHolds(): string[] {
     const holds: string[] = [];
     if (!this.rootDone) holds.push("root");

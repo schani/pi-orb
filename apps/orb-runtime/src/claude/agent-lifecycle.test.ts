@@ -828,6 +828,13 @@ it.each(["status", "assistant"] as const)(
             stopReason: "end_turn",
           },
         },
+        shutdownDiagnostics: {
+          initialClose: {
+            caller: "operation_drain",
+            result: { resultId: "drain-result", numTurns: 1, stopReason: "end_turn" },
+            ownership: { ownedTasks: { count: 0, ids: [], omitted: 0 } },
+          },
+        },
       },
     });
     expect(JSON.stringify(failure)).not.toContain("private-result");
@@ -855,6 +862,7 @@ it.each(["rotation", "interrupt"] as const)(
     const delivery = f.state.deliveries["inbox"];
     expect(delivery).toBeDefined();
     f.persist({ type: "user", uuid: delivery?.uuid, message: { content: "hello" } });
+    if (kind === "interrupt") await f.emit(nativeHook("initial-hook"));
     const aborted = kind === "interrupt" ? f.agent.abortOperation() : null;
     if (kind === "rotation") await f.emit(result);
     await f.awaitCloseRequest(2);
@@ -871,7 +879,24 @@ it.each(["rotation", "interrupt"] as const)(
       f.history.view.find(
         (record) => record.type === "event" && record.eventType === "claude.rotation_failed",
       ),
-    ).toMatchObject({ custom: { display: true }, overflow: { reason: "owned_work" } });
+    ).toMatchObject({
+      custom: { display: true },
+      overflow: {
+        reason: "owned_work",
+        shutdownDiagnostics: {
+          initialClose: {
+            caller: "operation_drain",
+            outcome: kind === "interrupt" ? "aborted" : "completed",
+            ownership: {
+              hooks: {
+                count: kind === "interrupt" ? 1 : 0,
+                ids: kind === "interrupt" ? ["initial-hook"] : [],
+              },
+            },
+          },
+        },
+      },
+    });
     expect(
       f.history.view.some(
         (record) => record.type === "event" && record.eventType === "claude.operation_finished",
@@ -916,6 +941,7 @@ it.each(["rotation", "interrupt"] as const)(
     await f.agent.closeExtensions();
     if (aborted !== null) expect((await aborted).isOk()).toBe(true);
     expect(f.agent.getHealth()).toMatchObject({ status: "ready", activity: "idle" });
+    expect(JSON.stringify(f.history.view)).not.toContain("shutdownDiagnostics");
     expect(
       f.history.view.find(
         (record) => record.type === "event" && record.eventType === "claude.operation_finished",
@@ -1164,3 +1190,35 @@ it.each(["result", "assistant"] as const)(
     await f.agent.closeExtensions();
   },
 );
+
+it("does not persist successful shutdown evidence and resets the next query's evidence", async () => {
+  const f = fixture();
+  expect((await f.attach()).isOk()).toBe(true);
+  for (const id of ["first", "second"]) {
+    expect((await f.agent.deliverInboxMessage(id, [id], [{ type: "text", text: id }])).isOk()).toBe(
+      true,
+    );
+    f.persist({ type: "user", uuid: f.state.deliveries[id]?.uuid, message: { content: id } });
+    await f.emit({ ...result, uuid: `${id}-result` } as unknown as SDKMessage);
+    if (id === "second") await f.emit(rootRequest);
+    f.exit();
+    await f.agent.closeExtensions();
+    if (id === "first") {
+      expect(f.agent.getHealth()).toMatchObject({ status: "ready", activity: "idle" });
+      expect(JSON.stringify(f.history.view)).not.toContain("shutdownDiagnostics");
+    }
+  }
+  const failure = f.history.view.find(
+    (record) => record.type === "event" && record.eventType === "claude.rotation_failed",
+  );
+  expect(failure).toMatchObject({
+    overflow: {
+      shutdownDiagnostics: {
+        initialClose: { caller: "operation_drain", seq: 1, result: { resultId: "second-result" } },
+        edges: [{ seq: 2, kind: "status" }],
+        droppedEdges: 0,
+      },
+    },
+  });
+  expect(JSON.stringify(failure)).not.toContain("first-result");
+});
