@@ -1162,6 +1162,160 @@ The corrective base is final PGlite254 `83582c00d1719ad39cdae3dc8934f1e687cd90a6
 
 Root npm audit initially reported 11 vulnerable entries (five production); updated supported transitives and Vitest 4.1.11 bring full and production audits to zero. Vitest 4 uses `maxWorkers: 1` in place of removed `poolOptions`; the existing actual-config sequencing contract guards frontend-first and single-owner lifecycle files. TypeScript's Node ambient types are explicit. The shrinkwrap-specific Pi packaging decision and reproducibility check are in `docs/pi-adapter.md`. Three isolated script lockfiles/installations also resolve patched brace expansion. Root typecheck, lint, 2,316 unit/DST cases (eight conditional skips), and 110 infrastructure tests passed. The full Docker E2E was attempted but blocked before tests by the absent local Docker socket; no release E2E qualification is claimed. A separate frontend attempt found missing Playwright browsers and then missing system libraries under an unprivileged user; its partial results do not qualify the browser suite.
 
+## npm 12.2.1 qualification (2026-11-04; local candidate, undeployed)
+
+Node remains 26.13.0 / ABI 147. npm 12.2.1's exact registry engines admit it;
+release metadata and verified tarball integrity are retained outside the worktree
+in `/workspace/npm-upgrade-evidence/`. The candidate uses an isolated npm prefix;
+the shared checkout and globally installed npm 11.20.0 are untouched.
+
+Tests first reject missing CI/container/native pins, lifecycle approvals and root
+package-manager metadata. Fixture tests observe the exact esbuild approval
+at the `npm ci` boundary, preserve the cloudflared denial and compare lock bytes.
+SQLite bundle version checks at the fixed path precede its explicit install hook; mismatch
+prevents that hook, while hook failure prevents service/test launch. Calls prove
+locked install → one SQLite hook → launch ordering; `sqlite_install` retains the
+existing bounded npm diagnostics.
+Controlled wrong-version esbuild probes reject on npm 11, incorrectly succeed
+with npm 12's original policy (hook blocked), then reject with the exact approval.
+The first npm 12 clean install also leaves Claude's CLI placeholder; the approved
+install executes `claude --version` successfully. Agent-browser works without its
+postinstall, through its own permission repair.
+
+Clean root installation applies all three unchanged Pi 1.4.0 sealed patches;
+reapplication verifies `already_applied`. Root/workspace lock bytes and patch
+SHA-256 seals match the base. Before stacking on PR 243, separate npm 11.20.0
+and npm 12.2.1 installs have identical version/URL/integrity/link graphs: root
+709 entries, web 320, control-plane 433 and runtime 339. Integrity-verified Pi,
+Chord and nested Pi dependency tarballs contain no `npm-shrinkwrap.json`.
+Independent web/control-plane/runtime manifest-only installs pass; web builds,
+control-plane patching and both network-namespace-isolated node-pty source
+rebuild/spawn gates pass. Existing `npm_config_nodedir=/usr/local` works with
+npm 12.2.1 but warns about future removal; no global source-policy broadening.
+The unchanged graph reports seven moderate audit findings (five runtime-only);
+no audit fix or lock refresh was run.
+
+Workspace/E2E typecheck and lint pass (488 warnings, 102 informational findings).
+The first lint attempt found only formatting in the new fixture test; formatting
+was corrected before the passing gate. Focused installer/fixture tests pass 69;
+pin/build-policy contracts pass 18. Playwright Chromium/WebKit and system
+prerequisites install successfully. The first `npm test` was transport-interrupted
+after approximately five minutes, with no final receipt; an owned detached gate
+replaces the tool-call lifetime, not a product/test timeout. On old head
+`fa95558b`, the complete `npm test` passes: 6,084 tests, 43 conditional skips,
+707 passed files/15 skipped; infrastructure passes 153 Node + 243 Python + 34
+native-guest tests and filesystem checks. Old-head E2E was deliberately disabled
+before execution for the PR 243 integration; these receipts do not qualify the
+stacked source. Docker CLI exists but its daemon socket is
+absent; no Docker image, real network PostgreSQL, native GCP acceptance or
+production qualification is claimed. Evidence logs and controlled failures remain
+in `/workspace/npm-upgrade-evidence/`.
+
+
+**Initial PR 243 integration:** npm was stacked on exact Claude head
+`c5c332e42273e6939c122ee780f64a5896596b85`; only Claude CLI `2.1.318` is approved,
+without an old-version fallback. Before that approval, a clean install reproduces
+the non-working CLI placeholder; afterward it runs the exact native version.
+Stacked clean install, exact CLI execution, seal reapplication, all 18 pin
+contracts and workspace/E2E typecheck/lint pass (488 warnings, 102 informational
+findings). Full infrastructure passes 156 Node + 243 Python + 34 native-guest
+checks, including 72 installer/fixture contracts. Lock SHA-256
+`b6982242b7f501b565dc4500a1c883266356dc2bd2918bb3b4c7bc53f3f2810d`
+and all sealed patch bytes match the exact PR 243 base. The first real npm 12 provider
+startup exposed the bundled SQLite rule that mocked install contracts missed;
+[evidence and correction](postmortems/2026-11-04-npm12-bundled-sqlite.md).
+With the narrow explicit native installation, the actual pinned wrapper reaches
+owned worker/Vite readiness, migrations and health, then executes an exit-zero
+child and cleans both groups without escalation. Exact fixture lock/generated
+hashes are retained; no fixture source/lock upgrade. Full stacked unit/E2E/image
+qualification remained pending at that checkpoint. PR 243 was then draft-blocked
+on its native queued-input/persistence contract; npm did not change or waive that proof.
+
+The standalone native npm paragraph sits before the Node section, preserving the
+existing git-crypt paragraph. `git merge-tree` against PR 247's `5065468f`
+source-build tree merges without conflict; no PR 247 behavior is included here.
+Final stacked startup/cleanup receipts: `stack243-wrapper-final/`; static/install
+receipts: `stack243-final-{ci,infra,typecheck,lint}.log`, all under the evidence
+root. A post-cleanup raw Python bind probe rejected a retained TCP `TIME-WAIT`
+socket, not a listener; `ss` evidence and Node-equivalent `SO_REUSEADDR` binding
+confirm both owned ports are available. No wrapper/test retry or product change
+was used to clear that diagnostic-probe assumption.
+
+
+**Focused integrated E2E:** reviewed `c81e8bba` (tree
+`e0ead4e3184d8a9289015d6783027a3457a19b94`) passes the actual pinned-provider
+process full-slice login/scripted-tool/replication/drain scenario: one pass,
+three intentionally deselected tests, 325.10 seconds. Pinned Chromium is explicit;
+the wrapper records exit zero, unchanged ready identity and successful cleanup
+of both groups without escalation. Command:
+`PI_ORB_E2E_BACKEND=process node scripts/local-fake-provider.mjs -- npm run test:e2e -- e2e/full-slice.e2e.test.ts -t 'runs login, a scripted tool round trip'`.
+Receipts: `stack243-fullslice-first.log`, `.exit` and
+`stack243-fullslice-provider/` under the evidence root.
+
+The rebase onto PR 243's `c5c332e4` changed only three upstream documentation
+files relative to reviewed `c81e8bba`; at that checkpoint, application behavior,
+manifests, lock, patches and tests were byte-identical. This qualification entry then updates
+attribution only. Repeated `git merge-tree` retains conflict-free independence
+from PR 247. That checkpoint claimed no full stacked unit/E2E/image pass or
+native-proof clearance; PR 243's question 88 was then open.
+
+
+**Native build ordering:** install and verify pinned npm after the existing Rustup
+proxy loop and before `cd /app`; Node is already extracted. A tests-first order
+contract rejects the earlier placement, then all 18 pin/build contracts pass.
+Only the two npm lines move; Rustup commands, dependency inputs and runtime
+behavior are unchanged. Earlier full-slice receipts do not exercise this image
+build ordering. The qualification section is colocated with dependency-tree
+ownership rather than appended at EOF to keep independent toolchain edits apart.
+
+**Prior CI base integration (2026-11-04, PST):** merged frozen PR 243 head
+`c02e49cf6238443e67e63a28b18ee774b2710840`, preserving its Claude `c5c332e4`
+and qualified PR 257 `df34bed1` ancestry. Runner cleanup is inherited unchanged;
+npm policy, execution pins, patches, dependency/lock bytes and fixture behavior
+remain identical to `78d67878`.
+
+The original inherited Claude failure in [CI 41864552196](https://github.com/schani/pi-orb/actions/runs/41864552196)
+remains preserved. At `78d67878`, [checks 126734259051](https://github.com/schani/pi-orb/actions/runs/41875667784/job/126734259051)
+again fails only `steering-native.test.ts:24` (undefined receipt): 6,315 pass,
+one fail, nine skip; the other nine jobs pass, including Docker E2E and Durable.
+That run retained no native journal, so it establishes no observed proof ordering.
+Its 19 DST JSON artifacts are historical, not new failures. Question 88 was then
+on hold; that integration made no receipt-proof/parser/state/assertion change
+or independent npm fix.
+
+On the integrated tree, fresh isolated npm 12 `ci`, 72 patch/provider tests,
+67 pin/capacity/qualification/APT contracts, workspace/E2E typecheck, lint,
+shell/syntax checks, seal reapplication and exact Claude CLI `2.1.318` execution
+pass. Global Node 26.13.0/npm 11.20.0 remain untouched. No new full unit/E2E run,
+cloud, Docker or production qualification is claimed. Receipts and source/scope
+identities: `/workspace/npm-upgrade-evidence/ci-base-fix/`; prior first-failure
+evidence: `/workspace/npm-upgrade-evidence/checks-fix/`.
+
+**Approved proof-base integration (2026-11-04, PST; local, undeployed):** merged
+frozen PR 243 `62e8a8111ba23af27f22f05d7348becaa5852b3c`. Question 88 is resolved
+by explicit human approval of the inherited single-copy proof correction, not a
+failure waiver. The upstream parser, assertions, tests and native harness are
+byte-identical to that head. Own scope remains 17 paths; every own file except
+this qualification doc is byte-identical to `fa885638`, including npm policy,
+pins, execution behavior, manifests, locks and patches. No new own behavior or
+independent Claude change is introduced; existing scoped npm reviews apply.
+
+Fresh isolated npm 12 `ci` preceded validation. The unchanged genuine native
+`steering-native.test.ts` passes both tests on its first run, including the formerly
+failing receipt assertion. Another 148 history/steering/boot/native cases pass
+(including 34 genuine SDK/CLI cases), plus 36 dependency/container contracts,
+72 patch/provider tests and 80 pin/capacity/qualification/API/APT contracts.
+Workspace/E2E typecheck, lint (488 warnings, 97 informational diagnostics), seal
+reapplication, shell/syntax checks and exact CLI `2.1.318` execution pass.
+Global Node 26.13.0/npm 11.20.0 remain unchanged. No new validation failed;
+the native steering harness deletes its temporary journals during cleanup.
+Receipts and byte proofs: `/workspace/npm-upgrade-evidence/q88-base-fix/`.
+
+Earlier first failures remain preserved, not relabelled as passes. Local native
+success qualifies this focused integration only: fresh exact-head hosted CI/E2E
+is still required before clearing CI status. No full-suite, image, live-subscription
+or production qualification, push or deployment is claimed.
+
 ## Shared dependency-tree ownership (2026-09-29)
 
 Finish one clean `npm ci` before starting validation in a shared checkout. No agent or tool may install while another validates. Run npm scripts or repository-local binaries; a missing local tool fails the check instead of allowing `npx` to download another version. During native MCP integration, concurrent installation and `npx vitest` selected transient Vitest 5 rather than pinned 3.2.7 and produced undefined SDK-export failures. Those runs are not a valid gate; preserve their first failures and qualify on a stable tree without overlapping installs. Evidence: `docs/postmortems/2026-09-29-native-mcp-validation-install-race.md`. The exclusive clean-install gate subsequently passed; qualification is recorded above.

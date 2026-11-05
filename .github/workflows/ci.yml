@@ -42,6 +42,11 @@ jobs:
           node-version: '26.13.0'
           cache: npm
 
+      - name: Install pinned npm
+        run: |
+          npm install --global npm@12.2.1
+          test "$(npm --version)" = 12.2.1
+
       - name: Install smoke controller dependencies
         run: npm ci --workspace @pi-orb/control-plane --include-workspace-root=false --ignore-scripts
 
@@ -94,6 +99,11 @@ jobs:
         with:
           node-version: '26.13.0'
           cache: npm
+
+      - name: Install pinned npm
+        run: |
+          npm install --global npm@12.2.1
+          test "$(npm --version)" = 12.2.1
 
       - name: Use the signed Ubuntu archive
         run: sudo python3 infra/runner_apt.py /etc/apt/sources.list.d/ubuntu.sources /etc/apt/apt.conf.d/99pi-orb-force-ipv4

@@ -29,6 +29,8 @@ curl -fsSL https://static.rust-lang.org/rustup/archive/1.29.3/x86_64-unknown-lin
 echo 'b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55  /usr/local/bin/rustup' | sha256sum -c -
 chmod 755 /usr/local/bin/rustup
 for proxy in cargo rustc rustdoc rustfmt cargo-clippy cargo-fmt clippy-driver; do ln -s rustup "/usr/local/bin/$proxy"; done
+npm install --global npm@12.2.1
+test "$(npm --version)" = 12.2.1
 cd /app
 sh infra/install_bun.sh amd64
 test "$(bun --version)" = 1.4.4
