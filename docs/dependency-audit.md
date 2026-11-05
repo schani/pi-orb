@@ -100,6 +100,16 @@ Current patch installation uses three central patches: Pi AI, codemode and Durab
 
 The inventory rows, estimates and text-only patch probes below remain the **pre-upgrade audit snapshot**, not current dependency or qualification claims. The earlier toolchain-only approval did not authorize Pi; this separate decision does. No external state reset or deployment is included.
 
+## HTTP/auth security refresh (2026-11-04, PST)
+
+Selected targets: Fastify **5.12.8**, static **10.1.8**, websocket **11.3.6**, ws **8.22.1**, Google auth **11.3.3**, openid-client **6.8.9**, tldts **7.4.19** and direct Undici **8.12.3**. Mandatory registry dependency floors also require find-my-way **9.10.0** (Fastify's `^9.10.0`), send **4.2.0** and jose **6.2.15**; existing compatible resolutions stay fixed.
+
+Keep owner-scoped overrides: static10.1.8 → glob **14.0.3**; gcp-metadata8.1.4 → gaxios **7.3.0**; Pi coding-agent1.4.0 → minimatch **11.0.1**, alongside its Undici8.12.3 override. These remove [glob cancellation bypass](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4) and [minimatch amplification](https://github.com/advisories/GHSA-g3hv-75wg-m249), including legacy Google auth10's gaxios7.1.3/rimraf5 closure. Glob14 requires its own minimatch11.0.2 and path-scurry3; both minimatch versions share nonrecursive-glob-match1.0.2. Global matcher/glob overrides and a Pi upgrade are rejected: the owning edges suffice without changing sealed Pi1.4.0 packages or patches.
+
+Real Pi package filtering and model selection qualify brace/globstar/negation/exact-override and nocase behavior. Native fetch with the npm8 Agent qualifies connection reuse, redirect rejection, abort and socket-time private/mixed DNS rejection. Static enumeration/ranges/cache validators, signed OIDC, Google refresh and legacy metadata HTTP contracts qualify their used boundaries. Keep existing sanitized auth/MCP errors and lifecycle close diagnostics. Local receipts and remaining qualification boundaries: `docs/testing.md`. No persisted-state, prompt or deployment change.
+
+Upstream: [Undici8.12.3](https://github.com/nodejs/undici/releases/tag/v8.12.3), [Fastify5.12.8](https://github.com/fastify/fastify/releases/tag/v5.12.8), [find-my-way9.10.0 registry](https://registry.npmjs.org/find-my-way/9.10.0), [static10.1.8](https://github.com/fastify/fastify-static/releases/tag/v10.1.8), [websocket11.3.6](https://github.com/fastify/fastify-websocket/releases/tag/v11.3.6), [ws8.22.1](https://github.com/websockets/ws/releases/tag/8.22.1), [openid-client6.8.9](https://github.com/panva/openid-client/releases/tag/v6.8.9), [Google auth registry](https://registry.npmjs.org/google-auth-library/11.3.3), [tldts registry](https://registry.npmjs.org/tldts/7.4.19).
+
 ## Direct npm inventory (pre-upgrade snapshot)
 
 ### Harnesses, execution, shared contracts
