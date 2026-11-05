@@ -4,7 +4,6 @@ import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   fauxAssistantMessage,
@@ -22,6 +21,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { NoSimulationTask } from "determined";
 import { err, okAsync } from "neverthrow";
+import { Type } from "typebox";
 import { Agent, fetch as localFetch } from "undici";
 import { expect, it, vi } from "vitest";
 import { composeControlPlaneDatabase } from "./adapters/database.ts";
@@ -295,9 +295,11 @@ it.each(["typed-boundary", "typed-unavailable", "pglite"] as const)(
       )._unsafeUnwrap();
       const owner = agent;
       const nativeRoot = (await resolveConversation!(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT))!;
-      const nativeView = await nativeRoot.viewState(BACKGROUND_CONTEXT);
+      const nativeView = await nativeRoot.watch(BACKGROUND_CONTEXT);
       // Native nested calls publish committed LiveDoc slots, not codemode api.details().
-      const unsubscribeNative = nativeView.subscribe((value) => {
+      nativeView.start(async (call) => {
+        if (call.kind !== "value") return;
+        const value = call.value;
         const live = value.docs[LiveDoc.definition.kind] as LiveState | undefined;
         for (const slot of live?.nestedTools ?? []) {
           if (slot.name.startsWith("mcp__fixture__"))
@@ -314,9 +316,8 @@ it.each(["typed-boundary", "typed-unavailable", "pglite"] as const)(
           publicProgress.push({ name: tool.name, state: tool.state });
       });
       disposeProgress = () => {
-        unsubscribeNative();
         unsubscribePublic();
-        nativeView.dispose();
+        void nativeView.stop();
       };
       const deliver = async (id: string) => {
         (

@@ -1,5 +1,5 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { type Tool, Type } from "@earendil-works/pi-ai";
+import type { Tool } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   fauxAssistantMessage,
@@ -18,6 +18,7 @@ import {
 import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
 import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
 import { errAsync, okAsync } from "neverthrow";
+import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
 import { CODEMODE_BOOTSTRAP } from "./codemode.ts";
@@ -383,7 +384,6 @@ it.each(["root", "child"] as const)(
           structuredContent: {
             type: "array",
             items: { anyOf: [{ type: "number" }, { type: "null" }, { type: "string" }] },
-            "~optional": true,
           },
         },
         required: ["content"],

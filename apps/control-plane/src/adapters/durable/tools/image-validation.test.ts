@@ -1,7 +1,7 @@
-import { Type } from "@earendil-works/pi-ai";
 import { CodemodeSandbox } from "@earendil-works/pi-codemode";
 import { defineTool } from "@earendil-works/pi-durable";
 import { okAsync } from "neverthrow";
+import { Type } from "typebox";
 import { expect, it } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
 import { createNativeCodemodeSandbox } from "./codemode-sandbox.ts";

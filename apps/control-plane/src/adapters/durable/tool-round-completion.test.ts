@@ -2,7 +2,6 @@ import { createServer } from "node:http";
 import { setImmediate } from "node:timers/promises";
 import { zstdDecompressSync } from "node:zlib";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
 import {
   createRegistry,
   defineExtension,
@@ -13,6 +12,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import type { ServerFrame } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { okAsync } from "neverthrow";
+import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import { DurableAgent } from "./agent.ts";
 import { createDurableModels } from "./models.ts";
@@ -227,7 +227,7 @@ describe("native HTTP tool-round completion", () => {
         );
         expect(calls.items).toContainEqual(
           expect.objectContaining({
-            version: 2,
+            version: 3,
             input: expect.objectContaining({ kind: "model", callId: "call|fc" }),
           }),
         );

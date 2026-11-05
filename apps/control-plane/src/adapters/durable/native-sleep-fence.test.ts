@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   fauxAssistantMessage,
@@ -17,6 +16,7 @@ import {
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { NoSimulationTask } from "determined";
 import type { Result } from "neverthrow";
+import { Type } from "typebox";
 import { expect, it, vi } from "vitest";
 import { makeOrbRow, makeProjectRow, seedTestUser } from "../../testkit/fixtures.ts";
 import { composeControlPlaneDatabase } from "../database.ts";

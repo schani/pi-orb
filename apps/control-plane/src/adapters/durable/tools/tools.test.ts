@@ -1,5 +1,4 @@
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   type FauxResponseFactory,
@@ -15,6 +14,7 @@ import {
   type ToolExecutionApi,
 } from "@earendil-works/pi-durable";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
+import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import { MemoryAgentPersistence } from "../memory-persistence.testkit.ts";
 import { CallableCatalog } from "./catalog.ts";
@@ -243,9 +243,9 @@ describe("Durable callable tools", () => {
       const submission = await root.submit({ type: "input", content: "go" }, context);
       await childStarted;
       await submission.wait(context);
-      const graph = await harness.taskGraph(context);
+      const graph = await harness.observeTaskGraph({ advance() {}, end() {} }, context);
       expect(Object.keys(graph.value.tasks).length).toBeGreaterThan(0);
-      graph.dispose();
+      graph.detach();
       const page = await storage.scanConversations({}, 100, undefined, context);
       expect(page.items.filter((c) => c.owner)).toHaveLength(1);
       const receipts = await harness.snapshot(ChildReceipts, root.id, context);

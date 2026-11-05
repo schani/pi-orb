@@ -1,5 +1,4 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   type FauxResponseFactory,
@@ -18,6 +17,7 @@ import {
   type TaskId,
   type ToolExecutionApi,
 } from "@earendil-works/pi-durable";
+import { Type } from "typebox";
 import { expect, it } from "vitest";
 import { promptExtension } from "../prompt.ts";
 import { ChildReceipts, createDurableTools } from "./index.ts";
@@ -458,10 +458,10 @@ it("parent input interrupts a real child wait without aborting its anchor or con
   }
 });
 
-it("cancels a restart-parked child anchor before waiting for its terminal receipt", async () => {
+it("cancels a persisted sleeping child anchor before waiting for its terminal receipt", async () => {
   const { MemoryAgentPersistence } = await import("../memory-persistence.testkit.ts");
   const authority = new MemoryAgentPersistence();
-  const storage = (await authority.openOrb("parked-child", false))._unsafeUnwrap().storage;
+  const storage = (await authority.openOrb("sleeping-child", false))._unsafeUnwrap().storage;
   const s = setup([
     fauxAssistantMessage(nativeCall("cancel_subagent", { agent_id: "child" }), {
       stopReason: "toolUse",
@@ -476,7 +476,7 @@ it("cancels a restart-parked child anchor before waiting for its terminal receip
       (tx) =>
         tx.createTask(
           ChildAnchor,
-          { prompt: "must not run", description: "parked" },
+          { prompt: "must not run", description: "sleeping" },
           { ownership: { kind: "conversation" }, background: true },
         ),
       ctx,
@@ -485,19 +485,37 @@ it("cancels a restart-parked child anchor before waiting for its terminal receip
       (await tx.doc(ChildReceipts, root.id)).children.child = {
         anchor: id,
         prompt: "must not run",
-        description: "parked",
+        description: "sleeping",
       };
     }, ctx);
     await harness.close(ctx);
     await storage.commit(
-      [{ type: "task", value: { ...(await storage.task(id, ctx))!, restarts: 5 } }],
+      [
+        [
+          {
+            type: "task",
+            value: {
+              ...(await storage.task(id, ctx))!,
+              state: {
+                status: "sleeping",
+                until: Date.now() + 60_000,
+                checkpoint: { phase: "create" },
+              },
+            },
+          },
+        ],
+      ],
+      () => {},
       ctx,
     );
     harness = await Harness.open(storage, s, ctx);
     const reopened = (await harness.conversation(root.id, ctx))!;
+    expect(await harness.getTask(id, ctx)).toMatchObject({ state: { status: "sleeping" } });
     s.tools.bindTaskAbort(harness.abortTask.bind(harness));
     harness.resume();
-    await (await reopened.submit({ type: "input", content: "cancel parked child" }, ctx)).wait(ctx);
+    await (await reopened.submit({ type: "input", content: "cancel sleeping child" }, ctx)).wait(
+      ctx,
+    );
     const entries = await reopened.entries({}, 100, undefined, ctx);
     const result = entries.items
       .flatMap((entry) => entry.model ?? [])
@@ -508,6 +526,7 @@ it("cancels a restart-parked child anchor before waiting for its terminal receip
     expect(await harness.getTask(id, ctx)).toMatchObject({
       state: { status: "terminal", outcome: { status: "aborted" } },
     });
+    expect((await harness.inspect(ctx)).tasks).toHaveLength(0);
   } finally {
     await harness.close(ctx);
     await s.tools.close();

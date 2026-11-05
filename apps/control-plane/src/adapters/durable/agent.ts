@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { AttachedReplicatedState } from "@earendil-works/chord";
+import type { WatchHandle } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import {
   type AssistantMessage,
@@ -23,10 +23,12 @@ import {
   type LiveState,
   ProviderDoc,
   type Registry,
+  type Report,
   type ReportInfo,
   type Storage,
   StorageRequestError,
   type TaskGraph,
+  type TaskId,
   type ToolExecutionApi,
   type ToolRegistration,
   type Tx,
@@ -241,6 +243,7 @@ export class DurableAgent implements AgentSessionFacade {
   private tasks: TaskGraph = { tasks: {} };
   private queuedInput: number | undefined;
   private operationId: string | null = null;
+  private runTaskId: TaskId | undefined;
   private readonly operationKind = "agent";
   private closing = false;
   private revokeResources: (() => void) | undefined;
@@ -248,10 +251,9 @@ export class DurableAgent implements AgentSessionFacade {
   private closeResult: ResultAsync<void, RuntimeClientError> | null = null;
   private operationOutcome: "completed" | "aborted" | "failed" = "completed";
   private failure: RuntimeClientError | null = null;
-  private view!: AttachedReplicatedState<ConversationView>;
-  private graph!: AttachedReplicatedState<TaskGraph>;
-  private unsubscribeView = () => {};
-  private unsubscribeGraph = () => {};
+  private view!: WatchHandle<ConversationView>;
+  private graph!: WatchHandle<TaskGraph>;
+  private executionNotice: AgentSnapshot["notice"];
   private unsubscribeCommits = () => {};
   private mutations: Promise<void> = Promise.resolve();
   private projection: Promise<Result<void, RuntimeClientError>> = Promise.resolve(ok(undefined));
@@ -324,8 +326,7 @@ export class DurableAgent implements AgentSessionFacade {
     let harness: Harness | undefined;
     let stage = "registry";
     let owner: DurableAgent | undefined;
-    const reports: ReportInfo[] = [];
-    let unexpectedClose = false;
+    const reports: Report[] = [];
     let resourceClose: ResultAsync<void, RuntimeClientError> | undefined;
     const closeResources = () =>
       (resourceClose ??= options.closeResources?.() ?? okAsync(undefined));
@@ -348,17 +349,23 @@ export class DurableAgent implements AgentSessionFacade {
             settings: { steeringMode: "all", followUpMode: "all", afterFailedRun: "continue" },
             env: (target) => options.envFor?.(target) ?? options.env,
             ...(options.now === undefined ? {} : { now: options.now }),
-            onReport: (error, info) => {
-              if (unexpectedClose) {
-                owner?.storageFailed(error);
-                return;
-              }
-              if (owner) void owner.reportFailure(info);
-              else reports.push(info);
+            onReport: (report) => {
+              if (!owner) reports.push(report);
+              else if (report.kind === "storage_failed") owner.storageFailed(report.error);
+              else void owner.reportFailure(report);
             },
           },
           context,
         );
+        const startupStorageFailure = reports.find((report) => report.kind === "storage_failed");
+        if (startupStorageFailure) {
+          const authority = storageAuthorityError(startupStorageFailure.error);
+          return err(
+            authority
+              ? startupRuntimeError(authority)
+              : durableError("central Harness storage failed during open"),
+          );
+        }
         options.bindNativeConversation?.(
           harness.conversation.bind(harness),
           harness.abortTask.bind(harness),
@@ -427,6 +434,15 @@ export class DurableAgent implements AgentSessionFacade {
           },
           context,
         );
+        const rootStorageFailure = reports.find((report) => report.kind === "storage_failed");
+        if (rootStorageFailure) {
+          const authority = storageAuthorityError(rootStorageFailure.error);
+          return err(
+            authority
+              ? startupRuntimeError(authority)
+              : durableError("central Harness storage failed during open"),
+          );
+        }
         const agent = new DurableAgent({ ...options, closeResources }, harness, root);
         owner = agent;
         for (const info of reports) await agent.reportFailure(info);
@@ -466,63 +482,73 @@ export class DurableAgent implements AgentSessionFacade {
           cursor = page.next;
         } while (cursor !== undefined);
         stage = "observations";
-        agent.view = await root.viewState(context);
-        agent.graph = await harness.taskGraph(context);
-        agent.updateView(agent.view.value);
+        agent.view = await root.watch(context);
+        agent.graph = await harness.watchTaskGraph(context);
         agent.tasks = agent.graph.value;
-        const inspection = await harness.inspect(context);
-        for (const task of inspection.tasks) {
-          if (
-            task.state.kind === "blocked" &&
-            task.state.reason === "restart_limit" &&
-            !reports.some((info) => info.type === "task_parked" && info.task.id === task.record.id)
-          ) {
-            await agent.reportFailure({ type: "task_parked", task: task.record });
-          }
-        }
-        agent.unsubscribeView = agent.view.subscribe((value) => agent.updateView(value));
-        agent.unsubscribeGraph = agent.graph.subscribe((value) => {
-          agent.tasks = value;
-          agent.updateView(agent.view.value);
+        const live = (agent.view.value.docs["pi.live"] ?? {}) as LiveState;
+        agent.runTaskId = live.run?.taskId ?? live.runFailure?.taskId;
+        agent.updateView(agent.view.value);
+        agent.view.start(async (call) => {
+          if (call.kind === "value") agent.updateView(call.value);
+          else agent.storageFailed(call.error);
         });
-        agent.unsubscribeCommits = harness.subscribeCommits((publication) => {
-          let changed = false;
-          for (const change of publication.changes) {
-            if (change.type === "entry" && change.value.conversationId === root.id) {
-              agent.entries.push(change.value);
-              const entry = change.value;
-              const owner =
-                entry.model?.[0]?.role === "assistant" && entry.byTaskId !== undefined
-                  ? String(entry.byTaskId)
-                  : undefined;
-              if (owner !== undefined) {
-                agent.retiredBlocks.set(`${agent.session.id}:${entry.id}`, [
-                  ...(agent.liveBlocks.get(owner) ?? []),
-                ]);
-                agent.liveBlocks.delete(owner);
+        agent.graph.start(async (call) => {
+          if (call.kind === "value") {
+            agent.tasks = call.value;
+            agent.updateView(agent.view.value);
+          } else agent.storageFailed(call.error);
+        });
+        const commits = harness.observeCommits({
+          advance: (publication) => {
+            let changed = false;
+            for (const change of publication.changes) {
+              if (
+                change.type === "document" &&
+                change.kind === "change" &&
+                change.record.kind === "pi.live" &&
+                change.conversationId === root.id
+              ) {
+                // Watch revisions may fold away a whole run; commit publications retain its identity.
+                const live = change.value as LiveState;
+                agent.runTaskId = live.run?.taskId ?? agent.runTaskId ?? live.runFailure?.taskId;
               }
-              changed = true;
-            }
-            if (
-              change.type === "submission" &&
-              change.value.conversationId === root.id &&
-              change.value.entry !== undefined
-            ) {
-              if (change.value.requestId?.startsWith("inbox:"))
-                agent.inboxEntries.set(change.value.entry, change.value.requestId.slice(6));
-              if (change.value.requestId?.startsWith(NOTIFICATION_REQUEST_PREFIX)) {
-                agent.notificationEntries.add(change.value.entry);
+              if (change.type === "entry" && change.value.conversationId === root.id) {
+                agent.entries.push(change.value);
+                const entry = change.value;
+                const owner =
+                  entry.model?.[0]?.role === "assistant" && entry.byTaskId !== undefined
+                    ? String(entry.byTaskId)
+                    : undefined;
+                if (owner !== undefined) {
+                  agent.retiredBlocks.set(`${agent.session.id}:${entry.id}`, [
+                    ...(agent.liveBlocks.get(owner) ?? []),
+                  ]);
+                  agent.liveBlocks.delete(owner);
+                }
                 changed = true;
               }
+              if (
+                change.type === "submission" &&
+                change.value.conversationId === root.id &&
+                change.value.entry !== undefined
+              ) {
+                if (change.value.requestId?.startsWith("inbox:"))
+                  agent.inboxEntries.set(change.value.entry, change.value.requestId.slice(6));
+                if (change.value.requestId?.startsWith(NOTIFICATION_REQUEST_PREFIX)) {
+                  agent.notificationEntries.add(change.value.entry);
+                  changed = true;
+                }
+              }
             }
-          }
-          if (changed) agent.queueProjection();
+            if (changed) agent.queueProjection();
+          },
+          end: (end) => {
+            if (end.kind === "failed" && !agent.closing) agent.storageFailed(end.error);
+          },
         });
-        harness.subscribeClose(() => {
-          if (!agent.closing) unexpectedClose = true;
-        });
+        agent.unsubscribeCommits = () => commits.detach();
         void harness.closed.then((end) => {
-          if (end.reason === "failed") agent.storageFailed(end.error);
+          if (end.kind === "failed") agent.storageFailed(end.error);
         });
         const recoveredTasks = Object.keys(agent.tasks.tasks);
         const recovering = recoveredTasks.length > 0 || unfinishedSubmissions;
@@ -628,81 +654,41 @@ export class DurableAgent implements AgentSessionFacade {
     void this.close();
   }
 
-  private parkingNotice(background: boolean): ServerFrame & { type: "server.error" } {
-    return {
+  private reportFailure(info: ReportInfo): PromiseLike<void> {
+    const interrupted = info.kind === "task_interrupted";
+    const terminal = interrupted || info.kind === "task_faulted";
+    const message = interrupted
+      ? info.reason === "restart_limit"
+        ? "Agent task failed after repeated interruptions without progress"
+        : "Agent task failed after exhausting interrupted model retries"
+      : terminal
+        ? "Agent task failed"
+        : "Agent extension reported a failure";
+    this.executionNotice = {
+      code: terminal ? "central_agent_task_failed" : "central_agent_report",
+      message,
+      retryable: false,
+    };
+    this.publish({
       v: 1,
       type: "server.error",
       at: new Date(this.now()).toISOString(),
-      error: {
-        code: "central_agent_paused",
-        message: background
-          ? "Background task paused after five consecutive interruptions without progress"
-          : "Agent paused after five consecutive interruptions without progress; abort the interrupted turn to continue",
-        retryable: false,
-      },
-    };
-  }
-
-  private reportFailure(info: ReportInfo): PromiseLike<void> {
-    const parked = info.type === "task_parked";
-    return ResultAsync.fromPromise(this.harness.inspect(context), () =>
-      durableError("Harness inspection failed"),
-    ).then((inspection) => {
-      const task = "task" in info ? info.task : undefined;
-      const tasks = inspection.isOk() ? inspection.value.tasks : [];
-      const record = tasks.find((entry) => entry.record.id === task?.id)?.record;
-      const blocksRoot = (record: (typeof tasks)[number]["record"]): boolean => {
-        if (record.conversationId !== this.root.id) return false;
-        let current: typeof record | undefined = record;
-        while (current) {
-          if (current.background) return false;
-          const owner: typeof current.owner = current.owner;
-          current =
-            owner === undefined
-              ? undefined
-              : tasks.find((entry) => entry.record.id === owner)?.record;
-        }
-        return true;
-      };
-      const message = parked
-        ? this.parkingNotice(record !== undefined && !blocksRoot(record)).error.message
-        : "Agent extension reported a failure";
-      this.publish({
-        v: 1,
-        type: "server.error",
-        at: new Date(this.now()).toISOString(),
-        error: {
-          code: parked ? "central_agent_paused" : "central_agent_report",
-          message,
-          retryable: false,
-        },
-      });
-      const facts = {
-        orbId: this.options.orbId,
-        type: info.type,
-        ...(task ? { task: task.id, conversation: task.conversationId, kind: task.kind } : {}),
-        ...("reason" in info ? { reason: info.reason } : {}),
-        ...(parked || ("reason" in info && info.reason === "restart_limit")
-          ? { restarts: record?.restarts ?? DEFAULT_RESTART_LIMIT, limit: DEFAULT_RESTART_LIMIT }
-          : {}),
-      };
-      void this.options.edge?.("harness.reported_failure", facts);
-      if (
-        inspection.isErr() ||
-        tasks.some(
-          (entry) =>
-            entry.state.kind === "blocked" &&
-            entry.state.reason !== "restart_limit" &&
-            blocksRoot(entry.record),
-        )
-      ) {
-        this.failure = inspection.isErr()
-          ? inspection.error
-          : durableError(parked ? message : "Agent execution is blocked");
-        this.operationOutcome = "failed";
-      }
-      if (parked || this.failure) void this.options.edge?.("harness.execution_blocked", facts);
+      error: this.executionNotice,
     });
+    const task = "task" in info ? info.task : undefined;
+    const facts = {
+      orbId: this.options.orbId,
+      type: info.kind,
+      ...(task ? { task: task.id, conversation: task.conversationId, kind: task.kind } : {}),
+      ...("reason" in info ? { reason: info.reason } : {}),
+      ...("restarts" in info ? { restarts: info.restarts } : {}),
+      ...("reason" in info && info.reason === "restart_limit"
+        ? { limit: DEFAULT_RESTART_LIMIT }
+        : {}),
+    };
+    return (this.options.edge?.("harness.reported_failure", facts) ?? okAsync(undefined)).then(
+      () => undefined,
+    );
   }
 
   private now(): number {
@@ -765,6 +751,24 @@ export class DurableAgent implements AgentSessionFacade {
 
   private updateView(value: ConversationView): void {
     this.live = (value.docs["pi.live"] ?? {}) as LiveState;
+    if (
+      this.live.runFailure &&
+      this.live.runFailure.taskId === this.runTaskId &&
+      this.live.runFailure.reason !== "aborted" &&
+      this.live.runFailure.reason !== "reset"
+    ) {
+      this.operationOutcome = "failed";
+      this.executionNotice = {
+        code: "central_agent_task_failed",
+        message:
+          this.live.runFailure.reason === "restart_limit"
+            ? "Agent task failed after repeated interruptions without progress"
+            : this.live.runFailure.reason === "interrupted"
+              ? "Agent task failed after exhausting interrupted model retries"
+              : "Agent run ended without an answer",
+        retryable: false,
+      };
+    } else if (this.live.run) this.executionNotice = undefined;
     const inbox = value.docs["pi.inbox"] as { items?: { id: number; mode: string }[] } | undefined;
     this.inboxCount = inbox?.items?.length ?? 0;
     this.queuedInput = inbox?.items?.find((item) => item.mode !== "write")?.id;
@@ -843,6 +847,14 @@ export class DurableAgent implements AgentSessionFacade {
     if (this.operationId !== null && run && this.tasks.tasks[String(run.taskId)]?.abortRequested)
       this.operationOutcome = "aborted";
     if (!active && this.operationId !== null) {
+      const failure = this.live.runFailure;
+      if (
+        failure &&
+        failure.taskId === this.runTaskId &&
+        failure.reason !== "aborted" &&
+        failure.reason !== "reset"
+      )
+        this.operationOutcome = "failed";
       const turn = this.records.slice(this.turnStart);
       if (
         this.summaryCoordinator &&
@@ -970,14 +982,8 @@ export class DurableAgent implements AgentSessionFacade {
 
   snapshot(): Result<AgentSnapshot, { message: string }> {
     if (this.failure) return err({ message: this.failure.message });
-    const parked = Object.values(this.tasks.tasks).find((task) => task.blocked === "restart_limit");
     return ok({
-      ...(parked
-        ? {
-            notice: this.parkingNotice(parked.background || parked.conversationId !== this.root.id)
-              .error,
-          }
-        : {}),
+      ...(this.executionNotice ? { notice: this.executionNotice } : {}),
       orbId: this.options.orbId,
       runtimeInstanceId: this.runtimeInstanceId,
       session: this.session,
@@ -1524,10 +1530,8 @@ export class DurableAgent implements AgentSessionFacade {
         await this.summaryCoordinator?.drain();
         await this.summaryOutcomes;
         this.unsubscribeCommits();
-        this.unsubscribeView();
-        this.unsubscribeGraph();
-        this.view.dispose();
-        this.graph.dispose();
+        await this.view.stop();
+        await this.graph.stop();
         const resources = await this.options.closeResources?.();
         const failed = draining?.isErr()
           ? { stage: "drain", error: draining.error }

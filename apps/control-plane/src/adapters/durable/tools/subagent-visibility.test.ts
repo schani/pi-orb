@@ -1,5 +1,4 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   fauxAssistantMessage,
@@ -15,6 +14,7 @@ import {
   type TaskId,
 } from "@earendil-works/pi-durable";
 import { okAsync, ResultAsync } from "neverthrow";
+import { Type } from "typebox";
 import { expect, it } from "vitest";
 import { MemoryAgentPersistence } from "../memory-persistence.testkit.ts";
 import { createDurableTools } from "./index.ts";

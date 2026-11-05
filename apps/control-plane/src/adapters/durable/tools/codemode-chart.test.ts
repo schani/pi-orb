@@ -1,7 +1,7 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-durable";
 import { CHART_MAX_PER_SCRIPT } from "@pi-orb/protocol";
+import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
 import { openCodemodeHarness } from "./testkit/codemode.ts";

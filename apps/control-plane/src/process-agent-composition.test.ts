@@ -1,9 +1,9 @@
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { MemoryStorage, type ToolExecutionApi } from "@earendil-works/pi-durable";
 import { NoSimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, ResultAsync } from "neverthrow";
+import { Type } from "typebox";
 import { fetch as localFetch, MockAgent } from "undici";
 import { describe, expect, it, vi } from "vitest";
 import { DurableAgent } from "./adapters/durable/agent.ts";

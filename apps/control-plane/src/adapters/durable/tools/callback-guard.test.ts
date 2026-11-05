@@ -1,5 +1,5 @@
-import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ToolExecutionResult } from "@earendil-works/pi-durable";
+import { Type } from "typebox";
 import { expect, it } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
 import { openCodemodeHarness } from "./testkit/codemode.ts";

@@ -1,7 +1,7 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
 import { defineTool, LiveDoc } from "@earendil-works/pi-durable";
 import { okAsync } from "neverthrow";
+import { Type } from "typebox";
 import { expect, it } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
 import { openCodemodeHarness } from "./testkit/codemode.ts";
@@ -30,9 +30,9 @@ it("discovers normalized names, namespaces and ranked bounded declarations", asy
   try {
     const result = await fixture.run(`text({
       declaration: (await describeTool("mcp__dev_radius__search")).includes("Promise<string | Array<"),
-      matches: (await searchTools("issues", { namespace: "dev_radius", limit: 1 })).map((tool) => tool.name),
+      matches: (await searchTools("issues", { namespace: "mcp__dev-radius", limit: 1 })).map((tool) => tool.name),
       orb: (await describeNamespace("orb")).tools,
-      instructions: (await describeNamespace("dev_radius")).instructions
+      instructions: (await describeNamespace("mcp__dev-radius")).instructions
     });`);
     expect(result.isError).toBe(false);
     expect(result.output).toContainEqual({

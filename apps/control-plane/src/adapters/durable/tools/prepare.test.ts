@@ -1,7 +1,7 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ToolExecutionApi } from "@earendil-works/pi-durable";
 import { okAsync } from "neverthrow";
+import { Type } from "typebox";
 import { expect, it } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
 

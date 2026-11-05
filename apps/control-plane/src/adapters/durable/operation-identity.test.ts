@@ -1,4 +1,3 @@
-import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
@@ -10,7 +9,6 @@ import {
   Harness,
   hook,
   MemoryStorage,
-  type StorageWrite,
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import type { RuntimeEvent } from "@pi-orb/protocol";
@@ -71,7 +69,8 @@ it("correlates earliest Native admission, patches, retirement and duplicate rece
   const admission = latch();
   const commitRelease = latch();
   class AdmissionStorage extends MemoryStorage {
-    override async commit(writes: readonly StorageWrite[], context: Context) {
+    override async commit(...args: Parameters<MemoryStorage["commit"]>) {
+      const writes = args[0].flat();
       if (
         writes.some(
           (write) => write.type === "submission" && write.value.requestId === "inbox:input-0",
@@ -80,7 +79,7 @@ it("correlates earliest Native admission, patches, retirement and duplicate rece
         admission.resolve();
         await commitRelease.promise;
       }
-      return super.commit(writes, context);
+      return super.commit(...args);
     }
   }
   const agent = (

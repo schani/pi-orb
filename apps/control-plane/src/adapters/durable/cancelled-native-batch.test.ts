@@ -90,11 +90,13 @@ it("cancels one member of a frozen batch, rejects late admission and delivers it
         if (key === "commit")
           return async (...args: Parameters<Storage["commit"]>) => {
             if (
-              args[0].some(
-                (write) =>
-                  write.type === "submission" &&
-                  write.value.requestId === `inbox:${batch[0]!.deliveryBatchId}`,
-              )
+              args[0]
+                .flat()
+                .some(
+                  (write) =>
+                    write.type === "submission" &&
+                    write.value.requestId === `inbox:${batch[0]!.deliveryBatchId}`,
+                )
             ) {
               entered.resolve();
               await release.promise;

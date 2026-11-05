@@ -21,6 +21,7 @@ export interface SqlDatabase extends SqlExecutor {
     seq: Seq,
     admittedSubmissions: ReadonlySet<SubmissionId>,
   ): Promise<void>;
+  afterCommit?(seqs: readonly Seq[]): Promise<void>;
   close(): Promise<void>;
 }
 

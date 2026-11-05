@@ -342,16 +342,16 @@ export class PgDurableAuthority {
             { cause: result.error },
           );
         }
-        if (typeof result.value === "number") {
-          // Notification failure cannot turn an acknowledged database commit into a rollback.
-          Result.fromThrowable(
-            () => options.afterCommit?.(result.value as unknown as Seq),
-            unavailable,
-          )();
-          if (options.checkpoint)
-            await ResultAsync.fromPromise(options.checkpoint("after_commit"), unavailable);
-        }
         return result.value;
+      },
+      afterCommit: async (seqs) => {
+        if (seqs.length === 0) return;
+        for (const seq of seqs) {
+          // Observer failure cannot turn an acknowledged SQL commit into a rollback.
+          Result.fromThrowable(() => options?.afterCommit?.(seq), unavailable)();
+        }
+        if (options?.checkpoint)
+          await ResultAsync.fromThrowable(() => options.checkpoint!("after_commit"), unavailable)();
       },
       project: async (transaction, writes, seq, admittedSubmissions) => {
         if (!options) rejectStorage("Read-only authority");

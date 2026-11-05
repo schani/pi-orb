@@ -1,7 +1,10 @@
-// PostgreSQL implementation adapted from @earendil-works/pi-durable 1.1.0 storage and scan semantics.
+// PostgreSQL implementation adapted from @earendil-works/pi-durable 1.5.0 storage and scan semantics.
 // Upstream portions copyright (c) 2025 Mario Zechner, MIT; see LICENSE.
+
 import type { Context, JsonValue } from "@earendil-works/chord";
 import { apply, type Op } from "@earendil-works/chord/delta";
+import { StorageRequestError } from "@earendil-works/pi-durable";
+import { err, ok, type Result, ResultAsync } from "neverthrow";
 import { rejectStorage, rejectStorageRequest, StorageFailure } from "./storage-boundary.ts";
 
 const idFromNumber = <I extends Id<string>>(value: number): I => {
@@ -11,6 +14,7 @@ const idFromNumber = <I extends Id<string>>(value: number): I => {
 const seqFromNumber = (value: number): Seq => Number(value) as Seq;
 
 import type {
+  CommitResult,
   ConversationId,
   ConversationQuery,
   ConversationRecord,
@@ -41,6 +45,9 @@ import type {
   TaskRecord,
 } from "@earendil-works/pi-durable";
 import type { SqlDatabase, SqlExecutor, SqlValue } from "./executor.ts";
+
+type StorageRefusal = { readonly type: "storage_refusal"; readonly message: string };
+const refusal = (message: string) => err({ type: "storage_refusal" as const, message });
 
 type StoredTask = TaskRecord<JsonValue, JsonValue, JsonValue>;
 type TableName = "conversation" | "entry" | "task" | "submission" | "document";
@@ -203,46 +210,90 @@ export class PgStorage implements Storage {
     }
   }
 
-  async commit(writes: readonly StorageWrite[], _context: Context): Promise<Seq> {
+  async commit(
+    batches: readonly (readonly StorageWrite[])[],
+    receive: (index: number, seq: Seq) => void,
+    _context: Context,
+  ): Promise<CommitResult> {
     this.assertOpen();
-    const documentActions = this.prepareDocumentActions(writes);
-    const candidateNextId = this.candidateNextId(writes);
-    const seq = await this.db.transaction(async (transaction) => {
+    const seqs: Seq[] = [];
+    let refused: StorageRefusal | undefined;
+    let candidateNextId = this.nextId;
+    await this.db.transaction(async (transaction) => {
       const metadata = await transaction.get<MetadataRow>(
         "SELECT next_id, next_seq FROM durable_pg_durable_metadata WHERE orb_id = $1 AND singleton = 1",
       );
       if (metadata === undefined) rejectStorage("Durable PostgreSQL metadata is missing");
-      const committedSeq = seqFromNumber(metadata.next_seq);
-      await this.checkGlobalIds(transaction, writes);
-      await this.checkDocumentActions(transaction, documentActions);
-      // Capture durable admission before upserts erase the distinction from new input.
-      const admittedSubmissions = new Set<SubmissionId>();
-      for (const write of writes) {
-        if (write.type !== "submission" || write.value.type !== "input") continue;
-        const row = await transaction.get<JsonRow>(
-          "SELECT record FROM durable_pg_submissions WHERE orb_id = $1 AND id = $2",
-          write.value.id,
-        );
-        const prior = row === undefined ? undefined : parseJson<SubmissionRecord>(row.record);
-        if (
-          prior?.type === "input" &&
-          prior.conversationId === write.value.conversationId &&
-          prior.requestId === write.value.requestId
-        )
-          admittedSubmissions.add(prior.id);
+      for (const writes of batches) {
+        const prepared = this.prepareDocumentActions(writes);
+        if (prepared.isErr()) {
+          refused = prepared.error;
+          break;
+        }
+        const documentActions = prepared.value;
+        const checked = await this.checkBatch(transaction, writes, documentActions);
+        if (checked.isErr()) {
+          refused = checked.error;
+          break;
+        }
+        const committedSeq = seqFromNumber(metadata.next_seq + seqs.length);
+        // Capture durable admission before upserts erase the distinction from new input.
+        const admittedSubmissions = new Set<SubmissionId>();
+        for (const write of writes) {
+          if (write.type !== "submission" || write.value.type !== "input") continue;
+          const row = await transaction.get<JsonRow>(
+            "SELECT record FROM durable_pg_submissions WHERE orb_id = $1 AND id = $2",
+            write.value.id,
+          );
+          const prior = row === undefined ? undefined : parseJson<SubmissionRecord>(row.record);
+          if (
+            prior?.type === "input" &&
+            prior.conversationId === write.value.conversationId &&
+            prior.requestId === write.value.requestId
+          )
+            admittedSubmissions.add(prior.id);
+        }
+        for (const write of writes) await this.applyTableWrite(transaction, write, committedSeq);
+        await this.applyDocumentActions(transaction, documentActions, committedSeq);
+        await this.db.project(transaction, writes, committedSeq, admittedSubmissions);
+        seqs.push(committedSeq);
+        candidateNextId = Math.max(candidateNextId, this.candidateNextId(writes));
       }
-      for (const write of writes) await this.applyTableWrite(transaction, write, committedSeq);
-      await this.applyDocumentActions(transaction, documentActions, committedSeq);
-      await transaction.run(
-        "UPDATE durable_pg_durable_metadata SET next_id = $2, next_seq = $3 WHERE orb_id = $1 AND singleton = 1",
-        String(Math.max(Number(metadata.next_id), candidateNextId)),
-        committedSeq + 1,
-      );
-      await this.db.project(transaction, writes, committedSeq, admittedSubmissions);
-      return committedSeq;
+      if (seqs.length > 0)
+        await transaction.run(
+          "UPDATE durable_pg_durable_metadata SET next_id = $2, next_seq = $3 WHERE orb_id = $1 AND singleton = 1",
+          String(Math.max(Number(metadata.next_id), candidateNextId)),
+          metadata.next_seq + seqs.length,
+        );
     });
     this.nextId = Math.max(this.nextId, candidateNextId);
-    return seq;
+    // Post-durable observers cannot suppress receipts, even if the facade throws synchronously.
+    await ResultAsync.fromThrowable(
+      async () => {
+        await this.db.afterCommit?.(seqs);
+      },
+      () => ({ type: "storage_observer_error" as const }),
+    )();
+    // SQL COMMIT succeeded: receipts are synchronous, ordered, and never precede durability.
+    for (const [index, seq] of seqs.entries()) receive(index, seq);
+    return refused === undefined
+      ? { stored: seqs.length }
+      : {
+          stored: seqs.length,
+          refused: new Error(refused.message),
+        };
+  }
+
+  private async checkBatch(
+    executor: SqlExecutor,
+    writes: readonly StorageWrite[],
+    actions: Map<DocumentId, DocumentAction>,
+  ): Promise<Result<void, StorageRefusal>> {
+    const ids = await this.checkGlobalIds(executor, writes);
+    if (ids.isErr()) return ids;
+    const documents = await this.checkDocumentActions(executor, actions);
+    if (documents.isErr()) return documents;
+    return this.resolveCopies(executor, actions);
   }
 
   async mintId<I extends Id<string>>(): Promise<I> {
@@ -734,7 +785,7 @@ export class PgStorage implements Storage {
   private async checkGlobalIds(
     executor: SqlExecutor,
     writes: readonly StorageWrite[],
-  ): Promise<void> {
+  ): Promise<Result<void, StorageRefusal>> {
     const claimed = new Map<Id<string>, TableName>();
     for (const write of writes) {
       if (write.type === "document.change" || write.type === "document.retire") continue;
@@ -749,19 +800,22 @@ export class PgStorage implements Storage {
       )?.record_type;
       const earlier = claimed.get(id);
       if (table === "conversation" || table === "entry" || table === "document") {
-        if (existing !== undefined) rejectStorage(`ID ${id} already belongs to ${existing}`);
-        if (earlier !== undefined) rejectStorage(`ID ${id} is written more than once`);
+        if (existing !== undefined) return refusal(`ID ${id} already belongs to ${existing}`);
+        if (earlier !== undefined) return refusal(`ID ${id} is written more than once`);
       } else {
         if (existing !== undefined && existing !== table)
-          rejectStorage(`ID ${id} already belongs to ${existing}`);
+          return refusal(`ID ${id} already belongs to ${existing}`);
         if (earlier !== undefined && earlier !== table)
-          rejectStorage(`ID ${id} is written as two record types`);
+          return refusal(`ID ${id} is written as two record types`);
       }
       claimed.set(id, table);
     }
+    return ok(undefined);
   }
 
-  private prepareDocumentActions(writes: readonly StorageWrite[]): Map<DocumentId, DocumentAction> {
+  private prepareDocumentActions(
+    writes: readonly StorageWrite[],
+  ): Result<Map<DocumentId, DocumentAction>, StorageRefusal> {
     const actions = new Map<DocumentId, DocumentAction>();
     for (const write of writes) {
       if (
@@ -788,7 +842,7 @@ export class PgStorage implements Storage {
             action.content !== undefined ||
             action.copy !== undefined
           ) {
-            rejectStorage(`Document ${id} has more than one content command`);
+            return refusal(`Document ${id} has more than one content command`);
           }
           action.create = write.record;
           action.content = write.content;
@@ -799,34 +853,34 @@ export class PgStorage implements Storage {
             action.content !== undefined ||
             action.copy !== undefined
           ) {
-            rejectStorage(`Document ${id} has more than one content command`);
+            return refusal(`Document ${id} has more than one content command`);
           }
           action.create = write.record;
           action.copy = write.source;
           break;
         case "document.change":
           if (action.content !== undefined || action.copy !== undefined) {
-            rejectStorage(`Document ${id} has more than one content command`);
+            return refusal(`Document ${id} has more than one content command`);
           }
           action.content = write.content;
           break;
         case "document.retire":
-          if (action.retire) rejectStorage(`Document ${id} is retired more than once`);
+          if (action.retire) return refusal(`Document ${id} is retired more than once`);
           action.retire = true;
           break;
       }
     }
-    return actions;
+    return ok(actions);
   }
 
   private async checkDocumentActions(
     executor: SqlExecutor,
     actions: ReadonlyMap<DocumentId, DocumentAction>,
-  ): Promise<void> {
+  ): Promise<Result<void, StorageRefusal>> {
     const liveCounts = new Map<string, number>();
     for (const [id, action] of actions) {
       if (action.copy !== undefined && actions.has(action.copy.id)) {
-        rejectStorage(`Document copy ${id} source is changed in the copy batch`);
+        return refusal(`Document copy ${id} source is changed in the copy batch`);
       }
       const row = await executor.get<JsonRow>(
         "SELECT record FROM durable_pg_documents WHERE orb_id = $1 AND id = $2",
@@ -834,18 +888,18 @@ export class PgStorage implements Storage {
       );
       const existing = row === undefined ? undefined : parseJson<DocumentRecord>(row.record);
       if (action.create === undefined && existing === undefined)
-        rejectStorage(`Unknown document: ${id}`);
+        return refusal(`Unknown document: ${id}`);
       if (action.create !== undefined && existing !== undefined)
-        rejectStorage(`Document ${id} already exists`);
-      if (existing?.retiredAt !== undefined) rejectStorage(`Document ${id} is retired`);
+        return refusal(`Document ${id} already exists`);
+      if (existing?.retiredAt !== undefined) return refusal(`Document ${id} is retired`);
       if (action.content?.kind === "delta") {
         const previous = await executor.get<{ readonly version: number }>(
           "SELECT version FROM durable_pg_document_revisions WHERE orb_id = $1 AND document_id = $2 ORDER BY seq DESC LIMIT 1",
           id,
         );
-        if (previous === undefined) rejectStorage(`Document ${id} delta has no base`);
+        if (previous === undefined) return refusal(`Document ${id} delta has no base`);
         if (previous.version !== action.content.version) {
-          rejectStorage(`Document ${id} version transition requires a base`);
+          return refusal(`Document ${id} version transition requires a base`);
         }
       }
       const record = action.create ?? existing!;
@@ -858,8 +912,9 @@ export class PgStorage implements Storage {
       liveCounts.set(key, live);
     }
     for (const live of liveCounts.values()) {
-      if (live > 1) rejectStorage("Document address already has a current incarnation");
+      if (live > 1) return refusal("Document address already has a current incarnation");
     }
+    return ok(undefined);
   }
 
   private async currentDocumentId(
@@ -955,37 +1010,45 @@ export class PgStorage implements Storage {
     );
   }
 
+  private async resolveCopies(
+    executor: SqlExecutor,
+    actions: Map<DocumentId, DocumentAction>,
+  ): Promise<Result<void, StorageRefusal>> {
+    for (const [id, action] of actions) {
+      if (action.copy === undefined) continue;
+      let stored: StoredDocument | undefined;
+      try {
+        stored = await this.materializeDocument(executor, action.copy.id, action.copy.at);
+      } catch (error) {
+        if (error instanceof StorageRequestError) return refusal(error.message);
+        rejectStorage(`Document copy ${id} failed`, {
+          cause: error instanceof StorageFailure ? error.cause : error,
+        });
+      }
+      if (stored === undefined)
+        return refusal(`Fork source document ${action.copy.id} cannot be read`);
+      const create = action.create!;
+      if (
+        stored.record.scope.kind !== "conversation" ||
+        create.scope.kind !== "conversation" ||
+        stored.record.kind !== create.kind ||
+        stored.record.key !== create.key ||
+        stored.record.history !== create.history ||
+        stored.record.fork !== create.fork
+      )
+        return refusal(`Fork source document ${action.copy.id} does not match the copied record`);
+      action.content = { kind: "base", version: stored.version, value: stored.value };
+    }
+    return ok(undefined);
+  }
+
   private async applyDocumentActions(
     executor: SqlExecutor,
     actions: ReadonlyMap<DocumentId, DocumentAction>,
     seq: Seq,
   ): Promise<void> {
     for (const [id, action] of actions) {
-      let content = action.content;
-      if (action.copy !== undefined) {
-        try {
-          const stored = await this.materializeDocument(executor, action.copy.id, action.copy.at);
-          if (stored === undefined)
-            rejectStorage(`Fork source document ${action.copy.id} cannot be read`);
-          const create = action.create!;
-          if (
-            stored.record.scope.kind !== "conversation" ||
-            create.scope.kind !== "conversation" ||
-            stored.record.kind !== create.kind ||
-            stored.record.key !== create.key ||
-            stored.record.history !== create.history ||
-            stored.record.fork !== create.fork
-          ) {
-            rejectStorage(
-              `Fork source document ${action.copy.id} does not match the copied record`,
-            );
-          }
-          content = { kind: "base", version: stored.version, value: stored.value };
-        } catch (error) {
-          if (error instanceof StorageFailure) rejectStorage(error.message, { cause: error.cause });
-          rejectStorage(`Document copy ${id} was rejected`, { cause: error });
-        }
-      }
+      const content = action.content;
       let record: DocumentRecord;
       if (action.create !== undefined) {
         record = {

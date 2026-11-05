@@ -1,5 +1,5 @@
 diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js b/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
-index 45bcd08..7b5cac0 100644
+index 427df0a..5e50f42 100644
 --- a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
 +++ b/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
 @@ -1,7 +1,7 @@
@@ -176,9 +176,9 @@ index 45bcd08..7b5cac0 100644
              if (!startEmitted) {
                  startEmitted = true;
                  stream.push({ type: "start", partial: output });
-@@ -347,7 +407,13 @@ export const stream = (model, context, options) => {
-                 delete block.customInput;
-             }
+@@ -342,7 +402,13 @@ export const stream = (model, context, options) => {
+         }
+         catch (error) {
              output.stopReason = options?.signal?.aborted ? "aborted" : "error";
 -            output.errorMessage = formatProviderError(normalizeProviderError(error));
 +            if (output.stopReason === "error") {
@@ -191,7 +191,7 @@ index 45bcd08..7b5cac0 100644
              stream.push({ type: "error", reason: output.stopReason, error: output });
              stream.end();
          }
-@@ -368,6 +434,7 @@ export const streamSimple = (model, context, options) => {
+@@ -363,6 +429,7 @@ export const streamSimple = (model, context, options) => {
      return stream(model, context, {
          ...base,
          reasoningEffort,
@@ -199,16 +199,7 @@ index 45bcd08..7b5cac0 100644
      });
  };
  // ============================================================================
-@@ -1179,7 +1246,7 @@ async function* startWebSocketOutputOnFirstEvent(events, onStart) {
- async function processWebSocketStream(url, body, headers, output, stream, model, onStart, idleTimeoutMs, websocketConnectTimeoutMs, cacheSessionId, accountId, grammarToolInputProperties, options) {
-     const { socket, entry, reused, release } = await acquireWebSocket(url, headers, cacheSessionId, accountId, options?.signal, websocketConnectTimeoutMs, options?.env);
-     let keepConnection = true;
--    const useCachedContext = options?.transport === "websocket-cached" || options?.transport === "auto";
-+    const useCachedContext = options?.transport === "websocket-cached" || (options?.transport || "auto") === "auto";
-     // ChatGPT Codex Responses rejects `store: true` ("Store must be set to false").
-     // WebSocket continuation still works via connection-scoped previous_response_id state.
-     const fullBody = body;
-@@ -1248,11 +1315,12 @@ async function parseErrorResponse(response) {
+@@ -1243,11 +1310,12 @@ async function parseErrorResponse(response) {
      const raw = await response.text();
      let message = raw || response.statusText || "Request failed";
      let friendlyMessage;
@@ -222,7 +213,7 @@ index 45bcd08..7b5cac0 100644
              if (/usage_limit_reached|usage_not_included|rate_limit_exceeded/i.test(code) || response.status === 429) {
                  const plan = err.plan_type ? ` (${err.plan_type.toLowerCase()} plan)` : "";
                  const mins = err.resets_at
-@@ -1265,7 +1333,7 @@ async function parseErrorResponse(response) {
+@@ -1260,7 +1328,7 @@ async function parseErrorResponse(response) {
          }
      }
      catch { }
@@ -232,7 +223,7 @@ index 45bcd08..7b5cac0 100644
  // ============================================================================
  // Auth & Headers
 diff --git a/node_modules/@earendil-works/pi-ai/dist/types.d.ts b/node_modules/@earendil-works/pi-ai/dist/types.d.ts
-index e92eefd..2936f85 100644
+index 2d650ea..04c72f9 100644
 --- a/node_modules/@earendil-works/pi-ai/dist/types.d.ts
 +++ b/node_modules/@earendil-works/pi-ai/dist/types.d.ts
 @@ -105,6 +105,8 @@ export interface ProviderRequestOptions<TModel = Model<Api>> {

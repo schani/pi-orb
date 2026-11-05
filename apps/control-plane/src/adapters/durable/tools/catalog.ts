@@ -1,5 +1,4 @@
 import type { Context } from "@earendil-works/chord";
-import type { TSchema } from "@earendil-works/pi-ai";
 import type { CodemodeJsonSchema } from "@earendil-works/pi-codemode";
 import {
   defineTool,
@@ -10,6 +9,7 @@ import {
 import type { CodemodeNamespace } from "@earendil-works/pi-durable/codemode";
 import { ExecutionError, FileError } from "@earendil-works/pi-durable/env";
 import { errAsync, okAsync, Result, ResultAsync } from "neverthrow";
+import type { TSchema } from "typebox";
 import { Check } from "typebox/value";
 
 export type ToolError = {
@@ -77,7 +77,7 @@ function bashFailure(error: unknown): string | undefined {
 
 type ToolNamespace = Omit<CodemodeNamespace, "prefix">;
 
-const nativeOutputSchema: CodemodeJsonSchema = {
+const nativeOutputSchema: Exclude<CodemodeJsonSchema, boolean> = {
   anyOf: [
     { type: "string" },
     {
@@ -110,7 +110,7 @@ const nativeOutputSchema: CodemodeJsonSchema = {
 
 export interface CallableMetadata {
   namespace?: ToolNamespace;
-  outputSchema?: CodemodeJsonSchema;
+  outputSchema?: Exclude<CodemodeJsonSchema, boolean>;
   deferred?: boolean;
 }
 /** The same gate serves model calls and every nested sandbox callback. */

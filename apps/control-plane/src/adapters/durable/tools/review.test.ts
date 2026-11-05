@@ -1,5 +1,4 @@
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { CodemodeSandbox } from "@earendil-works/pi-codemode";
@@ -13,6 +12,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
 import { okAsync } from "neverthrow";
+import { Type } from "typebox";
 import { expect, it } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
 import { createDurableTools } from "./index.ts";

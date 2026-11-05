@@ -1,6 +1,6 @@
-import { Type } from "@earendil-works/pi-ai";
 import { defineTool, hook, ToolTask } from "@earendil-works/pi-durable";
 import { errAsync, okAsync } from "neverthrow";
+import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
 import { createDurableTools } from "./index.ts";

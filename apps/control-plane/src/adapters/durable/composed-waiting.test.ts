@@ -2,7 +2,6 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   fauxAssistantMessage,
@@ -13,6 +12,7 @@ import { createRegistry, defineTool, MemoryStorage } from "@earendil-works/pi-du
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import type { ServerFrame } from "@pi-orb/protocol";
 import { ResultAsync } from "neverthrow";
+import { Type } from "typebox";
 import { expect, it } from "vitest";
 import { LazyExecutionEnv } from "../execution-client/lazy-env.ts";
 import { DurableAgent } from "./agent.ts";
