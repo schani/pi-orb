@@ -1,5 +1,23 @@
 # Testing
 
+## Claude queued-input proof order (2026-11-04, PST; user-approved, local, undeployed)
+
+The correction removes only the single-copy append-order exclusion; multi-copy proof and committed receipts retain their guards. The regression uses the exact retained native removal 18/attachment 19 pair, matching both identities with saved provenance. Both prefix orders require the complete pair before acknowledgement; tests cover indexed backfill, immutable native bytes/fingerprints/ancestry, rescans/reopen, wrong identities/provenance, child/sidechain exclusions, duplicates/conflicts and failed commit. Composed steering checks drain, real agent reattach, persisted duplicate acknowledgement without resubmission and one receipt. Boot projection checks all five input kinds, with human authority at attachment rather than the earlier removal or appended receipt.
+
+Fresh `npm ci` preceded checks. Initial tests-first run: 103 passed/10 failed; nine expected reverse-proof regressions and one test-oracle error (the forward receipt's parent is the native removal at the journal tail, not its attachment). After correcting only that ancestry oracle: 103 passed/nine expected failures on the original guard. Removing the guard passes all 112 cases. Expanded saved-provenance/restart coverage and final focused run: 269 passed across 20 files, including five existing DST suites; no new DST failure or trace. Genuine SDK 0.3.318/CLI 2.1.318 native qualification: 36 passed—full contract 28, unchanged steering 2, handoff 2, instructions 4. A further 122 lifecycle/initialization/lifetime/idle-fence safety cases pass across five files. Runtime typecheck and scoped Biome pass (eight existing informational diagnostics).
+
+Evidence: `/workspace/claude-evidence/q88-approved/` (first failures, diagnosis, commands, native artifacts and fixture/process/disk checks). Earlier original CI, root-compaction, baseline and graceful failures remain in their original evidence directories; original CI raw ordering remains unproven. Current contract/rationale: `docs/claude-agent-sdk.md`, findings: `docs/claude-sdk-capabilities.md`. Hosted exact-head full CI/E2E, packaged images, live subscription and deployment remain unqualified by these local gates.
+
+## Claude SDK 0.3.318 queued compaction (2026-11-04, PST)
+
+Accepted public interrupt leaves queued `/compact` runnable. The fixed native fixture
+returns no structured summary; [CLI 2.1.311](https://github.com/anthropics/claude-code/releases/tag/v2.1.311)
+added one missing-summary retry. Require exactly two provider requests for queued
+compaction, one for interrupted in-progress compaction and zero before dispatch.
+Cancellation, queue receipt, summary and continuation assertions remain unchanged.
+The original full-root failure and synthetic request capture are retained in
+`/workspace/claude-evidence/full/`; no production behavior changed.
+
 ## State-machine refactor gate (user-approved 2026-11-01, PST)
 
 For this task only—workspace uploads, central Durable owner close/drain, inbox admission/replay, MCP OAuth publication and frontend scroll pinning—each machine actually refactored must first have a new deterministic regression exposing a genuine bug in the original implementation. Manufactured requirements or mutation-introduced bugs do not qualify; machines without a confirmed bug are not refactored. Preserve and replay DST failures before fixing. Preserve persisted schemas, value vocabulary, file/receipt formats and intended CAS/transaction contracts; new or changed persisted representation requires user discussion. Correcting buggy effects/ordering within those contracts is permitted.

@@ -190,7 +190,7 @@ export type ClaudeQuery = Pick<
   | "applyFlagSettings"
   | typeof Symbol.asyncIterator
 > & {
-  // SDK 0.3.310 accepts this option but omits it from Query's declaration.
+  // SDK 0.3.318 accepts this option but omits it from Query's declaration.
   interrupt(options?: { cancelQueued?: boolean }): ReturnType<Query["interrupt"]>;
 };
 interface Delivery {
