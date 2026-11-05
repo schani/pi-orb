@@ -34,6 +34,10 @@ The extension tokenizes documents and queries with the English text configuratio
 
 An ordered BM25 scan applies scope and ancestry before `LIMIT`; nonmatching zero-distance rows are removed afterward. Snippets extract public text only for selected hits and center on literal query terms. A single statement snapshot covers eligibility and retrieval. No query-time corpus parsing, exact candidate count or latency guarantee is part of the contract. The 2 s qualification budget is a benchmark setting, not a production timeout or shipping gate.
 
+## PGlite packaging decision — 2026-11-04 (PST)
+
+Pin the embedded engine to **0.5.12** and its `pg_textsearch` wrapper to **0.0.14**, whose exact peer requires that engine. This is an engine/packaging update, not an extension upgrade: both runtime wrapper JS files and all 25 extracted extension files match 0.0.13 byte-for-byte; embedded **1.5.1**, native **1.3.1** and application SQL remain unchanged. Compressed archive bytes and one CJS source-map path differ. Keep the engine exact-pinned so future coupled upgrades require qualification.
+
 ## Interfaces
 
 `orb_search_history({query, scope?, orbId?, limit?})` returns native `{hits}` or `{error: OrbAgentError}`. Its shared structured result schema includes both outcomes; replay is safe. The only tool description is:
