@@ -1121,7 +1121,6 @@ function OrbConversation({
       onSelectionReady.current = () => {};
     };
   }, [acknowledgeEntry, latestVisibleAlert, onSelectionReady, metadataAvailable]);
-  const uploads = useWorkspaceUploads(orbId, orb?.state === "running");
   const mainRef = useRef<HTMLElement>(null);
   const [dropZone, setDropZone] = useState<DropZone | null>(null);
   const [dropLabel, setDropLabel] = useState("");
@@ -1287,6 +1286,11 @@ function OrbConversation({
   const cacheOwner = useRef<TranscriptOwner | null>(null);
   const lifecycle = orb?.state ?? null;
   const resourceGone = orbNotFound || lifecycle === "deleting";
+  const uploads = useWorkspaceUploads(
+    orbId,
+    lifecycle === "running",
+    metadataAvailable && !resourceGone,
+  );
   const resourceProjectId = !resourceGone ? (orb?.projectId ?? null) : null;
   const getOwner = useCallback(
     () => (resourceProjectId === null ? null : cacheOwner.current),
@@ -1907,10 +1911,8 @@ function OrbConversation({
     )
       return;
     const result = await deleteOrb(orbId);
-    if (result.isOk()) cache.invalidate(orbId);
     if (result.isOk()) {
-      setOrb(result.value);
-      setOrbError(null);
+      markMissing();
       setRenaming(false);
     } else {
       setOrbError(result.error);

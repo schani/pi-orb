@@ -108,6 +108,34 @@ cookie collisions and all Domain-bearing Set-Cookie headers are rejected; there 
 parent-domain cookie. Application cookies should be host-only. Preview WS requires its exact
 origin. No credentialed wildcard CORS or generic cross-origin development exception.
 
+### Orb access tokens (decided 2026-11-04)
+
+An orb's agent opens previews and hosted files itself, with or without a browser, using its own
+workload identity token: `pi-orb id-token --audience urn:pi-orb:access` (`docs/workload-identity.md`),
+which works in Claude and central-Pi guests. Preview and files hosts verify it against this issuer's
+published keys, exact issuer and audience, `token_use` and expiry (at most one hour, no revocation
+besides expiry). It admits previews and hosted files only of orbs whose project owner equals the
+`orb_id` orb's owner, which includes orbs it spawned; this is narrower than the owner's own
+company-wide access. A missing target passes so the resource route reports that it doesn't exist.
+Ownership is immutable; preview admission, registration and lifecycle fences are unchanged.
+
+Scripts send header `x-pi-orb-token`; browsers use the host-only cookie `__Host-pi-orb-token` on the
+URL's origin. agent-browser's origin-scoped `--headers` reached documents, subresources, fetch and
+SSE but not WebSocket upgrades (agent-browser 0.39.2, measured 2026-11-04); the cookie reaches all of
+them. The header wins over the cookie. A presented token is the request's only credential:
+rejection is 401/403, never a Google login redirect. Both are stripped before the preview
+application (`x-pi-orb-*` headers, `__Host-pi-orb-*` cookies). Rejections use the existing
+`preview-auth-admission`/`auth-admission` outcomes with `token_*` reasons; minting keeps the
+id-token's own observability. No persisted state.
+
+Accepted risk (user decision, 2026-11-04): a leaked token works for up to an hour within that owner's
+orbs. Rejected: a separate sealed access token with its own CLI, route and tool (the first version of
+this change), because the existing id-token already carries orb identity and expiry; a browser
+handoff (fragment grant, bridge page, callback, files cookie), larger and useless for scripts;
+`Authorization: Bearer`, which preview applications own; single-use or caller-liveness-bound tokens,
+which need persisted state or per-request caller reads for little gain over the runtime bearer the
+same code already holds.
+
 ### Admission, backend identity and activity
 
 Every request/upgrade reads current store authority and requires healthy running compute,

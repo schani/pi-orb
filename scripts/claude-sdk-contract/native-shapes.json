@@ -1,6 +1,6 @@
 {
-  "sdkVersion": "0.3.310",
-  "cliVersion": "2.1.310",
+  "sdkVersion": "0.3.318",
+  "cliVersion": "2.1.318",
   "compaction": {
     "metadataKeys": [
       "cumulativeDroppedTokens",
@@ -66,6 +66,7 @@
         "promptSource",
         "sessionId",
         "timestamp",
+        "turnAttributionKey",
         "turnOrigin",
         "turnPosition",
         "type",
@@ -87,6 +88,7 @@
         "message",
         "parentUuid",
         "perTurnEffort",
+        "promptCacheRequested",
         "requestRef",
         "requestedModel",
         "sessionId",
@@ -143,6 +145,7 @@
         "message",
         "parentUuid",
         "perTurnEffort",
+        "promptCacheRequested",
         "requestRef",
         "requestedModel",
         "sessionId",

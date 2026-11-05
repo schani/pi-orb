@@ -1,13 +1,22 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type OrbView, OrbViewSchema, type ProjectView, type SessionProbe } from "@pi-orb/protocol";
+import {
+  DisplayHistoryViewSchema,
+  type HistoryRecord,
+  type OrbView,
+  OrbViewSchema,
+  type ProjectView,
+  projectDisplayRecords,
+  type SessionProbe,
+} from "@pi-orb/protocol";
 import { chromium, expect as expectPage, webkit } from "@playwright/test";
 import Fastify from "fastify";
 import { Errors } from "typebox/value";
 import { build } from "vite";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it, onTestFinished } from "vitest";
 import { registerWebAssets } from "../apps/control-plane/src/http/web-assets.ts";
+import { diagramFixtureRecords } from "../apps/web/dev/diagram-fixtures.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pi-orb-built-shell-"));
 const app = Fastify({ logger: false });
@@ -741,5 +750,170 @@ it.each(["chromium", "webkit"] as const)(
       await page.close();
       if (engineBrowser !== browser) await engineBrowser.close();
     }
+  },
+);
+
+it.each(["chromium", "webkit"] as const)(
+  "%s: built Mermaid preserves privacy, sanitization, rendering and adjacent edge IDs",
+  async (engine) => {
+    const origin = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
+    const engineBrowser = engine === "webkit" ? await webkit.launch() : browser;
+    if (engine === "webkit") onTestFinished(() => engineBrowser.close());
+    const page = await engineBrowser.newPage();
+    onTestFinished(async () => {
+      try {
+        await page.unrouteAll({ behavior: "wait" });
+      } finally {
+        await page.close();
+      }
+    });
+    const timestamp = "2026-11-04T00:00:00Z";
+    const project: ProjectView = {
+      id: "built-diagrams",
+      name: "Diagrams",
+      state: "active",
+      repositoryUrl: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const orb: OrbView = {
+      id: "built-diagrams",
+      projectId: project.id,
+      harness: "pi",
+      name: "Diagrams",
+      state: "stopped",
+      stateVersion: 1,
+      stateChangedAt: timestamp,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const privateLabel = "private-mermaid-label";
+    const hostile = `%%{init: {"securityLevel": "loose"}}%%
+flowchart LR
+  A["<img src=x onerror='globalThis.__mermaidUnsafe = true'>${privateLabel}"] --> B["Link"]
+  click A "javascript:globalThis.__mermaidUnsafe=true"
+  click B "https://mermaid-private.invalid/leak"`;
+    const adjacent = "flowchart LR\n A[Start]e1@--> B@{shape: circle} e2@--> C[End]";
+    const fence = (source: string) => `\`\`\`mermaid\n${source}\n\`\`\``;
+    const records: HistoryRecord[] = [
+      ...diagramFixtureRecords(timestamp),
+      {
+        id: "built-safety",
+        parentId: "diagrams-answer",
+        timestamp,
+        type: "message",
+        role: "assistant",
+        overflow: {},
+        content: [
+          {
+            type: "text",
+            text: [hostile, 'flowchart LR\n A["$$E=mc^2$$"]', adjacent].map(fence).join("\n\n"),
+          },
+        ],
+      },
+    ];
+    const history = {
+      orbId: orb.id,
+      session: null,
+      records: projectDisplayRecords(records),
+      cursor: "built-safety",
+      headId: "built-safety",
+    };
+    expect([...Errors(DisplayHistoryViewSchema, history)]).toEqual([]);
+    const telemetry: unknown[] = [];
+    const errors: string[] = [];
+    const externalRequests: string[] = [];
+    const scripts: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", async (message) => {
+      if (message.text().startsWith("mermaid render"))
+        telemetry.push(await message.args()[1]?.jsonValue());
+    });
+    page.on("request", (request) => {
+      if (request.resourceType() === "script") scripts.push(new URL(request.url()).pathname);
+    });
+    // Only this listener and explicit synthetic API responses may receive browser traffic.
+    await page.route("**/*", (route) => {
+      if (new URL(route.request().url()).origin === origin) return route.continue();
+      externalRequests.push(new URL(route.request().url()).origin);
+      return route.abort("blockedbyclient");
+    });
+    await page.route("**/api/v1/projects", (route) =>
+      route.fulfill({ json: { items: [project] } }),
+    );
+    await page.route("**/api/v1/projects/built-diagrams/orbs", (route) =>
+      route.fulfill({ json: { items: [orb] } }),
+    );
+    await page.route("**/api/v1/orbs/built-diagrams", (route) => route.fulfill({ json: orb }));
+    await page.route("**/api/v1/orbs/built-diagrams/history", (route) =>
+      route.fulfill({
+        json: history,
+      }),
+    );
+    await page.goto(`${origin}/orbs/${orb.id}`);
+    const boards = page.locator(".mermaid-diagram");
+    await expectPage(boards).toHaveCount(7);
+    await expectPage.poll(() => telemetry.length).toBe(7);
+    for (const index of [0, 1, 2, 4, 5]) {
+      const svg = boards.nth(index).locator(".mermaid-canvas svg");
+      await expectPage(svg).toBeVisible();
+      const size = await svg.boundingBox();
+      expect(size?.width).toBeGreaterThan(0);
+      expect(size?.height).toBeGreaterThan(0);
+    }
+    await expectPage(boards.nth(1).locator("g.actor-man rect.actor-you")).toHaveCount(1);
+    await expectPage(boards.nth(5).locator(".katex")).toHaveCount(1);
+    await expectPage(boards.nth(3).locator(".mermaid-error")).toHaveText(
+      "Mermaid: parse error on line 4",
+    );
+    await expectPage(boards.nth(3).locator("pre code")).toContainText('A --> S["Support API"');
+    const unsafe = boards.nth(4);
+    await expectPage(unsafe.locator("script, [onerror], [onclick]")).toHaveCount(0);
+    expect(
+      await unsafe
+        .locator("a")
+        .evaluateAll((links) =>
+          links
+            .flatMap((link) =>
+              [...link.attributes]
+                .filter((attribute) => /href$/i.test(attribute.name))
+                .map((attribute) => attribute.value),
+            )
+            .sort(),
+        ),
+    ).toEqual(["https://mermaid-private.invalid/leak"]);
+    expect(await page.evaluate(() => Reflect.get(globalThis, "__mermaidUnsafe"))).toBeUndefined();
+    expect(externalRequests).toEqual([]);
+    expect(errors).toEqual([]);
+    expect(JSON.stringify(telemetry)).not.toContain(privateLabel);
+    for (const detail of telemetry) {
+      expect(detail).toEqual(
+        expect.objectContaining({ outcome: expect.stringMatching(/^(rendered|parse_failed)$/) }),
+      );
+      expect(Object.keys(detail as object).sort()).toEqual(
+        Reflect.get(detail as object, "outcome") === "rendered"
+          ? ["ms", "outcome"]
+          : ["line", "outcome", "type"],
+      );
+    }
+    expect(scripts.some((path) => /mermaid-render-.*\.js$/.test(path))).toBe(true);
+    expect(scripts.every((path) => path.startsWith("/assets/"))).toBe(true);
+    await unsafe.getByRole("button", { name: "Show Mermaid source" }).click();
+    await expectPage(unsafe.locator("pre code")).toHaveText(hostile);
+    await unsafe.getByRole("button", { name: "Show diagram" }).click();
+    await unsafe.getByRole("button", { name: "Open diagram" }).click();
+    const dialog = page.locator("dialog.mermaid-dialog");
+    await expectPage(dialog.locator("svg")).toBeVisible();
+    await expectPage(dialog.locator("script, [onerror], [onclick]")).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expectPage(dialog).toBeHidden();
+    // Mermaid #8459: brackets must not become part of an adjacent edge ID.
+    const syntax = boards.nth(6);
+    await expectPage(syntax.locator(".mermaid-canvas svg")).toBeVisible();
+    await expectPage(syntax.locator('path[id$="-e1"], path[id$="-e2"]')).toHaveCount(2);
+    await expectPage(syntax.locator(".node")).toHaveCount(3);
+    await expectPage(syntax.locator(".mermaid-error")).toHaveCount(0);
+    expect(externalRequests).toEqual([]);
+    expect(errors).toEqual([]);
   },
 );

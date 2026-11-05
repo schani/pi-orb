@@ -11,7 +11,7 @@ exit 101
 EOF
 chmod 755 /usr/sbin/policy-rc.d
 apt-get update
-apt-get install -y --no-install-recommends ca-certificates curl xz-utils git git-crypt ripgrep zip unzip sudo python3 python3-venv python-is-python3 build-essential pkg-config iproute2 util-linux openssl
+apt-get install -y --no-install-recommends ca-certificates curl xz-utils git ripgrep zip unzip sudo python3 python3-venv python-is-python3 build-essential pkg-config libssl-dev iproute2 util-linux openssl
 curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/github.gpg
 curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg -o /etc/apt/keyrings/google.asc
 curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
@@ -25,15 +25,18 @@ curl -fsSL https://nodejs.org/dist/v26.13.0/node-v26.13.0-linux-x64.tar.xz -o /t
 echo 'd28a96af6c38596f6d9d97c0ee531c13d238d757742387d1928de822d959e997  /tmp/node.tar.xz' | sha256sum -c -
 tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1
 rm /tmp/node.tar.xz
-curl -fsSL https://static.rust-lang.org/rustup/archive/1.29.2/x86_64-unknown-linux-gnu/rustup-init -o /usr/local/bin/rustup
-echo '5be191e8c70a5007074254cb74d78dbfdd25cd5a61c27de7b8e5410122ec24f4  /usr/local/bin/rustup' | sha256sum -c -
+curl -fsSL https://static.rust-lang.org/rustup/archive/1.29.3/x86_64-unknown-linux-gnu/rustup-init -o /usr/local/bin/rustup
+echo 'b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55  /usr/local/bin/rustup' | sha256sum -c -
 chmod 755 /usr/local/bin/rustup
 for proxy in cargo rustc rustdoc rustfmt cargo-clippy cargo-fmt clippy-driver; do ln -s rustup "/usr/local/bin/$proxy"; done
+npm install --global npm@12.2.1
+test "$(npm --version)" = 12.2.1
 cd /app
 sh infra/install_bun.sh amd64
 test "$(bun --version)" = 1.4.4
 test "$(bunx --version)" = 1.4.4
-git-crypt --version
+sh infra/install_git_crypt.sh
+test "$(git-crypt --version 2>&1)" = "git-crypt 0.8.0"
 npm ci --workspace @pi-orb/orb-runtime --include-workspace-root=false --ignore-scripts
 node infra/native-vm/claude-check.mjs | tee /opt/pi-orb/claude-sdk-version
 rm -rf node_modules/node-pty/prebuilds

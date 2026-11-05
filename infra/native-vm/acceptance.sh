@@ -14,10 +14,13 @@ case "$(getent shadow pi-orb-build | cut -d: -f2)" in
 esac
 sudo -u orb sudo -n true
 sudo -u orb sh -ec '
+  npm --version
+  test "$(npm --version)" = 12.2.1
   bun --version
   test "$(bun --version)" = 1.4.4
   test "$(bunx --version)" = 1.4.4
   git-crypt --version
+  test "$(git-crypt --version 2>&1)" = "git-crypt 0.8.0"
 '
 
 test -z "$(command -v tailscale || true)"

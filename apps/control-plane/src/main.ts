@@ -43,6 +43,7 @@ import {
   CryptoMintIdSource,
   NodeCryptoSigningKeyGenerator,
   OidcTokenSigner,
+  OidcTokenVerifier,
 } from "./adapters/oidc/signer.ts";
 import { PiAuthGate } from "./adapters/pi-auth/gate.ts";
 import { PiActivityHeadlineGenerator } from "./adapters/pi-headline-generator.ts";
@@ -114,6 +115,10 @@ import { MintDenialLog } from "./domain/workload-identity.ts";
 import { E2eReconcileCheckpoints } from "./e2e-reconcile-checkpoints.ts";
 import { parseE2eRuntimeEnvironment } from "./e2e-runtime-environment.ts";
 import { createConfiguredHostingAccessPolicy, readHostingConfiguration } from "./hosting-config.ts";
+import {
+  registerPreviewAccessTokens,
+  withFilesAccessTokens,
+} from "./http/access-token-admission.ts";
 import { type AuthOutcomeSink, registerAuthRoutes } from "./http/auth-routes.ts";
 import {
   type RequestPrincipalResolver,
@@ -864,11 +869,28 @@ export async function main(
     process.exitCode = 1;
     return;
   }
-  const principalResolver =
+  const tokens = {
+    verifier: new OidcTokenVerifier({
+      keys: database.signingKeys,
+      constants: DEFAULT_ISSUER_CONSTANTS,
+    }),
+    store: deps.store,
+    issuerUrl,
+  };
+  const principalResolver = withFilesAccessTokens(
     adapters.requestPrincipalResolverFactory?.(httpTask, database.users) ??
-    configuredPrincipalResolver.value;
+      configuredPrincipalResolver.value,
+    httpTask,
+    { filesOrigin: hostingOrigin, tokens },
+  );
   startupPhase("auth.complete");
   if (previewHosts !== undefined) {
+    registerPreviewAccessTokens(app, httpTask, {
+      hosts: previewHosts,
+      tokens,
+      outcome: ({ outcome, requestId }) =>
+        logEvent(httpTask, "preview-auth-admission", { outcome, requestId }),
+    });
     if (applicationAuth !== undefined && identityConfig.kind === "google") {
       const previewAuth = createSealedPreviewAuth(identityConfig.cookieSecret, Date.now);
       if (previewAuth.isErr()) {
@@ -886,9 +908,9 @@ export async function main(
           logEvent(httpTask, `preview-auth-${event}`, { outcome, requestId }),
       });
     } else {
-      app.decorateRequest("previewIdentity", undefined);
       app.addHook("onRequest", async (request, reply) => {
-        if (previewHosts?.parse(request.headers.host) === undefined) return;
+        if (request.previewIdentity || previewHosts?.parse(request.headers.host) === undefined)
+          return;
         const principal = await principalResolver(request);
         if (principal.isErr() || principal.value.kind !== "user")
           return reply.status(401).send({ error: "Preview authentication required" });

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -124,6 +125,40 @@ describe("composer typography", () => {
 });
 
 describe("bundled typography", () => {
+  it("matches served font bytes, cache keys and study copies to the manifest", () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL("../public/fonts/manifest.json", import.meta.url), "utf8"),
+    ) as {
+      assets: { file: string; sha256: string; family: string; weight: number; style: string }[];
+    };
+    const study = readFileSync(
+      new URL("../../../design-prototypes/programming-fonts.html", import.meta.url),
+      "utf8",
+    );
+    const studyFaces = [...study.matchAll(/@font-face\{([^}]+)\}/g)];
+    for (const asset of manifest.assets) {
+      const bytes = readFileSync(new URL(`../public/fonts/${asset.file}`, import.meta.url));
+      expect(createHash("sha256").update(bytes).digest("hex"), asset.file).toBe(asset.sha256);
+      expect(asset.file).toContain(asset.sha256.slice(0, 12));
+      expect(css).toContain(`url("/fonts/${asset.file}")`);
+      if (asset.family !== "Iosevka Etoile") continue;
+      const face = studyFaces.find(
+        ([, declarations]) =>
+          declarations?.includes('font-family:"StudyFont5"') &&
+          declarations.includes(`font-weight:${asset.weight};`) &&
+          declarations.includes(`font-style:${asset.style};`),
+      )?.[1];
+      const embedded = /base64,([^"]+)/.exec(face ?? "")?.[1];
+      expect(embedded, asset.file).toBeDefined();
+      expect(
+        createHash("sha256")
+          .update(Buffer.from(embedded ?? "", "base64"))
+          .digest("hex"),
+        `study copy of ${asset.file}`,
+      ).toBe(asset.sha256);
+    }
+  });
+
   it("separates quasi-proportional reading text from fixed-cell code", () => {
     expect(rule(":root")).toContain('--text: "Iosevka Etoile"');
     expect(rule(":root")).toContain('--mono: "JetBrains Mono"');

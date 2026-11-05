@@ -24,6 +24,12 @@ export function validatePins(head, lock, installed) {
     ? ok(undefined)
     : err({ type: "pin_mismatch" });
 }
+export function validateBundledSqlite(lock, installed) {
+  const sqlite = lock?.packages?.["node_modules/flingit/node_modules/better-sqlite3"];
+  return sqlite?.version === "12.11.1" && sqlite.inBundle === true && installed === "12.11.1"
+    ? ok(undefined)
+    : err({ type: "native_version_mismatch" });
+}
 export function validateInstallPolicy(npmVersion, project) {
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(npmVersion);
   const [, major, minor, patch] = match?.map(Number) ?? [];
@@ -424,7 +430,13 @@ export async function runLocalFake(command, env = process.env) {
   const preparationPhases = [];
   const tool = async (file, args, cwd = root) => {
     const phase =
-      file === "npm" ? (args[0] === "ci" ? "install" : "npm_version") : `${file}_${args[0]}`;
+      file === "npm"
+        ? args[0] === "ci"
+          ? "install"
+          : args[0] === "run"
+            ? "sqlite_install"
+            : "npm_version"
+        : `${file}_${args[0]}`;
     preparationPhases.push({ phase, at: new Date().toISOString(), state: "started" });
     const toolEnv =
       file === "docker" && env.DOCKER_HOST ? { ...safeEnv, DOCKER_HOST: env.DOCKER_HOST } : safeEnv;
@@ -500,6 +512,19 @@ export async function runLocalFake(command, env = process.env) {
     manifest.npm = /^\d+\.\d+\.\d+$/.test(npmVersion) ? npmVersion : null;
     const policy = validateInstallPolicy(npmVersion, project.value);
     if (policy.isErr()) return policy;
+    const approved = await boundary("install_policy_write", () =>
+      fs.writeFile(
+        join(source, "package.json"),
+        JSON.stringify({
+          ...project.value,
+          allowScripts: {
+            cloudflared: false,
+            "esbuild@0.28.2": true,
+          },
+        }),
+      ),
+    );
+    if (approved.isErr()) return approved;
     const install = await tool("npm", ["ci", "--no-audit", "--no-fund"], source);
     if (install.isErr()) return install;
     const installed = await boundary(
@@ -510,11 +535,21 @@ export async function runLocalFake(command, env = process.env) {
     );
     if (installed.isErr()) return installed;
     const verified = validatePins(head.value.trim(), lock.value, installed.value);
-    if (verified.isOk()) {
-      manifest.verifiedHead = PIN;
-      manifest.installedFling = "0.0.71";
-    }
-    return verified;
+    if (verified.isErr()) return verified;
+    const sqlitePrefix = "node_modules/flingit/node_modules/better-sqlite3";
+    const sqlitePath = join(source, sqlitePrefix);
+    const sqlite = await boundary(
+      "native_package",
+      async () => JSON.parse(await fs.readFile(join(sqlitePath, "package.json"), "utf8")).version,
+    );
+    if (sqlite.isErr()) return sqlite;
+    const native = validateBundledSqlite(lock.value, sqlite.value);
+    if (native.isErr()) return native;
+    const built = await tool("npm", ["run", "install", "--prefix", sqlitePrefix], source);
+    if (built.isErr()) return built;
+    manifest.verifiedHead = PIN;
+    manifest.installedFling = "0.0.71";
+    return ok(undefined);
   };
   try {
     const prepared = await prepare();

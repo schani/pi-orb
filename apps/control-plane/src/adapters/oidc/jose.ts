@@ -1,5 +1,5 @@
-import { createHash, generateKeyPairSync, sign } from "node:crypto";
-import { err, Result } from "neverthrow";
+import { createHash, createPublicKey, generateKeyPairSync, sign, verify } from "node:crypto";
+import { err, ok, Result } from "neverthrow";
 import type { SignerError } from "../../domain/errors.ts";
 
 /**
@@ -132,4 +132,42 @@ export function signJwtRS256(input: {
     },
     (error) => signerError("signing_failed", `sign id token: ${describeFailure(error)}`),
   )();
+}
+
+/**
+ * Verifies one compact RS256 JWT against published JWKs and returns its
+ * payload. Only `alg` and the signature are checked here; claims are the
+ * caller's to judge.
+ */
+export function verifyJwtRS256(
+  jwt: string,
+  keys: readonly unknown[],
+): Result<Readonly<Record<string, unknown>>, "invalid"> {
+  const json = (segment: string): unknown =>
+    JSON.parse(Buffer.from(segment, "base64url").toString("utf8"));
+  return Result.fromThrowable(
+    () => {
+      const [header, payload, signature, ...rest] = jwt.split(".");
+      if (!header || !payload || !signature || rest.length > 0) return null;
+      const { alg, kid } = (json(header) ?? {}) as { alg?: unknown; kid?: unknown };
+      const jwk = keys.find(
+        (key): key is PublicSigningJwk =>
+          typeof key === "object" && key !== null && (key as { kid?: unknown }).kid === kid,
+      );
+      if (alg !== "RS256" || typeof kid !== "string" || jwk === undefined) return null;
+      const signed = verify(
+        "sha256",
+        Buffer.from(`${header}.${payload}`, "ascii"),
+        createPublicKey({ key: { kty: "RSA", n: jwk.n, e: jwk.e }, format: "jwk" }),
+        Buffer.from(signature, "base64url"),
+      );
+      const claims = signed ? json(payload) : null;
+      return typeof claims === "object" && claims !== null && !Array.isArray(claims)
+        ? (claims as Record<string, unknown>)
+        : null;
+    },
+    () => null,
+  )()
+    .orElse(() => ok(null))
+    .andThen((claims) => (claims === null ? err("invalid" as const) : ok(claims)));
 }

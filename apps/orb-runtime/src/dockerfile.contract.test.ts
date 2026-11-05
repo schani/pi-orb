@@ -47,7 +47,10 @@ describe("orb runtime Dockerfile contract", () => {
   });
 
   it("installs agent-browser with a system Chromium executable", () => {
-    expect(runtimePackage.dependencies?.["agent-browser"]).toBe("0.39.2");
+    expect(runtimePackage.dependencies?.["agent-browser"]).toBe("0.41.2");
+    const lock = JSON.parse(readFileSync(join(repositoryRoot, "package-lock.json"), "utf8"));
+    expect(lock.packages["apps/orb-runtime"].dependencies["agent-browser"]).toBe("0.41.2");
+    expect(lock.packages["node_modules/agent-browser"].version).toBe("0.41.2");
     expect(dockerfile).toContain("gh chromium");
     expect(dockerfile).toContain(
       "ln -s /app/node_modules/.bin/agent-browser /usr/local/bin/agent-browser",
@@ -64,7 +67,7 @@ describe("orb runtime Dockerfile contract", () => {
   it("installs rustup and native build prerequisites with persistent Rust state", () => {
     expect(dockerfile).toContain("build-essential");
     expect(dockerfile).toContain("pkg-config");
-    expect(dockerfile).toContain("rustup/archive/1.29.2");
+    expect(dockerfile).toContain("rustup/archive/1.29.3");
     expect(dockerfile).toContain("sha256sum --check");
     expect(dockerfile).toContain(
       "for proxy in cargo rustc rustdoc rustfmt cargo-clippy cargo-fmt clippy-driver",

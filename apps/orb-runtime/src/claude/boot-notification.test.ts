@@ -178,6 +178,63 @@ describe("Claude uses Pi's boot decision", () => {
       marker: { customType: "pi-orb.host-restarted" },
     });
   });
+  it.each(["human", "system", "peer", "boot", "compaction"] as const)(
+    "reversed durable proof grants only %s authority at its attachment, not its removal",
+    (kind) => {
+      const f = new ComposedClaudeFixture();
+      try {
+        f.history.appendPlatform(human)._unsafeUnwrap();
+        f.history
+          .correlate("input", {
+            messageIds: kind === "boot" || kind === "compaction" ? [] : ["inbox"],
+            operationId: "host-marker",
+            ...(kind === "human" ? {} : { system: true }),
+            ...(kind === "peer"
+              ? { sender: { orbId: "11111111-1111-4111-8111-111111111111" } }
+              : {}),
+            ...(kind === "boot" ? { boot: true } : {}),
+            ...(kind === "compaction" ? { compaction: true } : {}),
+          })
+          ._unsafeUnwrap();
+        f.history.appendPlatform(boot("host-marker", "pi-orb.host-restarted"))._unsafeUnwrap();
+        f.append({
+          type: "queue-operation",
+          operation: "remove",
+          reason: "absorbed_mid_turn",
+          commandUuid: "input",
+          deliveryId: "delivery",
+          sessionId: f.state.id,
+        });
+        f.history.scan(f.nativePath)._unsafeUnwrap();
+        for (const id of ["a", "b", "c"]) f.history.appendPlatform(boot(id))._unsafeUnwrap();
+        expect(plan([...f.history.view])).toMatchObject({ triggerTurn: false });
+        f.append({
+          type: "attachment",
+          uuid: "attachment",
+          sessionId: f.state.id,
+          attachment: { type: "queued_command", source_uuid: "input", delivery_id: "delivery" },
+        });
+        const records = [...f.history.scan(f.nativePath)._unsafeUnwrap()];
+        expect(records.at(-1)).toMatchObject({
+          eventType: "claude.input_receipt",
+          overflow: { inputKind: kind, attachmentLine: 2, consumptionLine: 1 },
+        });
+        const entries = claudeBootEntries(records) as { id?: string }[];
+        expect(entries.filter((entry) => entry.id === "input")).toHaveLength(
+          kind === "human" ? 1 : 0,
+        );
+        expect(plan(records)).toMatchObject({ triggerTurn: kind === "human" });
+        expect(pendingBootContext(records).map((record) => record.id)).toEqual(
+          kind === "boot" ? [] : ["host-marker"],
+        );
+        expect(plan([...records, boot("d"), boot("e"), boot("f")])).toMatchObject({
+          triggerTurn: false,
+        });
+      } finally {
+        f.dispose();
+      }
+    },
+  );
   it("does not resume explicitly aborted or failed operations", () => {
     for (const outcome of ["aborted", "failed"]) {
       const terminal: HistoryRecord = {

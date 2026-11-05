@@ -539,7 +539,7 @@ describe("consumed queued input", () => {
   const setup = (rows: unknown[], provenance = true) => {
     const dir = fixture();
     const path = join(dir, "root.jsonl");
-    const source = rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+    const source = `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`;
     writeFileSync(path, source);
     const history = new ClaudeHistory(dir, "session", "2026-10-15T22:23:02Z");
     if (provenance)
@@ -547,44 +547,122 @@ describe("consumed queued input", () => {
     return { dir, path, source, history, indexPath: join(dir, "index.json") };
   };
 
-  it("backfills a fully indexed root once, preserving records, ancestry and native bytes", () => {
-    const f = setup([
-      attachment,
-      consumed,
-      { type: "assistant", uuid: "final", message: { content: "done" } },
-    ]);
-    f.history.scan(f.path)._unsafeUnwrap();
-    const index = JSON.parse(readFileSync(f.indexPath, "utf8"));
-    const records = index.records.filter((record: { id: string }) => record.id !== "input");
-    writeFileSync(f.indexPath, JSON.stringify({ ...index, records }));
-    const history = new ClaudeHistory(f.dir, "session", "later");
-    const view = history.scan(f.path)._unsafeUnwrap();
-    expect(view.slice(0, records.length)).toEqual(records);
-    expect(view).toHaveLength(records.length + 1);
-    const receipt = view.at(-1);
-    expect(receipt).toMatchObject({
-      id: "input",
-      parentId: "final",
+  it("accepts the retained native removal at line 18 before its attachment at line 19", () => {
+    const pair = readFileSync(
+      new URL("./fixtures/queued-input-reversed.jsonl", import.meta.url),
+      "utf8",
+    )
+      .trimEnd()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const session = "797c95ee-eb65-4805-ab00-14d2fd74b85c";
+    const uuid = "b9ea140f-d23e-40da-976b-ee6cce4993cc";
+    const f = setup(
+      [
+        ...Array.from({ length: 17 }, () => ({ type: "queue-operation", sessionId: session })),
+        ...pair,
+      ],
+      false,
+    );
+    const history = new ClaudeHistory(f.dir, session, "later");
+    history.correlate(uuid, { messageIds: ["steer"], operationId: "op" })._unsafeUnwrap();
+    expect(history.scan(f.path)._unsafeUnwrap().at(-1)).toMatchObject({
+      id: uuid,
       type: "event",
       eventType: "claude.input_receipt",
-      inboxMessageIds: ["inbox"],
+      inboxMessageIds: ["steer"],
       overflow: {
-        sessionId: "session",
         operationId: "op",
-        deliveryId: "delivery",
-        attachmentId: "attachment",
+        deliveryId: "69f77639-f79a-4c35-a159-5be3f8bea0ba",
+        attachmentId: "04a6eecd-f168-40e3-b0a3-81f8b96f2f0b",
+        attachmentLine: 19,
+        consumptionLine: 18,
         inputKind: "human",
       },
     });
-    expect(receipt).not.toHaveProperty("content");
-    expect(JSON.stringify(receipt)).not.toContain("PRIVATE");
+    expect(readFileSync(f.path, "utf8")).toBe(f.source);
+  });
+
+  it.each([false, true])("waits for both durable counterparts (removal first=%s)", (reverse) => {
+    const rows = reverse ? [consumed, attachment] : [attachment, consumed];
+    const f = setup([rows[0]]);
+    const before = [...f.history.scan(f.path)._unsafeUnwrap()];
+    expect(before.some((record) => record.id === "input")).toBe(false);
+    expect(qualifyClaudeRestart(state, before, "host").isErr()).toBe(true);
+    const prefix = JSON.parse(readFileSync(f.indexPath, "utf8")).fingerprints;
+    const history = new ClaudeHistory(f.dir, "session", "later");
+    expect(history.scan(f.path)._unsafeUnwrap()).toEqual(before);
+    appendFileSync(f.path, `${JSON.stringify(rows[1])}\n`);
+    const source = readFileSync(f.path, "utf8");
+    const view = history.scan(f.path)._unsafeUnwrap();
+    expect(view.slice(0, before.length)).toEqual(before);
+    expect(view.filter((record) => record.id === "input")).toEqual([
+      expect.objectContaining({
+        parentId: view.at(-2)?.id,
+        eventType: "claude.input_receipt",
+        inboxMessageIds: ["inbox"],
+        overflow: expect.objectContaining({
+          attachmentLine: reverse ? 2 : 1,
+          consumptionLine: reverse ? 1 : 2,
+          attachmentId: "attachment",
+          deliveryId: "delivery",
+          operationId: "op",
+        }),
+      }),
+    ]);
     expect(qualifyClaudeRestart(state, view, "host")._unsafeUnwrap().interruptedOperations).toEqual(
       ["op"],
     );
-    const reopened = new ClaudeHistory(f.dir, "session", "later still");
-    expect(reopened.scan(f.path)._unsafeUnwrap()).toEqual(view);
-    expect(readFileSync(f.path, "utf8")).toBe(f.source);
+    const saved = readFileSync(f.indexPath, "utf8");
+    expect(JSON.parse(saved).fingerprints.slice(0, prefix.length)).toEqual(prefix);
+    expect(history.scan(f.path)._unsafeUnwrap()).toEqual(view);
+    expect(new ClaudeHistory(f.dir, "session", "later still").scan(f.path)._unsafeUnwrap()).toEqual(
+      view,
+    );
+    expect(readFileSync(f.indexPath, "utf8")).toBe(saved);
+    expect(readFileSync(f.path, "utf8")).toBe(source);
   });
+
+  it.each([false, true])(
+    "backfills an indexed root without rewriting it (removal first=%s)",
+    (reverse) => {
+      const f = setup([
+        ...(reverse ? [consumed, attachment] : [attachment, consumed]),
+        { type: "assistant", uuid: "final", message: { content: "done" } },
+      ]);
+      f.history.scan(f.path)._unsafeUnwrap();
+      const index = JSON.parse(readFileSync(f.indexPath, "utf8"));
+      const records = index.records.filter((record: { id: string }) => record.id !== "input");
+      writeFileSync(f.indexPath, JSON.stringify({ ...index, records }));
+      const history = new ClaudeHistory(f.dir, "session", "later");
+      const view = history.scan(f.path)._unsafeUnwrap();
+      expect(view.slice(0, records.length)).toEqual(records);
+      expect(view).toHaveLength(records.length + 1);
+      const receipt = view.at(-1);
+      expect(receipt).toMatchObject({
+        id: "input",
+        parentId: "final",
+        type: "event",
+        eventType: "claude.input_receipt",
+        inboxMessageIds: ["inbox"],
+        overflow: {
+          sessionId: "session",
+          operationId: "op",
+          deliveryId: "delivery",
+          attachmentId: "attachment",
+          inputKind: "human",
+        },
+      });
+      expect(receipt).not.toHaveProperty("content");
+      expect(JSON.stringify(receipt)).not.toContain("PRIVATE");
+      expect(
+        qualifyClaudeRestart(state, view, "host")._unsafeUnwrap().interruptedOperations,
+      ).toEqual(["op"]);
+      const reopened = new ClaudeHistory(f.dir, "session", "later still");
+      expect(reopened.scan(f.path)._unsafeUnwrap()).toEqual(view);
+      expect(readFileSync(f.path, "utf8")).toBe(f.source);
+    },
+  );
 
   it.each([false, true])(
     "matches the last equivalent boot delivery copy (reordered payload=%s)",
@@ -608,7 +686,7 @@ describe("consumed queued input", () => {
         consumed,
         { type: "assistant", uuid: "final", parentUuid: "copy", message: { content: "done" } },
       ];
-      appendFileSync(f.path, tail.map((row) => JSON.stringify(row)).join("\n") + "\n");
+      appendFileSync(f.path, `${tail.map((row) => JSON.stringify(row)).join("\n")}\n`);
       const native = readFileSync(f.path, "utf8");
       const view = f.history.scan(f.path)._unsafeUnwrap();
       expect(view.slice(0, before.length)).toEqual(before);
@@ -635,21 +713,55 @@ describe("consumed queued input", () => {
     },
   );
 
-  it.each([
-    [[attachment], true],
-    [[consumed, attachment], true],
-    [[attachment, { ...consumed, commandUuid: "wrong" }], true],
-    [[attachment, { ...consumed, deliveryId: "wrong" }], true],
-    [[{ ...attachment, sessionId: "child" }, consumed], true],
-    [[attachment, { ...consumed, sessionId: "child" }], true],
-    [[{ ...attachment, isSidechain: true }, consumed], true],
-    [[attachment, { ...consumed, agentId: "child" }], true],
-    [[attachment, consumed], false],
-  ])("requires root proof and saved provenance: %j / %s", (rows, provenance) => {
+  it.each(
+    (
+      [
+        [[attachment], true],
+        [[consumed], true],
+        [[attachment, { ...consumed, commandUuid: "wrong" }], true],
+        [[attachment, { ...consumed, deliveryId: "wrong" }], true],
+        [[{ ...attachment, sessionId: "child" }, consumed], true],
+        [[attachment, { ...consumed, sessionId: "child" }], true],
+        [[{ ...attachment, isSidechain: true }, consumed], true],
+        [[attachment, { ...consumed, agentId: "child" }], true],
+        [[{ ...attachment, agent_id: "child" }, consumed], true],
+        [[attachment, { ...consumed, isSidechain: true }], true],
+        [[attachment, { ...consumed, agent_id: "child" }], true],
+        [[attachment, { ...consumed, reason: "other" }], true],
+        [[attachment, { ...consumed, operation: "enqueue" }], true],
+        [[{ ...attachment, uuid: "invalid identity" }, consumed], true],
+        [[attachment, consumed], false],
+      ] satisfies [unknown[], boolean][]
+    ).flatMap(([rows, provenance]) => [
+      { rows, provenance },
+      { rows: [...rows].reverse(), provenance },
+    ]),
+  )("requires root proof and saved provenance: %j", ({ rows, provenance }) => {
     const f = setup(rows, provenance);
     const view = f.history.scan(f.path)._unsafeUnwrap();
     expect(view.some((record) => record.id === "input")).toBe(false);
     expect(qualifyClaudeRestart(state, view, "host").isErr()).toBe(true);
+  });
+
+  it.each([false, true])("joins only saved input provenance (removal first=%s)", (reverse) => {
+    const f = setup(reverse ? [consumed, attachment] : [attachment, consumed], false);
+    f.history
+      .correlate("other-input", { messageIds: ["wrong-inbox"], operationId: "wrong-op" })
+      ._unsafeUnwrap();
+    const before = [...f.history.scan(f.path)._unsafeUnwrap()];
+    expect(before.some((record) => record.id === "input")).toBe(false);
+    expect(qualifyClaudeRestart(state, before, "host").isErr()).toBe(true);
+    f.history.correlate("input", { messageIds: ["inbox"], operationId: "op" })._unsafeUnwrap();
+    const reopened = new ClaudeHistory(f.dir, "session", "later");
+    const view = reopened.scan(f.path)._unsafeUnwrap();
+    expect(view.slice(0, before.length)).toEqual(before);
+    expect(view.at(-1)).toMatchObject({
+      id: "input",
+      inboxMessageIds: ["inbox"],
+      overflow: { operationId: "op" },
+    });
+    expect(JSON.stringify(view.at(-1))).not.toContain("wrong-");
+    expect(reopened.scan(f.path)._unsafeUnwrap()).toEqual(view);
   });
 
   it.each([
@@ -663,7 +775,7 @@ describe("consumed queued input", () => {
     const before = [...f.history.scan(f.path)._unsafeUnwrap()];
     const saved = readFileSync(f.indexPath, "utf8");
     const tail = [{ ...attachment, uuid: "copy", attachment: payload }, consumed];
-    appendFileSync(f.path, tail.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    appendFileSync(f.path, `${tail.map((row) => JSON.stringify(row)).join("\n")}\n`);
     expect(f.history.scan(f.path).isErr()).toBe(true);
     expect(f.history.view).toEqual(before);
     expect(readFileSync(f.indexPath, "utf8")).toBe(saved);
@@ -671,6 +783,8 @@ describe("consumed queued input", () => {
 
   it.each([
     [attachment, consumed, { ...consumed }],
+    [consumed, attachment, { ...consumed }],
+    [consumed, attachment, { ...attachment, uuid: "other" }],
     [attachment, consumed, { ...attachment, uuid: "other" }],
     [{ ...attachment, uuid: "input" }, consumed],
     [{ type: "assistant", uuid: "input", message: { content: "unrelated" } }, attachment, consumed],
@@ -693,19 +807,22 @@ describe("consumed queued input", () => {
     expect(nativeHistoryFiles.read(f.indexPath)).toBe(saved);
   });
 
-  it("never rewrites an already committed receipt when a later copy appears", () => {
-    const f = setup([attachment, consumed]);
-    const before = [...f.history.scan(f.path)._unsafeUnwrap()];
-    const saved = readFileSync(f.indexPath, "utf8");
-    appendFileSync(f.path, JSON.stringify({ ...attachment, uuid: "later-copy" }) + "\n");
-    const reopened = new ClaudeHistory(f.dir, "session", "later");
-    const result = reopened.scan(f.path);
-    expect(result.isErr() && result.error.message).toBe(
-      "Consumed Claude input receipt proof conflicts: delivery copy follows consumption.",
-    );
-    expect(reopened.view).toEqual(before);
-    expect(readFileSync(f.indexPath, "utf8")).toBe(saved);
-  });
+  it.each([false, true])(
+    "never rewrites committed proof for a later copy (removal first=%s)",
+    (reverse) => {
+      const f = setup(reverse ? [consumed, attachment] : [attachment, consumed]);
+      const before = [...f.history.scan(f.path)._unsafeUnwrap()];
+      const saved = readFileSync(f.indexPath, "utf8");
+      appendFileSync(f.path, `${JSON.stringify({ ...attachment, uuid: "later-copy" })}\n`);
+      const reopened = new ClaudeHistory(f.dir, "session", "later");
+      const result = reopened.scan(f.path);
+      expect(result.isErr() && result.error.message).toBe(
+        "Consumed Claude input receipt proof conflicts: delivery copy follows consumption.",
+      );
+      expect(reopened.view).toEqual(before);
+      expect(readFileSync(f.indexPath, "utf8")).toBe(saved);
+    },
+  );
 
   it("ignores a child delivery copy when selecting root proof", () => {
     const f = setup([
@@ -719,11 +836,11 @@ describe("consumed queued input", () => {
     });
   });
 
-  it("publishes no receipt when its index commit fails", () => {
-    const f = setup([attachment]);
+  it.each([false, true])("publishes no receipt on failed commit (removal first=%s)", (reverse) => {
+    const f = setup([reverse ? consumed : attachment]);
     const before = f.history.scan(f.path)._unsafeUnwrap();
     const saved = readFileSync(f.indexPath, "utf8");
-    appendFileSync(f.path, JSON.stringify(consumed) + "\n");
+    appendFileSync(f.path, `${JSON.stringify(reverse ? attachment : consumed)}\n`);
     const failed = new ClaudeHistory(f.dir, "session", "later", {
       ...nativeHistoryFiles,
       commit: () => {

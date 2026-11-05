@@ -15,6 +15,7 @@ import {
   PIN,
   runTool,
   supervise,
+  validateBundledSqlite,
   validateInstallPolicy,
   validatePins,
 } from "./local-fake-provider.mjs";
@@ -151,6 +152,32 @@ test("pin verification rejects HEAD, lock and installed version drift", () => {
     [PIN, lock, "0.0.70"],
   ])
     assert.equal(validatePins(...args).error.type, "pin_mismatch");
+});
+test("bundled SQLite build requires the pinned installed version and locked bundle identity", () => {
+  const entry = { version: "12.11.1", inBundle: true, hasInstallScript: true };
+  const lock = { packages: { "node_modules/flingit/node_modules/better-sqlite3": entry } };
+  assert.equal(validateBundledSqlite(lock, "12.11.1").isOk(), true);
+  for (const [candidate, installed] of [
+    [lock, "12.11.0"],
+    [{}, "12.11.1"],
+    [
+      {
+        packages: {
+          "node_modules/flingit/node_modules/better-sqlite3": { ...entry, version: "12.11.0" },
+        },
+      },
+      "12.11.1",
+    ],
+    [
+      {
+        packages: {
+          "node_modules/flingit/node_modules/better-sqlite3": { ...entry, inBundle: false },
+        },
+      },
+      "12.11.1",
+    ],
+  ])
+    assert.equal(validateBundledSqlite(candidate, installed).error.type, "native_version_mismatch");
 });
 test("install policy requires supported npm and an explicit cloudflared denial", () => {
   const project = { allowScripts: { cloudflared: false } };
@@ -595,13 +622,23 @@ test("conflicting or oversized npm diagnostics stay unknown", () => {
     clipped: true,
   });
 });
-for (const [npmVersion, denied, expectedError, npmCode = "ECONNRESET", errno = -104] of [
+for (const [
+  npmVersion,
+  denied,
+  expectedError,
+  npmCode = "ECONNRESET",
+  errno = -104,
+  native = false,
+] of [
   ["11.19.1", true, "tool_failed"],
+  ["12.2.1", true, "tool_failed"],
+  ["12.2.1", true, "tool_failed", "ECONNRESET", -104, true],
+  ["12.2.1", true, "native_version_mismatch", "ECONNRESET", -104, true],
   ["11.19.1", true, "tool_failed", "EBADENGINE", null],
   ["10.9.4", true, "npm_version_unsupported"],
   ["11.19.1", false, "install_policy_mismatch"],
 ])
-  test(`actual npm preparation: ${npmVersion}, denial=${denied}, code=${npmCode}`, async (t) => {
+  test(`actual npm preparation: ${npmVersion}, denial=${denied}, code=${npmCode}, native=${native}, expected=${expectedError}`, async (t) => {
     if (!linux) return t.skip("needs Linux /proc");
     const f = await ownedFixture(t);
     const bin = join(f.root, "bin"),
@@ -609,6 +646,11 @@ for (const [npmVersion, denied, expectedError, npmCode = "ECONNRESET", errno = -
     await fs.mkdir(bin);
     const lock = {
       packages: {
+        "node_modules/flingit/node_modules/better-sqlite3": {
+          version: "12.11.1",
+          inBundle: true,
+          hasInstallScript: true,
+        },
         "node_modules/flingit": {
           version: "0.0.71",
           integrity: FLING_INTEGRITY,
@@ -624,7 +666,7 @@ for (const [npmVersion, denied, expectedError, npmCode = "ECONNRESET", errno = -
     const calls = join(f.root, "calls");
     await fs.writeFile(
       join(bin, "npm"),
-      `#!${process.execPath}\nrequire('node:fs').appendFileSync(${JSON.stringify(calls)},JSON.stringify(process.argv.slice(2))+'\\n');if(process.argv[2]==='--version'){console.log('${npmVersion}');process.exit(0);}console.error('npm error code ${npmCode}\\nnpm error errno ${errno}\\nnpm error command sh -c secret https://token@private.invalid');process.exit(152);`,
+      `#!${process.execPath}\nrequire('node:fs').appendFileSync(${JSON.stringify(calls)},JSON.stringify(process.argv.slice(2))+'\\n');if(process.argv[2]==='--version'){console.log('${npmVersion}');process.exit(0);}require('node:fs').copyFileSync('package.json',${JSON.stringify(calls + "-policy.json")});if(${native}&&process.argv[2]==='ci'){const fs=require('node:fs');fs.mkdirSync('node_modules/flingit/node_modules/better-sqlite3',{recursive:true});fs.writeFileSync('node_modules/flingit/package.json',JSON.stringify({version:'0.0.71'}));fs.writeFileSync('node_modules/flingit/node_modules/better-sqlite3/package.json',JSON.stringify({version:${JSON.stringify(expectedError === "native_version_mismatch" ? "12.11.0" : "12.11.1")}}));process.exit(0);}console.error('npm error code ${npmCode}\\nnpm error errno ${errno}\\nnpm error command sh -c secret https://token@private.invalid');process.exit(152);`,
       { mode: 0o700 },
     );
     const wrapper = fileURLToPath(new URL("./local-fake-provider.mjs", import.meta.url));
@@ -640,15 +682,31 @@ for (const [npmVersion, denied, expectedError, npmCode = "ECONNRESET", errno = -
     assert.equal(
       await fs.readFile(calls, "utf8"),
       '["--version"]\n' +
-        (expectedError === "tool_failed" ? '["ci","--no-audit","--no-fund"]\n' : ""),
+        (["tool_failed", "native_version_mismatch"].includes(expectedError)
+          ? '["ci","--no-audit","--no-fund"]\n'
+          : "") +
+        (native && expectedError === "tool_failed"
+          ? '["run","install","--prefix","node_modules/flingit/node_modules/better-sqlite3"]\n'
+          : ""),
     );
     const manifest = JSON.parse(await fs.readFile(join(evidence, "manifest.json"), "utf8"));
     const phases = JSON.parse(await fs.readFile(join(evidence, "phases.json"), "utf8"));
-    const installs = phases.filter((p) => p.phase === "install" && p.state === "finished");
+    const installs = phases.filter(
+      (p) => p.phase === (native ? "sqlite_install" : "install") && p.state === "finished",
+    );
     assert.equal(installs.length, expectedError === "tool_failed" ? 1 : 0);
     if (expectedError === "tool_failed") {
+      const project = JSON.parse(await fs.readFile(calls + "-policy.json", "utf8"));
+      assert.deepEqual(project.allowScripts, {
+        cloudflared: false,
+        "esbuild@0.28.2": true,
+      });
       assert.deepEqual(installs[0].npm, { npmCode, errno, clipped: false });
       assert.equal(installs[0].code, 152);
+      assert.equal(
+        await fs.readFile(join(privateRoot, "source/package-lock.json"), "utf8"),
+        JSON.stringify(lock),
+      );
     }
     assert.equal(manifest.error, expectedError);
     assert.equal(manifest.npm, npmVersion);

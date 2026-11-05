@@ -2,6 +2,7 @@
 
 - **Owner-managed Tailscale cleanup after retirement** (`docs/ports.md`). Once old provisioning stops, the owner may delete devices/revoke join keys and the upstream OAuth client in Tailscale admin. Independent of apply-time destruction of `pi-orb-tailscale-oauth-client-secret`; no product cleanup, live inventory or absence-evidence deployment gate. No live action authorized here.
 - **Accept deployed HTTP previews** (`docs/ports.md`; question 74 (browser preview)). Deployed 2026-11-03 ([Deploy 41567414422](https://github.com/schani/pi-orb/actions/runs/41567414422), `7858ba8c`): the `*.piorb.live` certificate is active and an unauthenticated navigation reaches the preview login redirect. Live acceptance passed for login, HTTP/WS/SSE, streaming, uploads up to Cloud Run's 32 MiB limit and revoke fencing (`docs/ports.md`). Remaining: session expiry/re-login after 12 hours, Chromium/Safari runs, compute replacement with an open preview.
+- **Live-accept orb access tokens** (`docs/ports.md`). After deploy, from a Claude orb and a central-Pi orb: `agent-browser` with the `__Host-pi-orb-token` cookie (an id-token for `urn:pi-orb:access`) opens a same-owner `piorb.live` preview (document, SSE, WebSocket) and a hosted file, a cross-owner target returns 403, and the open preview recovers after the target's compute stop/start without a human tab (this also covers the Chromium and compute-replacement items above). Verify that no token appears in request logs.
 
 Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
@@ -10,6 +11,9 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 - When an item is done, delete it here and record the outcome in the relevant design doc.
 
 ## Bugs
+
+- **Remediate the two npm audit advisories** (2026-11-03; `docs/dependency-audit.md`): minimatch GHSA-g3hv-75wg-m249 and glob GHSA-3g3m-2fjr-6pw4. Resolve Pi/static/legacy GCP chains with compatible updates or qualified scoped overrides; verify full/production audits and regression gates.
+- **Refresh native Docker/containerd security pins** (2026-11-03; `docs/dependency-audit.md`): Docker 29.9.3 and containerd 2.3.7 LTS targets, subject to Debian package availability; paired refresh held under the 2026-10-24 decision in [docs/deployment.md](docs/deployment.md), pending [question 87](docs/open-questions.md#dependency-update-state-conversions--87). Refresh base/guest-agent security inputs and qualify the native image; record installed versions, not source-only assumptions.
 
 - **Finish qualification of the approved headline/deletion correction** (2026-10-29; `docs/postmortems/2026-10-29-pg17-production.md`; unwaived blocker). Focused local/PGlite tests and static checks pass (`docs/testing.md`); fresh exact-head PR CI and release qualification remain pending. Historical cause remains unproven.
 

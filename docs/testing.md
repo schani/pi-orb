@@ -1,5 +1,23 @@
 # Testing
 
+## Claude queued-input proof order (2026-11-04, PST; user-approved, local, undeployed)
+
+The correction removes only the single-copy append-order exclusion; multi-copy proof and committed receipts retain their guards. The regression uses the exact retained native removal 18/attachment 19 pair, matching both identities with saved provenance. Both prefix orders require the complete pair before acknowledgement; tests cover indexed backfill, immutable native bytes/fingerprints/ancestry, rescans/reopen, wrong identities/provenance, child/sidechain exclusions, duplicates/conflicts and failed commit. Composed steering checks drain, real agent reattach, persisted duplicate acknowledgement without resubmission and one receipt. Boot projection checks all five input kinds, with human authority at attachment rather than the earlier removal or appended receipt.
+
+Fresh `npm ci` preceded checks. Initial tests-first run: 103 passed/10 failed; nine expected reverse-proof regressions and one test-oracle error (the forward receipt's parent is the native removal at the journal tail, not its attachment). After correcting only that ancestry oracle: 103 passed/nine expected failures on the original guard. Removing the guard passes all 112 cases. Expanded saved-provenance/restart coverage and final focused run: 269 passed across 20 files, including five existing DST suites; no new DST failure or trace. Genuine SDK 0.3.318/CLI 2.1.318 native qualification: 36 passed—full contract 28, unchanged steering 2, handoff 2, instructions 4. A further 122 lifecycle/initialization/lifetime/idle-fence safety cases pass across five files. Runtime typecheck and scoped Biome pass (eight existing informational diagnostics).
+
+Evidence: `/workspace/claude-evidence/q88-approved/` (first failures, diagnosis, commands, native artifacts and fixture/process/disk checks). Earlier original CI, root-compaction, baseline and graceful failures remain in their original evidence directories; original CI raw ordering remains unproven. Current contract/rationale: `docs/claude-agent-sdk.md`, findings: `docs/claude-sdk-capabilities.md`. Hosted exact-head full CI/E2E, packaged images, live subscription and deployment remain unqualified by these local gates.
+
+## Claude SDK 0.3.318 queued compaction (2026-11-04, PST)
+
+Accepted public interrupt leaves queued `/compact` runnable. The fixed native fixture
+returns no structured summary; [CLI 2.1.311](https://github.com/anthropics/claude-code/releases/tag/v2.1.311)
+added one missing-summary retry. Require exactly two provider requests for queued
+compaction, one for interrupted in-progress compaction and zero before dispatch.
+Cancellation, queue receipt, summary and continuation assertions remain unchanged.
+The original full-root failure and synthetic request capture are retained in
+`/workspace/claude-evidence/full/`; no production behavior changed.
+
 ## State-machine refactor gate (user-approved 2026-11-01, PST)
 
 For this task only—workspace uploads, central Durable owner close/drain, inbox admission/replay, MCP OAuth publication and frontend scroll pinning—each machine actually refactored must first have a new deterministic regression exposing a genuine bug in the original implementation. Manufactured requirements or mutation-introduced bugs do not qualify; machines without a confirmed bug are not refactored. Preserve and replay DST failures before fixing. Preserve persisted schemas, value vocabulary, file/receipt formats and intended CAS/transaction contracts; new or changed persisted representation requires user discussion. Correcting buggy effects/ordering within those contracts is permitted.
@@ -45,6 +63,12 @@ Separately, the real web UI/main control plane, process host and network Postgre
 Local evidence: `.context/native-pg-process-acceptance/`, including snapshots, SQL checks, manifests and cleanup receipts. Operator CLI errors and an `about:blank` navigation were tooling issues; diagnostics are retained.
 
 This qualifies synthetic-inference process acceptance, not live-provider inference/billing, crash recovery, database failover or deployment.
+
+## Mermaid 12.3.0 (2026-11-04, PST; local, undeployed)
+
+Tests preceded the bump: both built-app browser engines rejected adjacent edge IDs on `12.2.0`, after passing privacy, sanitization, KaTeX, actor, source/dialog and parse-fallback assertions. `12.3.0` renders the same shapes and named edges. The built-shell fixture blocks external requests and asserts source-free render telemetry and lazy hashed assets. Existing Mermaid browser cases retain measurement-cleanup coverage.
+
+Local checks pass: **980 web tests**, **25 built-shell/Mermaid browser cases** across Chromium/WebKit, web build/typecheck, E2E typecheck and scoped Biome. Build retains large-chunk warnings. Initial fixture failures were corrected canonical display projection, safe-link expectations and diagram-prefixed SVG IDs; no deadlines changed. Commands, first-failure logs and registry receipts: `/tmp/mermaid-implementation.md`. This is scoped frontend qualification, not full runtime/process E2E, hosted CI or deployment.
 
 ## First-party security refresh (2026-10-24, PDT; local, undeployed)
 
@@ -199,6 +223,16 @@ The user waived attribution of only [Durable 39844782648](https://github.com/sch
 ## Durable browser APT setup (2026-10-22)
 
 **Rule:** Ubuntu runner helper coverage includes Durable process shards before native prerequisites and Playwright's privileged APT child, not only the Docker E2E workflow. The workflow-order inventory must cover each such job. Setup-only stalls are not test failures or successful qualification: preserve terminal logs and distinguish the proven acquisition phase from an unproven mirror/runner cause. The helper's public URI, keyring and IPv4 diagnostics remain in Actions logs; retries, deadlines and assertions are unchanged. Incident and local validation: `docs/postmortems/2026-10-22-durable-browser-apt-stall.md`. Fresh attempt-1 exact-head CI, all E2E shards and Durable qualification remain required; no historical cause is claimed fixed.
+
+## git-crypt 0.8.0 qualification (2026-11-04 PST; local, undeployed)
+
+Original-head (`5065468fea72685a5a2b14b7a40b578e658f58c9`) local receipts: tests first rejected the missing installer, image wiring and native snapshot input. `npm ci` preceded checks. Source pin/provenance and the rejected upstream binary: `docs/host-provider.md`. Contracts cover checksum rejection before extraction/build/install, download/build failure, wrong-version refusal, isolated-prefix installation with source/license retention, exact versions in both images and acceptance as `orb`. All 152 Node infrastructure, 243 Python infrastructure and 34 guest tests plus the filesystem check pass; the separate runtime APT suite passes 10 tests. Snapshot tests pass 7 cases; native-image typecheck, scoped Biome, shell syntax and diff whitespace checks pass.
+
+The actual shared installer builds unmodified 0.8.0 against Debian Bookworm OpenSSL 3.0.22/glibc 2.36 into an owned local prefix, without replacing system git-crypt. Upstream OpenSSL deprecation warnings remain. As UID 2000, an isolated disposable repository verifies encrypted committed bytes, lock, symmetric-key unlock, exact plaintext recovery and a clean worktree. A second fixture creates ciphertext/key with Debian 0.7.0 and verifies unlock plus explicit smudge with 0.8.0. Generated keys, repositories and private HOME directories are removed; no production credentials or keys are used. Evidence, including intentional RED logs, source/API receipts, build and fixture commands: `/workspace/gitcrypt-evidence/`.
+
+Docker CLI is installed but no daemon is available; none was started. Complete Docker/native cloud images and arm64 execution are unqualified. No E2E or deployment; runtime protocol/server/harness code is unchanged. Pi/Chord 1.4.0 patches and textsearch are untouched.
+
+**Capacity correction (2026-11-04):** that head's [E2E shard 1](https://github.com/schani/pi-orb/actions/runs/41865027728/job/126696965012) failed the unchanged 15 GiB guard with 9.6 GiB free, before image build or tests. First logs/artifacts remain in `/workspace/toolchain-ci-evidence/`. Rebased onto [PR 257](https://github.com/schani/pi-orb/pull/257), exact `df34bed10a67b17d6ee583ef5674c27890be83dd`, to inherit its qualified Android-only cleanup unchanged (`docs/postmortems/2026-11-04-ci-runner-disk-budget.md`). Git-crypt implementation/tests remain byte-identical. After fresh `npm ci`, 61 runtime-dependency/APT/qualification/capacity contracts, 7 snapshot tests, 34 guest tests and the filesystem check pass, as do native-image typecheck, scoped Biome and shell syntax checks. New local receipts: `/workspace/gitcrypt-evidence/capacity-fix/`; old-head receipts do not qualify this head. Fresh exact-head CI remains required; image/native/arm64 limits above still apply.
 
 ## Bun/git-crypt image qualification (2026-10-22; local, undeployed)
 
@@ -1110,9 +1144,177 @@ A separate live dedicated-grant check used the verified Pi 0.99.1 SDK patch and 
 
 Pi 0.99.2 appeared at 19:30 UTC during this round. Its discovery changes do not reconnect an initially failed broker-auth connection; it does not remove the local patches. Qualification stays pinned to 0.99.1 rather than silently changing the target. Both catalogs retain Sol 6.1 support; no account inference was tested. Audit: `.context/native-mcp-qualification/sdk-current-2.md`.
 
+## HTTP/auth security refresh (2026-11-04, PST; local, undeployed)
+
+Receipts: `.context/deps-http-security/`; corrected receipts use `find-my-way-`. Baseline and corrected candidate `npm ci` apply unchanged sealed Pi1.4.0 patches. Registry metadata/integrities and lock-delta checks preserve every unrelated retained record; removed records belong only to legacy gaxios7.1.3's closure and direct Undici7. Both Google auth11 copies update; legacy auth10 stays fixed. Corrected full/production audits report zero findings; `npm ls --all` passes. Published required manifests and artifact metadata match all 638 runtime lock entries (627 registry versions); all 1,228 required edges satisfy their effective ranges, including the four existing scoped override edges.
+
+Corrected focused contracts: **82 tests / 10 files**; full dependency-graph contract: **4 tests**; HTTP/WebSocket/provider-adapter regressions: **130 tests / 10 files**. Earlier installer/closure contracts: **23 tests**. Workspace/E2E typecheck and repository lint pass. Tests exercise real local HTTP/Agent connections and refresh/metadata requests, real Pi filtering/model selection, signed OIDC, static glob enumeration/range/HEAD/cache behavior and actual-dispatcher DNS rejection. Synthetic DNS/provider fixtures do not qualify live Google/MCP endpoints or TLS/HTTP2 negotiation.
+
+First failures remain in the receipt directory: expected baseline version assertions; deterministic Pi fixture discovery and removed-catalog-helper assumptions; DNS test table/overload/required-field type errors; formatting; stale direct-Undici/override installer expectations. Fixtures, assertions and expectations were corrected without product/configuration changes; generic fetch rejection was strengthened to require the DNS guard's cause. No flaky failure or DST trace occurred.
+
+The first serial root run (`full-unit.log`) remains failed: **6,102 passed / 43 skipped / 1 failed**. The lock editor omitted Fastify5.12.8's mandatory find-my-way floor: `^9.10.0` resolved to retained9.9.0. The existing root-graph assertion reproduced this exact deterministic failure before correction; a new version-pin row also failed first. Only that record's version/tarball/integrity changed to registry-verified9.10.0; its dependency/engine floors are unchanged. The complete graph and published runtime-dependency checks now pass, with no other omission. The earlier reviewer approval predates this correction. Fresh review, full serial unit/infra and full process E2E remain required; image/cloud and deployment gates are not claimed.
+
+Stack refresh receipts: `.context/deps-http-security-stack/refresh-83582/`; first CI failure: `.context/deps-http-security-stack/ci-first-failure/README.md`. [HTTP256 run 41877726134](https://github.com/schani/pi-orb/actions/runs/41877726134) failed E2E shards 2/3 before image build or tests: 9.6 GiB free, below the unchanged 15 GiB floor. Both artifacts contain the same 19 byte-identical tracked historical files; no new DST trace. The other eight old-head checks passed, not a qualification of this refresh. The original log SHA256 is `81717deeef45497fdbe5e9724681b4d9260b1aa6efd2ea37f11c23f142291b79`.
+
+The corrective base is final PGlite254 `83582c00d1719ad39cdae3dc8934f1e687cd90a6`, inheriting UI259 `ec772a18` and CI257 `df34bed1`; CI257 is not independently imported. Its Android-only hosted-runner cleanup addresses initial capacity without weakening floors, deadlines or assertions; decision and measured evidence: `docs/postmortems/2026-11-04-ci-runner-disk-budget.md`. HTTP/security versions, overrides, sealed Pi1.4.0 patches, exact PGlite0.5.12/wrapper0.0.14 and frozen JS/25-file extension/native SQL payload proofs remain unchanged. Targeted receipts qualify only the frozen staged tree; fresh Sol round 4, full unit/infra, image and process/browser E2E qualification remain pending. Keep PR256 draft until all ten exact-new-head CI checks pass; upstream receipts and historical passes do not clear that gate. No rerun, commit, push or deployment is claimed.
+
 ## Dependency remediation (2026-09-30)
 
 Root npm audit initially reported 11 vulnerable entries (five production); updated supported transitives and Vitest 4.1.11 bring full and production audits to zero. Vitest 4 uses `maxWorkers: 1` in place of removed `poolOptions`; the existing actual-config sequencing contract guards frontend-first and single-owner lifecycle files. TypeScript's Node ambient types are explicit. The shrinkwrap-specific Pi packaging decision and reproducibility check are in `docs/pi-adapter.md`. Three isolated script lockfiles/installations also resolve patched brace expansion. Root typecheck, lint, 2,316 unit/DST cases (eight conditional skips), and 110 infrastructure tests passed. The full Docker E2E was attempted but blocked before tests by the absent local Docker socket; no release E2E qualification is claimed. A separate frontend attempt found missing Playwright browsers and then missing system libraries under an unprivileged user; its partial results do not qualify the browser suite.
+
+## npm 12.2.1 qualification (2026-11-04; local candidate, undeployed)
+
+Node remains 26.13.0 / ABI 147. npm 12.2.1's exact registry engines admit it;
+release metadata and verified tarball integrity are retained outside the worktree
+in `/workspace/npm-upgrade-evidence/`. The candidate uses an isolated npm prefix;
+the shared checkout and globally installed npm 11.20.0 are untouched.
+
+Tests first reject missing CI/container/native pins, lifecycle approvals and root
+package-manager metadata. Fixture tests observe the exact esbuild approval
+at the `npm ci` boundary, preserve the cloudflared denial and compare lock bytes.
+SQLite bundle version checks at the fixed path precede its explicit install hook; mismatch
+prevents that hook, while hook failure prevents service/test launch. Calls prove
+locked install → one SQLite hook → launch ordering; `sqlite_install` retains the
+existing bounded npm diagnostics.
+Controlled wrong-version esbuild probes reject on npm 11, incorrectly succeed
+with npm 12's original policy (hook blocked), then reject with the exact approval.
+The first npm 12 clean install also leaves Claude's CLI placeholder; the approved
+install executes `claude --version` successfully. Agent-browser works without its
+postinstall, through its own permission repair.
+
+Clean root installation applies all three unchanged Pi 1.4.0 sealed patches;
+reapplication verifies `already_applied`. Root/workspace lock bytes and patch
+SHA-256 seals match the base. Before stacking on PR 243, separate npm 11.20.0
+and npm 12.2.1 installs have identical version/URL/integrity/link graphs: root
+709 entries, web 320, control-plane 433 and runtime 339. Integrity-verified Pi,
+Chord and nested Pi dependency tarballs contain no `npm-shrinkwrap.json`.
+Independent web/control-plane/runtime manifest-only installs pass; web builds,
+control-plane patching and both network-namespace-isolated node-pty source
+rebuild/spawn gates pass. Existing `npm_config_nodedir=/usr/local` works with
+npm 12.2.1 but warns about future removal; no global source-policy broadening.
+The unchanged graph reports seven moderate audit findings (five runtime-only);
+no audit fix or lock refresh was run.
+
+Workspace/E2E typecheck and lint pass (488 warnings, 102 informational findings).
+The first lint attempt found only formatting in the new fixture test; formatting
+was corrected before the passing gate. Focused installer/fixture tests pass 69;
+pin/build-policy contracts pass 18. Playwright Chromium/WebKit and system
+prerequisites install successfully. The first `npm test` was transport-interrupted
+after approximately five minutes, with no final receipt; an owned detached gate
+replaces the tool-call lifetime, not a product/test timeout. On old head
+`fa95558b`, the complete `npm test` passes: 6,084 tests, 43 conditional skips,
+707 passed files/15 skipped; infrastructure passes 153 Node + 243 Python + 34
+native-guest tests and filesystem checks. Old-head E2E was deliberately disabled
+before execution for the PR 243 integration; these receipts do not qualify the
+stacked source. Docker CLI exists but its daemon socket is
+absent; no Docker image, real network PostgreSQL, native GCP acceptance or
+production qualification is claimed. Evidence logs and controlled failures remain
+in `/workspace/npm-upgrade-evidence/`.
+
+
+**Initial PR 243 integration:** npm was stacked on exact Claude head
+`c5c332e42273e6939c122ee780f64a5896596b85`; only Claude CLI `2.1.318` is approved,
+without an old-version fallback. Before that approval, a clean install reproduces
+the non-working CLI placeholder; afterward it runs the exact native version.
+Stacked clean install, exact CLI execution, seal reapplication, all 18 pin
+contracts and workspace/E2E typecheck/lint pass (488 warnings, 102 informational
+findings). Full infrastructure passes 156 Node + 243 Python + 34 native-guest
+checks, including 72 installer/fixture contracts. Lock SHA-256
+`b6982242b7f501b565dc4500a1c883266356dc2bd2918bb3b4c7bc53f3f2810d`
+and all sealed patch bytes match the exact PR 243 base. The first real npm 12 provider
+startup exposed the bundled SQLite rule that mocked install contracts missed;
+[evidence and correction](postmortems/2026-11-04-npm12-bundled-sqlite.md).
+With the narrow explicit native installation, the actual pinned wrapper reaches
+owned worker/Vite readiness, migrations and health, then executes an exit-zero
+child and cleans both groups without escalation. Exact fixture lock/generated
+hashes are retained; no fixture source/lock upgrade. Full stacked unit/E2E/image
+qualification remained pending at that checkpoint. PR 243 was then draft-blocked
+on its native queued-input/persistence contract; npm did not change or waive that proof.
+
+The standalone native npm paragraph sits before the Node section, preserving the
+existing git-crypt paragraph. `git merge-tree` against PR 247's `5065468f`
+source-build tree merges without conflict; no PR 247 behavior is included here.
+Final stacked startup/cleanup receipts: `stack243-wrapper-final/`; static/install
+receipts: `stack243-final-{ci,infra,typecheck,lint}.log`, all under the evidence
+root. A post-cleanup raw Python bind probe rejected a retained TCP `TIME-WAIT`
+socket, not a listener; `ss` evidence and Node-equivalent `SO_REUSEADDR` binding
+confirm both owned ports are available. No wrapper/test retry or product change
+was used to clear that diagnostic-probe assumption.
+
+
+**Focused integrated E2E:** reviewed `c81e8bba` (tree
+`e0ead4e3184d8a9289015d6783027a3457a19b94`) passes the actual pinned-provider
+process full-slice login/scripted-tool/replication/drain scenario: one pass,
+three intentionally deselected tests, 325.10 seconds. Pinned Chromium is explicit;
+the wrapper records exit zero, unchanged ready identity and successful cleanup
+of both groups without escalation. Command:
+`PI_ORB_E2E_BACKEND=process node scripts/local-fake-provider.mjs -- npm run test:e2e -- e2e/full-slice.e2e.test.ts -t 'runs login, a scripted tool round trip'`.
+Receipts: `stack243-fullslice-first.log`, `.exit` and
+`stack243-fullslice-provider/` under the evidence root.
+
+The rebase onto PR 243's `c5c332e4` changed only three upstream documentation
+files relative to reviewed `c81e8bba`; at that checkpoint, application behavior,
+manifests, lock, patches and tests were byte-identical. This qualification entry then updates
+attribution only. Repeated `git merge-tree` retains conflict-free independence
+from PR 247. That checkpoint claimed no full stacked unit/E2E/image pass or
+native-proof clearance; PR 243's question 88 was then open.
+
+
+**Native build ordering:** install and verify pinned npm after the existing Rustup
+proxy loop and before `cd /app`; Node is already extracted. A tests-first order
+contract rejects the earlier placement, then all 18 pin/build contracts pass.
+Only the two npm lines move; Rustup commands, dependency inputs and runtime
+behavior are unchanged. Earlier full-slice receipts do not exercise this image
+build ordering. The qualification section is colocated with dependency-tree
+ownership rather than appended at EOF to keep independent toolchain edits apart.
+
+**Prior CI base integration (2026-11-04, PST):** merged frozen PR 243 head
+`c02e49cf6238443e67e63a28b18ee774b2710840`, preserving its Claude `c5c332e4`
+and qualified PR 257 `df34bed1` ancestry. Runner cleanup is inherited unchanged;
+npm policy, execution pins, patches, dependency/lock bytes and fixture behavior
+remain identical to `78d67878`.
+
+The original inherited Claude failure in [CI 41864552196](https://github.com/schani/pi-orb/actions/runs/41864552196)
+remains preserved. At `78d67878`, [checks 126734259051](https://github.com/schani/pi-orb/actions/runs/41875667784/job/126734259051)
+again fails only `steering-native.test.ts:24` (undefined receipt): 6,315 pass,
+one fail, nine skip; the other nine jobs pass, including Docker E2E and Durable.
+That run retained no native journal, so it establishes no observed proof ordering.
+Its 19 DST JSON artifacts are historical, not new failures. Question 88 was then
+on hold; that integration made no receipt-proof/parser/state/assertion change
+or independent npm fix.
+
+On the integrated tree, fresh isolated npm 12 `ci`, 72 patch/provider tests,
+67 pin/capacity/qualification/APT contracts, workspace/E2E typecheck, lint,
+shell/syntax checks, seal reapplication and exact Claude CLI `2.1.318` execution
+pass. Global Node 26.13.0/npm 11.20.0 remain untouched. No new full unit/E2E run,
+cloud, Docker or production qualification is claimed. Receipts and source/scope
+identities: `/workspace/npm-upgrade-evidence/ci-base-fix/`; prior first-failure
+evidence: `/workspace/npm-upgrade-evidence/checks-fix/`.
+
+**Approved proof-base integration (2026-11-04, PST; local, undeployed):** merged
+frozen PR 243 `62e8a8111ba23af27f22f05d7348becaa5852b3c`. Question 88 is resolved
+by explicit human approval of the inherited single-copy proof correction, not a
+failure waiver. The upstream parser, assertions, tests and native harness are
+byte-identical to that head. Own scope remains 17 paths; every own file except
+this qualification doc is byte-identical to `fa885638`, including npm policy,
+pins, execution behavior, manifests, locks and patches. No new own behavior or
+independent Claude change is introduced; existing scoped npm reviews apply.
+
+Fresh isolated npm 12 `ci` preceded validation. The unchanged genuine native
+`steering-native.test.ts` passes both tests on its first run, including the formerly
+failing receipt assertion. Another 148 history/steering/boot/native cases pass
+(including 34 genuine SDK/CLI cases), plus 36 dependency/container contracts,
+72 patch/provider tests and 80 pin/capacity/qualification/API/APT contracts.
+Workspace/E2E typecheck, lint (488 warnings, 97 informational diagnostics), seal
+reapplication, shell/syntax checks and exact CLI `2.1.318` execution pass.
+Global Node 26.13.0/npm 11.20.0 remain unchanged. No new validation failed;
+the native steering harness deletes its temporary journals during cleanup.
+Receipts and byte proofs: `/workspace/npm-upgrade-evidence/q88-base-fix/`.
+
+Earlier first failures remain preserved, not relabelled as passes. Local native
+success qualifies this focused integration only: fresh exact-head hosted CI/E2E
+is still required before clearing CI status. No full-suite, image, live-subscription
+or production qualification, push or deployment is claimed.
 
 ## Shared dependency-tree ownership (2026-09-29)
 
@@ -1184,6 +1386,14 @@ Frontend pages await the fixture response that enables their assertions. Boot fa
 A definitive orb-history 404 is monotonic for the mounted route: an older successful metadata poll cannot restore the resource or its live socket. Browser regressions must observe the held history request before changing fixture lifecycle, snapshot mutable response state when a request enters its route, and await exact browser responses before asserting their effects. The controlled stale-poll schedule, first failure, correction, and unrelated GitHub-run failures are recorded in `docs/postmortems/2026-09-18-webkit-missing-resource-race.md`.
 
 Raw SQL assertions must select an explicit representation when PostgreSQL and PGlite decode a type differently. The MCP audit test selects `generation::text` and checks `"2"`; its typed store-CAS result must still be numeric `2`. First-failure and both-driver verification: `docs/postmortems/2026-09-27-mcp-audit-generation-driver.md`.
+
+### Upload-listing navigation ownership (2026-11-04, PST; local, undeployed)
+
+The controlled same-origin server-held upload/navigation baseline passes all four Chromium/WebKit cases with zero page errors; it does **not** reproduce the historical WebKit access-control signature. Both engines then fail the added ownership assertion: two held listing requests remain after confirmed deletion and before reload. Deterministic hook/API tests independently expose uncanceled missing/unmount reads and polling a confirmed-missing resource. Effect-owned cancellation and metadata/missing-state gating correct those contracts without gating on running state. All five hook tests, four browser cases, web/E2E types and scoped lint pass; stopped-orb listing, zero-pageerror, URL and geometry assertions remain. Timelines record request entry/closure, deletion, missing visibility and reload; failure artifacts retain full browser errors. No deadline increase or error filtering.
+
+Sol-loop S1 adds a held pre-delete `running` metadata response, released only after DELETE succeeds and listing cancellation completes. Response-body completion, browser JSON consumption and two animation frames precede the invariant assertions. Both engines restore one held listing and lose the missing view before the repair; calling existing `markMissing()` on successful DELETE keeps listing canceled and the missing view visible. The initial harness waited for missing visibility while withholding the only metadata poll that could establish it; cancellation now gates release instead. Its first-failure evidence is retained. The positive held-listing premise polls for server entry across StrictMode cleanup, without extending deadlines.
+
+Evidence: `.context/uploads-navigation/{unit-baseline-red,unit-baseline-corrected-harness-red,browser-baseline,browser-ownership-red,unit-green,browser-ownership-green,typecheck-web,typecheck-e2e,lint-scoped,s1-browser-first-harness-failure,s1-browser-red,s1-browser-green,s1-unit-green,s1-typecheck-web,s1-typecheck-e2e,s1-lint-scoped}.log`; browser RED artifacts remain in `test-failures/missing-orb-*-delete-active-*`. Historical evidence remains separately at `/workspace/repo/test-failures/missing-orb-webkit-delete-active-oKAr39`; no historical root-cause fix or full-suite qualification is claimed.
 
 ## E2E resource ownership and concurrency (2026-09-18)
 
@@ -1495,6 +1705,20 @@ assertions and timeouts. Raw first-failure and corrected-run logs remain in
 `.context/native-final-unit-dst-bounded.log`.
 
 
+## Rustup 1.29.3 (2026-11-04, PST; local, undeployed)
+
+New shared-image checksum/version/order assertions and the updated Dockerfile contract rejected the old pins before implementation. After `npm ci`, all 16 runtime dependency contracts, 14 Dockerfile contracts, `test:infra` (152 Node, 241 Python, 34 native guest cases plus filesystem check), workspace/E2E typecheck, shell syntax and diff checks pass. Evidence: `.context/rustup-1-29-3/`; official archive/hash verification also remains in the combined candidate's `.context/native-security-baseline/`. The npm graph is unchanged (seven moderate audit findings).
+
+Fresh native acceptance passed on combined `0f8414e8`, which also changes the separately proposed platform baseline; all owned resources were removed. It does not establish exact-source full-suite, image/E2E or PostgreSQL qualification of this independent branch. The earlier local full-suite invocation was cancelled at its 300s caller budget: addressed as a tool-budget limit, not a passing full-suite gate. No deployment is claimed.
+
+**PR 253 first hosted failure (2026-11-04, PST):** source `e8db89a726cb5c3973755da8ee5d2c806c8f1562`, tested merge `9cc87c03eefbabd6f0e5bfe3d746fdaa34dc6374`, [E2E run 41875776428, attempt 1, shard 2](https://github.com/schani/pi-orb/actions/runs/41875776428/job/126734636867). At 10:03:55 PST the unchanged `15728640` KiB (15 GiB) pre-build guard failed with only 9.2 GiB available on the AWS runner's 72 GiB `/dev/mapper/cow-root` (63 GiB used). This was insufficient initial runner capacity, not an ENOSPC write, Rustup installation failure or test timeout; no image build/application tests/DST ran on this shard. Nine other required jobs passed: CI `41875776044`, Durable `41875776258`, E2E shards 1/3/4. Those receipts qualify only that source, not the integrated head.
+
+First evidence remains in `.context/pr253-first-failure/`: `job126734636867.log` (guard at lines 1519–1534), `artifacts.json`, run/check API snapshots and `SHA256SUMS`. Artifact `13350471175` was downloaded through `gh api`; its 42,348-byte ZIP matches API SHA-256 `c6bef7d103e92f1c81cdf916f4e4f21427d05e9c0afdd5cc2d71f0e4c9720072`. `artifact-verification.txt` verifies all 19 entries byte-identical to tracked historical fixtures; none requires a new DST replay.
+
+**Corrective integration:** merge the frozen [PR 257](https://github.com/schani/pi-orb/pull/257) base `df34bed10a67b17d6ee583ef5674c27890be83dd`, preserving Rustup history and its separate scope. The queried current base has all ten required checks green (CI `41887288706`, E2E `41887288679`, Durable `41887288742`). It prepares hosted-runner capacity before downloads, removes only unused Android tools, preserves the 15 GiB guards/deadlines and records before/after measurements in Actions logs/summary; rationale and measured AWS recovery: `docs/postmortems/2026-11-04-ci-runner-disk-budget.md`.
+
+After integration and `npm ci`, focused contracts pass: 49 Python cases (16 runtime dependency, 20 qualification, 13 inherited runner-disk) and 14 Dockerfile cases, plus installer shell syntax and diff checks. The inherited disk cases already cover bounded deletion, insufficient reclamation and unchanged guards/workflow ordering; no duplicate test was added. Logs remain beside the first evidence. Existing broader local qualification above is retained, not rerun. Sol round 2 is required before push; fresh exact-head hosted qualification is required before merge. No full local suite or deployment was run for this correction.
+
 ## HTTP preview verification (implementation authorized, 2026-10-06)
 
 `docs/ports.md` owns the tests-first sequence, forced/entropy DST matrix, named checkpoints,
@@ -1617,6 +1841,14 @@ failed on a test-ordering error: an API probe preceded the preview-origin login 
 (`e2e-1.log`); navigation now runs first. Unit/DST pass 4,335 tests (25 skipped);
 infrastructure passes 94 Node, 156 Python and 27 native-VM tests; the four other preview
 E2E files pass on Chromium and WebKit. No deployment.
+
+**Orb access tokens (2026-11-04).** Verifier, domain and admission tests preceded the
+implementation; no DST was added because verification adds no state machine and preview admission
+uses only the token's expiry. `e2e/preview-access-token.e2e.test.ts` mints through the production
+id-token mint and RS256 signer, then uses a never-logged-in Chromium context: header and
+`__Host-pi-orb-token` cookie admission, HTTP/assets/WebSocket, a hosted file, and recovery across
+stop/start plus runtime restart. An agent-browser 0.39.2 probe showed origin-scoped `--headers`
+missing on WebSocket upgrades, hence the cookie.
 
 ## HTTP preview rebase onto main `da14295e` (2026-11-01; not deployed)
 
@@ -1803,6 +2035,8 @@ A terminal-route unit-test flake found 2026-08-11 demonstrates the repository-wi
 **Frontend fixture session ownership (2026-10-02; extended 2026-10-04):** the Vite fixture's expired-session flag belongs to the server, not a browser page. Tests that expire it must restore it in `finally` and check the response before closing the page. Asset-only built-shell fixtures must supply a typed `/api/v1/session` principal before asserting private routes; retain production schema validation and principal admission, not implicit navigation login. Built-shell orb mocks satisfy `OrbView` and validate against `OrbViewSchema` before navigation (2026-10-06): omitting required `harness` rejects the list and leaves both dashboard and index ordering checks without rows. Run the focused case with `npx vitest run --config e2e/vitest.config.ts --project frontend e2e/frontend-web-shell.e2e.test.ts` to avoid lifecycle/Docker setup. Cause, first failures and tree-scoped qualification: `docs/postmortems/2026-10-02-frontend-session-fixture-isolation.md`.
 
 **Frontend-only session recovery has a focused browser E2E (decided and implemented 2026-09-03).** `npm run test:e2e:frontend` starts an in-process Vite server on a test-owned available port in `frontend` mode and drives it with Playwright Chromium. The test enters an orb draft, activates the fixture's IAP-shaped HTML-401 mode, observes the real global Session ribbon, invokes same-tab sign-in, and proves the same path, recovered session, absent ribbon, and exact draft after reload. Unit tests separately own API-header/401 classification, session response-order fencing, ribbon rendering, typed session-storage failure, and the state-free control-plane probe. This browser test is necessary because SSR and isolated reducers cannot prove the Vite-injected fixture control, fetch adapter, external store, React shell, top-level navigation, and browser storage as one path. `e2e/frontend-web-shell.e2e.test.ts` separately builds production assets, serves them through the browser-role Fastify shell fallback, and checks direct deep-link/reload JS, CSS, favicon and missing-resource behavior; Vite alone cannot qualify that server boundary. It deliberately does not claim to validate Google IAP; that requires a live protected deployment check. The launcher uses `PLAYWRIGHT_CHROMIUM_EXECUTABLE` when supplied, then the orb's `/usr/bin/chromium` when present, and otherwise Playwright's managed browser. Interceptors preserve non-JSON/error responses and drain owned routes before restoring shared fixture state; the expired-metadata HTML-401 failure and gated regression are recorded in `docs/postmortems/2026-10-02-expired-metadata-route.md`.
+
+**wterm 0.5.9 qualification (2026-11-04; local):** tests extended before the bump: the existing terminal-shade case now retains a marked 180-digit wrapped line through narrow/wide reflow; both phone engines check software-keyboard input events, cursor/composer bounds, whole rows, PTY resize controls and the same emulator/socket through injected iOS viewport shrink/pan/restore. On 0.5.5, `npx vitest run --config e2e/vitest.config.ts e2e/frontend-session.e2e.test.ts e2e/frontend-mobile.e2e.test.ts -t "toggles a headerless terminal|keeps terminal input and cursor"` passed 3 cases. After targeted metadata-backed family lock edits and `npm ci`, the same files with `-t "terminal|native composer caret"` passed 13 cases; `npx vitest run apps/web/src` passed 980 tests. Web build/typecheck, E2E typecheck and touched-path Biome checks passed (existing session-file warnings). The production build's hashed Ghostty WASM loaded as `application/wasm` HTTP 200, with terminal echo/reflow and no page errors or failed asset responses in Chromium and WebKit, using owned loopback fixture/preview servers. Browser work used `flock /tmp/frontend-dependency-heavy.lock`. Local commands/logs and the built-browser script: `/tmp/wterm-implementation.md`, `/tmp/wterm-logs/`. No full backend/provider E2E or physical iOS qualification is claimed. Dependency rationale: `docs/terminal.md`.
 
 **Terminal style E2E harness finding (fixed 2026-09-06):** React StrictMode
 can replace wterm's imperative subtree after a cursor locator resolves, making
@@ -2019,6 +2253,14 @@ Initial prepare (15:03:43–15:06:17 PDT) exited 1: `runner changed while prepar
 Correction: freeze source **before** separate `prepare-frozen` (15:07:06–15:07:32 PDT, exit 0), reusing the same owned index/build receipt, extractor and snapshot SQL. Manifest runner SHA-256 `05622cfd33ff06443de38b1b9571c9474c78488d7e04eb32461fe6248e2f8134` matches frozen/current source; the ~26 s preparation reused the **127.311 s** build, not a new 26 s build. `qualification-summary.json` records 35/35 private harness unit tests (33 in `unit-tests-final.log`, two in `unit-tests-diagnostic.log`); the original failure remains recorded and aggregate qualification remains negative.
 This benchmark did not qualify VM reboot, a bounded-memory production profile, ingestion/compaction stress or hosted behavior. No production mutation occurred.
 The 1.5.1 spill/force-merge fix ([PR 540](https://github.com/timescale/pg_textsearch/pull/540)) is not a 1.3.1 defect: later nonblocking spills ([PR 517](https://github.com/timescale/pg_textsearch/pull/517)) introduced it; 1.3.1 serializes under the lock.
+
+## PGlite packaging qualification (2026-11-04, PST; local, undeployed)
+
+Engine **0.5.12** and wrapper **0.0.14** satisfy the exact peer; extension versions remain embedded **1.5.1** / native **1.3.1** (`docs/history-search.md`). Independent npm pack/direct-download SHA-512 and SHA-1 checks pass for both wrappers and the candidate engine. Both runtime wrapper JS files and all 25 extracted extension files are byte-identical; compressed bytes and only a CJS source-map path differ.
+
+Clean baseline/candidate `npm ci` pass. Tests-first exact-pin RED precedes dependency edits; frozen payload/JS checks already pass on baseline. The initial retained-search fixture used parameterized `text <@> text`, which cannot infer an index (typed invariant, SQLSTATE 42704); explicit `to_bm25query` matches production SQL and passes before upgrading. The corrected retained-directory test preserves indexed rows and accepts new indexed writes. A separate actual **0.5.11-created** directory reopens under **0.5.12** with its **1.5.1** extension, retained BM25 search and new indexed writes; no binary fixture is committed.
+
+Scoped qualification passes **40 tests / nine files**, with two existing native-PostgreSQL skips; scoped Biome and diff checks pass. Only the two existing package nodes and workspace specs change; Pi/Chord 1.4.0 and all three patch seals are unchanged. Evidence and commands: `.context/pglite-upgrade/`. Full checks, native PostgreSQL and process/browser E2E remain separate gates; no cloud or production qualification is claimed.
 
 ## Native history search implementation (2026-10-29, PDT; local, undeployed)
 

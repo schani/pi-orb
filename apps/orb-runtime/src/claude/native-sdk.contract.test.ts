@@ -360,8 +360,11 @@ nativeIt(
     expect(JSON.stringify(messages).split("INTERRUPTED_CONTRACT_TASK")).toHaveLength(2);
     // The pinned CLI appends a system token-budget message after the user turn.
     const conversational = messages?.filter((message) => message.role !== "system");
-    expect(conversational?.at(-1)).toEqual({ role: "user", content: continuation });
-    expect(messages?.filter((message) => message.content === continuation)).toHaveLength(1);
+    expect(conversational?.at(-1)).toEqual({
+      role: "user",
+      content: [{ type: "text", text: continuation, cache_control: { type: "ephemeral" } }],
+    });
+    expect(JSON.stringify(messages).split(continuation)).toHaveLength(2);
     expect(result.childFiles).toHaveLength(1);
     expect(result.rootContainsChildAssistant).toBe(false);
   },
@@ -430,7 +433,8 @@ nativeIt(
     });
     expect(commandEcho).not.toHaveProperty("isMeta");
     expect(result.compaction.customInstructionsReachedProvider).toBe(true);
-    expect(result.compaction.providerRequests).toBe(1);
+    // The canned response lacks a structured summary; native compaction retries once.
+    expect(result.compaction.providerRequests).toBe(2);
     expect(result.compaction.ordinaryAssistantContinuation).toBe(false);
     expect(result.compaction.boundaryContentIsSummary).toBe(false);
     expect(result.compaction.statuses).toContainEqual({
@@ -480,7 +484,7 @@ for (const cancelAt of [
       // before the caller observes the result and closes the process.
       expect(result.compaction.hasSummary).toBe(cancelAt === "queued");
       expect(result.compaction.providerRequests).toBe(
-        cancelAt === "in-progress" || cancelAt === "queued" ? 1 : 0,
+        cancelAt === "queued" ? 2 : cancelAt === "in-progress" ? 1 : 0,
       );
       expect(result.compaction.ordinaryAssistantContinuation).toBe(false);
     },
