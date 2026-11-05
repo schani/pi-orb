@@ -34,13 +34,15 @@ it("updates Google auth 11 without replacing legacy provider auth 10", () => {
   }
 });
 
-it("removes affected glob/minimatch copies without upgrading Pi or Chord", () => {
+it("removes affected glob/minimatch copies and locks Pi and Chord to 1.5.0", () => {
   for (const [path, pkg] of Object.entries(lock.packages)) {
     if (/node_modules\/(?:glob|minimatch)$/.test(path)) {
-      expect(path.endsWith("/glob") ? ["14.0.3"] : ["11.0.1", "11.0.2"]).toContain(pkg.version);
+      expect(path.endsWith("/glob") ? ["14.0.3"] : ["11.0.1", "11.0.2", "11.0.3"]).toContain(
+        pkg.version,
+      );
     }
     if (/^node_modules\/@earendil-works\/(?:pi-[^/]+|chord)$/.test(path)) {
-      expect(pkg.version, path).toBe("1.4.0");
+      expect(pkg.version, path).toBe("1.5.0");
     }
   }
 });
