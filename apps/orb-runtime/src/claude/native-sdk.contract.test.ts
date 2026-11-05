@@ -9,6 +9,7 @@ import {
   probeNetworkGuard,
 } from "../../../../scripts/claude-sdk-contract/probe.mjs";
 import { ComposedClaudeFixture } from "../testkit/claude-composed.ts";
+import { bootNotificationModelText } from "./boot-notification.ts";
 import { BOOT_BASELINE_TYPE, planBootNotification } from "./boot-policy.ts";
 import { ClaudeHistory } from "./history.ts";
 
@@ -333,7 +334,7 @@ nativeIt(
           reason: "resumed",
           shape: "unanswered_user_message",
         });
-        continuation = plan.marker.content;
+        continuation = bootNotificationModelText(plan.marker.content);
         return continuation;
       },
     });
@@ -364,7 +365,9 @@ nativeIt(
       role: "user",
       content: [{ type: "text", text: continuation, cache_control: { type: "ephemeral" } }],
     });
-    expect(JSON.stringify(messages).split(continuation)).toHaveLength(2);
+    expect(JSON.stringify(messages).split(JSON.stringify(continuation).slice(1, -1))).toHaveLength(
+      2,
+    );
     expect(result.childFiles).toHaveLength(1);
     expect(result.rootContainsChildAssistant).toBe(false);
   },

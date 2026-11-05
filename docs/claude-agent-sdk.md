@@ -277,6 +277,8 @@ Successful account validation persists only authentication source and grant gene
 
 Use approved neutral `HOST_RESTART_CONTEXT` wording: execution identity proves process loss, not restart cause. Settled restart starts no inference; existing markers/`boot_receipt` provenance supply all unreceived contexts FIFO as `shouldQuery:false`, `isSynthetic` before the next legitimate input. A single volatile set contains only context UUIDs actually enqueued in the current query. Skip a successful zero-turn acknowledgement only when its IDs are nonempty and all belong to that set; it cannot retire human work. Native receipts may lag stdout, so classify without a receipt check; normal final drain enforces durability. Context is metadata, not resume authority or a budget reset. Interrupted work and `sleep_wake` remain triggering; settled context forbids repeating completed or aborted work. Evidence: `docs/postmortems/2026-10-22-claude-timeline-identity-gap.md`.
 
+**Decision — 2026-11-05 (PST; user-approved):** wrap only model-facing restart/resume notices, including passive context and triggering continuation/sleep-wake input, in `<system-reminder>` tags; add no explanatory text. This distinguishes runtime context when the SDK merges user-role inputs. Human input, persisted notices, roles, flags and boot policy stay unchanged. Adapter tests cover passive/triggering boundaries and adjacent human text; the pinned-SDK fake-provider test covers wrapped continuation serialization without child-work replay, not passive merging or real-model interpretation. Existing notices, receipts and visible failures remain diagnostic evidence; no persisted state is added.
+
 ## Approved POC qualification milestones
 
 ### 1. Characterize the pinned SDK without real credentials

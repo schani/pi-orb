@@ -346,7 +346,17 @@ it.each([
       )._unsafeUnwrap();
       const context = await input(),
         human = await input();
-      expect(context).toMatchObject({ isSynthetic: true, shouldQuery: false });
+      expect(context).toMatchObject({
+        isSynthetic: true,
+        shouldQuery: false,
+        message: {
+          content: marker.content?.map((block) => ({
+            type: "text",
+            text: `<system-reminder>\n${block.type === "text" ? block.text : ""}\n</system-reminder>`,
+          })),
+        },
+      });
+      expect(JSON.stringify(marker.content)).not.toContain("<system-reminder>");
       expect(context.origin).toBeUndefined();
       expect(f.history.correlation(context.uuid)).toMatchObject({
         boot: true,

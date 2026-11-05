@@ -312,6 +312,17 @@ it("a boot prompt without a native receipt preserves retry budget rather than hu
   await f.attach(true);
   const input = await f.prompt()?.[Symbol.asyncIterator]().next();
   expect(input?.done).toBe(false);
+  const marker = f.history.view.find(
+    (record) => record.type === "event" && record.eventType === "pi-orb.turn-resume",
+  );
+  if (marker?.type !== "event") throw new Error("Boot marker missing.");
+  expect(input?.value.message.content).toEqual(
+    marker.content?.map((block) => ({
+      type: "text",
+      text: `<system-reminder>\n${block.type === "text" ? block.text : ""}\n</system-reminder>`,
+    })),
+  );
+  expect(JSON.stringify(marker.content)).not.toContain("<system-reminder>");
   expect(f.state.deliveries).toEqual({});
   expect(qualifyClaudeRestart(f.state, f.history.view, "after-crash").isOk()).toBe(true);
   expect(f.history.correlation(input?.value.uuid ?? "")).toMatchObject({ boot: true });

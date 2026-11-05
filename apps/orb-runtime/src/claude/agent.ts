@@ -70,7 +70,11 @@ import { ClaudeActivity } from "./activity.ts";
 import { claudeChildEnvironment, fetchClaudeSubscription, verifyClaudeAccount } from "./auth.ts";
 import { validateClaudeAuthSettings } from "./auth-settings.ts";
 import { fetchBootContext } from "./boot-context.ts";
-import { claudeBootEntries, pendingBootContext } from "./boot-notification.ts";
+import {
+  bootNotificationModelText,
+  claudeBootEntries,
+  pendingBootContext,
+} from "./boot-notification.ts";
 import { BOOT_BASELINE_TYPE, planBootNotification, SLEEP_WAKE_TYPE } from "./boot-policy.ts";
 import { ClaudeDiagnostics, type ClaudeQueryError } from "./diagnostics.ts";
 import { claudeEnvironmentPrompt, claudePortExposurePrompt } from "./environment-prompt.ts";
@@ -2380,7 +2384,9 @@ export class ClaudeOrbAgent implements OrbAgent {
           message: {
             role: "user",
             content: (marker.content ?? []).flatMap((block) =>
-              block.type === "text" ? [{ type: "text" as const, text: block.text }] : [],
+              block.type === "text"
+                ? [{ type: "text" as const, text: bootNotificationModelText(block.text) }]
+                : [],
             ),
           },
         });
@@ -2435,7 +2441,10 @@ export class ClaudeOrbAgent implements OrbAgent {
         role: "user",
         content: systemInputModelContent(content, system).map((block) =>
           block.type === "text"
-            ? { type: "text" as const, text: block.text }
+            ? {
+                type: "text" as const,
+                text: boot ? bootNotificationModelText(block.text) : block.text,
+              }
             : {
                 type: "image" as const,
                 source: {
