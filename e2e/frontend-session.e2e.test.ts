@@ -1359,7 +1359,7 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
-  it("aligns run glyphs with file dots and keeps collapsed chevrons on a visible rail", async () => {
+  it("aligns run glyphs with the row text and keeps collapsed chevrons on a visible rail", async () => {
     for (const width of [1280, 390, 320]) {
       const page = await browser.newPage({ viewport: { width, height: 900 } });
       try {
@@ -1381,36 +1381,24 @@ describe("frontend-only browser behavior", () => {
             markerCenterX: box.left + box.width / 2,
           };
         });
-        const read = page
-          .locator(".tool-activity-category")
-          .filter({
-            has: page.locator(".activity-rail-label", { hasText: /^read$/ }),
-          })
-          .first();
-        const commands = page
-          .locator(".tool-activity-category")
+        const strip = page.locator(".activity-strip", {
+          has: page.locator('[aria-label="commands · npm test -- HistoryView.test.tsx"]'),
+        });
+        await strip.locator(":scope > summary .activity-rail-label").click();
+        const commands = strip
+          .locator(":scope > .activity-strip-body > .tool-activity-category")
           .filter({
             has: page.locator(".activity-rail-label", { hasText: /^commands$/ }),
           })
           .first();
-        await read.locator(":scope > summary").click();
         await commands.locator(":scope > summary").click();
-        await commands.locator(".tool-activity-call > summary").first().click();
         await expectPage(
           commands.locator(".tool-command-line .tool-command-text").first(),
         ).toContainText("npm test -- HistoryView.test.tsx");
         await expectPage(commands.locator(".tool-call-output").first()).toContainText(
           "PASS HistoryView.test.tsx",
         );
-        const dotLeft = await read
-          .locator(".tool-call-marker")
-          .first()
-          .evaluate((element) => {
-            const range = element.ownerDocument.createRange();
-            range.selectNodeContents(element);
-            return range.getBoundingClientRect().left;
-          });
-        const summaryLeft = await read
+        const summaryLeft = await commands
           .locator(":scope > summary .activity-rail-summary")
           .evaluate((element) => element.getBoundingClientRect().left);
         const command = await commands
@@ -1434,8 +1422,7 @@ describe("frontend-only browser behavior", () => {
             };
           });
         assert.ok(command, "Missing command geometry");
-        expectPage(dotLeft).toBeCloseTo(summaryLeft, 0);
-        expectPage(command.runGlyphLeft).toBeCloseTo(dotLeft, 0);
+        expectPage(command.runGlyphLeft).toBeCloseTo(summaryLeft, 0);
         expectPage(command.commandTextLeft - command.bodyLeft).toBeCloseTo(command.outputIndent, 0);
         expectPage(command.outputLeft).toBe(command.bodyLeft);
         expectPage(command.outputIndent).toBeGreaterThan(30);
