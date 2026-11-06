@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { err, ok, Result, type Result as ResultType } from "neverthrow";
+import { isFilesReadPath } from "./orb-files-url.ts";
 import type { IsolatedHosts } from "./preview-host.ts";
 
 export interface HostingAccessConfig {
@@ -125,10 +126,6 @@ function runtimeRoute(path: string): HostingAccessOutcome["route"] {
   return /^\/runtime(?:\/|$)/u.test(path) ? "runtime" : "other";
 }
 
-function isHostedPath(path: string): boolean {
-  return /^\/s\/[^/]+\//u.test(path);
-}
-
 export function createHostingAccessPolicy(
   config: HostingAccessConfig,
 ): ResultType<HostingAccessPolicy, HostingAccessConfigError> {
@@ -179,7 +176,7 @@ export function createHostingAccessPolicy(
         if (method !== "GET" && method !== "HEAD") {
           return { kind: "reject", reason: "files_method" };
         }
-        return isHostedPath(path) ||
+        return isFilesReadPath(path) ||
           (method === "GET" && (path === "/auth/login" || path === "/auth/callback"))
           ? { kind: "allow", surface: "hosted_read" }
           : { kind: "isolated_not_found" };
@@ -189,7 +186,12 @@ export function createHostingAccessPolicy(
       if (!appHosts.has(host.host) && !(runtimeRequest && host.host === runtime.value.host)) {
         return { kind: "reject", reason: "unknown_host" };
       }
-      if (path === "/s" || path.startsWith("/s/")) {
+      if (
+        path === "/s" ||
+        path.startsWith("/s/") ||
+        path === "/files" ||
+        path.startsWith("/files/")
+      ) {
         return { kind: "reject", reason: "files_wrong_host" };
       }
 

@@ -8,9 +8,6 @@ export interface IsolatedTarget {
 export interface IsolatedHosts {
   parse(authority: string | undefined): IsolatedTarget | undefined;
 }
-export interface OrbFileHosts extends IsolatedHosts {
-  url(orbId: string): Result<string, { type: "invalid_file_target" }>;
-}
 export interface PreviewTarget extends IsolatedTarget {
   readonly orbId: string;
   readonly port: number;
@@ -18,7 +15,6 @@ export interface PreviewTarget extends IsolatedTarget {
 }
 export interface PreviewHosts {
   readonly baseOrigin: string;
-  readonly files: OrbFileHosts;
   parse(authority: string | undefined): PreviewTarget | undefined;
   url(orbId: string, port: number): Result<string, { type: "invalid_preview_target" }>;
 }
@@ -63,19 +59,6 @@ export function createPreviewHosts(config: {
       : err({ type: "invalid_preview_target" });
   return ok({
     baseOrigin: base.origin,
-    files: {
-      url: (orbId) =>
-        uuid.test(orbId)
-          ? ok(`${base.protocol}//f-o${orbId}.${base.host}`)
-          : err({ type: "invalid_file_target" }),
-      parse(authority) {
-        const prefix = "f-o";
-        const suffix = `.${base.host}`;
-        if (!authority?.startsWith(prefix) || !authority.endsWith(suffix)) return undefined;
-        const orbId = authority.slice(prefix.length, -suffix.length);
-        return uuid.test(orbId) ? { orbId, origin: `${base.protocol}//${authority}` } : undefined;
-      },
-    },
     url,
     parse(authority) {
       if (!authority) return undefined;
@@ -89,14 +72,4 @@ export function createPreviewHosts(config: {
       return origin.isOk() ? { orbId, port, origin: origin.value } : undefined;
     },
   });
-}
-
-export function orbFilesBaseUrl(
-  hosts: PreviewHosts | undefined,
-  provider: string,
-  orbId: string,
-): string | null {
-  return provider === "docker" || provider === "gce" || provider === "process"
-    ? (hosts?.files.url(orbId).unwrapOr(null) ?? null)
-    : null;
 }

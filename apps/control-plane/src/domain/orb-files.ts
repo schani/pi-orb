@@ -13,7 +13,7 @@ export type FileResponse = Readonly<{ contentType: string; length: number; body:
 export interface OrbFilesTransport {
   open(
     route: FileRoute,
-    request: { method: "GET" | "HEAD"; path: string },
+    request: { method: "GET" | "HEAD"; path: string; base?: "repo" },
     signal: AbortSignal,
   ): ResultAsync<FileResponse, FileError>;
 }
@@ -30,7 +30,13 @@ export async function readOrbFile(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   transport: OrbFilesTransport,
-  request: { orbId: string; ownerUserId: string; method: "GET" | "HEAD"; path: string },
+  request: {
+    orbId: string;
+    ownerUserId: string;
+    method: "GET" | "HEAD";
+    path: string;
+    base?: "repo";
+  },
   signal: AbortSignal,
 ): Promise<Result<FileResponse, FileError>> {
   const unavailable = () =>

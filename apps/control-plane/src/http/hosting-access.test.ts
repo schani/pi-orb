@@ -313,3 +313,21 @@ it("records sanitized host and route denials, never accepted requests", async ()
   expect(outcomes).toHaveLength(cases.length);
   await app.close();
 });
+
+it.each(["files", "files/repo"])(
+  "admits canonical fixed-origin %s GET/HEAD without exposing app routes",
+  (branch) => {
+    const url = `/${branch}/12345678-1234-4234-8234-123456789abc/workspace/report.html`;
+    for (const method of ["GET", "HEAD"]) {
+      expect(policy().decide({ method, path: url, host: "files.test" }).kind).toBe("allow");
+      expect(policy().decide({ method, path: url, host: "app.test" }).kind).toBe("reject");
+    }
+    expect(
+      policy().decide({ method: "GET", path: url, host: "files.test", upgrade: "websocket" }).kind,
+    ).toBe("reject");
+    for (const path of ["/files", "/files/not-an-orb/a", url.replace("12345678", "%312345678")])
+      expect(policy().decide({ method: "GET", path, host: "files.test" }).kind).toBe(
+        "isolated_not_found",
+      );
+  },
+);

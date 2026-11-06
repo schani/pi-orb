@@ -44,23 +44,17 @@ it.each([
   },
 );
 
-it("renders the trusted per-orb files URL in root and child instructions", () => {
-  const filesBaseUrl = "https://f-o12345678-1234-4234-8234-123456789abc.preview.example.net";
-  const prompt = renderPrompt({ repository: [], skills: [], filesBaseUrl });
-  expect(prompt).toContain(`absolute path under ${filesBaseUrl},`);
-  expect(prompt.split(filesBaseUrl)).toHaveLength(2);
-  expect(renderPrompt({ repository: [], skills: [], filesBaseUrl: null })).not.toContain(
-    "absolute path under",
-  );
-});
-
-it("keeps the orb's files origin in root and child sections, never a child-conversation ID", async () => {
-  const filesBaseUrl = "https://f-o12345678-1234-4234-8234-123456789abc.preview.example.net";
-  const extension = promptExtension(renderPrompt({ repository: [], skills: [], filesBaseUrl }));
-  const section = extension.sections![0]!;
+it("keeps exact compact file guidance in root and child sections without URL metadata", async () => {
+  const extension = promptExtension(renderPrompt({ repository: [], skills: [] }));
+  const section = extension.sections?.[0];
+  const rule =
+    "When referring to an orb-local file in prose, use a Markdown link with `orb:<repository-relative-path>` (for example, `orb:README.md`) or `orb:/absolute/path`. Percent-encode each path segment. Keep filesystem paths unchanged inside code and commands. Resolve absolute paths with `pwd`/`realpath`; do not assume a workspace root.";
   for (const conversationId of ["root", "child-conversation"]) {
-    const rendered = await section.render({ conversationId } as never, {} as never);
-    expect(rendered).toContain(`absolute path under ${filesBaseUrl},`);
-    expect(rendered).not.toContain("f-ochild-conversation");
+    const rendered = await section?.render({ conversationId } as never, {} as never);
+    expect(rendered?.split(rule)).toHaveLength(2);
+    expect(rendered).not.toContain("https://files.");
+    expect(rendered).not.toContain("/files/");
+    expect(rendered).not.toContain("12345678-1234-4234-8234-123456789abc");
+    expect(rendered).not.toContain("/workspace");
   }
 });

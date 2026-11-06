@@ -30,6 +30,7 @@ import { HistoryView, type LiveBlock, type ToolChip } from "../components/Histor
 import { HostedFiles } from "../components/HostedFiles.tsx";
 import { Icon } from "../components/Icons.tsx";
 import { OrbFailureBanner } from "../components/OrbFailureBanner.tsx";
+import { OrbFilesBaseUrl } from "../components/OrbFilesBaseUrl.ts";
 import { OrbIndex } from "../components/OrbIndex.tsx";
 import { OrbNotice } from "../components/OrbNotice.tsx";
 import { OrbResourceWarnings } from "../components/OrbResourceWarnings.tsx";
@@ -1962,7 +1963,7 @@ function OrbConversation({
       ? null
       : formatTimeRemaining(orb.actionRequired.expiresAt, ageNow);
 
-  return createElement(
+  const conversation = createElement(
     HeadlineSlots.Provider,
     { value: headlineSlots },
     <main
@@ -2354,4 +2355,5 @@ function OrbConversation({
       )}
     </main>,
   );
+  return createElement(OrbFilesBaseUrl.Provider, { value: orb?.filesBaseUrl }, conversation);
 }

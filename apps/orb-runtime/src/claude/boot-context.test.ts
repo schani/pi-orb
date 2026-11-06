@@ -16,7 +16,6 @@ describe("boot context client", () => {
           JSON.stringify({
             v: 1,
             userTimeZone: "Asia/Tokyo",
-            filesBaseUrl: "https://f-o12345678-1234-1234-1234-123456789abc.piorb.live",
             context: {
               messageId: "sleep-1",
               messageIds: ["sleep-1"],
@@ -30,7 +29,6 @@ describe("boot context client", () => {
     vi.stubGlobal("fetch", fetch);
     expect((await fetchBootContext(broker))._unsafeUnwrap()).toMatchObject({
       userTimeZone: "Asia/Tokyo",
-      filesBaseUrl: "https://f-o12345678-1234-1234-1234-123456789abc.piorb.live",
       context: { messageId: "sleep-1", system: { kind: "sleep_wake" } },
     });
     expect(fetch).toHaveBeenCalledWith(

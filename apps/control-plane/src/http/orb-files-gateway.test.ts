@@ -5,16 +5,17 @@ import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import { expect, it, vi } from "vitest";
 import { readOrbFile } from "../domain/orb-files.ts";
 import { makeHarness, seedRunningOrb, TEST_USER_ID } from "../testkit/fixtures.ts";
+import { registerAuthenticatedBrowserRoutes } from "./browser-identity.ts";
+import { createHostingAccessPolicy, registerHostingAccessGuard } from "./hosting-access.ts";
 import {
   filePath,
   registerOrbFilesBoundary,
   registerOrbFilesGateway,
 } from "./orb-files-gateway.ts";
-import { createPreviewHosts } from "./preview-host.ts";
 import { registerResponseDrain } from "./response-drain.ts";
 
 const orbId = "12345678-1234-4234-8234-123456789abc";
-async function setup() {
+async function setup(expiresIn = 60_000) {
   const task = new NoSimulationTask("files gateway", false);
   const h = makeHarness();
   seedRunningOrb(task, h, orbId);
@@ -25,22 +26,17 @@ async function setup() {
     ...h.deps,
     hostProvider: { ...h.deps.hostProvider, kind: "docker", executionBinding: binding },
   };
-  const hosts = createPreviewHosts({
-    previewOrigin: "https://preview.example.net",
-    appOrigin: "https://app.example.com",
-    filesOrigin: "https://files.example.org",
-  })._unsafeUnwrap();
-  const host = new URL(hosts.files.url(orbId)._unsafeUnwrap()).host;
+  const filesOrigin = "https://files.example.org";
+  const appOrigin = "https://app.example.com";
+  const host = new URL(filesOrigin).host;
   const app = Fastify();
   registerResponseDrain(app, new AbortController().signal);
-  registerOrbFilesBoundary(app, { hosts: hosts.files, appOrigin: "https://app.example.com" });
-  app.addHook("onRequest", async (request) => {
-    if (request.headers.authorization === "owner")
-      request.previewIdentity = {
-        principal: { kind: "user", user: { id: TEST_USER_ID, email: null } },
-        expiresAt: task.wallNow() + 60000,
-      };
-  });
+  registerOrbFilesBoundary(app, { filesOrigin, appOrigin });
+  registerHostingAccessGuard(
+    app,
+    createHostingAccessPolicy({ filesOrigin, appOrigin })._unsafeUnwrap(),
+    appOrigin,
+  );
   const open = vi.fn<import("../domain/orb-files.ts").OrbFilesTransport["open"]>(() =>
     okAsync({
       contentType: "text/plain",
@@ -48,12 +44,18 @@ async function setup() {
       body: Readable.from(["hello"]),
     }),
   );
-  registerOrbFilesGateway(app, task, {
-    deps,
-    hosts: hosts.files,
-    appOrigin: "https://app.example.com",
-    transport: { open },
-  });
+  registerAuthenticatedBrowserRoutes(
+    app,
+    (request) => {
+      if (request.headers.authorization !== "owner")
+        return errAsync({ type: "unauthenticated", message: "denied" });
+      request.authExpiresAt = task.wallNow() + expiresIn;
+      return okAsync({ kind: "user", user: { id: TEST_USER_ID, email: null } });
+    },
+    (scope) => {
+      registerOrbFilesGateway(scope, task, { deps, filesOrigin, appOrigin, transport: { open } });
+    },
+  );
   const platform = vi.fn(() => "platform");
   app.all("/*", platform);
   return { app, task, h, deps, open, binding, platform, headers: { host, authorization: "owner" } };
@@ -72,13 +74,13 @@ it("decodes paths once, rejecting traversal, separators and malformed escapes", 
   ])
     expect(filePath(path).isErr()).toBe(true);
 });
-it("dispatches all file-host paths before app routes, preserving private headers", async () => {
+it("dispatches only fixed-origin live paths, preserving private headers", async () => {
   const f = await setup();
   const logs = vi.spyOn(f.task, "log");
   const before = f.h.store.orbSnapshot(orbId);
   const starts = f.h.world.hostStartCountOf(orbId);
-  for (const url of ["/api/v1/projects", "/runtime/private", "/Review%20notes"]) {
-    const response = await f.app.inject({ url, headers: f.headers });
+  for (const path of ["/api/v1/projects", "/runtime/private", "/Review%20notes"]) {
+    const response = await f.app.inject({ url: `/files/${orbId}${path}`, headers: f.headers });
     expect(response.body).toBe("hello");
     expect(response.headers["cache-control"]).toBe("no-store");
     expect(response.headers["x-content-type-options"]).toBe("nosniff");
@@ -94,23 +96,26 @@ it("dispatches all file-host paths before app routes, preserving private headers
   );
   await f.app.close();
 });
-it("denies unauthenticated reads, writes, service workers, upgrades and reserved paths", async () => {
+it("denies unauthenticated reads, writes, service workers and upgrades", async () => {
   const f = await setup();
-  expect((await f.app.inject({ url: "/a", headers: { host: f.headers.host } })).statusCode).toBe(
-    401,
-  );
+  expect(
+    (await f.app.inject({ url: `/files/${orbId}/a`, headers: { host: f.headers.host } }))
+      .statusCode,
+  ).toBe(401);
   for (const headers of [
     { "service-worker": "script" },
     { "sec-fetch-dest": "serviceworker" },
     { upgrade: "websocket" },
   ])
     expect(
-      (await f.app.inject({ url: "/a", headers: { ...f.headers, ...headers } })).statusCode,
+      (await f.app.inject({ url: `/files/${orbId}/a`, headers: { ...f.headers, ...headers } }))
+        .statusCode,
     ).toBe(403);
-  expect((await f.app.inject({ method: "POST", url: "/a", headers: f.headers })).statusCode).toBe(
-    405,
-  );
-  expect((await f.app.inject({ url: "/__pi_orb/other", headers: f.headers })).statusCode).toBe(403);
+  expect(
+    (await f.app.inject({ method: "POST", url: `/files/${orbId}/a`, headers: f.headers }))
+      .statusCode,
+  ).toBe(405);
+
   expect(f.open).not.toHaveBeenCalled();
   await f.app.close();
 });
@@ -120,20 +125,21 @@ it("preserves missing-file URLs and deduplicates failure/recovery without secret
   f.open.mockReturnValue(errAsync({ status: 404, message: "File doesn't exist" }));
   for (let i = 0; i < 2; i++) {
     const response = await f.app.inject({
-      url: "/secret-path",
+      url: `/files/${orbId}/secret-path`,
       headers: { ...f.headers, "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" },
     });
     expect(response.statusCode).toBe(404);
     expect(response.headers.location).toBeUndefined();
     expect(response.body).toContain("https://app.example.com");
   }
-  expect((await f.app.inject({ method: "HEAD", url: "/a", headers: f.headers })).statusCode).toBe(
-    404,
-  );
+  expect(
+    (await f.app.inject({ method: "HEAD", url: `/files/${orbId}/a`, headers: f.headers }))
+      .statusCode,
+  ).toBe(404);
   f.open.mockReturnValue(
     okAsync({ contentType: "text/plain", length: 0, body: Readable.from([]) }),
   );
-  await f.app.inject({ url: "/a", headers: f.headers });
+  await f.app.inject({ url: `/files/${orbId}/a`, headers: f.headers });
   const events = logs.mock.calls.filter((call) => String(call[0]).startsWith("lifecycle:"));
   expect(events).toHaveLength(2);
   expect(JSON.stringify(events)).not.toMatch(/secret|private/);
@@ -151,7 +157,7 @@ it("times out stalled DB admission without subsequent host I/O", async () => {
     timeout.abort();
     return ResultAsync.fromSafePromise(blocked).map(() => f.h.store.orbSnapshot(orbId));
   });
-  const response = await f.app.inject({ url: "/a", headers: f.headers });
+  const response = await f.app.inject({ url: `/files/${orbId}/a`, headers: f.headers });
   expect(response.statusCode).toBe(503);
   release();
   await new Promise<void>((resolve) => setImmediate(resolve));
@@ -213,7 +219,7 @@ it("cancels upstream transport through standard response draining", async () => 
     signal = upstreamSignal;
     return okAsync({ contentType: "application/octet-stream", length: 6, body });
   });
-  const download = f.app.inject({ url: "/big", headers: f.headers }).then(
+  const download = f.app.inject({ url: `/files/${orbId}/big`, headers: f.headers }).then(
     () => {},
     () => {},
   );
@@ -222,4 +228,94 @@ it("cancels upstream transport through standard response draining", async () => 
   await download;
   expect(signal?.aborted).toBe(true);
   expect(body.destroyed).toBe(true);
+});
+
+it("keeps live paths off the app origin and app routes off the files origin", async () => {
+  const f = await setup();
+  for (const url of [
+    "/api/v1/projects",
+    "/runtime/private",
+    "/__pi_orb/auth/start",
+    "/files/not-a-uuid/a",
+    `/files/${orbId.toUpperCase()}/a`,
+  ]) {
+    expect((await f.app.inject({ url, headers: f.headers })).statusCode).toBe(404);
+  }
+  expect(
+    (
+      await f.app.inject({
+        url: `/files/${orbId}/a`,
+        headers: { ...f.headers, host: "app.example.com" },
+      })
+    ).statusCode,
+  ).toBe(403);
+  expect(f.open).not.toHaveBeenCalled();
+  expect(f.platform).not.toHaveBeenCalled();
+  await f.app.close();
+});
+
+it.each([0, 5000, 300_000])(
+  "caps admission and streaming at authentication expiry and 120s: %i",
+  async (expiresIn) => {
+    const f = await setup(expiresIn);
+    const deadline = vi.spyOn(f.task, "createDeadline");
+    const response = await f.app.inject({ url: `/files/${orbId}/a`, headers: f.headers });
+    expect(deadline.mock.calls[0]?.[0]).toBeLessThanOrEqual(Math.min(120_000, expiresIn));
+    expect(response.statusCode).toBe(expiresIn === 0 ? 503 : 200);
+    if (expiresIn === 0) {
+      expect(f.open).not.toHaveBeenCalled();
+      expect(f.binding).not.toHaveBeenCalled();
+    }
+    await f.app.close();
+  },
+);
+
+it("forwards repository reads without inventing a workspace path", async () => {
+  const f = await setup();
+  for (const method of ["GET", "HEAD"] as const) {
+    f.open.mockImplementation(() =>
+      okAsync({
+        contentType: "text/plain",
+        length: method === "HEAD" ? 0 : 5,
+        body: method === "HEAD" ? null : Readable.from(["hello"]),
+      }),
+    );
+    const response = await f.app.inject({
+      method,
+      url: `/files/repo/${orbId}/Review%20notes%23%25.md?download=1`,
+      headers: f.headers,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(f.open.mock.lastCall?.[1]).toMatchObject({
+      method,
+      base: "repo",
+      path: "Review notes#%.md",
+    });
+  }
+  for (const path of ["../a", "%2e%2e/a"]) expect(filePath(`/${path}`).isErr()).toBe(true);
+  for (const path of ["%2fa", "%5ca", "%zz", ""]) {
+    const response = await f.app.inject({
+      url: `/files/repo/${orbId}/${path}`,
+      headers: f.headers,
+    });
+    expect(response.statusCode, path).toBe(400);
+  }
+  for (const headers of [{ "service-worker": "script" }, { "sec-fetch-dest": "serviceworker" }])
+    expect(
+      (await f.app.inject({ url: `/files/repo/${orbId}/a`, headers: { ...f.headers, ...headers } }))
+        .statusCode,
+    ).toBe(403);
+  expect(
+    (await f.app.inject({ method: "POST", url: `/files/repo/${orbId}/a`, headers: f.headers }))
+      .statusCode,
+  ).toBe(405);
+  expect(
+    (
+      await f.app.inject({
+        url: `/files/repo/${orbId}/a`,
+        headers: { ...f.headers, host: "app.example.com" },
+      })
+    ).statusCode,
+  ).toBe(403);
+  await f.app.close();
 });

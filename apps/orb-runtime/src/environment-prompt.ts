@@ -10,8 +10,7 @@ You're running on a VM in the cloud via pi-orb: https://github.com/schani/pi-orb
 - For MCP servers, ask the user to open the project's config gear: MCPs (OAuth Connect) or Secrets (static keys). Catalog changes apply next start; OAuth reauthorization needs no restart.
 - Executable repo-root hooks: \`.agents/setup\` runs once per compute incarnation before the agent, without identity; install toolchains there. \`.agents/resume\` runs every start with identity to authenticate credentials. Both idempotent; logs: \`$HOME/.cache/pi-orb/logs\`.`;
 
-export function environmentPrompt(filesBaseUrl?: string | null): string {
-  if (!filesBaseUrl) return baseEnvironmentPrompt;
+export function environmentPrompt(): string {
   return `${baseEnvironmentPrompt}
-- When referring to an orb-local file in prose, use a Markdown link to its absolute path under ${filesBaseUrl}, percent-encoding each path segment. Keep filesystem paths unchanged inside code and commands.`;
+- When referring to an orb-local file in prose, use a Markdown link with \`orb:<repository-relative-path>\` (for example, \`orb:README.md\`) or \`orb:/absolute/path\`. Percent-encode each path segment. Keep filesystem paths unchanged inside code and commands. Resolve absolute paths with \`pwd\`/\`realpath\`; do not assume a workspace root.`;
 }

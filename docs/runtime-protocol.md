@@ -59,7 +59,7 @@ Persistence is deliberately separate: the control plane never derives replica wr
 
 `POST /v1/alert` accepts `{v:1,message,requestId}` under the runtime's incarnation bearer and returns `{v:1,id,duplicate}` only after persistence. The CLI calls this endpoint locally; the browser does not. An alert is a non-model-context history event, not a new agent command or inference turn. Claude persists locally and uses committed-history notifications and pull replication. The Pi execution guest forwards to `POST /api/runtime/alert` with bearer authentication and exact `x-orb-incarnation`; the application alert writer fences identity, appends native durable history and deduplicates before replying. Neither path introduces model input or a new WebSocket frame. `docs/orb-alerts.md` owns admission, retry identity, acknowledgement, and testing.
 
-**Spawn bootstrap contract (decided 2026-10-15):** authenticated `POST /runtime/v1/orb/boot-context` returns `{v:1,context,userTimeZone,filesBaseUrl?,initialModel?}`. It omits `initialModel` exactly when immutable stored spawn intent is null; present intent is the exact canonical `{provider,id}`. Present null and malformed refs reject. It initializes only a fresh native session, never replaces restored settings, and is not a browser settings mutation. Central sessions receive the same intent through process-agent composition. Synthetic guest-validation brokers without intent omit the field. Spawn request and retry contract: `docs/orb-spawning.md`.
+**Spawn bootstrap contract (decided 2026-10-15):** authenticated `POST /runtime/v1/orb/boot-context` returns `{v:1,context,userTimeZone,initialModel?}`. It omits `initialModel` exactly when immutable stored spawn intent is null; present intent is the exact canonical `{provider,id}`. Present null and malformed refs reject. It initializes only a fresh native session, never replaces restored settings, and is not a browser settings mutation. Central sessions receive the same intent through process-agent composition. Synthetic guest-validation brokers without intent omit the field. Spawn request and retry contract: `docs/orb-spawning.md`.
 
 ## Agent settings (implemented locally 2026-09-14)
 
@@ -103,7 +103,7 @@ external ingress acceptance remain pending; source qualification is not deployme
 
 ## Live guest-file reads (approved 2026-11-05)
 
-GET/HEAD `/v1/files?path=<encoded-absolute-path>` streams files under runtime bearer/incarnation admission; private typed failures use `x-pi-orb-file-error`. Boot context includes optional `filesBaseUrl: string` only when serving is configured. Access, lifetime and exposure contract: `docs/orb-files.md`.
+GET/HEAD `/v1/files?path=<encoded-absolute-path>` streams files under runtime bearer/incarnation admission; optional `base=repo` instead resolves `path` relative to the configured initial repository. Typed failures use HTTP status codes and JSON `{ error }` responses; access, lifetime and exposure contract: `docs/orb-files.md`.
 
 ## Transport and control-plane handoff
 

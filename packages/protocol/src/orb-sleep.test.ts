@@ -60,16 +60,15 @@ describe("orb sleep protocol", () => {
     ).toBe(true);
   });
 
-  it("accepts omitted file serving configuration or a configured URL, never null", () => {
+  it("rejects file-serving metadata in agent boot context", () => {
     const response = { v: 1, context: null, userTimeZone: null };
     expect(Check(OrbBootContextResponseSchema, response)).toBe(true);
     expect(
       Check(OrbBootContextResponseSchema, {
         ...response,
-        filesBaseUrl: "https://f-o12345678-1234-1234-1234-123456789abc.piorb.live",
+        filesBaseUrl: "https://files.example.org/files/12345678-1234-1234-1234-123456789abc",
       }),
-    ).toBe(true);
-    expect(Check(OrbBootContextResponseSchema, { ...response, filesBaseUrl: null })).toBe(false);
+    ).toBe(false);
   });
 
   it("accepts absent or exact initial model intent and rejects malformed present values", () => {

@@ -29,21 +29,19 @@ describe("shared runtime environment prompt", () => {
       "- Do not send progress updates to other orbs unless explicitly asked.",
       "- For MCP servers, ask the user to open the project's config gear: MCPs (OAuth Connect) or Secrets (static keys). Catalog changes apply next start; OAuth reauthorization needs no restart.",
       "- Executable repo-root hooks: `.agents/setup` runs once per compute incarnation before the agent, without identity; install toolchains there. `.agents/resume` runs every start with identity to authenticate credentials. Both idempotent; logs: `$HOME/.cache/pi-orb/logs`.",
+      "- When referring to an orb-local file in prose, use a Markdown link with `orb:<repository-relative-path>` (for example, `orb:README.md`) or `orb:/absolute/path`. Percent-encode each path segment. Keep filesystem paths unchanged inside code and commands. Resolve absolute paths with `pwd`/`realpath`; do not assume a workspace root.",
     ]);
   });
 
-  it("uses the trusted live-files base URL in the approved prose rule", () => {
-    const baseUrl = "https://f-o12345678-1234-1234-1234-123456789abc.piorb.live";
-    const rule = `When referring to an orb-local file in prose, use a Markdown link to its absolute path under ${baseUrl}, percent-encoding each path segment. Keep filesystem paths unchanged inside code and commands.`;
-    expect(environmentPrompt(baseUrl)).toBe(`${environmentPrompt()}\n- ${rule}`);
-    expect(environmentPrompt(baseUrl).split(rule)).toHaveLength(2);
+  it("always uses the exact compact file-link rule without deployment metadata", () => {
+    const rule =
+      "When referring to an orb-local file in prose, use a Markdown link with `orb:<repository-relative-path>` (for example, `orb:README.md`) or `orb:/absolute/path`. Percent-encode each path segment. Keep filesystem paths unchanged inside code and commands. Resolve absolute paths with `pwd`/`realpath`; do not assume a workspace root.";
+    expect(environmentPrompt().split(rule)).toHaveLength(2);
+    expect(environmentPrompt()).not.toContain("https://files.");
+    expect(environmentPrompt()).not.toContain("/files/");
+    expect(environmentPrompt()).not.toContain("orb://");
+    expect(environmentPrompt()).not.toContain("/workspace");
     expect(claudeEnvironmentPrompt).not.toContain("When referring to an orb-local file");
-  });
-
-  it("omits live-file guidance when the serving origin is unconfigured", () => {
-    expect(environmentPrompt(null)).toBe(environmentPrompt());
-    expect(environmentPrompt()).not.toContain("<files-base-url>");
-    expect(environmentPrompt()).not.toContain("When referring to an orb-local file");
   });
 
   it("keeps harness-specific CLI guidance out of the shared base", () => {

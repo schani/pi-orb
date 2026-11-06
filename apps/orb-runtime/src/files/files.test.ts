@@ -284,3 +284,60 @@ it.each(["truncation", "cancellation"] as const)(
     expect(source.bytesRead).toBeLessThan(mode === "truncation" ? 4 : 64 * 1024 * 1024);
   },
 );
+
+for (const harness of ["pi", "claude"] as const) {
+  it(`${harness}: resolves repository reads only from configured workspace, preserving file guards`, async () => {
+    const root = join(dir, "workspace");
+    const repo = join(root, "repo");
+    await fs.mkdir(repo, { recursive: true });
+    await fs.writeFile(join(repo, "Review # %.md"), "repository bytes");
+    await fs.writeFile(join(root, "outside"), "outside");
+    await fs.mkdir(join(repo, "directory"));
+    await fs.symlink(join(root, "outside"), join(repo, "escape"));
+    await fs.symlink(root, join(repo, "parent"));
+    const read = (
+      app: FastifyInstance,
+      path: string,
+      base = "repo",
+      method: "GET" | "HEAD" = "GET",
+    ) =>
+      app.inject({
+        method,
+        url: `/v1/files?base=${base}&path=${encodeURIComponent(path)}`,
+        headers,
+      });
+    for (const container of ["0", "1"]) {
+      vi.stubEnv("PI_ORB_CONTAINER", container);
+      vi.stubEnv("PI_ORB_WORK_DIR", root);
+      const app = appFor(harness); // server cwd is deliberately not the repository
+      for (const method of ["GET", "HEAD"] as const) {
+        const response = await read(app, "Review # %.md", "repo", method);
+        expect(response.statusCode).toBe(200);
+        expect(response.body).toBe(method === "GET" ? "repository bytes" : "");
+        expect(response.headers["content-length"]).toBe("16");
+      }
+      for (const path of [
+        "",
+        "/etc/passwd",
+        "../outside",
+        "parent/../outside",
+        "a/./b",
+        "a//b",
+        "a\\b",
+        "nul\0byte",
+      ])
+        expect((await read(app, path)).statusCode).toBe(400);
+      for (const path of ["escape", "parent/outside", "directory", "."])
+        expect((await read(app, path)).statusCode).toBe(path === "." ? 400 : 403);
+      expect((await read(app, "missing")).statusCode).toBe(404);
+      for (const base of ["absolute", "unknown", "repo&base=repo"])
+        expect((await read(app, "Review # %.md", base)).statusCode).toBe(400);
+    }
+    for (const root of ["", "relative"]) {
+      vi.stubEnv("PI_ORB_WORK_DIR", root);
+      expect((await read(appFor(harness), "README.md")).statusCode).toBe(503);
+    }
+    vi.stubEnv("PI_ORB_WORK_DIR", dir);
+    expect((await read(appFor(harness), "README.md")).statusCode).toBe(404);
+  });
+}

@@ -26,3 +26,14 @@ resource "google_storage_bucket_iam_member" "control_plane_hosting_objects" {
   role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${local.control_plane_email}"
 }
+
+# No file paths or credentials in Cloud Run's automatic request-URL logs.
+resource "google_logging_project_exclusion" "files_requests" {
+  name        = "files-requests"
+  description = "Do not retain hosted or live-file paths or query strings"
+  filter      = <<-FILTER
+    resource.type="cloud_run_revision"
+    log_id("run.googleapis.com/requests")
+    httpRequest.requestUrl =~ "^${replace(local.hosting_origin, ".", "\\.")}([/:?]|$)"
+  FILTER
+}

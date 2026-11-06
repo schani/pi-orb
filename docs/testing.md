@@ -2606,3 +2606,9 @@ Integration ancestor `35ba0ae5` passed 143 targeted E2E unit tests and 54 focuse
 scheduler/replay/timer checks, workspace/E2E typecheck, lint and resource audit.
 Reviewed receipts remain unchanged in the qualification directory's `integration260/`.
 The historical 6,086-test full pass predates this cleanup; full new-head CI is pending.
+
+## Compact live-file links (2026-11-05, PST; local, undeployed)
+
+Current focused gates and real public-HTTPS click: `docs/orb-files.md`. Historical pre-compact full suites do not qualify current source. Preserve first failures under `.context/orb-files/compact-implementation/frontend/` and `final/`; approved checksums and completed gates are in `final/qualified/`.
+
+Native-click tests own separate HTTP source/target servers; synthetic routed HTTPS also aborted outside the app. Both browsers and the real public HTTPS click passed; no product native-click fix is claimed. String-arrow `locator.evaluate` returned a function/undefined: both CSS assertions now await `toHaveCSS` with unchanged exact RGB, without larger timeouts. Test CommonMark-normalized destinations, not a custom walker. Restart/cleanup evidence: `.context/process-host-dev/compact-smoke.json`, `final/qualified/restarted-dashboard.txt`. Full exact-head release qualification remains separate.

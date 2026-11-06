@@ -9,10 +9,9 @@ import {
   recordFileOutcome,
 } from "../domain/orb-files.ts";
 import type { ControlPlaneDeps } from "../domain/ports.ts";
-import type {} from "./preview-auth-routes.ts";
-import type { OrbFileHosts } from "./preview-host.ts";
+import { requestAuthOrigin } from "./auth-routes.ts";
+import { liveFileRoute } from "./orb-files-url.ts";
 
-const authPaths = new Set(["/__pi_orb/auth/start", "/__pi_orb/auth/callback"]);
 const escaped = (value: string) =>
   value
     .replaceAll("&", "&amp;")
@@ -51,10 +50,14 @@ export function filePath(url: string): ResultType<string, FileError> {
 }
 export function registerOrbFilesBoundary(
   app: FastifyInstance,
-  options: { hosts: OrbFileHosts; appOrigin: string },
+  options: { filesOrigin: string; appOrigin: string },
 ): void {
   app.addHook("onRequest", async (request, reply) => {
-    if (!options.hosts.parse(request.headers.host)) return;
+    if (
+      requestAuthOrigin(request, options) !== options.filesOrigin ||
+      !liveFileRoute(request.originalUrl)
+    )
+      return;
     const reject = (status: FileError["status"], message: string) =>
       deny(reply, { status, message }, options.appOrigin);
     reply
@@ -67,10 +70,6 @@ export function registerOrbFilesBoundary(
       request.headers.upgrade !== undefined
     )
       return reject(403, "Service workers and upgrades cannot read orb files");
-    const path = request.originalUrl.split("?")[0] ?? "";
-    if (authPaths.has(path)) return;
-    if (path.startsWith("/__pi_orb/") || path === "/__pi_orb")
-      return reject(403, "Reserved authentication path");
     if (request.method !== "GET" && request.method !== "HEAD")
       return reject(405, "Orb files are read-only");
   });
@@ -80,75 +79,95 @@ export function registerOrbFilesGateway(
   task: SimulationTask,
   options: {
     deps: ControlPlaneDeps;
-    hosts: OrbFileHosts;
+    filesOrigin: string;
     appOrigin: string;
     transport: OrbFilesTransport;
   },
 ): void {
-  const { deps, hosts, transport, appOrigin } = options;
-  app.addHook("onRequest", async (request, reply) => {
-    const target = hosts.parse(request.headers.host);
-    if (!target) return;
-    const identity = request.previewIdentity;
-    if (!identity || authPaths.has(request.originalUrl.split("?")[0] ?? ""))
-      return deny(reply, { status: 401, message: "Orb file authentication required" }, appOrigin);
-    const path = filePath(request.originalUrl);
-    if (path.isErr()) return deny(reply, path.error, appOrigin);
-    const controller = new AbortController();
-    const deadline = task.createDeadline(
-      Math.max(0, Math.min(120_000, identity.expiresAt - task.wallNow())),
-      "file request deadline",
-    );
-    const abort = () => controller.abort();
-    deadline.signal.addEventListener("abort", abort, { once: true });
-    request.raw.once("aborted", abort);
-    reply.raw.once("close", () => {
-      abort();
-      deadline.cancel();
-      deadline.signal.removeEventListener("abort", abort);
-      request.raw.off("aborted", abort);
+  const { deps, transport, appOrigin } = options;
+  for (const url of ["/files/:orbId/*", "/files/repo/:orbId/*"])
+    app.route({
+      method: ["GET", "HEAD"],
+      url,
+      logLevel: "silent",
+      handler: async (request, reply) => {
+        const target = liveFileRoute(request.originalUrl);
+        if (requestAuthOrigin(request, options) !== options.filesOrigin || !target)
+          return deny(reply, { status: 404, message: "Orb file doesn't exist" }, appOrigin);
+        const principal = request.principal;
+        if (principal?.kind !== "user")
+          return deny(
+            reply,
+            { status: 401, message: "Orb file authentication required" },
+            appOrigin,
+          );
+        const path = filePath(target.path);
+        if (path.isErr()) return deny(reply, path.error, appOrigin);
+        if (target.base && path.value === "/")
+          return deny(
+            reply,
+            { status: 400, message: "A repository file path is required" },
+            appOrigin,
+          );
+        const expiresAt = request.authExpiresAt ?? task.wallNow() + 120_000;
+        const controller = new AbortController();
+        const deadline = task.createDeadline(
+          Math.max(0, Math.min(120_000, expiresAt - task.wallNow())),
+          "file request deadline",
+        );
+        const abort = () => controller.abort();
+        deadline.signal.addEventListener("abort", abort, { once: true });
+        request.raw.once("aborted", abort);
+        reply.raw.once("close", () => {
+          abort();
+          deadline.cancel();
+          deadline.signal.removeEventListener("abort", abort);
+          request.raw.off("aborted", abort);
+        });
+        if (deadline.signal.aborted || expiresAt <= task.wallNow()) abort();
+        const cancelled: FileError = {
+          status: 503,
+          message: "Orb file request expired or disconnected",
+        };
+        let cancel = () => {};
+        const cancellation = new Promise<ResultType<FileResponse, FileError>>((resolve) => {
+          cancel = () => resolve(err(cancelled));
+          controller.signal.addEventListener("abort", cancel, { once: true });
+          if (controller.signal.aborted) cancel();
+        });
+        const response = await Promise.race([
+          readOrbFile(
+            task,
+            deps,
+            transport,
+            {
+              orbId: target.orbId,
+              ownerUserId: principal.user.id,
+              method: request.method as "GET" | "HEAD",
+              path: target.base ? path.value.slice(1) : path.value,
+              ...(target.base ? { base: target.base } : {}),
+            },
+            controller.signal,
+          ),
+          cancellation,
+        ]);
+        controller.signal.removeEventListener("abort", cancel);
+        if (response.isErr()) {
+          abort();
+          recordFileOutcome(task, deps, target.orbId, response.error);
+          return deny(reply, response.error, appOrigin);
+        }
+        const { body, contentType, length } = response.value;
+        const outcome = (error: FileError | null) =>
+          recordFileOutcome(task, deps, target.orbId, error);
+        body?.once("error", () => {
+          if (!controller.signal.aborted || deadline.signal.aborted)
+            outcome({ status: 503, message: "Orb file stream interrupted" });
+        });
+        body?.once("end", () => outcome(null));
+        if (!body) outcome(null);
+        reply.header("content-type", contentType).header("content-length", length);
+        return reply.send(body ?? "");
+      },
     });
-    if (deadline.signal.aborted || identity.expiresAt <= task.wallNow()) abort();
-    const cancelled: FileError = {
-      status: 503,
-      message: "Orb file request expired or disconnected",
-    };
-    let cancel = () => {};
-    const cancellation = new Promise<ResultType<FileResponse, FileError>>((resolve) => {
-      cancel = () => resolve(err(cancelled));
-      controller.signal.addEventListener("abort", cancel, { once: true });
-      if (controller.signal.aborted) cancel();
-    });
-    const response = await Promise.race([
-      readOrbFile(
-        task,
-        deps,
-        transport,
-        {
-          orbId: target.orbId,
-          ownerUserId: identity.principal.user.id,
-          method: request.method as "GET" | "HEAD",
-          path: path.value,
-        },
-        controller.signal,
-      ),
-      cancellation,
-    ]);
-    controller.signal.removeEventListener("abort", cancel);
-    if (response.isErr()) {
-      abort();
-      recordFileOutcome(task, deps, target.orbId, response.error);
-      return deny(reply, response.error, appOrigin);
-    }
-    const { body, contentType, length } = response.value;
-    const outcome = (error: FileError | null) => recordFileOutcome(task, deps, target.orbId, error);
-    body?.once("error", () => {
-      if (!controller.signal.aborted || deadline.signal.aborted)
-        outcome({ status: 503, message: "Orb file stream interrupted" });
-    });
-    body?.once("end", () => outcome(null));
-    if (!body) outcome(null);
-    reply.header("content-type", contentType).header("content-length", length);
-    return reply.send(body ?? "");
-  });
 }

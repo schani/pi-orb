@@ -42,11 +42,26 @@ class PreviewTest(unittest.TestCase):
         self.assertNotIn('\\\\', pattern)
         host = 'p5173-o00000000-0000-4000-8000-000000000001'
         self.assertRegex(f'https://{host}.preview.example.net/oauth?code=secret', pattern)
-        file_host = 'f-o00000000-0000-4000-8000-000000000001'
-        self.assertRegex(f'https://{file_host}.preview.example.net/workspace/secret?key=secret', pattern)
-        for value in [f'https://{file_host}.preview.example.net.attacker.test/', f'https://{host}.preview.example.net.attacker.test/', 'https://app.example.net/', f'https://{host}.other.example.net/', f'https://{host}Xpreview.example.net/']:
+        for value in [f'https://{host}.preview.example.net.attacker.test/', 'https://app.example.net/', f'https://{host}.other.example.net/', f'https://{host}Xpreview.example.net/']:
             self.assertNotRegex(value, pattern)
 
+
+    def test_fixed_files_request_logs_are_excluded_before_service_activation(self):
+        source = Path('infra/hosting.tf').read_text()
+        block = source.split('resource "google_logging_project_exclusion" "files_requests" {', 1)[1].split('\n}', 1)[0]
+        self.assertIn('resource.type="cloud_run_revision"', block)
+        self.assertIn('log_id("run.googleapis.com/requests")', block)
+        self.assertNotIn('count', block)
+        expression = block.split('httpRequest.requestUrl =~ ', 1)[1].splitlines()[0]
+        interpolation = re.search(r'\$\{[^}]+\}', expression).group()
+        origin = 'https://files---pi-orb-issuer-123.us-central1.run.app'
+        pattern = expression.replace(interpolation, origin.replace('.', '\\.'))[1:-1]
+        self.assertNotIn('\\\\', pattern)
+        for path in ['/files/12345678-1234-4234-8234-123456789abc/workspace/secret?token=private', '/s/orb/private?key=private', '/auth/callback?code=private']:
+            self.assertRegex(origin + path, pattern)
+        for url in [origin + '.attacker.test/files/orb/a', origin.replace('.run.app', 'XrunXapp') + '/files/orb/a', 'https://app.example.org/files/orb/a']:
+            self.assertNotRegex(url, pattern)
+        self.assertIn('google_logging_project_exclusion.files_requests', Path('infra/run.tf').read_text())
 
     def test_preview_ingress_is_a_wildcard_https_edge_to_the_issuer(self):
         source = Path('infra/preview.tf').read_text()

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createPreviewHosts, orbFilesBaseUrl } from "./preview-host.ts";
+import { createPreviewHosts } from "./preview-host.ts";
 
 const orb = "12345678-1234-4234-8234-123456789abc";
 const config = {
@@ -29,24 +29,6 @@ describe("preview hosts", () => {
       expect(hosts.parse(host)).toBeUndefined();
     expect(hosts.url(orb, 1.5).isErr()).toBe(true);
   });
-  it("isolates registration-free file origins and omits them for unsupported providers", () => {
-    const hosts = createPreviewHosts(config)._unsafeUnwrap();
-    const origin = `https://f-o${orb}.preview.example.net`;
-    expect(hosts.files.url(orb)._unsafeUnwrap()).toBe(origin);
-    expect(hosts.files.parse(new URL(origin).host)).toEqual({ orbId: orb, origin });
-    expect(hosts.parse(new URL(origin).host)).toBeUndefined();
-    for (const host of [
-      `f-o${orb.toUpperCase()}.preview.example.net`,
-      `f-o${orb}.preview.example.net:443`,
-      `f-o${orb}.preview.example.net.attacker.test`,
-    ])
-      expect(hosts.files.parse(host)).toBeUndefined();
-    expect(orbFilesBaseUrl(hosts, "docker", orb)).toBe(origin);
-    expect(orbFilesBaseUrl(hosts, "gce", orb)).toBe(origin);
-    expect(orbFilesBaseUrl(hosts, "process", orb)).toBe(origin);
-    expect(orbFilesBaseUrl(hosts, "unknown", orb)).toBeNull();
-    expect(orbFilesBaseUrl(undefined, "docker", orb)).toBeNull();
-  });
   it("requires exact HTTPS origin and isolated PSL registrable domain", () => {
     for (const previewOrigin of [
       "https://x.example.com",
@@ -70,7 +52,6 @@ describe("preview hosts", () => {
       previewOrigin: "http://preview.localhost:3000",
       local: true,
     })._unsafeUnwrap();
-    expect(orbFilesBaseUrl(local, "process", orb)).toBe(`http://f-o${orb}.preview.localhost:3000`);
     expect(createPreviewHosts({ ...config, previewOrigin: local.baseOrigin }).isErr()).toBe(true);
     expect(
       createPreviewHosts({

@@ -96,7 +96,7 @@ HTTP preview implementation is authorized, not deployment (2026-10-06); contract
 same application; empty disables registration. No domain/DNS/TLS/LB is selected or provisioned.
 `run.app` cannot provide user-controlled wildcard DNS/TLS. Operator Host-preserving TLS routing
 configuration is in `infra/README.md`. The optional project `_Default` exclusion removes
-preview-host Cloud Run request-URL logs, not audit logs; custom/ancestor sinks and edge logs
+preview-host Cloud Run request-URL logs. The fixed files origin has its own unconditional request-URL exclusion (`infra/hosting.tf`), covering hosted and live reads. These exclusions do not cover audit logs; custom/ancestor sinks and edge logs
 must also be checked before exposure. Existing lifecycle/identity gates remain mandatory.
 Pending deployed acceptance covers DNS/TLS, consolidated login/stateless preview handoff,
 registered-port admission, HMR/streaming, activity versus idle stop and Stop/replacement fencing.

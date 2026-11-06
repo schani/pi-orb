@@ -9,6 +9,7 @@ import {
 } from "../domain/access-token.ts";
 import { requestCookie, sendAuthFailure } from "./auth-routes.ts";
 import type { RequestPrincipalResolver } from "./browser-identity.ts";
+import { liveFileRoute } from "./orb-files-url.ts";
 import type {} from "./preview-auth-routes.ts";
 import type { IsolatedHosts } from "./preview-host.ts";
 
@@ -69,9 +70,11 @@ export function withFilesAccessTokens(
   return (request) => {
     const token = presentedAccessToken(request);
     if (token === undefined) return resolve(request);
-    const orbId = /^\/s\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\//u.exec(
-      request.url,
-    )?.[1];
+    const orbId =
+      liveFileRoute(request.url)?.orbId ??
+      /^\/s\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\//u.exec(
+        request.url,
+      )?.[1];
     if (request.headers.host !== filesHost || typeof token !== "string" || orbId === undefined)
       return errAsync(invalid);
     return verifyAccessToken(task, options.tokens, token, orbId).map((identity) => {

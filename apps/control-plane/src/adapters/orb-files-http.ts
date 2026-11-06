@@ -7,15 +7,18 @@ export class NodeOrbFilesTransport implements OrbFilesTransport {
   open: OrbFilesTransport["open"] = (route, request, signal) =>
     ResultAsync.fromThrowable(
       () =>
-        fetch(`${route.baseUrl}/v1/files?${new URLSearchParams({ path: request.path })}`, {
-          method: request.method,
-          headers: {
-            authorization: `Bearer ${route.token}`,
-            "x-orb-incarnation": String(route.incarnation),
+        fetch(
+          `${route.baseUrl}/v1/files?${new URLSearchParams({ path: request.path, ...(request.base ? { base: request.base } : {}) })}`,
+          {
+            method: request.method,
+            headers: {
+              authorization: `Bearer ${route.token}`,
+              "x-orb-incarnation": String(route.incarnation),
+            },
+            signal,
+            redirect: "error",
           },
-          signal,
-          redirect: "error",
-        }),
+        ),
       unavailable,
     )().andThen((response) => {
       if (signal.aborted) return err(unavailable());

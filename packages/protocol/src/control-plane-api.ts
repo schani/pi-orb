@@ -296,6 +296,7 @@ export const OrbViewSchema = Type.Object(
     /** Original spawn caller ID; browser reads derive it from acceptance provenance. */
     spawnedByOrb: Type.Optional(Type.String()),
     centralAgent: Type.Optional(Type.Boolean()),
+    filesBaseUrl: Type.Optional(Type.String()),
     /** Latest observed agent activity, independent of compute for central agents. */
     activity: Type.Optional(Type.Union([Type.Literal("idle"), Type.Literal("busy")])),
     previewActiveUntil: Type.Optional(Type.String()),

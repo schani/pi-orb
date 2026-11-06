@@ -32,11 +32,9 @@ import {
   mintIdToken,
 } from "../../apps/control-plane/src/domain/workload-identity.ts";
 import { registerOrbFilesGateway } from "../../apps/control-plane/src/http/orb-files-gateway.ts";
+import { orbFilesBaseUrl } from "../../apps/control-plane/src/http/orb-files-url.ts";
 import { registerPreviewGateway } from "../../apps/control-plane/src/http/preview-gateway.ts";
-import {
-  orbFilesBaseUrl,
-  type PreviewHosts,
-} from "../../apps/control-plane/src/http/preview-host.ts";
+import type { PreviewHosts } from "../../apps/control-plane/src/http/preview-host.ts";
 import { registerRuntimePreviewRoutes } from "../../apps/control-plane/src/http/runtime-preview-routes.ts";
 import { FakeSecretStore } from "../../apps/control-plane/src/testkit/broker.ts";
 import {
@@ -176,17 +174,18 @@ export async function startPreviewComposition(
       issuerUrl,
     },
     previewPorts: ports,
-    filesOrbIds: [orbId, ...(options.missingOrbId ? [options.missingOrbId] : [])],
-    configurePreviews: async ({ app, hosts, appOrigin }) => {
-      previewUrl = (id, port) => hosts.url(id, port);
-      filesBaseUrl = orbFilesBaseUrl(hosts, deps.hostProvider.kind, orbId);
+    configureFiles: ({ app, filesOrigin, appOrigin }) => {
+      filesBaseUrl = orbFilesBaseUrl(filesOrigin, deps.hostProvider.kind, orbId);
       if (options.files)
         registerOrbFilesGateway(app, task, {
           deps,
-          hosts: hosts.files,
+          filesOrigin,
           appOrigin,
           transport: new NodeOrbFilesTransport(),
         });
+    },
+    configurePreviews: async ({ app, hosts, appOrigin }) => {
+      previewUrl = (id, port) => hosts.url(id, port);
       registerRuntimePreviewRoutes(app, task, {
         store: h.store,
         url: (id, port) => hosts.url(id, port),
@@ -240,9 +239,10 @@ export async function startPreviewComposition(
     h,
     task,
     orbId,
-    liveFilesOrigin: auth.liveFilesOrigins[0],
     filesBaseUrl,
-    missingFilesOrigin: auth.liveFilesOrigins[1],
+    missingFilesBaseUrl: options.missingOrbId
+      ? orbFilesBaseUrl(auth.filesOrigin, deps.hostProvider.kind, options.missingOrbId)
+      : null,
     activity,
     observed: () => observed,
     /** `pi-orb id-token --audience urn:pi-orb:access` through the production mint and signer. */

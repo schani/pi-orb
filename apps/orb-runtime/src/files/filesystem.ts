@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { lstat, open, realpath, statfs } from "node:fs/promises";
-import { isAbsolute, normalize, relative, sep } from "node:path";
+import { isAbsolute, join, normalize, relative, sep } from "node:path";
 import { Readable } from "node:stream";
 import { err, ok, ResultAsync } from "neverthrow";
 
@@ -23,7 +23,20 @@ const ioError = (cause: unknown): FileError => {
 };
 const io = <T>(fn: () => Promise<T>) => ResultAsync.fromThrowable(fn, ioError)();
 
-export async function openLiveFile(path: unknown, root?: string) {
+export async function openLiveFile(path: unknown, root?: string, base?: unknown, workDir?: string) {
+  if (base !== undefined && base !== "repo") return err(fileError(400, "unknown file base"));
+  if (base === "repo") {
+    if (
+      typeof path !== "string" ||
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: reject path controls and separators.
+      /[\\\u0000-\u001f\u007f]/u.test(path) ||
+      path.split("/").some((part) => !part || part === "." || part === "..")
+    )
+      return err(fileError(400, "a repository-relative file path is required"));
+    if (!workDir || !isAbsolute(workDir))
+      return err(fileError(503, "file workspace is unavailable"));
+    path = join(workDir, "repo", path);
+  }
   if (typeof path !== "string" || !path.startsWith("/") || path.includes("\0"))
     return err(fileError(400, "an absolute file path is required"));
   if (root !== undefined) {
