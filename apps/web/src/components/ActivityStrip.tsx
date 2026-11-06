@@ -76,6 +76,8 @@ export function ActivityStrip({
     (step) => `strip:${memory?.aliases.get(step.identity) ?? step.identity}`,
   );
   const [open, setOpen] = useState(() => remembered.some((id) => memory?.opened.has(id)));
+  // Once opened, rows stay mounted while closed so in-flight headlines still land, as in a category.
+  const [mounted, setMounted] = useState(open);
   const [picked, setPicked] = useState<string | null>(null);
   const remember = (value: boolean) => {
     for (const id of remembered) {
@@ -157,18 +159,19 @@ export function ActivityStrip({
         if (value && pickedStep !== undefined) return;
         remember(value);
         setOpen(value);
+        if (value) setMounted(true);
         if (!value) setPicked(null);
       }}
     >
-      {(open || pickedStep !== undefined) && (
+      {(mounted || pickedStep !== undefined) && (
         <div className="activity-strip-body">
-          {open
-            ? steps.map((step) => <Fragment key={step.key}>{step.node}</Fragment>)
-            : pickedStep !== undefined && (
-                <ActivityRailOpen key={pickedStep.key} value={true}>
-                  {pickedStep.node}
-                </ActivityRailOpen>
-              )}
+          {pickedStep !== undefined ? (
+            <ActivityRailOpen key={pickedStep.key} value={true}>
+              {pickedStep.node}
+            </ActivityRailOpen>
+          ) : (
+            steps.map((step) => <Fragment key={step.key}>{step.node}</Fragment>)
+          )}
         </div>
       )}
     </ActivityRailRow>

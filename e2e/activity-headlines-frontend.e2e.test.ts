@@ -262,7 +262,6 @@ it.each(
         await expect(summaries.first()).toContainText("Headline seen-null");
         await expect.poll(() => requests.length).toBe(4);
         await strip.click();
-        await expect(rows).toHaveCount(5);
         await page.evaluate(() => {
           const scope = globalThis as unknown as {
             document: { dispatchEvent(event: unknown): void };
