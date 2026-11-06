@@ -77,6 +77,12 @@ export function ActivityStrip({
   );
   const [open, setOpen] = useState(() => remembered.some((id) => memory?.opened.has(id)));
   const [picked, setPicked] = useState<string | null>(null);
+  const remember = (value: boolean) => {
+    for (const id of remembered) {
+      if (value) memory?.opened.add(id);
+      else memory?.opened.delete(id);
+    }
+  };
   const [tip, setTip] = useState<Tip | null>(null);
 
   useLayoutEffect(() => {
@@ -95,71 +101,76 @@ export function ActivityStrip({
   const pickedStep = picked === null ? undefined : steps.find((step) => step.key === picked);
 
   return (
-    <>
-      <ActivityRailRow
-        className="activity-strip"
-        label="activity"
-        strip={
-          <span className="activity-strip-dots" ref={dotsRef}>
-            {hidden > 0 && <span className="activity-strip-more">+{hidden}</span>}
-            {shown.map((step) => (
-              <button
-                type="button"
-                tabIndex={-1}
-                key={step.key}
-                className={`activity-strip-dot activity-strip-${step.state}${
-                  step.key === picked ? " activity-strip-picked" : ""
-                }`}
-                data-step={step.state}
-                aria-label={step.headline === "" ? step.label : `${step.label} · ${step.headline}`}
-                aria-pressed={step.key === picked}
-                onMouseLeave={() => setTip(null)}
-                onMouseEnter={(event) => {
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  setTip({ step, left: rect.left, top: rect.top });
-                }}
-                onClick={(event) => {
-                  event.preventDefault();
-                  setPicked((current) => (current === step.key ? null : step.key));
-                }}
-              />
-            ))}
-            {tip !== null && (
-              <span
-                className="activity-strip-tip"
-                role="tooltip"
-                style={{
-                  left: Math.max(4, tip.left - 16),
-                  top: tip.top - 22,
-                  maxWidth: `min(60ch, calc(100vw - ${Math.max(4, tip.left - 16) + 8}px))`,
-                }}
-              >
-                <span className={`activity-strip-tip-label activity-strip-${tip.step.state}`}>
-                  {tip.step.label}
-                </span>
-                {tip.step.headline !== "" && ` · ${tip.step.headline}`}
+    <ActivityRailRow
+      className="activity-strip"
+      label="activity"
+      strip={
+        <span className="activity-strip-dots" ref={dotsRef}>
+          {hidden > 0 && <span className="activity-strip-more">+{hidden}</span>}
+          {shown.map((step) => (
+            <button
+              type="button"
+              tabIndex={-1}
+              key={step.key}
+              className={`activity-strip-dot activity-strip-${step.state}${
+                step.key === picked ? " activity-strip-picked" : ""
+              }`}
+              data-step={step.state}
+              aria-label={step.headline === "" ? step.label : `${step.label} · ${step.headline}`}
+              aria-pressed={step.key === picked}
+              onMouseLeave={() => setTip(null)}
+              onMouseEnter={(event) => {
+                const rect = event.currentTarget.getBoundingClientRect();
+                setTip({ step, left: rect.left, top: rect.top });
+              }}
+              onClick={(event) => {
+                event.preventDefault();
+                remember(false);
+                setOpen(false);
+                setPicked((current) => (current === step.key ? null : step.key));
+              }}
+            />
+          ))}
+          {tip !== null && (
+            <span
+              className="activity-strip-tip"
+              role="tooltip"
+              style={{
+                left: Math.max(4, tip.left - 16),
+                top: tip.top - 22,
+                maxWidth: `min(60ch, calc(100vw - ${Math.max(4, tip.left - 16) + 8}px))`,
+              }}
+            >
+              <span className={`activity-strip-tip-label activity-strip-${tip.step.state}`}>
+                {tip.step.label}
               </span>
-            )}
-          </span>
-        }
-        metric={steps.length}
-        state={steps.some((step) => step.state === "running") ? "running" : "neutral"}
-        defaultOpen={open}
-        onToggle={(value) => {
-          setOpen(value);
-          for (const id of remembered) {
-            if (value) memory?.opened.add(id);
-            else memory?.opened.delete(id);
-          }
-        }}
-      />
-      {open
-        ? steps.map((step) => <Fragment key={step.key}>{step.node}</Fragment>)
-        : pickedStep !== undefined && (
-            <ActivityRailOpen key={pickedStep.key} value={true}>
-              {pickedStep.node}
-            </ActivityRailOpen>
+              {tip.step.headline !== "" && ` · ${tip.step.headline}`}
+            </span>
           )}
-    </>
+        </span>
+      }
+      metric={steps.length}
+      state={steps.some((step) => step.state === "running") ? "running" : "neutral"}
+      defaultOpen={open || pickedStep !== undefined}
+      onToggle={(value) => {
+        // Opening for a picked dot keeps that single step; the summary opens every step.
+        if (value && pickedStep !== undefined) return;
+        remember(value);
+        setOpen(value);
+        if (!value) setPicked(null);
+      }}
+    >
+      {(open || pickedStep !== undefined) && (
+        <div className="activity-strip-body">
+          {open
+            ? steps.map((step) => <Fragment key={step.key}>{step.node}</Fragment>)
+            : pickedStep !== undefined && (
+                <ActivityRailOpen key={pickedStep.key} value={true}>
+                  {pickedStep.node}
+                </ActivityRailOpen>
+              )}
+        </div>
+      )}
+    </ActivityRailRow>
   );
 }

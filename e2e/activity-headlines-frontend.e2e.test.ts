@@ -199,7 +199,9 @@ it.each(
           if (new URL(request.url()).pathname.includes(`/${ORB}/details/`)) detailReads++;
         });
         await expect.poll(() => [...requests].sort()).toEqual(["code-bash", "code-codemode"]);
-        await expect(rows).toHaveCount(7);
+        const strip = page.locator(".activity-strip");
+        await expect(rows).toHaveCount(6);
+        await expect(strip.locator(".activity-strip-dot")).toHaveCount(3);
         for (const index of [0, 1, 4]) {
           await expect(summaries.nth(index).locator("code")).toHaveText("HEADLINE_DETAIL_BODY");
           await expect(summaries.nth(index).locator("code")).toHaveCSS("white-space", "nowrap");
@@ -210,8 +212,6 @@ it.each(
         await expect(summaries.nth(3).locator("code")).toHaveCount(0);
         await expect(summaries.nth(5)).toContainText("commands");
         await expect(summaries.nth(5).locator("code")).toHaveCount(0);
-        await expect(summaries.last()).toContainText("3 ran");
-        await expect(summaries.last().locator(".activity-rail-headline")).toHaveCount(0);
         release("code-bash");
         release("code-codemode");
         await expect(summaries.first()).toContainText("Headline code-bash");
@@ -224,30 +224,30 @@ it.each(
         await expect(summaries.first()).toContainText("Headline code-result");
         expect(detailReads).toBe(0);
         expect(requests).toHaveLength(3);
-        await summaries.last().click();
+        await strip.locator(":scope > summary .activity-rail-label").click();
+        await expect(rows).toHaveCount(9);
         await expect.poll(() => requests.length).toBe(5);
-        const children = page.locator(".tool-activity-call > summary");
-        await expect(children).toHaveCount(3);
-        for (const child of await children.all())
-          await expect(child).toContainText("HEADLINE_DETAIL_BODY");
+        for (const index of [6, 7, 8])
+          await expect(summaries.nth(index)).toContainText("HEADLINE_DETAIL_BODY");
         const activeGroup = held.filter((item) => item.key.startsWith("code-group-"));
         expect(activeGroup).toHaveLength(2);
         for (const item of activeGroup) item.gate.release();
         await expect.poll(() => requests.length).toBe(6);
         for (const item of held.filter((item) => item.key.startsWith("code-group-")))
           item.gate.release();
-        await expect(children.last()).toContainText("Headline code-group-three");
+        await expect(summaries.nth(8)).toContainText("Headline code-group-three");
         expect(detailReads).toBe(0);
       } else if (scenario === "first seen") {
         await expect.poll(() => [...requests].sort()).toEqual(["seen-arbitrary", "seen-null"]);
-        await expect(rows).toHaveCount(6);
+        const strip = page.locator(".activity-strip > summary .activity-rail-label");
+        await expect(rows).toHaveCount(5);
         expect(await rows.first().getAttribute("open")).toBeNull();
         await expect(summaries.nth(2)).toContainText("Ready from history");
-        await summaries.last().click();
-        await expect(page.locator(".tool-activity-call > summary")).toHaveCount(2);
+        await strip.click();
+        await expect(rows).toHaveCount(7);
         await flush();
         await page.setViewportSize({ width: 1100, height: 350 });
-        await page.locator(".tool-activity-call > summary").last().scrollIntoViewIfNeeded();
+        await summaries.last().scrollIntoViewIfNeeded();
         const activeBox = await summaries.first().boundingBox();
         const scrollBox = await page.locator(".orb-transcript-scroll").boundingBox();
         expect(
@@ -261,7 +261,8 @@ it.each(
         );
         await expect(summaries.first()).toContainText("Headline seen-null");
         await expect.poll(() => requests.length).toBe(4);
-        await summaries.last().click();
+        await strip.click();
+        await expect(rows).toHaveCount(5);
         await page.evaluate(() => {
           const scope = globalThis as unknown as {
             document: { dispatchEvent(event: unknown): void };
@@ -291,13 +292,9 @@ it.each(
           });
           scope.document.dispatchEvent(new scope.Event("visibilitychange"));
         });
-        await summaries.last().click();
-        await expect(page.locator(".tool-activity-call").first()).toContainText(
-          "Headline group-one",
-        );
-        await expect(page.locator(".tool-activity-call").last()).toContainText(
-          "Headline group-two",
-        );
+        await strip.click();
+        await expect(summaries.nth(5)).toContainText("Headline group-one");
+        await expect(summaries.nth(6)).toContainText("Headline group-two");
         await flush();
         expect([...requests].sort()).toEqual([
           "group-one",

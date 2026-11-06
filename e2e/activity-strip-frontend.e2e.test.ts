@@ -51,15 +51,17 @@ it("folds interleaved activity into dots that preview, open and overflow", async
     await failed.hover();
     await expectPage(page.getByRole("tooltip")).toContainText("codemode · text(await tools.bash");
     await failed.click();
-    const picked = page.locator(".rec-bd > .activity-rail-row-failed");
-    await expectPage(picked).toHaveCount(1);
+    const body = first.locator(":scope > .activity-strip-body");
+    const picked = body.locator(":scope > .activity-rail-row-failed");
+    await expectPage(first).toHaveAttribute("open", "");
+    await expectPage(body.locator(":scope > .activity-rail-row")).toHaveCount(1);
     await expectPage(picked).toHaveAttribute("open", "");
     await expectPage(picked.locator(".tool-call-output-error")).toBeVisible();
-    await expectPage(first).not.toHaveAttribute("open", "");
     await failed.click();
     await expectPage(picked).toHaveCount(0);
+    await expectPage(first).not.toHaveAttribute("open", "");
 
-    await first.locator(".activity-rail-label").click();
+    await first.locator(":scope > summary .activity-rail-label").click();
     await expectPage(first).toHaveAttribute("open", "");
     await expectPage(page.locator(".rec-orb .reasoning")).toHaveCount(20);
 

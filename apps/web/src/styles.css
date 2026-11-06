@@ -2428,6 +2428,37 @@ pre,
     0 0 0 3px var(--ok);
 }
 
+/* Expanded steps nest in the strip's band, like calls inside a category. */
+.activity-strip-body {
+  padding: 2px 8px 4px calc(2ch + 16px);
+  background: var(--g1);
+}
+
+.activity-strip-body > .activity-rail-row {
+  background: var(--g1);
+  border: 0;
+}
+
+.activity-strip-body > .activity-rail-row:last-child {
+  margin-bottom: 0;
+}
+
+.activity-strip-body > .activity-rail-row > summary {
+  padding: 0;
+}
+
+.activity-strip-body > .activity-rail-row > summary:hover {
+  background: var(--w);
+}
+
+.activity-strip-body
+  > .activity-rail-row
+  > :is(.reasoning-body, .tool-activity-calls, .subagent-notice-body) {
+  padding-left: calc(2ch + 8px);
+  background: var(--w);
+  border-top: 0;
+}
+
 @keyframes activity-strip-blink {
   50% {
     opacity: 0.15;
