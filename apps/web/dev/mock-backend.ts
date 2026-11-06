@@ -1539,6 +1539,19 @@ async function handleApi(
     sendJson(response, 200, { items: [...state.projects.values()] });
     return true;
   }
+  const mcpStatusRoute = /^\/api\/v1\/projects\/([^/]+)\/mcp\/status$/.exec(path);
+  if (method === "GET" && mcpStatusRoute) {
+    const projectId = decodeURIComponent(mcpStatusRoute[1] ?? "");
+    if (!state.projects.has(projectId)) notFound(response);
+    else {
+      const catalog = state.projectMcp.get(projectId) ?? { revision: 0, servers: [] };
+      sendJson(response, 200, {
+        revision: catalog.revision,
+        servers: catalog.servers.map(({ name }) => ({ name, status: "unknown" })),
+      });
+    }
+    return true;
+  }
   const mcpRoute =
     /^\/api\/v1\/projects\/([^/]+)\/mcp(?:\/(describe)|\/([^/]+)\/oauth(?:\/(connect|disconnect))?)?$/.exec(
       path,

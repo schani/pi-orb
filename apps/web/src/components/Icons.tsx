@@ -17,9 +17,11 @@ export type IconName =
   | "more"
   | "trend"
   | "source"
-  | "expand";
+  | "expand"
+  | "refresh";
 
 const PATHS: Record<IconName, string> = {
+  refresh: "M13 6a5 5 0 1 0 0 4 M13 2v4H9",
   trend: "M2 2v12h12 M4 10l3-4 3 2 4-5",
   fold: "m3 6 5 5 5-5",
   send: "M8 13V3M3 8l5-5 5 5",

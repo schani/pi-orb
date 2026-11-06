@@ -1,10 +1,11 @@
-import type { McpCatalog, McpConfig } from "@pi-orb/protocol";
+import type { McpCatalog, McpConfig, ProjectMcpStatus } from "@pi-orb/protocol";
 import { useEffect, useId, useRef, useState } from "react";
 import {
   connectMcpOAuth,
   describeApiError,
   describeProjectMcp,
   getProjectMcp,
+  getProjectMcpStatus,
   listProjectSecrets,
   saveProjectMcp,
 } from "../lib/api.ts";
@@ -17,6 +18,7 @@ import {
   mcpDraft,
 } from "../lib/mcp-form.ts";
 import { launchSafariAuth, safariAuthUrl } from "../lib/safari-links.ts";
+import { Icon } from "./Icons.tsx";
 import { useMcpAuthorization } from "./McpOAuthControls.tsx";
 import { TextFieldFrame } from "./TextFieldFrame.tsx";
 
@@ -200,16 +202,27 @@ export function mcpAuthorizationLabel(status: string): string {
   return status === "connected" ? "grant stored" : status;
 }
 
+const healthDiagnostics = {
+  auth_required: "Authorization required",
+  invalid_binding: "Invalid MCP configuration",
+  connection_failed: "Connection failed",
+  credentials_unavailable: "Credentials unavailable",
+};
+
 function Connection({
   server,
   autoOpen,
   onOpened,
   group,
   onRemove,
+  health,
+  checking,
   ...props
 }: Shared &
   Omit<EditorProps, "previous" | "onCancel"> & {
     server: McpConfig;
+    health: ProjectMcpStatus["servers"][number] | undefined;
+    checking: boolean;
     autoOpen: boolean;
     onOpened: () => void;
     group: string;
@@ -234,6 +247,7 @@ function Connection({
     : editable
       ? "bearer token"
       : "custom headers";
+  const observed = health?.status ?? "unknown";
   return (
     <details className="activity-rail-row project-mcp-connection" name={group} ref={details}>
       {/* biome-ignore lint/a11y/noStaticElementInteractions: summary is the native keyboard-operable disclosure; cancel its default action only while a mutation owns the dialog. */}
@@ -246,7 +260,13 @@ function Connection({
         <span className="activity-rail-marker" aria-hidden="true" />
         <span className="activity-rail-summary">
           {server.name}
-          <span className="activity-rail-headline"> · {status}</span>
+          <span
+            className={`mcp-health mcp-health-${observed}`}
+            title={`Control-plane connection and discovery${health?.diagnostic ? ` · ${healthDiagnostics[health.diagnostic]}` : ""}`}
+          >
+            {checking ? "checking…" : observed === "needs-auth" ? "auth required" : observed}
+          </span>
+          <span className="activity-rail-headline">{status}</span>
         </span>
       </summary>
       <div className="reasoning-body">
@@ -317,6 +337,50 @@ export function ProjectMcpSettings({
   const [error, setError] = useState<string | null>(null);
   const [secrets, setSecrets] = useState<string[]>([]);
   const [secretError, setSecretError] = useState<string | null>(null);
+  const [healthRead, setHealthRead] = useState<{
+    revision: number;
+    report?: ProjectMcpStatus;
+    failed: boolean;
+    checking: boolean;
+  } | null>(null);
+  const refreshHealth = useRef(() => {});
+  const inFlight = useRef(false);
+  const revision = catalog?.revision;
+  const currentHealth = healthRead?.revision === revision ? healthRead : null;
+  const health =
+    currentHealth?.report && currentHealth.report.revision === revision
+      ? currentHealth.report
+      : undefined;
+  useEffect(() => {
+    if (!active || revision === undefined) return;
+    let current = true;
+    const load = () => {
+      if (inFlight.current) return;
+      inFlight.current = true;
+      setHealthRead({ revision, failed: false, checking: true });
+      void getProjectMcpStatus(projectId).then((result) => {
+        inFlight.current = false;
+        if (!current) {
+          refreshHealth.current();
+          return;
+        }
+        setHealthRead({
+          revision,
+          failed: result.isErr(),
+          checking: false,
+          ...(result.isOk() ? { report: result.value } : {}),
+        });
+      });
+    };
+    load();
+    refreshHealth.current = load;
+    window.addEventListener("focus", load);
+    return () => {
+      current = false;
+      refreshHealth.current = () => {};
+      window.removeEventListener("focus", load);
+    };
+  }, [active, projectId, revision]);
   const group = useId();
   const addButton = useRef<HTMLButtonElement>(null);
   const alive = useRef(true);
@@ -455,10 +519,31 @@ export function ProjectMcpSettings({
   return (
     <div className="project-secrets-body">
       {catalog === null && !error && <span className="muted">loading…</span>}
+      {catalog && catalog.servers.length > 0 && (
+        <div className="mcp-health-toolbar">
+          <button
+            type="button"
+            className="icon-button"
+            title="Refresh MCP health"
+            aria-label="Refresh MCP health"
+            disabled={!active || saving || currentHealth?.checking}
+            onClick={() => refreshHealth.current()}
+          >
+            <Icon name="refresh" />
+          </button>
+        </div>
+      )}
+      {currentHealth?.failed && (
+        <p className="banner banner-error" role="alert">
+          Could not check MCP health.
+        </p>
+      )}
       {catalog?.servers.map((server) => (
         <Connection
           key={server.name}
           server={server}
+          health={health?.servers.find((row) => row.name === server.name)}
+          checking={currentHealth?.checking ?? false}
           projectId={projectId}
           saving={saving}
           setSaving={setSaving}

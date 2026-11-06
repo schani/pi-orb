@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { Agent } from "undici";
 import { afterEach, expect, it, vi } from "vitest";
 import { createMcpOAuthFetch } from "./mcp-oauth.ts";
-import { probeMcp } from "./mcp-probe.ts";
+import { checkMcp, probeMcp } from "./mcp-probe.ts";
 
 const dnsLookup = vi.hoisted(() =>
   vi.fn<
@@ -50,7 +50,20 @@ it.each(
     expect(result.isErr() && result.error).toBe(
       "Cannot connect to MCP; check endpoint and project secret bindings",
     );
-    expect(dnsLookup).toHaveBeenCalledTimes(2);
+    const health = await checkMcp(
+      {
+        name: "fixture",
+        description: "Fixture",
+        url: "https://mcp.example/mcp",
+        headers: {},
+      },
+      {},
+    );
+    expect(health._unsafeUnwrapErr()).toEqual({
+      type: "mcp_probe_error",
+      diagnostic: "invalid_binding",
+    });
+    expect(dnsLookup).toHaveBeenCalledTimes(3);
     expect(dnsLookup).toHaveBeenNthCalledWith(
       1,
       "mcp.example",
