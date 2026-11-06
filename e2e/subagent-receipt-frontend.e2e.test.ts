@@ -45,6 +45,12 @@ for (const width of [1280, 390, 320]) {
         "frontend-fixture-orb",
       );
       const rows = page.locator(".subagent-notice:not(.subagent-message-notice)");
+      await expectPage(rows).toHaveCount(1);
+      const strip = rows
+        .first()
+        .locator("xpath=following-sibling::details[contains(@class, 'activity-strip')][1]");
+      await expectPage(strip.locator(".activity-strip-dot")).toHaveCount(2);
+      await strip.locator(":scope > summary .activity-rail-label").click();
       await expectPage(rows).toHaveCount(3);
       await expectPage(page.locator("body")).not.toContainText("private-child-");
       const measure = async () =>
@@ -58,7 +64,6 @@ for (const width of [1280, 390, 320]) {
           above: gap(prose[0], rows[0]),
           below: gap(rows[0], prose[1]),
           adjacent: gap(rows[1], rows[2]),
-          rail: getComputedStyle(rows[1], "::before").bottom,
           bodyLeft: body === null ? null : body.getBoundingClientRect().left + parseFloat(getComputedStyle(body).paddingLeft),
           railLeft: rows[0].getBoundingClientRect().left + parseFloat(getComputedStyle(rows[0], "::before").left),
           overflow: document.documentElement.scrollWidth - innerWidth,
@@ -67,7 +72,6 @@ for (const width of [1280, 390, 320]) {
           above: number;
           below: number;
           adjacent: number;
-          rail: string;
           bodyLeft: number;
           railLeft: number;
           overflow: number;
@@ -75,7 +79,6 @@ for (const width of [1280, 390, 320]) {
       const collapsed = await measure();
       expectPage(collapsed.above).toBeCloseTo(collapsed.below, 1);
       expectPage(collapsed.adjacent).toBe(4);
-      expectPage(collapsed.rail).toBe("-4px");
       expectPage(collapsed.overflow).toBeLessThanOrEqual(0);
       await rows.first().locator("summary").click();
       await rows.nth(1).locator("summary").click();

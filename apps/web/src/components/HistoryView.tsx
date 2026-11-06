@@ -8,6 +8,7 @@ import {
 import {
   createContext,
   createElement,
+  isValidElement,
   memo,
   type ReactNode,
   type RefObject,
@@ -22,18 +23,20 @@ import { representedInboxMessageIds } from "../lib/queued-messages.ts";
 import { HeadlineSlots } from "../lib/use-activity-headline.tsx";
 import { useHistoryTail } from "../lib/use-history-tail.ts";
 import { ActivityRailRow } from "./ActivityRailRow.tsx";
+import { type ActivityItem, groupActivity } from "./ActivityStrip.tsx";
 import { BitRegister } from "./BitRegister.tsx";
 import { ChatMarkdown as UnmemoizedChatMarkdown } from "./ChatMarkdown.tsx";
 import { PlainChatText } from "./ChatText.tsx";
 import { CommittedImage, imageIndex } from "./CommittedImage.tsx";
 import { CommittedBody, type DetailContext, RunningBody } from "./DetailBody.tsx";
 import { ResponseMarkdown as UnmemoizedResponseMarkdown } from "./ResponseMarkdown.tsx";
-import { isSubagentNotice, SubagentNotice } from "./SubagentNotice.tsx";
+import { SubagentNotice, subagentStep } from "./SubagentNotice.tsx";
 import {
   type PersistedToolCall,
   ToolActivity,
   type ToolCallBlock,
   type ToolResultBlock,
+  toolCallStep,
 } from "./ToolActivity.tsx";
 
 const ChatMarkdown = memo(UnmemoizedChatMarkdown);
@@ -448,30 +451,42 @@ function renderAgentRecords(
   records: readonly (MessageRecord | EventRecord)[],
   pairing: ToolPairing,
   tools: readonly ToolChip[],
-): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  let runIndex = 0;
+): ActivityItem[] {
+  const items: ActivityItem[] = [];
+  const push = (node: ReactNode) => {
+    const key = isValidElement(node) && node.key !== null ? node.key : `node-${items.length}`;
+    items.push({ key, node });
+  };
   let currentCalls: PersistedToolCall[] = [];
 
+  // Each tool call is its own step; a lone call still renders as today's category row.
   const flushTools = () => {
-    if (currentCalls.length === 0) return;
-    nodes.push(<PersistedActivity calls={currentCalls} key={`tools-${runIndex}`} />);
-    runIndex += 1;
+    for (const call of currentCalls) {
+      const key = call.call.detailKey;
+      const node = <PersistedActivity calls={[call]} key={key} />;
+      const facts = toolCallStep(call);
+      const step =
+        facts === undefined ? undefined : { key, identity: call.call.callId, node, ...facts };
+      items.push({ key, node, ...(step === undefined ? {} : { step }) });
+    }
     currentCalls = [];
   };
 
   for (const record of records) {
     if (record.type === "event") {
       flushTools();
-      if (isSubagentNotice(record)) {
-        nodes.push(<OwnedSubagent key={record.id} record={record} />);
+      const facts = subagentStep(record);
+      if (facts !== undefined) {
+        const node = <OwnedSubagent key={record.id} record={record} />;
+        const step = { key: record.id, identity: record.id, node, ...facts };
+        items.push({ key: record.id, node, step });
         continue;
       }
       if (record.delivery !== undefined) {
-        nodes.push(<DeliveryRow key={record.id} record={record} />);
+        push(<DeliveryRow key={record.id} record={record} />);
         continue;
       }
-      nodes.push(
+      push(
         <div className="record-custom" key={record.id}>
           <p className={record.compactionOutcome === "failed" ? "msg-text error-text" : "msg-text"}>
             <PlainChatText>{blockText(record.content ?? [])}</PlainChatText>
@@ -499,7 +514,7 @@ function renderAgentRecords(
       if (block.type === "tool_result") {
         if (!pairing.pairedResults.has(block)) {
           flushTools();
-          nodes.push(renderToolResult(block, `${record.id}-${index}`, record.id));
+          push(renderToolResult(block, `${record.id}-${index}`, record.id));
         }
         continue;
       }
@@ -507,7 +522,7 @@ function renderAgentRecords(
       // Visible prose/reasoning/media is a boundary between maximal tool runs.
       flushTools();
       if (block.type === "text" && index === firstTextIndex && copySource !== null) {
-        nodes.push(
+        push(
           <ResponseMarkdown
             key={`${record.id}-${index}`}
             markdown={block.text}
@@ -516,17 +531,33 @@ function renderAgentRecords(
         );
         continue;
       }
+      if (block.type === "reasoning") {
+        // Reasoning must be a direct child of the turn body so its rail row can
+        // collapse the body's prose gap against adjacent activity rows.
+        const key = `${record.id}-${index}`;
+        const node = renderReasoningRail(block.detailKey, key, record.id, false, block.headline);
+        const headline = block.headline ?? "";
+        items.push({
+          key,
+          node,
+          step: {
+            key,
+            identity: block.detailKey,
+            node,
+            state: "thinking",
+            label: "thinking",
+            headline,
+          },
+        });
+        continue;
+      }
       const singleBlockRecord: MessageRecord = { ...record, content: [block] };
-      const rendered = renderMessageBlocks(singleBlockRecord);
-      // Reasoning must be a direct child of the turn body so its rail row can
-      // collapse the body's prose gap against adjacent activity rows.
-      if (block.type === "reasoning") nodes.push(...rendered);
-      else nodes.push(<div key={`${record.id}-${index}`}>{rendered}</div>);
+      push(<div key={`${record.id}-${index}`}>{renderMessageBlocks(singleBlockRecord)}</div>);
     }
     const failure = assistantFailure(record);
     if (failure !== null) {
       flushTools();
-      nodes.push(
+      push(
         <p className="error-text" role="alert" key={`${record.id}-error`}>
           <PlainChatText>{failure}</PlainChatText>
         </p>,
@@ -534,7 +565,7 @@ function renderAgentRecords(
     }
   }
   flushTools();
-  return nodes;
+  return items;
 }
 
 const MessageBlocks = memo(function MessageBlocks({ record }: { record: MessageRecord }) {
@@ -546,16 +577,29 @@ const AgentRecords = memo(
     records,
     pairing,
     tools,
+    live,
+    busy = false,
   }: {
     records: readonly (MessageRecord | EventRecord)[];
     pairing: ToolPairing;
     tools: readonly ToolChip[];
+    live?: LiveAgentContent | undefined;
+    busy?: boolean;
   }) {
-    return renderAgentRecords(records, pairing, tools);
+    const openState = useContext(OpenDetailValue);
+    const items = renderAgentRecords(records, pairing, tools);
+    if (live !== undefined) items.push(...liveAgentItems(live));
+    return [
+      ...groupActivity(items, openState),
+      // Only authoritative busy state can keep the activity marker alive.
+      busy && <BitRegister key="busy" />,
+    ];
   },
   (previous, next) => {
     if (
       previous.tools !== next.tools ||
+      previous.live !== next.live ||
+      previous.busy !== next.busy ||
       previous.records.length !== next.records.length ||
       previous.records.some((record, index) => record !== next.records[index])
     )
@@ -648,21 +692,31 @@ interface LiveAgentContent {
   tools: readonly ToolChip[];
 }
 
-function renderLiveAgentContent(live: LiveAgentContent, busy: boolean): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  if (live.tools.length > 0) nodes.push(<LiveActivity calls={live.tools} key="live-tools" />);
-  for (const block of live.blocks) {
-    nodes.push(
-      block.blockType === "reasoning" ? (
-        renderReasoningRail(block.blockId, block.blockId, "live", true, block.headline)
-      ) : block.text.trim() === "" ? null : (
-        <ResponseMarkdown key={block.blockId} markdown={block.text} copySource={block.text} />
-      ),
-    );
+function liveAgentItems(live: LiveAgentContent): ActivityItem[] {
+  const items: ActivityItem[] = [];
+  for (const tool of live.tools) {
+    const key = `live-${tool.callId}`;
+    const node = <LiveActivity calls={[tool]} key={key} />;
+    const facts = toolCallStep(tool);
+    if (facts !== undefined)
+      items.push({ key, node, step: { key, identity: tool.callId, node, ...facts } });
   }
-  // Only authoritative busy state can keep the activity marker alive.
-  if (busy) nodes.push(<BitRegister key="busy" />);
-  return nodes;
+  for (const block of live.blocks) {
+    const key = block.blockId;
+    if (block.blockType === "reasoning") {
+      const node = renderReasoningRail(block.blockId, key, "live", true, block.headline);
+      const headline = block.headline ?? "";
+      items.push({
+        key,
+        node,
+        step: { key, identity: key, node, state: "thinking", label: "thinking", headline },
+      });
+    } else if (block.text.trim() !== "") {
+      const node = <ResponseMarkdown key={key} markdown={block.text} copySource={block.text} />;
+      items.push({ key, node });
+    }
+  }
+  return items;
 }
 
 function CorrespondenceBand({
@@ -791,8 +845,13 @@ function renderTurn(
         <article className="rec rec-orb" key={turn.key} data-history-row={turn.key}>
           <span className="visually-hidden">Orb:</span>
           <div className="rec-bd">
-            <AgentRecords records={turn.records} pairing={pairing} tools={tools} />
-            {live !== undefined && renderLiveAgentContent(live, busy)}
+            <AgentRecords
+              records={turn.records}
+              pairing={pairing}
+              tools={tools}
+              live={live}
+              busy={busy}
+            />
           </div>
         </article>
       );
@@ -949,7 +1008,15 @@ export const HistoryView = memo(function HistoryView({
           {hasAgentLive && !mergeLiveIntoFinalTurn && (
             <article className="rec rec-orb">
               <span className="visually-hidden">Orb:</span>
-              <div className="rec-bd">{renderLiveAgentContent(liveAgentContent, busy)}</div>
+              <div className="rec-bd">
+                <AgentRecords
+                  records={[]}
+                  pairing={pairing}
+                  tools={tools}
+                  live={liveAgentContent}
+                  busy={busy}
+                />
+              </div>
             </article>
           )}
           {compacting && compaction !== null && compactionResult === undefined && (
