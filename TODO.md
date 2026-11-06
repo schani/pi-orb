@@ -38,8 +38,6 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 - **Diagnose lifecycle-smoke old-revision HTTP 500** (2026-10-16; `docs/postmortems/2026-10-16-lifecycle-smoke-http500.md`). Establish why the restart GET was attributed to deleted revision `00060-kfk`; correlate response shape and trace evidence. Deploy 38961777202 remains applied-but-unvalidated; bounded smoke retries do not explain or clear it.
 
-- **Own direct runtime/build/type dependencies explicitly** (2026-10-16; `docs/dependency-audit.md`). Resolve runtime imports of undeclared Pi AI/agent-core/Chord and native-image/fork build use of hoisted esbuild. Review runtime `ws` and native-image `determined` as dev-only declarations; preserve plugin peers and DST coverage. Qualify isolated package installs/builds and types; do not rely on incidental hoisting.
-
 - **Fix WebKit harness-icons navigation readiness** ([first failure](https://github.com/schani/pi-orb/actions/runs/38865297828/job/116856612635)): cause unresolved; first browser diagnostics were not uploaded. Artifact retention does not clear this deployment blocker.
 
 - [ ] **Qualify, release and adopt cooperative Claude SDK responsiveness** (2026-10-16; [PR 137](https://github.com/schani/pi-orb/pull/137), `docs/claude-agent-sdk.md`, `docs/testing.md`). Exact-head CI and separate landing of the validated UI correction remain required before merge/deployment. Adopt only after fresh idle/inbox review; no target operation is authorized. The October 15 tail remains unexplained; preserve original evidence, with no replay.

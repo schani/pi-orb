@@ -59,6 +59,14 @@ Pi's detailed compatibility review supersedes a generic patch/minor estimate: gr
 - **Other stale pins:** rustup **1.29.2 → 1.29.3**; CI gcloud **590.0.1 → 592.0.0**; Iosevka **34.9.0 → 34.9.1**.
 - **Current:** Node **26.13.0**, Bun **1.4.4**, OpenTofu **1.13.2**, all **eight GitHub Action SHAs**, TypeScript **7.0.2**, Vite **8.3.5**, Playwright **1.64.1**, React **19.3.1**.
 
+## Dependency ownership (2026-11-06, PST)
+
+Runtime owns Chord **1.5.0**: `apps/orb-runtime/src/execution/server.ts` imports `BACKGROUND_CONTEXT` and `withAbortSignal`; it and `line-reader.ts` also import `Context` types. Keep runtime `ws` in production: `preview/loopback-websocket.ts` uses it, not just tests. Runtime `determined` also has production callers. Native-image's `determined` belongs in development dependencies: only DST tests import its types; retain those tests.
+
+Root-owned esbuild **0.28.2** supplies native acceptance/build tooling and fork reproduction; shared workspace resolution at this explicit tooling boundary is intentional. Keep the scoped Chord WebSocket peer override. Do not duplicate root build tools into every workspace or infer runtime removals from an import-only scan.
+
+Qualified with clean root and selective production workspace installs, runtime execution/preview/Claude imports outside the checkout, native CLI launch without `determined`, CLI bundle inspection, types, and existing DST/acceptance/patch-boundary tests. The lockfile changes only the two workspace declarations; no external versions or artifacts change.
+
 ## Historical October 16 inventory and subsequent decisions
 
 **Evidence date: 2026-10-16, America/Los_Angeles.** The inventory is the pre-PR audit snapshot; the dated toolchain and Pi decisions below record subsequent approved upgrades. Registry/release queries were live; estimates are engineering judgment, not measured upgrade trials.
@@ -212,7 +220,7 @@ The table distinguishes removing a package from **all three graphs** from removi
 
 These are package-name removals, not measured install-size savings or lock-record counts; shared/nested dependencies remain. Replacing safe parsers, OAuth/crypto, scheduler, terminal engines, or harnesses to reduce a name count is not prudent.
 
-Baseline manifest ownership findings: runtime imports Pi AI/agent-core/Chord without owning declarations (plus a pi-mcp test import); native-image acceptance/build and fork reproduction consume hoisted esbuild (`0.28.2`, current). Baseline Node typings resolved transitively to **26.1.1** against Node24; latest overall **26.6.5** was not the right target. The approved toolchain pins root `@types/node` **24.19.2**. Runtime `ws` and native-image `determined` have real test-only direct use and plausible dev reclassification; neither becomes removed from the relevant production/plugin/DST graphs. Remaining ownership work is tracked only in `TODO.md`.
+Baseline Node typings resolved transitively to **26.1.1** against Node24; latest overall **26.6.5** was not the right target. The approved October 16 toolchain pinned root `@types/node` **24.19.2**; later Node and dependency-ownership decisions above supersede this baseline.
 
 ### Authoritative npm migration sources
 
