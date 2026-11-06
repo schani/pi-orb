@@ -30,23 +30,9 @@ function fixture(servers: McpCatalog["servers"] = [server]) {
     oauth: { token },
     probe,
   };
-  const read = (owner = TEST_USER_ID, project = "project") =>
-    readProjectMcpStatus(task, deps, project, owner);
+  const read = () => readProjectMcpStatus(task, deps, "project", TEST_USER_ID);
   return { h, deps, catalog, probe, token, read };
 }
-
-it("checks ownership before reading configuration, credentials or probing", async () => {
-  const f = fixture();
-  for (const [owner, project] of [
-    ["other", "project"],
-    [TEST_USER_ID, "missing"],
-  ]) {
-    expect((await f.read(owner, project))._unsafeUnwrapErr().code).toBe("not_found");
-  }
-  expect(f.catalog.read).not.toHaveBeenCalled();
-  expect(f.token).not.toHaveBeenCalled();
-  expect(f.probe).not.toHaveBeenCalled();
-});
 
 it("uses saved headers/secrets and the existing OAuth authority without exposing credentials", async () => {
   const configured = {

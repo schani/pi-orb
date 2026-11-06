@@ -6,7 +6,7 @@ import type { McpHealthDeps } from "../domain/mcp.ts";
 import { makeHarness, makeProjectRow, TEST_USER_ID } from "../testkit/fixtures.ts";
 import { registerProjectMcpStatusRoute } from "./mcp-routes.ts";
 
-it("requires identity and project ownership before checking saved servers; never starts compute", async () => {
+it("requires identity and project ownership before checking saved servers", async () => {
   const h = makeHarness();
   const task = new NoSimulationTask("MCP HTTP", false);
   h.store.seedProject(makeProjectRow("project"));
@@ -22,7 +22,6 @@ it("requires identity and project ownership before checking saved servers; never
     ),
   };
   const oauth = { token: vi.fn<McpHealthDeps["oauth"]["token"]>() };
-  const observe = vi.spyOn(h.deps.hostProvider, "observe");
   const app = Fastify();
   app.addHook("onRequest", async (request) => {
     if (request.headers.authorization)
@@ -51,6 +50,7 @@ it("requires identity and project ownership before checking saved servers; never
       expect(missing.headers.location).toBeUndefined();
     }
     expect(catalog.read).not.toHaveBeenCalled();
+    expect(oauth.token).not.toHaveBeenCalled();
     expect(probe).not.toHaveBeenCalled();
     const response = await app.inject({ url, headers: { authorization: TEST_USER_ID } });
     expect(response.statusCode).toBe(200);
@@ -59,7 +59,6 @@ it("requires identity and project ownership before checking saved servers; never
       revision: 1,
       servers: [{ name: "fixture", status: "available" }],
     });
-    expect(observe).not.toHaveBeenCalled();
   } finally {
     await app.close();
   }

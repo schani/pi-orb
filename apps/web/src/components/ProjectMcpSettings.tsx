@@ -331,18 +331,13 @@ export function ProjectMcpSettings({
   setSaving,
   active = true,
 }: Shared & { projectName: string; active?: boolean }) {
-  const [loadedCatalog, setLoadedCatalog] = useState<{
-    projectId: string;
-    value: McpCatalog;
-  } | null>(null);
-  const catalog = loadedCatalog?.projectId === projectId ? loadedCatalog.value : null;
+  const [catalog, setCatalog] = useState<McpCatalog | null>(null);
   const [adding, setAdding] = useState(false);
   const [openName, setOpenName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [secrets, setSecrets] = useState<string[]>([]);
   const [secretError, setSecretError] = useState<string | null>(null);
   const [healthRead, setHealthRead] = useState<{
-    projectId: string;
     revision: number;
     report?: ProjectMcpStatus;
     failed: boolean;
@@ -351,8 +346,7 @@ export function ProjectMcpSettings({
   const refreshHealth = useRef(() => {});
   const inFlight = useRef(false);
   const revision = catalog?.revision;
-  const currentHealth =
-    healthRead?.projectId === projectId && healthRead.revision === revision ? healthRead : null;
+  const currentHealth = healthRead?.revision === revision ? healthRead : null;
   const health =
     currentHealth?.report && currentHealth.report.revision === revision
       ? currentHealth.report
@@ -363,7 +357,7 @@ export function ProjectMcpSettings({
     const load = () => {
       if (inFlight.current) return;
       inFlight.current = true;
-      setHealthRead({ projectId, revision, failed: false, checking: true });
+      setHealthRead({ revision, failed: false, checking: true });
       void getProjectMcpStatus(projectId).then((result) => {
         inFlight.current = false;
         if (!current) {
@@ -371,7 +365,6 @@ export function ProjectMcpSettings({
           return;
         }
         setHealthRead({
-          projectId,
           revision,
           failed: result.isErr(),
           checking: false,
@@ -409,7 +402,7 @@ export function ProjectMcpSettings({
     let current = true;
     void getProjectMcp(projectId).then((result) => {
       if (!current) return;
-      if (result.isOk()) setLoadedCatalog({ projectId, value: result.value });
+      if (result.isOk()) setCatalog(result.value);
       else setError(describeApiError(result.error));
     });
     return () => {
@@ -481,7 +474,7 @@ export function ProjectMcpSettings({
       setSaving(false);
       return;
     }
-    setLoadedCatalog({ projectId, value: result.value });
+    setCatalog(result.value);
     setAdding(false);
     setOpenName(config.value.name);
     if (config.value.oauth && (!previous?.oauth || config.value.oauth.id !== previous.oauth.id)) {
@@ -518,7 +511,7 @@ export function ProjectMcpSettings({
     if (owner !== lifetime.current) return;
     if (result.isErr()) setError(describeApiError(result.error));
     else {
-      setLoadedCatalog({ projectId, value: result.value });
+      setCatalog(result.value);
       setOpenName(null);
       queueMicrotask(() => addButton.current?.focus());
     }

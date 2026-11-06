@@ -93,7 +93,6 @@ async function runProbe(
     {
       capabilities: {},
       versionNegotiation: { mode: "auto" },
-      enforceStrictCapabilities: listTools,
     },
   );
   const transport = new StreamableHTTPClientTransport(endpoint.value, {
@@ -134,11 +133,6 @@ async function runProbe(
   const description = result.isOk()
     ? (client.getServerVersion()?.description ?? "").replace(/[\r\n]/g, " ").slice(0, 240)
     : "";
-  // Closing the transport aborts SSE without a remote session-delete request.
-  await ResultAsync.fromThrowable(
-    () => transport.close(),
-    () => "MCP probe cleanup failed",
-  )();
   await ResultAsync.fromThrowable(
     () => client.close(),
     () => "MCP probe cleanup failed",

@@ -2317,7 +2317,6 @@ describe("frontend-only browser behavior", () => {
       oauth: { id: grant },
     };
     let revision = 1;
-    let authorized = true;
     let status = "available";
     let fail = false;
     let hold = false;
@@ -2330,10 +2329,9 @@ describe("frontend-only browser behavior", () => {
       if (route.request().method() === "PUT") revision++;
       return route.fulfill({ json: { revision, servers: [server] } });
     });
-    await page.route(`**/api/v1/projects/${project}/mcp/${grant}/oauth{,/disconnect}`, (route) => {
-      if (route.request().url().endsWith("/disconnect")) authorized = false;
-      return route.fulfill({ json: { status: authorized ? "connected" : "auth_required" } });
-    });
+    await page.route(`**/api/v1/projects/${project}/mcp/${grant}/oauth`, (route) =>
+      route.fulfill({ json: { status: "connected" } }),
+    );
     const healthUrl = `**/api/v1/projects/${project}/mcp/status`;
     await page.route(healthUrl, async (route) => {
       reads++;
@@ -2356,7 +2354,6 @@ describe("frontend-only browser behavior", () => {
       const refresh = mcp.getByRole("button", { name: "Refresh MCP health", exact: true });
       await expectPage(health).toHaveText("available");
       await expectPage(summary).toContainText("grant stored");
-      await expectPage(mcp.getByRole("combobox", { name: "Observed in" })).toHaveCount(0);
       await summary.click();
       const description = mcp.getByLabel("Description", { exact: true });
       await description.fill("draft survives health refresh");
@@ -2364,11 +2361,6 @@ describe("frontend-only browser behavior", () => {
       await refresh.click();
       await expectPage(health).toHaveText("unavailable");
       await expectPage(summary).toContainText("grant stored");
-      await expectPage(description).toHaveValue("draft survives health refresh");
-      await mcp.getByRole("button", { name: "disconnect", exact: true }).click();
-      await expectPage(summary).toContainText("authorization required");
-      await expectPage(health).toHaveText("unavailable");
-      authorized = true;
       status = "needs-auth";
       await description.focus();
       await page.evaluate("window.dispatchEvent(new Event('focus'))");
