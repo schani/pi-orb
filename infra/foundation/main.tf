@@ -6,7 +6,7 @@ terraform {
   required_providers {
     google = {
       source  = "opentofu/google"
-      version = "~> 6.0"
+      version = "8.10.0"
     }
   }
 }

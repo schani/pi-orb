@@ -122,6 +122,13 @@ Verify the new grant in an empty HOME/gcloud configuration through the real resu
 hook before revoking the administrator's temporary login. Already-running orbs
 receive the updated shared IAM grant; they do not need new personal credentials.
 
+### Foundation-plan read authority (approved 2026-11-05, PST)
+
+Project role `piOrbFoundationPlanReader` in `playground-dev-6ae7` had seven reads approved 2026-11-05, PST; the ten-read extension for refreshed planning was approved, applied and verified 2026-11-06, PST. Its sole `pi-orb-amp-deployer` binding and existing grants/conditions remain unchanged.
+Ten approved reads: `iam.workloadIdentityPools.get`, `storage.buckets.getIamPolicy`, `iam.serviceAccounts.get`, `iam.serviceAccounts.getIamPolicy`, `iam.roles.get`, `servicenetworking.services.get`, `resourcemanager.projects.getIamPolicy`, `iam.workloadIdentityPools.getAttestationRules`, `artifactregistry.repositories.getIamPolicy`, `iam.workloadIdentityPoolProviders.get`.
+Grant-only apply used provider **6.50.0** with the standard backend lock: **0 added, 1 changed, 0 destroyed**, only the role permissions. The deployer gained no IAM write permissions; human authority was revoked.
+Fresh merged-source baseline/**8.10.0** candidate read-only plans pass using copied state/local backends; see [qualification](../README.md#google-provider-8100-qualification-2026-11-06-pst).
+
 ### Release logging-exclusion authority (2026-09-11; applied and federation-verified)
 
 `google_project_iam_custom_role.deployer_logging_exclusions` grants only
