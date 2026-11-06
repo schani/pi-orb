@@ -27,6 +27,7 @@ import {
   createHostingAccessPolicy,
   registerHostingAccessGuard,
 } from "../../apps/control-plane/src/http/hosting-access.ts";
+import { registerOrbFilesBoundary } from "../../apps/control-plane/src/http/orb-files-gateway.ts";
 import { registerPreviewAuth } from "../../apps/control-plane/src/http/preview-auth-routes.ts";
 import { previewRoutingUrl } from "../../apps/control-plane/src/http/preview-gateway.ts";
 import {
@@ -45,6 +46,11 @@ export async function startApplicationAuthFixture(
     /** Admits orb id-tokens on preview and files hosts, composed as in main.ts. */
     accessTokens?: AccessTokenDeps;
     previewPorts?: readonly number[];
+    configureFiles?: (context: {
+      app: FastifyInstance;
+      filesOrigin: string;
+      appOrigin: string;
+    }) => void;
     configurePreviews?: (context: {
       app: FastifyInstance;
       hosts: PreviewHosts;
@@ -314,6 +320,7 @@ export async function startApplicationAuthFixture(
       },
     });
     if (!options.configurePreviews) await app.register(websocket);
+    registerOrbFilesBoundary(app, { filesOrigin, appOrigin });
     registerHostingAccessGuard(
       app,
       createHostingAccessPolicy(origins)._unsafeUnwrap(),
@@ -368,6 +375,7 @@ export async function startApplicationAuthFixture(
           })
         : createGoogleRequestPrincipalResolver(origins, auth),
       (scope) => {
+        options.configureFiles?.({ app: scope, filesOrigin, appOrigin });
         scope.get(`/s/${orbId}/token.html`, async (_request, reply) =>
           reply
             .header("cache-control", "private, no-store")

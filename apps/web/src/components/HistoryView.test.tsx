@@ -15,6 +15,7 @@ import {
   assistantResponseMarkdown as browserAssistantResponseMarkdown,
   type ToolChip,
 } from "./HistoryView.tsx";
+import { OrbFilesBaseUrl } from "./OrbFilesBaseUrl.ts";
 
 function HistoryView({
   records,
@@ -50,6 +51,38 @@ function message(id: string, role: "user" | "assistant", text: string): MessageR
     content: [{ type: "text", text }],
   };
 }
+
+describe("orb-local links in history", () => {
+  it("shares physical-orb context across committed, live and loaded reasoning Markdown", () => {
+    const base = "https://files.example/files/11111111-1111-4111-8111-111111111111";
+    const record = message("files", "assistant", "[committed](orb:README.md)");
+    const original = JSON.stringify(record);
+    const html = renderToStaticMarkup(
+      <OrbFilesBaseUrl.Provider value={base}>
+        <HistoryView
+          records={[record]}
+          liveBlocks={[
+            { blockId: "live", blockType: "text", text: "[live](orb:/tmp/live.html)", revision: 1 },
+          ]}
+          tools={[]}
+          busy={true}
+        />
+        <DetailContent
+          context={detailContext()}
+          recordId="files"
+          detailKey="files:0"
+          body={{ type: "reasoning", text: "[loaded](orb:/tmp/loaded.html)" }}
+        />
+      </OrbFilesBaseUrl.Provider>,
+    );
+    expect(html).toContain(
+      'href="https://files.example/files/repo/11111111-1111-4111-8111-111111111111/README.md"',
+    );
+    expect(html).toContain(`href="${base}/tmp/live.html"`);
+    expect(html).toContain(`href="${base}/tmp/loaded.html"`);
+    expect(JSON.stringify(record)).toBe(original);
+  });
+});
 
 describe("HistoryView live tool status", () => {
   const call: MessageRecord = {

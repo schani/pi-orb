@@ -77,41 +77,44 @@ it("admits same-owner previews by header or cookie before preview login", async 
   expect((await get(MINE, {})).statusCode).toBe(302);
 });
 
-it("admits same-owner hosted files only on the files host, never via Google login", async () => {
-  const startLogin = vi.fn(() =>
-    okAsync({ authorizationUrl: "https://google", loginCookieValue: "" }),
-  );
-  const base = vi.fn(() => errAsync({ type: "unauthenticated" as const, message: "none" }));
-  const app = Fastify();
-  registerAuthenticatedBrowserRoutes(
-    app,
-    withFilesAccessTokens(base, task, { filesOrigin, tokens: setup() }),
-    (scope) => {
-      scope.get("/*", (request) => request.principal);
-    },
-    { origins: { appOrigin, filesOrigin }, auth: { startLogin } },
-  );
-  const get = (host: string, url: string, value = token) =>
-    app.inject({
-      url,
-      headers: {
-        host,
-        [ACCESS_TOKEN_HEADER]: value,
-        "sec-fetch-mode": "navigate",
-        "sec-fetch-dest": "document",
+it.each(["s", "files", "files/repo"])(
+  "admits same-owner %s files only on the files host, never via Google login",
+  async (prefix) => {
+    const startLogin = vi.fn(() =>
+      okAsync({ authorizationUrl: "https://google", loginCookieValue: "" }),
+    );
+    const base = vi.fn(() => errAsync({ type: "unauthenticated" as const, message: "none" }));
+    const app = Fastify();
+    registerAuthenticatedBrowserRoutes(
+      app,
+      withFilesAccessTokens(base, task, { filesOrigin, tokens: setup() }),
+      (scope) => {
+        scope.get("/*", (request) => request.principal);
       },
+      { origins: { appOrigin, filesOrigin }, auth: { startLogin } },
+    );
+    const get = (host: string, url: string, value = token) =>
+      app.inject({
+        url,
+        headers: {
+          host,
+          [ACCESS_TOKEN_HEADER]: value,
+          "sec-fetch-mode": "navigate",
+          "sec-fetch-dest": "document",
+        },
+      });
+    expect((await get("files.example.org", `/${prefix}/${MINE}/a.html`)).json()).toEqual({
+      kind: "user",
+      user: { id: "owner", email: null },
     });
-  expect((await get("files.example.org", `/s/${MINE}/a.html`)).json()).toEqual({
-    kind: "user",
-    user: { id: "owner", email: null },
-  });
-  expect((await get("files.example.org", `/s/${FOREIGN}/a.html`)).statusCode).toBe(403);
-  for (const [host, url, value] of [
-    ["app.example.com", "/api/v1/projects", token],
-    ["files.example.org", `/s/${MINE.replace("1", "%31")}/a.html`, token],
-    ["files.example.org", `/s/${MINE}/a.html`, "forged"],
-  ] as const)
-    expect((await get(host, url, value)).statusCode).toBe(401);
-  expect(startLogin).not.toHaveBeenCalled();
-  expect(base).not.toHaveBeenCalled();
-});
+    expect((await get("files.example.org", `/${prefix}/${FOREIGN}/a.html`)).statusCode).toBe(403);
+    for (const [host, url, value] of [
+      ["app.example.com", "/api/v1/projects", token],
+      ["files.example.org", `/${prefix}/${MINE.replace("1", "%31")}/a.html`, token],
+      ["files.example.org", `/${prefix}/${MINE}/a.html`, "forged"],
+    ] as const)
+      expect((await get(host, url, value)).statusCode).toBe(401);
+    expect(startLogin).not.toHaveBeenCalled();
+    expect(base).not.toHaveBeenCalled();
+  },
+);

@@ -119,6 +119,7 @@ Subsystem designs:
 - [docs/workload-identity.md](docs/workload-identity.md) — requirements for orb-issued OIDC identity and keyless federation with cloud providers and private services
 - [docs/workload-identity-recipes.md](docs/workload-identity-recipes.md) — relying-party integration recipes for that identity: GCP workload identity federation, AWS web-identity roles, and generic OIDC verification
 - [docs/ports.md](docs/ports.md) — HTTP preview contracts: isolated origins, authentication, runtime proxy, DST and pending ingress acceptance
+- [docs/orb-files.md](docs/orb-files.md) — live guest-file links, owner-only access, fixed files origin and runtime streaming
 - [docs/hosting.md](docs/hosting.md) — system-hosted orb files: durable namespaces, object storage, publication, serving, and lifecycle ownership
 - [docs/deployment.md](docs/deployment.md) — Cloud Run/OpenTofu deployment direction (operational workflow: `infra/README.md`)
 - [docs/control-plane-consolidation.md](docs/control-plane-consolidation.md) — single-service application authentication, implementation record and cutover/qualification gates

@@ -13,7 +13,11 @@ it("preserves encoded auth cookie bytes and clearing options", () => {
   );
 });
 
-it("scopes login/callback to configured hosts and protects app-only logout", async () => {
+it.each([
+  "/s/orb/page#hash",
+  "/files/repo/12345678-1234-4234-8234-123456789abc/Review%20notes?x=1#hash",
+  "/files/12345678-1234-4234-8234-123456789abc/Review%20notes?x=1#hash",
+])("scopes login/callback to configured hosts: %s", async (returnTo) => {
   const app = Fastify();
   registerHostingAccessGuard(
     app,
@@ -37,7 +41,7 @@ it("scopes login/callback to configured hosts and protects app-only logout", asy
       completeLogin: (_origin, _url, cookie) => {
         complete++;
         return cookie === "transaction"
-          ? okAsync({ sessionCookieValue: "sealed", returnTo: "/s/orb/page#hash" })
+          ? okAsync({ sessionCookieValue: "sealed", returnTo })
           : errAsync({ type: "unauthenticated", message: "secret code" });
       },
     },
@@ -45,7 +49,7 @@ it("scopes login/callback to configured hosts and protects app-only logout", asy
   );
   for (const host of ["app.test", "files.test"]) {
     const login = await app.inject({
-      url: "/auth/login?returnTo=%2Fs%2Forb%2Fpage%23hash",
+      url: `/auth/login?returnTo=${encodeURIComponent(returnTo)}`,
       headers: { host },
     });
     expect(login.statusCode).toBe(302);
@@ -59,7 +63,7 @@ it("scopes login/callback to configured hosts and protects app-only logout", asy
       },
     });
     expect(callback.statusCode).toBe(302);
-    expect(callback.headers.location).toBe("/s/orb/page#hash");
+    expect(callback.headers.location).toBe(returnTo);
     expect(callback.headers["set-cookie"]?.toString()).toMatch(/Max-Age=604800;.*HttpOnly/u);
   }
   expect(complete).toBe(2);

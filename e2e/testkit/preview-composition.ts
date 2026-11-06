@@ -16,12 +16,14 @@ import {
   OidcTokenSigner,
   OidcTokenVerifier,
 } from "../../apps/control-plane/src/adapters/oidc/signer.ts";
+import { NodeOrbFilesTransport } from "../../apps/control-plane/src/adapters/orb-files-http.ts";
 import { FetchRuntimeClient } from "../../apps/control-plane/src/adapters/runtime-client/fetch-client.ts";
 import { NodePreviewClient } from "../../apps/control-plane/src/adapters/runtime-client/preview-client.ts";
 import { ACCESS_TOKEN_AUDIENCE } from "../../apps/control-plane/src/domain/access-token.ts";
 import { DEFAULT_ISSUER_CONSTANTS as constants } from "../../apps/control-plane/src/domain/constants.ts";
 import { requestOrbStart, requestOrbStop } from "../../apps/control-plane/src/domain/lifecycle.ts";
 import { createCentralOrbAgentOperations } from "../../apps/control-plane/src/domain/orb-agent-operations.ts";
+import type { OrbHostProvider, OrbHostRef } from "../../apps/control-plane/src/domain/ports.ts";
 import { previewError } from "../../apps/control-plane/src/domain/preview.ts";
 import { PreviewConnections } from "../../apps/control-plane/src/domain/preview-connections.ts";
 import { SIGNING_KEY_SECRET_PROVIDER } from "../../apps/control-plane/src/domain/signing-keys.ts";
@@ -29,6 +31,8 @@ import {
   MintDenialLog,
   mintIdToken,
 } from "../../apps/control-plane/src/domain/workload-identity.ts";
+import { registerOrbFilesGateway } from "../../apps/control-plane/src/http/orb-files-gateway.ts";
+import { orbFilesBaseUrl } from "../../apps/control-plane/src/http/orb-files-url.ts";
 import { registerPreviewGateway } from "../../apps/control-plane/src/http/preview-gateway.ts";
 import type { PreviewHosts } from "../../apps/control-plane/src/http/preview-host.ts";
 import { registerRuntimePreviewRoutes } from "../../apps/control-plane/src/http/runtime-preview-routes.ts";
@@ -46,7 +50,7 @@ import { registerPreviewRoutes } from "../../apps/orb-runtime/src/http/preview-r
 import { HmacPreviewVerifier } from "../../apps/orb-runtime/src/preview/admission.ts";
 import { startApplicationAuthFixture } from "./application-auth-fixture.ts";
 
-/** Real HTTP/auth/forwarding adapters, in-memory authority and fake host inventory; not namespace isolation. */
+/** Real HTTP/auth/forwarding adapters, in-memory authority and optional real host provider. */
 export async function startPreviewComposition(
   ports: readonly number[],
   external?: {
@@ -57,6 +61,11 @@ export async function startPreviewComposition(
     cli?: (brokerPort: number, args: string[]) => Promise<string>;
     brokerSocket?: string;
   },
+  options: {
+    files?: boolean;
+    missingOrbId?: string;
+    host?: { provider: OrbHostProvider; ref: OrbHostRef };
+  } = {},
 ) {
   const task = new NoSimulationTask("preview composed integration", false);
   const orbId = external?.orbId ?? randomUUID();
@@ -68,6 +77,7 @@ export async function startPreviewComposition(
   h.store.seedOrb({
     ...seeded,
     runtimeTokenHash: createHash("sha256").update(token).digest("hex"),
+    ...(options.host ? { hostRef: options.host.ref.resourceId } : {}),
   });
   const health = {
     v: 1 as const,
@@ -116,13 +126,29 @@ export async function startPreviewComposition(
       runtimeAddress: { baseUrl: external?.baseUrl ?? baseUrl },
     });
   };
-  const deps = { ...h.deps, runtimeClient: new FetchRuntimeClient() };
+  if (options.files && !options.host) {
+    if (!external) throw new Error("Live files require an external runtime fixture");
+    Object.defineProperty(h.deps.hostProvider, "kind", { value: "docker" });
+    h.deps.hostProvider.executionBinding = () =>
+      okAsync({
+        baseUrl: external.baseUrl,
+        token,
+        incarnation: String(seeded.hostIncarnation),
+        cwd: "/workspace",
+      });
+  }
+  const deps = {
+    ...h.deps,
+    ...(options.host ? { hostProvider: options.host.provider } : {}),
+    runtimeClient: new FetchRuntimeClient(),
+  };
   const connections = new PreviewConnections(deps, (_orb, operation) =>
     ResultAsync.fromPromise(operation(task), () =>
       previewError("cancelled", "Fixture watcher closed"),
     ),
   );
   let previewUrl: PreviewHosts["url"] | undefined;
+  let filesBaseUrl: string | null = null;
   const keys = new FakeSigningKeyStore();
   const secrets = new FakeSecretStore();
   const key = generateRsaSigningKey()._unsafeUnwrap();
@@ -148,6 +174,16 @@ export async function startPreviewComposition(
       issuerUrl,
     },
     previewPorts: ports,
+    configureFiles: ({ app, filesOrigin, appOrigin }) => {
+      filesBaseUrl = orbFilesBaseUrl(filesOrigin, deps.hostProvider.kind, orbId);
+      if (options.files)
+        registerOrbFilesGateway(app, task, {
+          deps,
+          filesOrigin,
+          appOrigin,
+          transport: new NodeOrbFilesTransport(),
+        });
+    },
     configurePreviews: async ({ app, hosts, appOrigin }) => {
       previewUrl = (id, port) => hosts.url(id, port);
       registerRuntimePreviewRoutes(app, task, {
@@ -203,10 +239,14 @@ export async function startPreviewComposition(
     h,
     task,
     orbId,
+    filesBaseUrl,
+    missingFilesBaseUrl: options.missingOrbId
+      ? orbFilesBaseUrl(auth.filesOrigin, deps.hostProvider.kind, options.missingOrbId)
+      : null,
     activity,
     observed: () => observed,
     /** `pi-orb id-token --audience urn:pi-orb:access` through the production mint and signer. */
-    idToken: () =>
+    idToken: (sourceToken = token) =>
       mintIdToken(
         task,
         {
@@ -218,7 +258,7 @@ export async function startPreviewComposition(
           issuerUrl,
         },
         {
-          tokenHash: createHash("sha256").update(token).digest("hex"),
+          tokenHash: createHash("sha256").update(sourceToken).digest("hex"),
           audience: ACCESS_TOKEN_AUDIENCE,
           ttlSeconds: 3600,
         },

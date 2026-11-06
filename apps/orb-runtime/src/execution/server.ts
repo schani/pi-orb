@@ -24,6 +24,7 @@ import Fastify from "fastify";
 import type { ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
 import type { RuntimePreviewService } from "../domain/preview.ts";
+import { FILES_PATH, registerFileRoutes } from "../files/routes.ts";
 import { registerPreviewRoutes } from "../http/preview-route.ts";
 import { BoundedLineReader } from "./line-reader.ts";
 
@@ -78,6 +79,8 @@ export function buildExecutionServer(options: ExecutionServerOptions) {
   const binaryReaders = new Map<string, BinaryReader>();
   const calls = new Map<string, { controller: AbortController; done: Promise<void> }>();
   app.addHook("onRequest", async (request, reply) => {
+    // File routes own their shared bearer/incarnation/readiness guard.
+    if (request.url === FILES_PATH || request.url.startsWith(`${FILES_PATH}?`)) return;
     // Preview requests carry a per-request HMAC admission instead of the bearer.
     if (request.url === "/v1/health" || request.url.startsWith("/v1/preview/")) return;
     const received = Buffer.from(request.headers.authorization ?? "");
@@ -99,6 +102,11 @@ export function buildExecutionServer(options: ExecutionServerOptions) {
         return reply.code(503).send(health);
       return reply.code(503).send(failure("invalid", "execution host not ready"));
     }
+  });
+  registerFileRoutes(app, {
+    token: options.token,
+    incarnation: options.incarnation,
+    ready: () => !options.ready || options.ready() !== null,
   });
   void app.register(websocket);
   const preview = options.preview;

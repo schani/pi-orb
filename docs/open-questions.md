@@ -263,3 +263,23 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 ## Pi 1.5 native persisted state and recovery — 89
 
 89. **Resolved (user-approved 2026-11-05, PST):** implement the minimal Pi 1.5.0 upgrade and open a PR, without merge or deployment. Approve native lazy `pi.live` v1 → v3, `pi.tool` v2 → v3 and `pi.generation` v1 → v2 upgrades, terminal restart-limit failures and budgeted/backed-off interrupted model requests. Native typed reads upgrade/cache in memory, later mutation persists the current document version, and scheduler advance upgrades live checkpoints. Accept memory-first progress, including shorter crash-recovered aborted assistant/tool details, missing unstored attempts/usage and changed future context; roughly one second plus backlog/storage latency is not a hard loss bound. No progress patch, zero-delay workaround or stored-only projection. Completed history/entries, receipt/journal/store authority, first-party v1 state and native code-mode v1 documents/module version 2 remain. No SQL migration, table/column, bulk rewrite, silent reset, compatibility framework or downgrade guarantee. The three convenience removals remain approved; no prompt edits, new product controls, production stop, merge or deployment. The prior immediate-progress preservation and naive native-submit batch alternatives were rejected for complexity and non-equivalence respectively. Contract/rationale: [docs/pi-durable-evaluation.md](pi-durable-evaluation.md). Implementation and qualification completed in [PR 263](https://github.com/schani/pi-orb/pull/263), merged 2026-11-05 as `9b121935`; no deployment. Questions 87 and 88 remain independent.
+
+## Live orb-file links — 90
+
+90. **Resolved (user-approved 2026-11-05, PST):** implement `docs/orb-files.md`: per-orb live-file URLs, owner-only browser access and same-owner cross-project id-token access to regular readable files anywhere on isolated guests. The user accepted broad readable-file exposure, including secrets and active same-orb HTML fetching/exfiltrating them. Authorization and current-running-incarnation checks occur at request admission only; normal runtime stop/disconnect terminates streams, without file-specific lifecycle watchers, capacity accounting or polling. No auto-start, activity lease, keep-awake or new persisted structures. Shared prompt wording and the live-versus-durable hosting guidance are approved. The implementation requires canonical real paths and rejects every symlink component. Qualification and deployment are not yet complete.
+
+## Shared files-origin live links — 91
+
+91. **Resolved (user-approved 2026-11-05, PST):** use the fixed dedicated `PI_ORB_HOSTING_ORIGIN` and `/files/<canonical-orb-uuid><encoded-absolute-path>`, replacing question 90's per-orb origin choice. The user accepts any HTML on that origin, including published `/s/…` copies, reading/exfiltrating all live files the signed-in owner can read across orbs and projects. Keep the app separate behind a files-only allowlist; machine owner/target checks and filesystem/streaming restrictions remain. Cloud development uses two fixed preview ports for app and files, with Host-preserving forwarding to the same control plane, not per-orb ports or publication. No new persisted structures or prompt text approved here. Contract and rejected alternative: `docs/orb-files.md`. Implemented locally; remaining qualification: `TODO.md`.
+
+## Canonical-path prompt guidance — 92
+
+92. **Resolved (user-approved 2026-11-05, PST):** add this sentence to configured live-file guidance shared by root/child conversations and both harnesses:
+
+> Resolve paths with `pwd`/`realpath`; do not assume a workspace root.
+
+The agent assumed `/workspace/repo` despite earlier correct `pwd`; absolute-path guidance alone did not prevent that assumption. Keep the valid 403 and canonical workspace confinement: no guard change, alias or remapping. Decision and finding: `docs/orb-files.md`.
+
+## Compact orb-file Markdown URIs — 93
+
+93. **Resolved (user request 2026-11-05, PST):** compact Markdown links use `orb:README.md` for the configured initial repository and `orb:/actual/absolute/path` for actual absolute paths, with a single slash and no workspace alias. After the syntax discussion, the user requested compact links and a restart, authorizing implementation of the proposal and its exact shared prompt replacement. Contract, approved wording and qualification status: [`docs/orb-files.md`](orb-files.md#compact-markdown-uris--implemented-contract-2026-11-05-pst).

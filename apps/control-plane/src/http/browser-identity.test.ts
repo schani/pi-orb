@@ -63,14 +63,18 @@ describe("authenticated browser route scope", () => {
     expect((await app.inject({ url: "/v1/runtime" })).statusCode).toBe(200);
   });
 
-  it("only initiates files login for top-level GET navigation", async () => {
+  it.each([
+    "/s/orb/file",
+    "/files/12345678-1234-4234-8234-123456789abc/file",
+    "/files/repo/12345678-1234-4234-8234-123456789abc/file",
+  ])("only initiates files login for top-level GET navigation: %s", async (fileUrl) => {
     const app = Fastify();
     apps.push(app);
     registerAuthenticatedBrowserRoutes(
       app,
       () => errAsync({ type: "unauthenticated", message: "denied" }),
       (scope) => {
-        scope.get("/s/orb/file", async () => ({}));
+        scope.get(fileUrl, async () => ({}));
         scope.get("/api/private", async () => ({}));
       },
       {
@@ -89,15 +93,13 @@ describe("authenticated browser route scope", () => {
       "sec-fetch-mode": "navigate",
       "sec-fetch-dest": "document",
     };
-    expect((await app.inject({ url: "/s/orb/file?q=1", headers: navigation })).statusCode).toBe(
-      302,
+    expect((await app.inject({ url: `${fileUrl}?q=1`, headers: navigation })).statusCode).toBe(302);
+    expect(
+      (await app.inject({ method: "HEAD", url: fileUrl, headers: navigation })).statusCode,
+    ).toBe(401);
+    expect((await app.inject({ url: fileUrl, headers: { host: "files.test" } })).statusCode).toBe(
+      401,
     );
-    expect(
-      (await app.inject({ method: "HEAD", url: "/s/orb/file", headers: navigation })).statusCode,
-    ).toBe(401);
-    expect(
-      (await app.inject({ url: "/s/orb/file", headers: { host: "files.test" } })).statusCode,
-    ).toBe(401);
     expect(
       (await app.inject({ url: "/api/private", headers: { ...navigation, host: "app.test" } }))
         .statusCode,
@@ -105,7 +107,7 @@ describe("authenticated browser route scope", () => {
     expect(
       (
         await app.inject({
-          url: "/s/orb/file",
+          url: fileUrl,
           headers: { ...navigation, authorization: "invalid" },
         })
       ).statusCode,
