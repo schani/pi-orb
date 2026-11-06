@@ -2626,7 +2626,7 @@ The historical 6,086-test full pass predates this cleanup; full new-head CI is p
 
 ## Native security baseline (2026-11-05, PST; local, undeployed)
 
-Prepared on `c181b7981df6dd20da5c2813b523cf3c0789d273`, without commits.
+Preparation began on `c181b7981df6dd20da5c2813b523cf3c0789d273`.
 The historical four-file source archive was allowlisted before extraction;
 23,424 bytes, SHA-256
 `a14c50f667f77f0abccae1fc1b948a1b1fe2e5e74de4201a121b10863269cb6b`.
@@ -2672,15 +2672,59 @@ The source archive SHA-256 remains
 all 390 uploaded files matched at final comparison. This operation does not
 qualify subsequent tooling changes.
 
-**Capture prerequisite (awaiting Sol round 2).** The minimal fix reuses existing
+**Capture prerequisite (Sol approved, two rounds).** The minimal fix reuses existing
 12-read/60-second recovery for validated PENDING success, fencing the create ID
 before the first describe and accepting only READY. Tests-first RED is retained
 in `capture-pending-first-failure.log`. Focused 60 cases and full native suite
 226 cases / 19 files (including DST), native typecheck, scoped lint and diff
 checks pass (`capture-pending-*.log`); no new failure or DST replay.
-No second live operation has run; fresh exact-source image qualification follows
-round-2 approval. Cause, cleanup and limits:
+Prerequisite `df7084ce7cbb5faa0551441cac15623a43a2860b` precedes native refresh
+`2d5c8e3c2218326e48ed049c410cb4e6713bd51b`. Behavior and source/tooling
+inventories were frozen after approval; the final receipt commit changes docs
+only. Cause, cleanup and limits:
 `docs/postmortems/2026-11-05-native-capture-pending.md`.
+
+**Fresh native image PASS (18:07:57–18:20:22 PST).** Operation
+`fff7addc415246dd`, version `q87-native-b9e57f31`, accepted clean exact source
+`2d5c8e3c2218326e48ed049c410cb4e6713bd51b` (`sourceDirty: false`). Archive
+SHA-256 `bddb07306d038004e6269a044bd68518fc8f4a60ea55187b3de3c32da0668c14`;
+all 390 uploaded and 32 tooling per-file hashes matched the frozen inventories,
+accepted manifest and final tracked source. Base ID `1253207937433879378`,
+runtime image ID `4363597010943641246` and workspace image ID
+`4129969387249632967` were verified, including builder/validator source-image
+identities.
+
+| Package | Actual installed version |
+| --- | --- |
+| Docker Engine | `5:29.9.3-1~debian.12~bookworm` |
+| Docker CLI | `5:29.9.3-1~debian.12~bookworm` |
+| containerd.io | `2.4.2-3~debian.12~bookworm` |
+| google-guest-agent | `1:20261021.00-g1` |
+
+All four match the pins; the complete 554-package inventory equals the first
+operation's inventory. Installation, native PTY, 34 guest contracts, boot graph,
+sealing, workspace integrity and captures passed. Fresh validator boot,
+host-key stability, guest acceptance, exact package/configuration checks,
+default-disabled Docker/containerd and exact-validator Cloud Logging passed.
+Synthetic Claude/native Bash/MCP, isolated network sandbox, receipts, hooks,
+drain, continuation and retained-session gates passed; this is not billing or
+organization-policy qualification. Both live create responses were READY, not
+live PENDING coverage; deterministic unit tests cover same-ID PENDING recovery.
+
+After exact name/ID, operation/version and source-disk/source-disk-ID ownership
+fences against the accepted receipt, cleanup confirmed all eight exact resources
+absent and operation-filtered instances/disks/images empty. The operation key,
+process and owned SSH host-cache entries are absent; other cache entries were
+preserved. Disk remained 6% used, 45 GiB free. First-failure evidence hashes and
+its completed cleanup remain unchanged. No new acceptance failure, assertion
+change or deadline increase occurred.
+[Accepted-image receipt](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/55be2793-d9e4-48c3-8574-6a2f84ddf39e/evidence/q87/native-image-accepted.md);
+private source/manifest/cleanup receipts: `fresh-image-b9e57f31/`.
+
+Final local `npm run typecheck`, `npm run lint`, `git diff --check` and
+`python3 infra/artifact_guard.py` pass (`final-receipts/`). Normal CI,
+full-suite, E2E and PostgreSQL results remain pending in PR checks; prior local
+or native acceptance results do not establish those gates.
 
 **Retained daemon stores PASS: 164 exact assertions.** The final corrected
 private-root fixture opened actual Docker 29.1.3/containerd.io 2.3.4-2 stores
@@ -2703,8 +2747,9 @@ mounts, sockets and operation key were cleaned; exact-fenced VM
 [Retained-store receipt](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/55be2793-d9e4-48c3-8574-6a2f84ddf39e/evidence/q87/native-retained-store.md),
 local `.context/native-store-qualification/summary.md`.
 This is not VM reboot/stop-start, full-image replacement, default networking,
-E2E or rollback qualification. Exact-source normal CI/full-suite/PostgreSQL/E2E
-and fresh image acceptance remain unestablished (`TODO.md`); no deployment.
+E2E or rollback qualification. Production-only retained-workspace reboot,
+stop/start, full-image replacement, networking, missing-disk and full-system
+native gates remain deferred (`TODO.md`); no merge or deployment is authorized.
 
 Historical archive receipts do not qualify this checkout: combined `0f8414e8`
 (including a separate rustup update) had fresh acceptance and reported owned

@@ -37,8 +37,31 @@ command logs and recovery decisions retain the polling outcome.
 Focused 60 tests and full native 226 cases / 19 files, including DST, pass;
 native typecheck, scoped lint and diff checks pass. No new failure or DST replay.
 Receipts: `.context/native-platform-security/capture-pending-*.log`.
-The prerequisite awaits Sol round-2 approval. No second live operation has run;
-fresh qualification and exact-source normal CI remain pending (`TODO.md`).
+Sol approved the frozen behavior in two rounds. Prerequisite
+`df7084ce7cbb5faa0551441cac15623a43a2860b` precedes refresh
+`2d5c8e3c2218326e48ed049c410cb4e6713bd51b`.
+
+## Accepted fresh qualification
+
+Operation `fff7addc415246dd` (`q87-native-b9e57f31`), November 5,
+18:07:57–18:20:22 PST, accepted clean exact source `2d5c8e3c`
+(`sourceDirty: false`). All 390 uploaded and 32 tooling hashes matched the
+frozen inventories, accepted manifest and final source; the receipt commit
+changes docs only. Archive SHA-256:
+`bddb07306d038004e6269a044bd68518fc8f4a60ea55187b3de3c32da0668c14`.
+Base ID `1253207937433879378`, runtime `4363597010943641246` and workspace
+`4129969387249632967` were verified. All four target versions matched; the
+554-package inventory is unchanged from the first operation.
+
+Installation, PTY, 34 guest contracts, boot graph, sealing, workspace integrity,
+captures, fresh boot, host-key stability, guest acceptance, default-disabled
+daemons and exact-validator Cloud Logging passed. Synthetic Claude/native
+Bash/MCP and isolated network sandbox gates passed. Both create responses were
+READY: this is not live PENDING coverage or proof of why the first response was
+PENDING. Deterministic unit tests establish the corrected recovery behavior.
+[Accepted-image receipt](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/55be2793-d9e4-48c3-8574-6a2f84ddf39e/evidence/q87/native-image-accepted.md);
+full gate and retained-store receipts: `docs/testing.md`.
+Normal CI/full-suite/E2E/PostgreSQL results remain pending in PR checks.
 
 ## Cleanup and limits
 
@@ -46,5 +69,15 @@ Failure cleanup removed both captured images, builder VM, workspace template
 disk and builder boot disk. Exact-resource absence and operation-filtered zero
 instances/disks/images were confirmed; the local operation key was removed.
 Validator and validation disk were never created and were confirmed absent.
-No production resource was changed. The installed-package receipt is not native
-image acceptance, E2E, retained-workspace replacement or rollback qualification.
+Accepted-operation cleanup additionally fenced exact names/IDs,
+operation/version and source-disk/source-disk-ID ownership against its receipt.
+All eight exact resources are absent; operation-filtered instances/disks/images
+are empty. The operation key, process and owned SSH host-cache entries are
+absent; unrelated cache entries were preserved. Disk remained 6% used, 45 GiB
+free. Every private first-failure evidence hash remains unchanged.
+
+No production resource was changed. Fresh image and separate 164-assertion
+retained-daemon-store acceptance do not qualify VM reboot/stop-start,
+full-image replacement, full-system native acceptance or rollback. Production
+release boundaries remain deferred in `TODO.md`; no merge or deployment is
+authorized.
