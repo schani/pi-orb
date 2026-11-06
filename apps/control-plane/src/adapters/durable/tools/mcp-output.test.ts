@@ -1,31 +1,63 @@
 import { BACKGROUND_CONTEXT, withCancel } from "@earendil-works/chord/context";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
-import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
+import { InMemoryTransport } from "@modelcontextprotocol/client";
 import { okAsync } from "neverthrow";
 import { expect, it, vi } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
 import { McpTools } from "./mcp.ts";
 
-function fixture(response: unknown) {
+function fixture(
+  response: unknown,
+  era: "modern" | "legacy" = "modern",
+  outputSchema?: Record<string, unknown>,
+) {
   const connect = vi.fn(() => {
-    const { client, server } = createInMemoryTransportPair();
-    server.onMessage((message) => {
+    const [client, server] = InMemoryTransport.createLinkedPair();
+    server.onmessage = (message) => {
       if (!("method" in message) || !("id" in message)) return;
+      if (message.method === "server/discover" && era === "legacy") {
+        void server.send({
+          jsonrpc: "2.0",
+          id: message.id,
+          error: { code: -32601, message: "Unsupported" },
+        });
+        return;
+      }
       void server.send({
         jsonrpc: "2.0",
         id: message.id,
         result:
-          message.method === "initialize"
+          message.method === "server/discover"
             ? {
-                protocolVersion: "2025-11-25",
+                resultType: "complete",
+                supportedVersions: ["2026-07-28"],
                 capabilities: { tools: {} },
-                serverInfo: { name: "fixture", version: "1" },
               }
-            : message.method === "tools/list"
-              ? { tools: [{ name: "value", inputSchema: { type: "object" } }] }
-              : response,
+            : message.method === "initialize"
+              ? {
+                  protocolVersion: "2025-11-25",
+                  capabilities: { tools: {} },
+                  serverInfo: { name: "fixture", version: "1" },
+                }
+              : message.method === "tools/list"
+                ? {
+                    ...(era === "modern"
+                      ? { resultType: "complete", ttlMs: 0, cacheScope: "private" }
+                      : {}),
+                    tools: [
+                      {
+                        name: "value",
+                        inputSchema: { type: "object" },
+                        ...(outputSchema ? { outputSchema } : {}),
+                      },
+                    ],
+                  }
+                : {
+                    ...(era === "modern" ? { resultType: "complete" } : {}),
+                    ...(response as Record<string, unknown>),
+                  },
       });
-    });
+    };
     void server.start();
     return okAsync(client);
   });
@@ -34,9 +66,9 @@ function fixture(response: unknown) {
   return { mcp, catalog, connect };
 }
 
-it.each([{ n: 7 }, [1, null, "value"], null])(
+it.each([{ n: 7 }, [1, null, "value"], null].map((structuredContent) => ({ structuredContent })))(
   "returns native structured MCP results including %j",
-  async (structuredContent) => {
+  async ({ structuredContent }) => {
     const response = {
       content: [{ type: "text", text: "reported failure" }],
       structuredContent,
@@ -119,3 +151,54 @@ it("cancels before deferred broker acquisition without starting another connecti
     await mcp.close();
   }
 });
+
+it.each([[1, null, "value"], null].map((structuredContent) => ({ structuredContent })))(
+  "rejects malformed legacy structuredContent %j without wrapping or leaking it",
+  async ({ structuredContent }) => {
+    const { mcp, catalog } = fixture(
+      { content: [{ type: "text", text: "SECRET" }], structuredContent },
+      "legacy",
+    );
+    try {
+      (await mcp.discover(BACKGROUND_CONTEXT))._unsafeUnwrap();
+      const result = (
+        await catalog.invoke("mcp__fixture__value", {}, {} as ToolExecutionApi, BACKGROUND_CONTEXT)
+      )._unsafeUnwrap();
+      expect(result.isError).toBe(true);
+      expect(result.structuredOutput).toBeUndefined();
+      expect(JSON.stringify(result)).not.toContain("SECRET");
+    } finally {
+      await mcp.close();
+    }
+  },
+);
+
+it.each([
+  {
+    structuredContent: [1, null, "value"],
+    outputSchema: {
+      type: "array",
+      items: { anyOf: [{ type: "number" }, { type: "null" }, { type: "string" }] },
+    },
+  },
+  { structuredContent: null, outputSchema: { type: "null" } },
+])(
+  "validates successful modern structured output against its non-object schema: $outputSchema.type",
+  async ({ structuredContent, outputSchema }) => {
+    const response = { content: [], structuredContent, isError: false };
+    const { mcp, catalog } = fixture(response, "modern", outputSchema);
+    try {
+      (await mcp.discover(BACKGROUND_CONTEXT))._unsafeUnwrap();
+      const result = (
+        await catalog.invoke("mcp__fixture__value", {}, {} as ToolExecutionApi, BACKGROUND_CONTEXT)
+      )._unsafeUnwrap();
+      expect(result.isError).toBe(false);
+      expect(result.structuredOutput).toEqual(response);
+      expect(result.output).toEqual([
+        { type: "text", text: JSON.stringify(structuredContent, null, 2) },
+      ]);
+    } finally {
+      await mcp.close();
+    }
+  },
+);

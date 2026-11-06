@@ -765,6 +765,7 @@ export async function startControlPlane(options: {
   readinessPath?: string;
   extraEnv?: Readonly<Record<string, string>>;
   controlledClockEpoch?: number;
+  localSummaries?: boolean;
 }): Promise<ControlPlaneHandle> {
   const ownedAuthDir = options.authDir === undefined;
   const authDir = options.authDir ?? mkdtempSync(join(tmpdir(), "pi-orb-e2e-auth-"));
@@ -773,6 +774,7 @@ export async function startControlPlane(options: {
   const logs: string[] = [];
   const relay = await durableFakeRelay(
     options.extraEnv?.["PI_ORB_FAKE_OPENAI_INFERENCE_URL"] ?? options.fake.inferenceBaseUrl,
+    options.localSummaries,
   );
   let ingress: Awaited<ReturnType<typeof createControlPlaneForwarder>>;
   try {

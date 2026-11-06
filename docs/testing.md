@@ -1,5 +1,13 @@
 # Testing
 
+## Official MCP client for Pi execution (2026-11-06, PST; local, undeployed)
+
+Fresh `npm ci` preceded checks. Reviewed focused qualification passes **118 tests/14 files**: 69 core MCP, 39 production-composition and 10 inference-relay cases. Tests cover modern sessionless negotiation, SDK legacy fallback, protocol-specific structured results, cached-definition/no-replay guards, explicit provider handles, authorization and cancellation. Deterministic RED/GREEN cases reproduce and prevent late 401 retries after cancellation and restore legacy DELETE after caller cancellation while retaining lease-revocation fencing. Optional notification summaries belong to the test-owned inference relay; exact prompt/envelope matching leaves ordinary root/child lookalikes and mismatched envelopes upstream. No production flag or prompt change.
+
+The revised scoped browser/runtime MCP E2E passes **1/1** (86.353s), including OAuth recovery/reconnect/isolation and modern explicit-handle continuity. Outer exit is 0; fixture manifest reports no cleanup error and both process groups close without escalation. Receipts: `.context/mcp-official-pr/review-summary-e2e.{log,exit}`, `review-summary-provider/{manifest,phases}.json`, `core-scoped-qualified.log`, `review-cleanup-{red,green}.log`, `composition-cancel-{red,green}.log` and `review-summary-green-frozen.log` under the same evidence directory.
+
+First evidence is retained: the first E2E rejected catalog PUT with HTTP 400 because its fixture omitted the required description; that field and response diagnostic were corrected. The second passed assertions but was interrupted before outer exit/cleanup receipts; it remains unqualified, with the historical gap unproven and no cause/fix claimed. The first full-unit execution was interrupted at the execution-transport boundary after approximately 305s, without a failed test assertion or final report (`unit-full.log`). Prior root types/lint passed before the latest review fixes. Final root types/lint/full-unit/infrastructure checks and hosted CI remain pending. These scoped receipts do not qualify the full suite, live modern PostHog behavior or deployment. Contract and incident: `docs/mcp.md`, `docs/postmortems/2026-11-06-posthog-project-selection.md`.
+
 ## Orb messages as notification activity (2026-11-06, America/Los_Angeles; local, undeployed)
 
 Before rebasing onto the Terraform Google-provider update, fresh-install qualification passed 1,051 web tests/120 files, three Chromium activity-strip cases, root/workspace/E2E typecheck, root lint (warnings/infos only) and web production build (chunk-size warning). The broad web suite and build were not repeated after rebase; npm dependencies were unchanged. No DST failure or trace.

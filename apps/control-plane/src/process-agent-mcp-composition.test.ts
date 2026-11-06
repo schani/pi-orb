@@ -19,6 +19,7 @@ import {
   MemoryStorage,
   ROOT_CONVERSATION_ID,
 } from "@earendil-works/pi-durable";
+import { PROTOCOL_VERSION_META_KEY, SERVER_INFO_META_KEY } from "@modelcontextprotocol/client";
 import { NoSimulationTask } from "determined";
 import { err, okAsync } from "neverthrow";
 import { Type } from "typebox";
@@ -40,6 +41,11 @@ it.each(["typed-boundary", "typed-unavailable", "pglite"] as const)(
   async (boundary) => {
     let acceptedCalls = 0;
     let requests = 0;
+    const wire: Array<{
+      method: string;
+      session: string | undefined;
+      meta: Record<string, unknown> | undefined;
+    }> = [];
     let recovered = false;
     let forbiddenEffects = 0;
     const root = mkdtempSync(join(tmpdir(), "mcp-composed-"));
@@ -86,21 +92,30 @@ it.each(["typed-boundary", "typed-unavailable", "pglite"] as const)(
           return;
         }
         const message = JSON.parse(raw);
+        wire.push({
+          method: message.method,
+          session: request.headers["mcp-session-id"] as string | undefined,
+          meta: message.params?._meta,
+        });
         if (message.id === undefined) {
           response.writeHead(202).end();
           return;
         }
         if (message.method === "tools/call") acceptedCalls++;
         const result =
-          message.method === "initialize"
+          message.method === "server/discover"
             ? {
-                protocolVersion: message.params.protocolVersion,
+                resultType: "complete",
+                supportedVersions: ["2026-07-28"],
                 capabilities: { tools: {} },
-                serverInfo: { name: "fixture", version: "1" },
+                _meta: { [SERVER_INFO_META_KEY]: { name: "fixture", version: "1" } },
                 instructions: recovered ? "RESET_CONSENT_INSTRUCTIONS" : "CONSENT_INSTRUCTIONS",
               }
             : message.method === "tools/list"
               ? {
+                  resultType: "complete",
+                  ttlMs: 0,
+                  cacheScope: "private",
                   tools: [
                     {
                       name: recovered ? "read_after_reset" : "read",
@@ -108,7 +123,7 @@ it.each(["typed-boundary", "typed-unavailable", "pglite"] as const)(
                     },
                   ],
                 }
-              : { content: [{ type: "text", text: "OAUTH_READ_OK" }] };
+              : { resultType: "complete", content: [{ type: "text", text: "OAUTH_READ_OK" }] };
         response
           .writeHead(200, { "content-type": "application/json" })
           .end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
@@ -475,6 +490,12 @@ it.each(["typed-boundary", "typed-unavailable", "pglite"] as const)(
       expect(logs.filter((line) => line.includes("durable.mcp_unavailable"))).toHaveLength(1);
       expect(JSON.stringify(third.records)).not.toContain("TEST-ACCESS");
       expect(JSON.stringify(third.records)).not.toContain("TEST-REFRESH");
+      expect(wire.length).toBeGreaterThan(0);
+      expect(wire.some((request) => request.method === "initialize")).toBe(false);
+      for (const request of wire) {
+        expect(request.session).toBeUndefined();
+        expect(request.meta?.[PROTOCOL_VERSION_META_KEY]).toBe("2026-07-28");
+      }
       if (boundary === "typed-boundary") {
         const rootConversation = (await resolveConversation!(
           ROOT_CONVERSATION_ID,
