@@ -20,6 +20,8 @@ export interface OrbMcpState {
   state: "failed" | "needs-auth" | "disconnected" | "connected";
   message?: string;
   diagnostic?: OrbMcpDiagnostic | undefined;
+  source?: string;
+  observation?: "native" | "bridge";
 }
 
 /** The platform fetch boundary never forwards upstream error bodies, URLs, or redirect credentials. */
@@ -119,17 +121,23 @@ export function createBrokerMcpFetch(options: {
 }
 
 export function createMcpStateReporter(onState?: (event: OrbMcpState) => void) {
-  const states = new Map<string, OrbMcpState["state"]>();
+  const states = new Map<string, Pick<OrbMcpState, "state" | "source" | "observation">>();
   return (
     server: string,
     state: OrbMcpState["state"],
     message?: string,
     diagnostic?: OrbMcpDiagnostic,
+    provenance?: Pick<OrbMcpState, "source" | "observation">,
   ) => {
     const previous = states.get(server);
-    if (previous === state) return;
-    states.set(server, state);
-    if (!previous && state === "connected") return;
+    if (
+      previous?.state === state &&
+      previous.source === provenance?.source &&
+      previous.observation === provenance?.observation
+    )
+      return;
+    states.set(server, { state, ...provenance });
+    if (state === "connected" && (!previous || previous.state === "connected")) return;
     const notified = Result.fromThrowable(
       () =>
         onState?.({
@@ -137,6 +145,7 @@ export function createMcpStateReporter(onState?: (event: OrbMcpState) => void) {
           state,
           ...(message ? { message } : {}),
           ...(diagnostic ? { diagnostic } : {}),
+          ...provenance,
         }),
       () => mcpError("unavailable", "MCP state telemetry unavailable"),
     )();

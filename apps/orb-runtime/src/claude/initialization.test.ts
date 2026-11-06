@@ -22,6 +22,7 @@ import type { ServerFrame } from "@pi-orb/protocol";
 import { NoSimulationTask, type SimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, Result } from "neverthrow";
 import { afterEach, expect, it, vi } from "vitest";
+import { createMcpStateReporter } from "../mcp/transport.ts";
 import {
   background,
   childEdge,
@@ -289,6 +290,62 @@ it.each(failures)(
     expect(f.factories()).toBe(1);
   },
 );
+
+it("labels visible OAuth bridge failures and recovery without changing sanitized guidance", async () => {
+  let onState: mcpModule.ClaudeMcpDeps["onState"];
+  vi.spyOn(mcpModule, "createClaudeMcp").mockImplementation((deps) => {
+    onState = deps.onState;
+    return ok({ mcpServers: {}, close: () => okAsync(undefined) });
+  });
+  const f = fixture(true, undefined, true);
+  expect((await f.attach()).isOk()).toBe(true);
+  expect(onState).toBeDefined();
+  const report = createMcpStateReporter(onState);
+  report("datadog", "failed", "MCP datadog unavailable; check project MCP settings", {
+    code: "network",
+  });
+  report(
+    "datadog",
+    "needs-auth",
+    "MCP datadog authorization required; reconnect in project MCP settings",
+    { code: "auth_required" },
+  );
+  report("datadog", "connected");
+  const events = f.history.view.filter(
+    (record) => record.type === "event" && record.eventType === "claude.mcp",
+  );
+  expect(events).toMatchObject([
+    {
+      content: [
+        { type: "text", text: "OAuth bridge: MCP datadog unavailable; check project MCP settings" },
+      ],
+      custom: { display: true },
+      overflow: { state: "failed", code: "network", source: "sdk", observation: "bridge" },
+    },
+    {
+      content: [
+        {
+          type: "text",
+          text: "OAuth bridge: MCP datadog authorization required; reconnect in project MCP settings",
+        },
+      ],
+      custom: { display: true },
+      overflow: {
+        state: "needs-auth",
+        code: "auth_required",
+        source: "sdk",
+        observation: "bridge",
+      },
+    },
+    {
+      content: [{ type: "text", text: "OAuth bridge: MCP datadog: connected" }],
+      custom: { display: true },
+      overflow: { state: "connected", source: "sdk", observation: "bridge" },
+    },
+  ]);
+  expect(events).toHaveLength(3);
+  await f.agent.closeExtensions();
+});
 
 it("captures production-spawner stderr, exit and SDK cause without credentials", async () => {
   const f = fixture(true, (input, options) => {
