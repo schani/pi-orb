@@ -1,5 +1,7 @@
 # TODO
 
+- **Qualify live files for release** (`docs/orb-files.md`, questions 91–93): run full exact-current-HEAD release gates; verify production fixed-files request-log exclusion, including edge/custom/ancestor sinks. Untested cloud-development checks: separate-user outer-preview/inner-local admission, cancellation and telemetry.
+
 - **Owner-managed Tailscale cleanup after retirement** (`docs/ports.md`). Once old provisioning stops, the owner may delete devices/revoke join keys and the upstream OAuth client in Tailscale admin. Independent of apply-time destruction of `pi-orb-tailscale-oauth-client-secret`; no product cleanup, live inventory or absence-evidence deployment gate. No live action authorized here.
 - **Accept deployed HTTP previews** (`docs/ports.md`; question 74 (browser preview)). Deployed 2026-11-03 ([Deploy 41567414422](https://github.com/schani/pi-orb/actions/runs/41567414422), `7858ba8c`): the `*.piorb.live` certificate is active and an unauthenticated navigation reaches the preview login redirect. Live acceptance passed for login, HTTP/WS/SSE, streaming, uploads up to Cloud Run's 32 MiB limit and revoke fencing (`docs/ports.md`). Remaining: session expiry/re-login after 12 hours, Chromium/Safari runs, compute replacement with an open preview.
 - **Live-accept orb access tokens** (`docs/ports.md`). After deploy, from a Claude orb and a central-Pi orb: `agent-browser` with the `__Host-pi-orb-token` cookie (an id-token for `urn:pi-orb:access`) opens a same-owner `piorb.live` preview (document, SSE, WebSocket) and a hosted file, a cross-owner target returns 403, and the open preview recovers after the target's compute stop/start without a human tab (this also covers the Chromium and compute-replacement items above). Verify that no token appears in request logs.
@@ -46,7 +48,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 - **Validate transcript target UUIDs before store lookup** (2026-10-13; `docs/postmortems/2026-10-13-rollout-monitor-anomalies.md`). Return a typed client-visible invalid-target response, not PostgreSQL 22P02 → internal 500. Test the HTTP boundary with real PostgreSQL; retain content-free route/error correlation for unexpected lookup failures.
 
-- **Classify rollout-monitor HTTP 429s** (2026-10-13; `docs/postmortems/2026-10-13-rollout-monitor-anomalies.md`). Distinguish typed application mint-floor denials from Cloud Run ingress refusals with durable content-free evidence. Test both paths; preserve fail-closed handling of unknown 429s.
+- **Qualify native retry tracing for rollout-monitor HTTP 429s** (2026-11-06; `docs/deployment.md`, `docs/postmortems/2026-10-13-rollout-monitor-anomalies.md`). Verify live trace propagation and same-invocation recovery for application mint-floor and Cloud Run ingress 429s. Recovery is outcome-based; unknown or unproven recovery remains fail-closed.
 
 - **Surface invariant history-poll blockage to the user** (2026-10-13; `docs/postmortems/2026-10-13-claude-history-nul.md`). Expose parked replication and blocked inbox delivery without claiming delivery before receipt commit; retain content-free durable diagnosis.
 
@@ -151,6 +153,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 - **Corroborate a suspected control-plane egress partition across orbs before an unreachable-runtime restart** (`docs/postmortems/2026-08-05-egress-blip-false-unreachable-restart.md`). Since 2026-09-07 provider delay alone cannot trigger a restart and a fresh health request is required before restart. The remaining ambiguity is a partition where provider access succeeds while both runtime requests receive no response. Use bounded fleet-level evidence without turning healthy polling into log noise.
 
 ## Follow-ups
+
+- **Remove multi-call `ToolActivity` aggregation** (2026-11-06; `docs/web-ui.md` activity strip). Transcripts now render each tool call alone, so category aggregation across calls (`2 ran`, `2 files`, `CallRow`/`OwnedCallRow`, distinct-path counting) is unreachable from `HistoryView`. Delete it with its tests and the superseded prose in the consolidated-tool-activity decision.
 
 - **Verify the iPad status-bar band and input-bar viewport on the installed app** (2026-10-20; `docs/web-ui.md`). Browser checks prove the band is invisible, click-through and qualifies geometrically, and that the orb page follows a simulated shrunken/panned visual viewport at iPad width. Confirm on the user's iPadOS 26 home-screen install that the status-bar blur is gone (including with menus/dialogs open) and that focusing the composer with a hardware keyboard keeps the header in view.
 

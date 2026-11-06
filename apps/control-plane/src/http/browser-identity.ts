@@ -10,6 +10,7 @@ import {
   requestAuthOrigin,
   sendAuthFailure,
 } from "./auth-routes.ts";
+import { isFilesReadPath } from "./orb-files-url.ts";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -69,7 +70,7 @@ export function registerAuthenticatedBrowserRoutes(
           filesLogin &&
           requestAuthOrigin(request, filesLogin.origins) === filesLogin.origins.filesOrigin &&
           request.method === "GET" &&
-          request.url.startsWith("/s/") &&
+          isFilesReadPath(request.url) &&
           request.headers.authorization === undefined &&
           presentedAccessToken(request) === undefined &&
           request.headers["sec-fetch-mode"] === "navigate" &&

@@ -5,6 +5,7 @@ import type { OrbRow, ProjectDeletionProgress, ProjectRow } from "../domain/orb.
 /** Static deployment configuration the view layer derives fields from. */
 export interface ViewConfig {
   readonly centralAgent?: boolean;
+  readonly filesBaseUrl?: (orbId: string) => string | null;
 }
 
 const iso = (ms: number): string => new Date(ms).toISOString();
@@ -156,6 +157,7 @@ export function orbView(
   const lastError =
     (config.centralAgent ? control.getAgentRecoveryError(orb.id) : null) ?? orb.lastError;
   const stateDetail = stateDetailOf(orb, control, drain, bootProbe, config.centralAgent === true);
+  const filesBaseUrl = config.filesBaseUrl?.(orb.id);
   return {
     id: orb.id,
     projectId: orb.projectId,
@@ -165,6 +167,7 @@ export function orbView(
     stateVersion: orb.stateVersion,
     ...(spawnedByOrb !== null ? { spawnedByOrb } : {}),
     ...(config.centralAgent ? { centralAgent: true } : {}),
+    ...(filesBaseUrl ? { filesBaseUrl } : {}),
     ...(activity !== undefined ? { activity } : {}),
     ...(orb.previewActiveUntil != null ? { previewActiveUntil: iso(orb.previewActiveUntil) } : {}),
     ...(orb.checkoutCommit !== null ? { checkoutCommit: orb.checkoutCommit } : {}),

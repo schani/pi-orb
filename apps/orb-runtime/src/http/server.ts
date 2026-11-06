@@ -24,6 +24,7 @@ import { type FrameSink, OutboundWriter } from "../domain/outbound.ts";
 import type { RuntimePreviewService } from "../domain/preview.ts";
 import { decideRequest, RequestRegistry, type RequestResult } from "../domain/requests.ts";
 import { computeSyncFrames } from "../domain/sync.ts";
+import { registerFileRoutes } from "../files/routes.ts";
 import type { TerminalManager } from "../terminal/manager.ts";
 import { registerPreviewRoutes } from "./preview-route.ts";
 import { registerTerminalRoute } from "./terminal-route.ts";
@@ -53,9 +54,15 @@ export function buildRuntimeServer(
   terminalManager: TerminalManager,
   alertToken: string | undefined = process.env.PI_ORB_RUNTIME_TOKEN,
   preview?: RuntimePreviewService,
+  incarnation: string | undefined = process.env.PI_ORB_HOST_INCARNATION,
 ): FastifyInstance {
   const app = Fastify({ logger: false });
   const registry = new RequestRegistry();
+  registerFileRoutes(app, {
+    token: alertToken,
+    incarnation,
+    ready: () => agent.getHealth().status === "ready",
+  });
 
   app.get("/v1/health", async (_request, reply) => reply.status(200).send(agent.getHealth()));
 

@@ -130,3 +130,27 @@ it("reports a provenance read outage on direct GET", async () => {
   expect(response.statusCode).toBe(503);
   expect(response.json().error.retryable).toBe(true);
 });
+
+it("derives the configured files base on both list and direct metadata reads", async () => {
+  const configured = Fastify();
+  registerRoutes(
+    configured,
+    task,
+    h.deps,
+    TEST_SYSTEM_VIEW,
+    undefined,
+    (id) => `https://files.test/files/${id}`,
+  );
+  try {
+    const direct = await configured.inject({ url: "/api/v1/orbs/child" });
+    expect(direct.json().filesBaseUrl).toBe("https://files.test/files/child");
+    const list = await configured.inject({ url: "/api/v1/projects/project/orbs" });
+    for (const orb of list.json().items)
+      expect(orb.filesBaseUrl).toBe(`https://files.test/files/${orb.id}`);
+    expect((await app.inject({ url: "/api/v1/orbs/child" })).json()).not.toHaveProperty(
+      "filesBaseUrl",
+    );
+  } finally {
+    await configured.close();
+  }
+});

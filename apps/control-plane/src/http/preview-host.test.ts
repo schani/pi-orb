@@ -47,13 +47,12 @@ describe("preview hosts", () => {
           ...(previewOrigin === "https://a.co.uk" ? { appOrigin: "https://b.a.co.uk" } : {}),
         }).isErr(),
       ).toBe(true);
-    expect(
-      createPreviewHosts({
-        ...config,
-        previewOrigin: "http://preview.localhost:8080",
-        local: true,
-      }).isOk(),
-    ).toBe(true);
+    const local = createPreviewHosts({
+      ...config,
+      previewOrigin: "http://preview.localhost:3000",
+      local: true,
+    })._unsafeUnwrap();
+    expect(createPreviewHosts({ ...config, previewOrigin: local.baseOrigin }).isErr()).toBe(true);
     expect(
       createPreviewHosts({
         ...config,

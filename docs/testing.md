@@ -2624,3 +2624,17 @@ Integration ancestor `35ba0ae5` passed 143 targeted E2E unit tests and 54 focuse
 scheduler/replay/timer checks, workspace/E2E typecheck, lint and resource audit.
 Reviewed receipts remain unchanged in the qualification directory's `integration260/`.
 The historical 6,086-test full pass predates this cleanup; full new-head CI is pending.
+
+## Compact live-file links (2026-11-05, PST; local, undeployed)
+
+[Durable qualification archive](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/08059a1f-04fb-4ca2-907f-e38b2140e180/evidence/pr266-qualification.tar.gz) (SHA-256 `681f425111eb656aa7bc48336ba6e5f4dc9c6d56be57e164ebbd306f6ef6c7d7`) retains earlier local qualification, first failures and controlled corrective evidence through orb archival. These historical/pre-integration receipts do not qualify new committed-head CI.
+
+Current focused gates and real public-HTTPS click: `docs/orb-files.md`. Historical pre-compact full suites do not qualify current source. Preserve first failures under `.context/orb-files/compact-implementation/frontend/` and `final/`; approved checksums and completed gates are in `final/qualified/`.
+
+Native-click tests own separate HTTP source/target servers; synthetic routed HTTPS also aborted outside the app. Both browsers and the real public HTTPS click passed; no product native-click fix is claimed. String-arrow `locator.evaluate` returned a function/undefined: both CSS assertions now await `toHaveCSS` with unchanged exact RGB, without larger timeouts. Test CommonMark-normalized destinations, not a custom walker. Restart/cleanup evidence: `.context/process-host-dev/compact-smoke.json`, `final/qualified/restarted-dashboard.txt`. Full exact-head release qualification remains separate.
+
+## Recovered identity throttles (2026-11-06, PST; local, undeployed)
+
+After `npm ci`, final-source validation passed: `npx vitest run apps/orb-runtime/src/id-token` (31 tests, including existing cold-start DST); `python3 -m unittest infra.rollout_monitor_test` (21); `npm run test:infra` (156 Node, 271 Python, 34 native-VM); typecheck; lint (520 existing warnings, 99 infos). Full units/E2E await PR CI; live Cloud Run propagation is unqualified.
+
+Tests-first evidence remains in `.context/retry-*-red.log`: absent trace, recovery classification, disappearing inventory, premature 1,080-second finalization, a stale read crossing 1,090, and a blanket cutoff dropping independent tail faults. Regressions cover concurrent invocation isolation, mixed outcomes, malformed/foreign logs, reverse delivery, ERROR severity, sticky independent faults, query truncation/failure, cutoff-tail recovery and independent faults throughout the ingestion tail. No concurrency state machine was added.

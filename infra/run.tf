@@ -146,6 +146,7 @@ resource "google_cloud_run_v2_service" "issuer" {
     google_logging_project_exclusion.mcp_oauth_callback,
     google_logging_project_exclusion.google_callback,
     google_logging_project_exclusion.preview_requests,
+    google_logging_project_exclusion.files_requests,
     google_secret_manager_secret_iam_member.cp_auth,
     google_secret_manager_secret_iam_member.cp_mcp_oauth_accessor,
     google_secret_manager_secret_iam_member.cp_mcp_oauth_versions,

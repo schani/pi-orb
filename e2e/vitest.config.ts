@@ -62,6 +62,7 @@ export default defineConfig({
             "e2e/preview-docker.e2e.test.ts",
             "e2e/preview-central.e2e.test.ts",
             "e2e/preview-access-token.e2e.test.ts",
+            "e2e/live-files.e2e.test.ts",
           ],
           globalSetup: ["e2e/global-setup.ts"],
           pool: "forks",

@@ -423,3 +423,16 @@ it("shows reconstructible central recovery errors through the existing lastError
   control.noteAgentRecoveryError(orb.id, null);
   expect(orbView(row, control, { centralAgent: true }).lastError).toBeUndefined();
 });
+
+it("derives an optional files base without changing the stored orb", () => {
+  const control = new ControlState();
+  const before = { ...orb };
+  const filesBaseUrl = "https://files.test/files/12345678-1234-4234-8234-123456789abc";
+  const view = orbView(orb, control, { filesBaseUrl: () => filesBaseUrl });
+  expect(view.filesBaseUrl).toBe(filesBaseUrl);
+  expect(Check(OrbViewSchema, view)).toBe(true);
+  expect(Check(OrbViewSchema, { ...view, filesBaseUrl: null })).toBe(false);
+  expect(orbView(orb, control, {})).not.toHaveProperty("filesBaseUrl");
+  expect(orbView(orb, control, { filesBaseUrl: () => null })).not.toHaveProperty("filesBaseUrl");
+  expect(orb).toEqual(before);
+});

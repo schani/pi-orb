@@ -203,22 +203,24 @@ it.each(["chromium", "webkit"] as const)(
         await gotoFrontendHistory(page, `${origin}/orbs/${ORB}`, ORB);
         await expect.poll(() => syncs).toBeGreaterThanOrEqual(1);
         const history = page.locator(".history");
-        const read = history.locator("details.tool-activity-category").filter({
-          has: page.locator(":scope > summary", { hasText: "read" }),
-        });
+        const read = history.locator("details.activity-strip");
         await expect(read).toHaveCount(1);
+        await expect(read.locator(".activity-strip-dot")).toHaveCount(30);
         expect(closedToolReads).toEqual([]);
-        await read.locator(":scope > summary").click();
-        const callSummaries = read
-          .locator("details.tool-activity-call")
-          .filter({ has: page.locator("summary code") });
-        await expect(callSummaries).toHaveCount(30);
-        const headers = await callSummaries.locator("summary code").evaluateAll((codes) =>
-          codes.map((code) => ({
-            text: code.textContent ?? "",
-            title: code.getAttribute("title"),
-          })),
+        await read.locator(":scope > summary .activity-rail-label").click();
+        const callSummaries = read.locator(
+          ":scope > .activity-strip-body > details.tool-activity-category",
         );
+        await expect(callSummaries).toHaveCount(30);
+        const headers = await callSummaries
+          .locator(":scope > summary .activity-rail-headline")
+          .evaluateAll((codes) =>
+            codes.map((code) => ({
+              text: code.textContent ?? "",
+              title: code.getAttribute("title"),
+            })),
+          );
+        expect(headers).toHaveLength(30);
         for (const header of headers) {
           expect(header.title).toBe(header.text);
           expect(Buffer.byteLength(header.text)).toBeLessThanOrEqual(1024);

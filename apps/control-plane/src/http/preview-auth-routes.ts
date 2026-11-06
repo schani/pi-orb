@@ -10,7 +10,7 @@ import {
   type PreviewIdentity,
 } from "../domain/preview-auth.ts";
 import { authCookie, requestCookie, sendAuthFailure } from "./auth-routes.ts";
-import type { PreviewHosts } from "./preview-host.ts";
+import type { IsolatedHosts } from "./preview-host.ts";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -18,7 +18,7 @@ declare module "fastify" {
   }
 }
 export interface PreviewAuthOptions {
-  readonly hosts: PreviewHosts;
+  readonly hosts: IsolatedHosts;
   readonly appOrigin: string;
   readonly applicationAuth: Pick<ApplicationAuth, "authenticateSession">;
   readonly previewAuth: PreviewAuth;

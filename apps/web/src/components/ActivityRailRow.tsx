@@ -1,9 +1,13 @@
-import type { ReactNode, Ref } from "react";
+import { createContext, type ReactNode, type Ref, useContext } from "react";
+
+/** Opens every row rendered directly beneath it; nested rows are unaffected. */
+export const ActivityRailOpen = createContext(false);
 
 interface ActivityRailRowProps {
   label: ReactNode;
   headerRef?: Ref<HTMLElement>;
   headline?: ReactNode;
+  strip?: ReactNode;
   metric?: ReactNode;
   state?: "neutral" | "running" | "completed" | "failed";
   className?: string;
@@ -21,6 +25,7 @@ export function ActivityRailRow({
   label,
   headerRef,
   headline,
+  strip,
   metric,
   state = "neutral",
   className = "",
@@ -28,16 +33,18 @@ export function ActivityRailRow({
   defaultOpen = false,
   onToggle,
 }: ActivityRailRowProps) {
+  const forcedOpen = useContext(ActivityRailOpen);
   return (
     <details
       className={`activity-rail-row activity-rail-row-${state} ${className}`.trim()}
-      open={defaultOpen || undefined}
+      open={defaultOpen || forcedOpen || undefined}
       onToggle={onToggle === undefined ? undefined : (event) => onToggle(event.currentTarget.open)}
     >
       <summary ref={headerRef}>
         <span className="activity-rail-marker" aria-hidden="true" />
         <span className="activity-rail-summary">
           <span className="activity-rail-label">{label}</span>
+          {strip}
           {headline !== undefined && (
             <>
               {" · "}
@@ -52,7 +59,7 @@ export function ActivityRailRow({
         </span>
         {metric !== undefined && <span className="activity-rail-metric">{metric}</span>}
       </summary>
-      {children}
+      <ActivityRailOpen value={false}>{children}</ActivityRailOpen>
     </details>
   );
 }
