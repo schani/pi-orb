@@ -336,56 +336,7 @@ policies, generic OIDC verification rules — is
 
 ## Google provider 8.10.0 qualification (2026-11-05, PST)
 
-[Q87](../docs/open-questions.md#dependency-update-state-conversions--87) approves upstream state conversions:
-application **7.21.0 → 8.10.0**, foundation **6.50.0 → 8.10.0**. No apply or deployment.
-OpenTofu **1.13.2** matched CI's checksum; Google tag commit: `abd6d1130c758fed9ee011f11c0c2274b9279e96`.
-Both locks were generated from signed checksums for 15 platforms; unavailable old `windows_arm`
-was excluded, not manually rehashed. Random's lock entry is unchanged.
-
-Local qualification used read-only GCS snapshots under `umask 077`, source base `c181b798`,
-and a candidate differing only in provider pins/locks. Scratch roots used local backends and
-local foundation remote-state reads: no state locks, apply, or backend writes.
-
-| Plan | Foundation | Application |
-| --- | --- | --- |
-| Baseline, no refresh | 82 no-op | 53 no-op |
-| Candidate, no refresh | 41 update + 41 no-op | 27 update + 26 no-op |
-| Candidate, normal refresh | **Blocked** | **53 no-op** |
-
-No-refresh updates add `deletion_policy = "DELETE"` and materialize previously null network,
-Cloud Run and SQL fields as false, zero or empty string (exact fields in the evidence below).
-The unchanged database guard rejects the no-refresh candidate (exit 1); these updates are not collectively
-qualified as state-only. Normal refreshed application planning resolves them, passes the guard (exit 0),
-and preserves passwords/payloads.
-
-Actual-provider synthetic and copied-state checks verified secret-version schema **0 → 1**:
-unused `secret_data_wo_version` **0 → empty string**, preserving payloads/IDs; bucket schema **3 → 4**
-preserves absent retention policies. Synthetic retention **86400 → "86400"** also passed.
-Sources: [8.10.0 upgrade guide](https://github.com/opentofu/terraform-provider-google/blob/abd6d1130c758fed9ee011f11c0c2274b9279e96/website/docs/guides/version_8_upgrade.html.markdown), [secret upgrader](https://github.com/opentofu/terraform-provider-google/blob/abd6d1130c758fed9ee011f11c0c2274b9279e96/google/services/secretmanager/resource_secret_manager_secret_version.go#L864-L886), [bucket upgrader](https://github.com/opentofu/terraform-provider-google/blob/abd6d1130c758fed9ee011f11c0c2274b9279e96/google/services/storage/resource_storage_bucket_600_migration.go#L1585-L1608).
-
-Foundation refresh hit **17 HTTP 403** read denials:
-
-| Category | Count | Reported permission / operation |
-| --- | ---: | --- |
-| WIF pool resources | 3 | `iam.workloadIdentityPools.get` |
-| State-bucket IAM | 1 | `storage.buckets.getIamPolicy` |
-| Deployer service account | 1 | `iam.serviceAccounts.get` |
-| Service-account IAM | 1 | `iam.serviceAccounts.getIamPolicy` |
-| Project IAM | 6 | Project `getIamPolicy` (literal permission name not emitted) |
-| Custom roles | 4 | `iam.roles.get` |
-| Service Networking connection | 1 | `servicenetworking.services.get` |
-
-Its partial errored plan (29 no-op) is **not success**. Qualification remains **Draft/incomplete**;
-the 403 evidence is preserved, not resolved.
-**Approved 2026-11-05 (PST):** add project custom role `piOrbFoundationPlanReader` with exactly
-the seven observed read permissions and one additive member for the existing `pi-orb-amp-deployer`
-in `playground-dev-6ae7`. Project scope is deliberate; existing roles/bindings/conditions stay unchanged.
-[Foundation decision and proposed grant procedure](foundation/README.md#foundation-plan-read-authority-approved-2026-11-05-pst).
-No grant applied or administrator login performed; saved-plan review/apply approval remains pending.
-After granting, repeat the full fresh **8.10.0** refreshed plan with a **local backend and copied state**.
-No provider-8 apply, deployment, workflow dispatch or guard change.
-Local `npm ci`, typecheck, lint and infrastructure tests passed; normal units passed **723 files / 6,230 tests**
-(**15 files / 43 tests skipped**, no local PostgreSQL fixture).
-Contracts: [application](tests/google_upgrade.tftest.hcl), [foundation](foundation/tests/google_upgrade.tftest.hcl), [pins/guards](foundation/iam_contract.test.mjs).
-[Sanitized qualification evidence](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/a96a1275-06be-4cda-8451-a9b2b8d4495d/evidence/q87-google/provider-qualification.md) includes field deltas, source review and reproduction steps.
-Raw state, plans and logs remain private; never publish them.
+[Q87](../docs/open-questions.md#dependency-update-state-conversions--87) approves upstream conversions: application **7.21.0 → 8.10.0**, foundation **6.50.0 → 8.10.0**; no provider-8 apply or deployment.
+Application refreshed planning passed; foundation qualification remains **incomplete**, blocked by read denials.
+The [approved read grant](foundation/README.md#foundation-plan-read-authority-approved-2026-11-05-pst) is pending; full fresh foundation qualification must follow it.
+[Sanitized receipt](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/a96a1275-06be-4cda-8451-a9b2b8d4495d/evidence/q87-google/provider-qualification.md) retains native provider conversion/plan evidence; source and mock contracts do not prove conversions.
