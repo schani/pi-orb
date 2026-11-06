@@ -15,7 +15,6 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 ## Bugs
 
 - **Attribute Claude shutdown race 1f315657** (2026-11-04): capture and reproduce the initial-close/late-edge ordering before changing quiescence logic. See `docs/postmortems/2026-11-04-claude-query-rotation-1f315657.md`.
-- **Remediate the two npm audit advisories** (2026-11-03; `docs/dependency-audit.md`): minimatch GHSA-g3hv-75wg-m249 and glob GHSA-3g3m-2fjr-6pw4. Resolve Pi/static/legacy GCP chains with compatible updates or qualified scoped overrides; verify full/production audits and regression gates.
 - **Refresh native Docker/containerd security pins** (2026-11-03; `docs/dependency-audit.md`): Docker 29.9.3 and containerd 2.3.7 LTS targets, subject to Debian package availability; paired refresh held under the 2026-10-24 decision in [docs/deployment.md](docs/deployment.md), pending [question 87](docs/open-questions.md#dependency-update-state-conversions--87). Refresh base/guest-agent security inputs and qualify the native image; record installed versions, not source-only assumptions.
 
 - **Finish qualification of the approved headline/deletion correction** (2026-10-29; `docs/postmortems/2026-10-29-pg17-production.md`; unwaived blocker). Focused local/PGlite tests and static checks pass (`docs/testing.md`); fresh exact-head PR CI and release qualification remain pending. Historical cause remains unproven.
@@ -154,8 +153,6 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 - **Corroborate a suspected control-plane egress partition across orbs before an unreachable-runtime restart** (`docs/postmortems/2026-08-05-egress-blip-false-unreachable-restart.md`). Since 2026-09-07 provider delay alone cannot trigger a restart and a fresh health request is required before restart. The remaining ambiguity is a partition where provider access succeeds while both runtime requests receive no response. Use bounded fleet-level evidence without turning healthy polling into log noise.
 
 ## Follow-ups
-
-- **Implement and qualify the approved Pi 1.5.0 upgrade** (2026-11-05, PST; question 89 resolved). Keep the integration minimal; use native lazy state/recovery and memory-first progress, retain resource/privacy/replay guards, and keep all three conveniences removed. Tests-first grouped-commit/API/schema/recovery coverage, fresh sealed installs, full unit/DST/infrastructure/types/lint/build, runtime/harness E2E and necessary packaged proofs precede qualification. Open one reviewed PR; no merge or deployment. Contract: `docs/pi-durable-evaluation.md`.
 
 - **Verify the iPad status-bar band and input-bar viewport on the installed app** (2026-10-20; `docs/web-ui.md`). Browser checks prove the band is invisible, click-through and qualifies geometrically, and that the orb page follows a simulated shrunken/panned visual viewport at iPad width. Confirm on the user's iPadOS 26 home-screen install that the status-bar blur is gone (including with menus/dialogs open) and that focusing the composer with a hardware keyboard keeps the header in view.
 

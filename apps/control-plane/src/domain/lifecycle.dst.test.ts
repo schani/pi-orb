@@ -3207,7 +3207,6 @@ describe("orb lifecycle (DST)", () => {
                 "the turn is replicated",
                 () => harness.store.replicaRecords(ORB).length === 1,
               );
-              harness.deps.control.unregisterBrowserConnection(ORB, "setup-tab", task.wallNow());
               const stopsBefore = harness.world.hostStopCountOf(ORB);
               let previousInstance = harness.world.runtimeInstanceIdOf(ORB);
               for (let attempt = 1; attempt <= 4; attempt++) {
@@ -3221,6 +3220,8 @@ describe("orb lifecycle (DST)", () => {
                     harness.world.runtimeInstanceIdOf(ORB) !== previousInstance,
                   { timeoutMs: 20 * 60_000 },
                 );
+                harness.deps.control.registerBrowserConnection(ORB, "setup-tab");
+                harness.deps.control.setBrowserVisibility(ORB, "setup-tab", true, task.wallNow());
                 previousInstance = harness.world.runtimeInstanceIdOf(ORB);
                 expect(harness.world.resumeMarkersOf(ORB)).toHaveLength(Math.min(attempt, 3));
               }
@@ -3235,6 +3236,7 @@ describe("orb lifecycle (DST)", () => {
                 { timeoutMs: 20 * 60_000 },
               );
               harness.world.finishTurn(ORB);
+              harness.deps.control.unregisterBrowserConnection(ORB, "setup-tab", task.wallNow());
               // Once settled, the ordinary idle reaper still collects it.
               await waitUntil(
                 task,
