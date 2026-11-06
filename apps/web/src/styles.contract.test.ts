@@ -31,6 +31,12 @@ function media(condition: string): string {
   return blocks.join("\n");
 }
 
+it("disables mobile text autosizing so long rows keep the base size", () => {
+  const html = rule("html");
+  expect(html).toContain("-webkit-text-size-adjust: 100%");
+  expect(html).toContain("text-size-adjust: 100%");
+});
+
 it("hides a failed chart canvas while retaining its mount target", () => {
   expect(rule(".chart-canvas[hidden]")).toContain("display: none");
 });
