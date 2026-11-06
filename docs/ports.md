@@ -162,6 +162,15 @@ maintain a second registration database. Application Authorization is never rema
 
 A shared per-orb CP watcher revalidates authority every 5 seconds with a 2-second deadline,
 failing closed on missed validation; target stale-stream closure is within 10 seconds.
+Admission reads authority and takes the lease per request, but each control-plane process
+validates compute identity (host observation plus runtime health) once per orb and shares it,
+including with concurrent requests, for 5 seconds. Orb state changes and a runtime
+`stale_target` refusal discard it; failures are never shared beyond requests already waiting.
+A stale shared identity fails closed because the runtime checks the exact signed target.
+Validating per request made a dev-page reload of ~200 modules run ~400 external calls and
+spuriously 503 (`docs/postmortems/2026-11-05-preview-admission-burst-503.md`).
+`preview-admission-denied` records the failed `check`, `failure` (`timeout`, `error`,
+`mismatch`) and `elapsedMs`.
 Local lifecycle closure also cancels owned connections. A durable 15-second activity lease
 protects idle-stop CAS. HTTP/SSE in-flight requests count even while silent; actual WS
 application messages renew activity. A silent HMR socket or protocol heartbeat alone does not
@@ -267,6 +276,15 @@ limit. Revoke closed an open WebSocket within 3 seconds, returned 404 `port_not_
 re-registration restored service; every step logged its lifecycle edge. Vite's HMR socket
 connected through the preview. A browser's normal WebSocket close reached the application as
 `1006` until the runtime stopped cancelling accepted sockets on TCP close; fixed with a test.
+
+**Chromium and compute loss (2026-11-04/05, Claude orb):** Chrome 155 matched Firefox except
+that the automated HMR check returned `null` (unexplained) and revoke closed the WebSocket in
+5.6 seconds with `1006`. After an idle stop with a tab open, probes got 503 `orb_unavailable`
+without waking the orb; after wake, the tab recovered without reload. An orb's
+`agent-browser`, using an orb access token, kept a preview open across a guest power-off:
+`unreachable-restart` after 32 silent seconds, `preview-admission-recovered` at `running`,
+and the registration survived without re-exposing. Application processes do not survive
+compute loss.
 
 ## Retained decisions and alternatives
 

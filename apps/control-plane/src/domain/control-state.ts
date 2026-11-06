@@ -1,5 +1,9 @@
+import type { Result } from "neverthrow";
 import type { BootHook, BootHookFailureReason } from "./orb.ts";
 import type { DeviceChallenge } from "./ports.ts";
+import type { PreviewAdmissionDenial, PreviewIdentity } from "./preview.ts";
+
+type PreviewIdentityResult = Result<PreviewIdentity, PreviewAdmissionDenial>;
 
 /** The boot-hook verdict the orb page reports (docs/orb-setup-hook.md). */
 export interface HookFailure {
@@ -584,6 +588,48 @@ export class ControlState {
     return (this.stoppingOrbs.get(orbId) ?? -1) >= observedStateVersion;
   }
 
+  // -- preview compute identity (one validation per orb, not per request) --
+
+  private readonly previewIdentities = new Map<
+    string,
+    {
+      readonly fingerprint: string;
+      readonly validUntil: number;
+      readonly identity: Promise<PreviewIdentityResult>;
+    }
+  >();
+
+  /**
+   * Single-flight, short-lived memo of the compute identity preview admission
+   * validated. Concurrent and subsequent admissions with the same authority
+   * `fingerprint` share one validation until `ttlMs` after it began; a
+   * different fingerprint replaces the entry and a failure is dropped as soon
+   * as it settles, so only success is ever reused.
+   */
+  sharePreviewIdentity(
+    orbId: string,
+    fingerprint: string,
+    now: number,
+    ttlMs: number,
+    validate: () => Promise<PreviewIdentityResult>,
+  ): Promise<PreviewIdentityResult> {
+    for (const [id, entry] of this.previewIdentities)
+      if (now >= entry.validUntil) this.previewIdentities.delete(id);
+    const existing = this.previewIdentities.get(orbId);
+    if (existing?.fingerprint === fingerprint) return existing.identity;
+    const entry = { fingerprint, validUntil: now + ttlMs, identity: validate() };
+    this.previewIdentities.set(orbId, entry);
+    const drop = () => {
+      if (this.previewIdentities.get(orbId) === entry) this.previewIdentities.delete(orbId);
+    };
+    void entry.identity.then((result) => result.isErr() && drop(), drop);
+    return entry.identity;
+  }
+
+  forgetPreviewIdentity(orbId: string): void {
+    this.previewIdentities.delete(orbId);
+  }
+
   setDrainStatus(orbId: string, status: DrainStatus): void {
     this.drainStatus.set(orbId, status);
   }
@@ -633,6 +679,7 @@ export class ControlState {
     this.authBlocked.delete(orbId);
     this.drainStatus.delete(orbId);
     this.restartPending.delete(orbId);
+    this.previewIdentities.delete(orbId);
     this.lifecycleClosers.delete(orbId);
     if (!preserveBrowser) {
       this.browserConnections.delete(orbId);

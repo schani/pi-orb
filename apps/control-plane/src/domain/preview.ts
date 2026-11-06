@@ -3,7 +3,7 @@ import type { SimulationTask } from "determined";
 import { err, ok, type Result } from "neverthrow";
 import { withDeadline } from "./dst.ts";
 import { logOrbEvent } from "./log.ts";
-import type { ControlPlaneDeps } from "./ports.ts";
+import type { ControlPlaneDeps, OperationContext } from "./ports.ts";
 
 export const PREVIEW_LEASE_MS = 15_000;
 export const PREVIEW_REVALIDATE_MS = 5_000;
@@ -28,23 +28,56 @@ export const previewError = (code: PreviewError["code"], message: string): Previ
   message,
 });
 
+export interface PreviewIdentity {
+  readonly baseUrl: string;
+  readonly executionId: string;
+  readonly runtimeInstanceId: string;
+}
+/** Which admission check denied a request, and how, for the `preview-admission-denied` edge. */
+export interface PreviewAdmissionDenial {
+  readonly check:
+    | "request"
+    | "authority"
+    | "host_observe"
+    | "runtime_health"
+    | "lease"
+    | "admission";
+  readonly failure: "timeout" | "error" | "mismatch";
+  readonly error: PreviewError;
+}
+const denied = (
+  check: PreviewAdmissionDenial["check"],
+  failure: PreviewAdmissionDenial["failure"],
+  code: PreviewError["code"],
+  message: string,
+): Result<never, PreviewAdmissionDenial> =>
+  err({ check, failure, error: previewError(code, message) });
+
 export async function admitPreview(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   request: PreviewRequest,
 ): Promise<Result<PreviewRoute, PreviewError>> {
+  const startedAt = task.monotonicNow();
   const result = await resolvePreview(task, deps, request);
   if (
     deps.control.noteCondition(`preview-admission:${request.orbId}:${request.port}`, result.isErr())
   ) {
+    const denial = result.isErr() ? result.error : undefined;
     logOrbEvent(
       task,
       request.orbId,
-      result.isErr() ? "preview-admission-denied" : "preview-admission-recovered",
-      { port: request.port, reason: result.isErr() ? result.error.code : undefined },
+      denial ? "preview-admission-denied" : "preview-admission-recovered",
+      {
+        port: request.port,
+        reason: denial?.error.code,
+        check: denial?.check,
+        failure: denial?.failure,
+        elapsedMs: denial ? Math.round(task.monotonicNow() - startedAt) : undefined,
+      },
     );
   }
-  return result;
+  return result.mapErr((denial) => denial.error);
 }
 
 export function previewCloseError(
@@ -68,6 +101,8 @@ export function recordPreviewTransport(
   phase: "connect" | "stream",
   error: PreviewError | null,
 ): void {
+  // The runtime refused the signed target: the cached identity is stale.
+  if (error?.code === "stale_target") deps.control.forgetPreviewIdentity(route.target.orbId);
   if (
     deps.control.noteCondition(
       `preview-transport:${route.target.orbId}:${route.target.port}`,
@@ -94,18 +129,19 @@ async function resolvePreview(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   request: PreviewRequest,
-): Promise<Result<PreviewRoute, PreviewError>> {
+): Promise<Result<PreviewRoute, PreviewAdmissionDenial>> {
   if (request.port === 8080)
-    return err(previewError("reserved_port", "The runtime port cannot be exposed"));
+    return denied("request", "mismatch", "reserved_port", "The runtime port cannot be exposed");
   if (!Number.isInteger(request.port) || request.port < 1 || request.port > 65535)
-    return err(previewError("invalid_request", "Invalid preview port"));
+    return denied("request", "mismatch", "invalid_request", "Invalid preview port");
   if (task.wallNow() >= request.expiresAt)
-    return err(previewError("unauthenticated", "Preview session expired"));
+    return denied("request", "mismatch", "unauthenticated", "Preview session expired");
   await task.checkpoint("preview.authority-read");
   const authority = await deps.store.readPreviewAuthority(task, request);
   if (authority.isErr())
-    return err(previewError("store_unavailable", "Preview authority unavailable"));
-  if (authority.value === null) return err(previewError("orb_not_found", "Orb doesn't exist"));
+    return denied("authority", "error", "store_unavailable", "Preview authority unavailable");
+  if (authority.value === null)
+    return denied("authority", "mismatch", "orb_not_found", "Orb doesn't exist");
   const { orb, registration } = authority.value;
   if (
     orb.state !== "running" ||
@@ -114,70 +150,128 @@ async function resolvePreview(
     orb.runtimeTokenHash === null ||
     deps.control.isStopping(orb.id, orb.stateVersion)
   )
-    return err(previewError("orb_unavailable", `Orb is ${orb.state}`));
+    return denied("authority", "mismatch", "orb_unavailable", `Orb is ${orb.state}`);
   if (registration === null)
-    return err(previewError("port_not_registered", "Preview port isn't registered"));
+    return denied("authority", "mismatch", "port_not_registered", "Preview port isn't registered");
   if (deps.hostProvider.kind === "process")
-    return err(previewError("unsupported_provider", "Previews require isolated compute"));
+    return denied(
+      "request",
+      "mismatch",
+      "unsupported_provider",
+      "Previews require isolated compute",
+    );
   const hostRef = orb.hostRef;
-  const observed = await withDeadline(
-    task,
-    PREVIEW_VALIDATION_TIMEOUT_MS,
-    "preview host observation",
-    (context) =>
-      deps.hostProvider.observe(
-        task,
-        { provider: deps.hostProvider.kind, resourceId: hostRef },
-        context,
-      ),
+  // The runtime verifies the exact signed target on every forwarded request, so
+  // a stale identity fails closed with `stale_target`, which drops it
+  // (`recordPreviewTransport`); `stateVersion` retires it on any transition.
+  const identity = await deps.control.sharePreviewIdentity(
+    orb.id,
+    JSON.stringify([orb.stateVersion, hostRef, orb.hostIncarnation, orb.runtimeTokenHash]),
+    task.monotonicNow(),
+    PREVIEW_REVALIDATE_MS,
+    () => validateCompute(task, deps, orb.id, hostRef, orb.hostIncarnation),
   );
-  if (
-    observed.isErr() ||
-    observed.value === null ||
-    observed.value.state !== "running" ||
-    observed.value.orbId !== orb.id ||
-    observed.value.incarnation !== orb.hostIncarnation ||
-    observed.value.runtimeAddress === undefined
-  )
-    return err(previewError("stale_target", "Preview compute is unavailable or replaced"));
-  const baseUrl = observed.value.runtimeAddress.baseUrl;
-  const health = await withDeadline(
-    task,
-    PREVIEW_VALIDATION_TIMEOUT_MS,
-    "preview runtime identity",
-    (context) => deps.runtimeClient.health(task, baseUrl, context),
-  );
-  if (
-    health.isErr() ||
-    health.value.status !== "ready" ||
-    health.value.orbId !== orb.id ||
-    health.value.incarnation !== orb.hostIncarnation ||
-    !health.value.executionId
-  )
-    return err(previewError("stale_target", "Preview runtime identity unavailable"));
+  if (identity.isErr()) return err(identity.error);
   const route: PreviewRoute = {
     target: {
       orbId: orb.id,
       port: request.port,
       registrationId: registration.registrationId,
       incarnation: orb.hostIncarnation,
-      executionId: health.value.executionId,
-      runtimeInstanceId: health.value.runtimeInstanceId,
+      executionId: identity.value.executionId,
+      runtimeInstanceId: identity.value.runtimeInstanceId,
     },
-    baseUrl,
+    baseUrl: identity.value.baseUrl,
     runtimeTokenHash: orb.runtimeTokenHash,
     origin: request.origin,
     expiresAt: Math.min(request.expiresAt, task.wallNow() + PREVIEW_MAX_DURATION_MS),
   };
   await task.checkpoint("preview.before-protection");
   const protectedActivity = await protect(task, deps, route);
-  if (protectedActivity.isErr()) return err(protectedActivity.error);
+  if (protectedActivity.isErr())
+    return err({
+      check: "lease",
+      failure: protectedActivity.error.code === "store_unavailable" ? "error" : "mismatch",
+      error: protectedActivity.error,
+    });
   await task.checkpoint("preview.transport-admission");
   if (deps.control.isStopping(orb.id, orb.stateVersion))
-    return err(previewError("orb_unavailable", "Orb admission closed"));
+    return denied("admission", "mismatch", "orb_unavailable", "Orb admission closed");
   if (task.wallNow() >= route.expiresAt)
-    return err(previewError("unauthenticated", "Preview session expired"));
+    return denied("admission", "mismatch", "unauthenticated", "Preview session expired");
   return ok(route);
+}
+
+async function validateCompute(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orbId: string,
+  hostRef: string,
+  incarnation: number,
+): Promise<Result<PreviewIdentity, PreviewAdmissionDenial>> {
+  await task.checkpoint("preview.compute-validation");
+  const failure = (context: OperationContext) =>
+    context.signal.aborted ? ("timeout" as const) : ("error" as const);
+  const observed = await withDeadline(
+    task,
+    PREVIEW_VALIDATION_TIMEOUT_MS,
+    "preview host observation",
+    (context) =>
+      deps.hostProvider
+        .observe(task, { provider: deps.hostProvider.kind, resourceId: hostRef }, context)
+        .mapErr(() => failure(context)),
+  );
+  if (observed.isErr())
+    return denied(
+      "host_observe",
+      observed.error,
+      "stale_target",
+      "Preview compute is unavailable or replaced",
+    );
+  if (
+    observed.value === null ||
+    observed.value.state !== "running" ||
+    observed.value.orbId !== orbId ||
+    observed.value.incarnation !== incarnation ||
+    observed.value.runtimeAddress === undefined
+  )
+    return denied(
+      "host_observe",
+      "mismatch",
+      "stale_target",
+      "Preview compute is unavailable or replaced",
+    );
+  const baseUrl = observed.value.runtimeAddress.baseUrl;
+  const health = await withDeadline(
+    task,
+    PREVIEW_VALIDATION_TIMEOUT_MS,
+    "preview runtime identity",
+    (context) => deps.runtimeClient.health(task, baseUrl, context).mapErr(() => failure(context)),
+  );
+  if (health.isErr())
+    return denied(
+      "runtime_health",
+      health.error,
+      "stale_target",
+      "Preview runtime identity unavailable",
+    );
+  if (
+    health.value.status !== "ready" ||
+    health.value.orbId !== orbId ||
+    health.value.incarnation !== incarnation ||
+    !health.value.executionId
+  )
+    return denied(
+      "runtime_health",
+      "mismatch",
+      "stale_target",
+      "Preview runtime identity unavailable",
+    );
+  return ok({
+    baseUrl,
+    executionId: health.value.executionId,
+    runtimeInstanceId: health.value.runtimeInstanceId,
+  });
 }
 
 async function protect(
