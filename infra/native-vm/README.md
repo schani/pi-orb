@@ -8,7 +8,7 @@ npm ci
 npm run native-image:build -- \
   --project playground-dev-6ae7 \
   --zone us-central1-a \
-  --base-image projects/debian-cloud/global/images/debian-12-bookworm-v20260902 \
+  --base-image projects/debian-cloud/global/images/debian-12-bookworm-v20261027 \
   --version v20260905-1 \
   --subnet projects/playground-dev-6ae7/regions/us-central1/subnetworks/pi-orb-image-build-us-central1 \
   --builder-service-account pi-orb-image-builder@playground-dev-6ae7.iam.gserviceaccount.com \

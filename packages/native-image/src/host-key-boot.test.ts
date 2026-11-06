@@ -181,9 +181,13 @@ describe("native image SSH host-key boot contract", () => {
     try {
       const bin = join(root, "bin");
       await mkdir(bin);
-      await writeFile(join(bin, "dpkg-query"), "#!/bin/bash\nprintf %s 1:20260715.00-g1\n", {
-        mode: 0o755,
-      });
+      await writeFile(
+        join(bin, "dpkg-query"),
+        `#!/bin/bash\nprintf %s "\${GUEST_VERSION:-1:20261021.00-g1}"\n`,
+        {
+          mode: 0o755,
+        },
+      );
       await writeFile(
         join(bin, "systemctl"),
         `#!/bin/bash
@@ -206,6 +210,10 @@ esac
           env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...env },
         });
       await expect(run()).resolves.toBeDefined();
+      await expect(run({ GUEST_VERSION: "1:20260715.00-g1" })).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining("PI_ORB_SEAL_GUARD_FAILED=google_package_version"),
+      });
       await expect(run({ BEFORE: "ssh.service sshd.service" })).rejects.toMatchObject({
         code: 1,
         stderr: expect.stringContaining("PI_ORB_SEAL_GUARD_FAILED=google_manager_before_ssh"),
