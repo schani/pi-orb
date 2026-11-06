@@ -50,6 +50,7 @@ let server: Server;
 let env: BrokerEnv;
 const seenAuthorization: string[] = [];
 const seenBodies: string[] = [];
+const seenTraces: string[] = [];
 
 beforeAll(async () => {
   server = createServer((request, response) => {
@@ -59,6 +60,7 @@ beforeAll(async () => {
       const raw = Buffer.concat(chunks).toString("utf8");
       seenAuthorization.push(String(request.headers.authorization));
       seenBodies.push(raw);
+      seenTraces.push(String(request.headers["x-cloud-trace-context"]));
       if (request.url !== ID_TOKEN_PATH || request.method !== "POST") {
         response.writeHead(404).end();
         return;
@@ -91,6 +93,31 @@ async function mint(audience: string, ttlSeconds?: number): Promise<IdTokenEndpo
 }
 
 describe("id-token HTTP endpoint", () => {
+  it("shares a trace only across attempts of one CLI endpoint", async () => {
+    seenTraces.length = 0;
+    const task = new NoSimulationTask("trace", false);
+    const first = new HttpIdTokenEndpoint(env);
+    const second = new HttpIdTokenEndpoint(env);
+    await Promise.all([
+      first.mint(task, { audience: "throttled" }, 1_000),
+      second.mint(task, { audience: "ok" }, 1_000),
+    ]);
+    await first.mint(task, { audience: "ok" }, 1_000);
+    expect(seenTraces).toHaveLength(3);
+    for (const header of seenTraces) {
+      expect(header).toMatch(/^[a-f0-9]{32}\/[1-9][0-9]*;o=0$/);
+      expect(header.slice(0, 32)).not.toBe("0".repeat(32));
+      const span = BigInt(header.split("/")[1]?.split(";")[0] ?? "0");
+      expect(span).toBeGreaterThan(0n);
+      expect(span).toBeLessThan(2n ** 64n);
+    }
+    // Arrival order of concurrent invocations is irrelevant.
+    const retryTrace = seenTraces[2]?.split("/")[0];
+    expect(seenTraces.slice(0, 2).filter((h) => h.startsWith(`${retryTrace}/`))).toHaveLength(1);
+    expect(new Set(seenTraces.map((h) => h.split("/")[0])).size).toBe(2);
+    expect(new Set(seenTraces.map((h) => h.split("/")[1])).size).toBe(3);
+  });
+
   it("sends the bearer and only the caller's audience and lifetime", async () => {
     seenAuthorization.length = 0;
     seenBodies.length = 0;

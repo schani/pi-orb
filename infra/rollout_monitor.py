@@ -15,6 +15,7 @@ from infra.release_state import Cloud, Result, fail, load, now, parse_json, save
 
 WINDOW_SECONDS = 900
 METRIC_LAG_SECONDS = 180
+ID_TOKEN_RETRY_SECONDS = 10
 
 
 def placement(service, image):
@@ -32,11 +33,101 @@ def placement(service, image):
                    'generation': env.get('PI_ORB_HOST_SPEC_GENERATION')})
 
 
-def log_counts(rows):
-    return {'errors': sum(row.get('severity') in ('ERROR', 'CRITICAL', 'ALERT', 'EMERGENCY') for row in rows),
-            'http429': sum(row.get('httpRequest', {}).get('status') == 429 for row in rows),
+def id_token_attempt(row, project, region, revision):
+    """Only native request logs can establish an HTTP outcome, not container JSON."""
+    trace = row.get('trace')
+    resource = row.get('resource', {})
+    labels = resource.get('labels', {}) if isinstance(resource, dict) else None
+    if (row.get('logName') != f'projects/{project}/logs/run.googleapis.com%2Frequests' or
+            not isinstance(trace, str) or
+            not re.fullmatch(re.escape(f'projects/{project}/traces/') + r'[a-f0-9]{32}', trace) or
+            trace.endswith('/' + '0' * 32) or not isinstance(resource, dict) or
+            resource.get('type') != 'cloud_run_revision' or not isinstance(labels, dict) or
+            labels.get('service_name') != 'pi-orb-issuer' or
+            labels.get('location') != region or labels.get('revision_name') != revision):
+        return None
+    request = row.get('httpRequest', {})
+    url, stamp = request.get('requestUrl'), row.get('timestamp')
+    if request.get('requestMethod') != 'POST' or not isinstance(url, str) or not isinstance(stamp, str):
+        return None
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        timestamp = datetime.fromisoformat(stamp.replace('Z', '+00:00'))
+    except ValueError:
+        return None
+    if (parsed.scheme != 'https' or not parsed.netloc or parsed.path != '/runtime/v1/id-token' or
+            parsed.query or parsed.fragment or timestamp.tzinfo is None):
+        return None
+    return trace, url, timestamp
+
+
+def log_counts(rows, successes=(), project=None, region=None, revision=None):
+    throttles = [(row, id_token_attempt(row, project, region, revision)) for row in rows
+                 if row.get('httpRequest', {}).get('status') == 429]
+    completed = [id_token_attempt(row, project, region, revision) for row in successes
+                 if row.get('httpRequest', {}).get('status') == 200]
+    first = {}
+    for _, attempt in throttles:
+        if attempt:
+            key = attempt[:2]
+            first[key] = min(first.get(key, attempt[2]), attempt[2])
+    recovered = [row for row, attempt in throttles if attempt and any(
+        success and success[:2] == attempt[:2] and attempt[2] < success[2] <=
+        first[attempt[:2]] + timedelta(seconds=ID_TOKEN_RETRY_SECONDS) for success in completed)]
+    errors = [row for row in rows if row.get('severity') in ('ERROR', 'CRITICAL', 'ALERT', 'EMERGENCY')]
+    # Eligible 429s are provisional even at ERROR severity; the final throttle
+    # classification decides them. Independent application errors remain sticky.
+    pending_or_recovered = [row for row, attempt in throttles if attempt]
+    return {'errorsRaw': len(errors),
+            'errors': sum(row not in pending_or_recovered for row in errors),
+            'http429': len(throttles), 'http429Recovered': len(recovered),
+            'http429Unrecovered': len(throttles) - len(recovered),
             'http5xx': sum(type(row.get('httpRequest', {}).get('status')) is int and
                           row['httpRequest']['status'] >= 500 for row in rows)}
+
+
+def read_logs(cloud, project, query):
+    logs = cloud.json(['logging', 'read', query, '--project', project, '--limit=1000'])
+    if logs.error:
+        return logs
+    if (not isinstance(logs.value, list) or len(logs.value) >= 1000 or
+            any(not isinstance(row, dict) or
+                not isinstance(row.get('jsonPayload', {}), dict) or
+                not isinstance(row.get('resource', {}), dict) or
+                not isinstance(row.get('resource', {}).get('labels', {}), dict) or
+                not isinstance(row.get('httpRequest', {}), dict) for row in logs.value)):
+        return fail('invalid', 'error log inventory truncated')
+    return logs
+
+
+def rollout_logs(cloud, project, region, revision, start):
+    cutoff = datetime.fromisoformat(start.replace('Z', '+00:00')) + timedelta(seconds=WINDOW_SECONDS)
+    recovery_end = (cutoff + timedelta(seconds=ID_TOKEN_RETRY_SECONDS)).isoformat().replace('+00:00', 'Z')
+    scope = (f'resource.type="cloud_run_revision" AND resource.labels.service_name="pi-orb-issuer" '
+             f'AND resource.labels.location="{region}" AND resource.labels.revision_name="{revision}" '
+             f'AND timestamp>="{start}"')
+    # NOT also matches application logs with no HTTP status; != would drop them.
+    logs = read_logs(cloud, project, scope +
+                     f' AND ((httpRequest.status=429 AND timestamp<="{cutoff.isoformat().replace("+00:00", "Z")}") OR '
+                     '((NOT httpRequest.status=429) AND '
+                     '(severity>=ERROR OR httpRequest.status>=500 OR textPayload:"lifecycle:")))')
+    if logs.error:
+        return logs
+    traces = sorted({attempt[0] for row in logs.value
+                     if row.get('httpRequest', {}).get('status') == 429 and
+                     (attempt := id_token_attempt(row, project, region, revision))})
+    successes = []
+    # Keep each query below Logging's 20,000-character filter limit.
+    for offset in range(0, len(traces), 100):
+        matches = ' OR '.join(f'trace="{trace}"' for trace in traces[offset:offset + 100])
+        completed = read_logs(cloud, project, scope + f' AND timestamp<="{recovery_end}" '
+                              f'AND logName="projects/{project}/logs/run.googleapis.com%2Frequests" '
+                              f'AND httpRequest.requestMethod="POST" AND httpRequest.status=200 AND ({matches})')
+        if completed.error:
+            return completed
+        successes.extend(completed.value)
+    return Result({'counts': log_counts(logs.value, successes, project, region, revision),
+                   'lifecycle': lifecycle_counts(logs.value)})
 
 
 def lifecycle_counts(rows):
@@ -210,16 +301,9 @@ def sample(cloud, record, start):
     baseline = record.get('_monitorBaseline', {})
     if baseline and baseline.get('ownerUserId') != fleet.value['ownerUserId']:
         return fail('conflict', 'monitor owner differs from preflight')
-    logs = cloud.json(['logging', 'read',
-        f'resource.type="cloud_run_revision" AND resource.labels.service_name="pi-orb-issuer" AND resource.labels.location="{record["region"]}" AND resource.labels.revision_name="{selected.value["revision"]}" AND timestamp>="{start}" AND (severity>=ERROR OR httpRequest.status>=500 OR httpRequest.status=429 OR textPayload:"lifecycle:")',
-        '--project', record['project'], '--limit=1000'])
+    logs = rollout_logs(cloud, record['project'], record['region'], selected.value['revision'], start)
     if logs.error:
         return logs
-    if (not isinstance(logs.value, list) or len(logs.value) >= 1000 or
-            any(not isinstance(row, dict) or
-                not isinstance(row.get('jsonPayload', {}), dict) or
-                not isinstance(row.get('httpRequest', {}), dict) for row in logs.value)):
-        return fail('invalid', 'error log inventory truncated')
     ended = datetime.now(timezone.utc)
     # Leave the documented 180-second ingestion allowance; absence is never zero.
     metric_start = (ended - timedelta(seconds=1080)).isoformat().replace('+00:00', 'Z')
@@ -240,8 +324,8 @@ def sample(cloud, record, start):
             return coverage
         metrics[label] = coverage.value
     return Result({'health': 'ok', 'placement': selected.value, 'sqlState': 'RUNNABLE',
-                   'fleet': fleet.value, 'logs': log_counts(logs.value),
-                   'lifecycle': lifecycle_counts(logs.value), 'metrics': metrics})
+                   'fleet': fleet.value, 'logs': logs.value['counts'],
+                   'lifecycle': logs.value['lifecycle'], 'metrics': metrics})
 
 
 def observe(record, output, cloud=None, clock=time.monotonic, sleep=time.sleep):
@@ -256,13 +340,17 @@ def observe(record, output, cloud=None, clock=time.monotonic, sleep=time.sleep):
         return saved
     failed, regression = False, False
     while True:
+        final_sample = clock() - began >= WINDOW_SECONDS + ID_TOKEN_RETRY_SECONDS + METRIC_LAG_SECONDS
         captured = sample(cloud, record, evidence['startedAt'])
+        if captured.error is None and any(
+                entry.get('logs', {}).get('http429', 0) > captured.value.get('logs', {}).get('http429', 0)
+                for entry in evidence['samples']):
+            captured = fail('invalid', 'cumulative throttle log inventory decreased')
         failed = failed or captured.error is not None
         if captured.error is None:
             observed = captured.value
             regression = regression or observed.get('logs', {}).get('http5xx', 0) > 0 or (
-                observed.get('logs', {}).get('errors', 0) > 0) or (
-                observed.get('logs', {}).get('http429', 0) > 0) or any(
+                observed.get('logs', {}).get('errors', 0) > 0) or any(
                 observed.get('lifecycle', {}).get(code, 0) > 0 for code in (
                     'history_integrity', 'drain-integrity', 'drain-restart-cap',
                     'central-agent-unavailable', 'central-delivery-blocked',
@@ -271,13 +359,15 @@ def observe(record, output, cloud=None, clock=time.monotonic, sleep=time.sleep):
                                     'message': captured.error.message}
                                    if captured.error else {'at': now(), 'outcome': 'observed', **captured.value})
         evidence['durationSeconds'] = int(clock() - began)
-        if evidence['durationSeconds'] >= WINDOW_SECONDS + METRIC_LAG_SECONDS:
+        if final_sample:
+            if captured.error is None:
+                regression = regression or captured.value.get('logs', {}).get('http429Unrecovered', 0) > 0
             evidence['finishedAt'] = now()
             evidence['outcome'] = 'incomplete' if failed else 'regression' if regression else 'observed'
         saved = save(output, evidence)
         if saved.error:
             return saved
-        if evidence['durationSeconds'] >= WINDOW_SECONDS + METRIC_LAG_SECONDS:
+        if final_sample:
             if failed or regression:
                 return fail('http' if failed else 'conflict', 'rollout observation requires review')
             return Result(evidence)

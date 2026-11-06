@@ -312,6 +312,8 @@ and mid-body timeout is distinguished from malformed JSON. The original rational
 transport remains valid; carving the budget into independent short attempts was the rejected part.
 Evidence and deterministic/real-tool reproduction: `docs/postmortems/2026-09-08-identity-cold-start.md`.
 
+**Retry correlation (decided 2026-11-06, PST; not deployed):** one HTTP endpoint is constructed per CLI invocation. It generates an ephemeral random 128-bit trace, shared only by that invocation's retries, and distinct unsigned 64-bit attempt spans in `X-Cloud-Trace-Context: TRACE_ID/SPAN_ID;o=0`. No caller argument or environment variable selects the trace. Generation failures return typed `internal`; credentials and request bodies are unchanged. Native Cloud Run request logs provide HTTP status correlation without application telemetry or persisted identity state. The rollout monitor can classify same-invocation 429 → 200 as recovered; unrelated successes cannot recover it. HTTP 200 is server completion, not proof the CLI consumed a valid token. Provider contract and conservative fallback: `docs/deployment.md`.
+
 `PI_ORB_ID_TOKEN_DIAGNOSTICS=1` emits an opt-in token-free JSON event allowlist on stderr:
 attempt number, elapsed and remaining milliseconds, result kind, retry hint, selected wait, and
 budget exhaustion. It never includes audience, bearer, token or arbitrary error text. Successful
