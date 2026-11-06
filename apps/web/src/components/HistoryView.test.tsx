@@ -1576,7 +1576,7 @@ describe("orb correspondence", () => {
     inboxMessageIds: [pending.id],
   };
 
-  it.each([false, true])("renders full literal correspondence once, pending=%s", (queued) => {
+  it.each([false, true])("discloses literal notifications once, pending=%s", (queued) => {
     const html = renderToStaticMarkup(
       <HistoryView
         {...idle}
@@ -1593,7 +1593,11 @@ describe("orb correspondence", () => {
         senderNames={new Map([[senderId, "runtime handshake"]])}
       />,
     );
-    expect(html.match(/class="rec rec-peer(?: rec-q)?"/g)).toHaveLength(1);
+    expect(
+      html.match(/class="activity-rail-row activity-rail-row-neutral peer-notice"/g),
+    ).toHaveLength(1);
+    expect(html).toContain('class="activity-rail-label">notification</span>');
+    expect(html).not.toMatch(/<details[^>]* open=/);
     expect(html).toContain(`href="/orbs/${senderId}">runtime handshake</a>`);
     expect(html).toContain(
       "&lt;script&gt;bad()&lt;/script&gt;\n&lt;img src=x onerror=&quot;bad()&quot;&gt; &amp; &quot;quotes&quot;\n**literal**\n" +
@@ -1601,15 +1605,40 @@ describe("orb correspondence", () => {
         "\nsecond",
     );
     expect(html).not.toMatch(/<script>|<img|<strong>literal<\/strong>|rec-you/);
-    const band = html.match(/<article class="rec rec-peer[^"]*"[^>]*>([\s\S]*?)<\/article>/)?.[1];
+    const band = html.match(/<details class="[^"]*peer-notice"[^>]*>([\s\S]*?)<\/details>/)?.[1];
     expect(band).toBeDefined();
     expect(band).not.toContain("chat-markdown");
     if (!queued) {
-      expect(html.match(/class="rec rec-orb"/g)).toHaveLength(2);
+      expect(html.match(/class="rec rec-orb"/g)).toHaveLength(1);
       expect(html.indexOf("before")).toBeLessThan(html.indexOf("peer-body"));
       expect(html.indexOf("peer-body")).toBeLessThan(html.indexOf("after"));
       expect(html).not.toMatch(/rec-q|rec-status/);
     }
+  });
+
+  it("folds peer receipts and adjacent committed/live tools into one maximal run", () => {
+    const tool = (id: string): MessageRecord => ({
+      ...message(id, "assistant", ""),
+      content: [{ type: "tool_call", callId: id, name: "bash", arguments: { command: "pwd" } }],
+    });
+    const html = renderToStaticMarkup(
+      <HistoryView
+        {...idle}
+        records={[tool("before"), receipt, tool("after")]}
+        tools={[{ callId: "live", name: "bash", state: "running", message: null }]}
+        senderNames={new Map([[senderId, "runtime handshake"]])}
+      />,
+    );
+    expect(html.match(/class="rec rec-orb"/g)).toHaveLength(1);
+    expect(html.match(/class="[^"]* activity-strip"/g)).toHaveLength(1);
+    expect([...html.matchAll(/data-step="(\w+)"/g)].map((match) => match[1])).toEqual([
+      "running",
+      "notification",
+      "running",
+      "running",
+    ]);
+    expect(html).toContain('aria-label="notification · runtime handshake"');
+    expect(html).not.toContain("snapshot-");
   });
 
   it("requires trusted provenance, not human text, correlation or another event type", () => {
@@ -1626,7 +1655,7 @@ describe("orb correspondence", () => {
       />,
     );
     expect(html).toContain('class="rec rec-you"');
-    expect(html).not.toMatch(/rec-peer|href="\/orbs\//);
+    expect(html).not.toMatch(/peer-notice|href="\/orbs\//);
   });
 
   it.each([
@@ -1652,7 +1681,11 @@ describe("orb correspondence", () => {
     expect(html).toContain(`class="rec-status">${label}</span>`);
     expect(html).toContain(`href="/orbs/${senderId}">runtime handshake</a>`);
     expect(html).toContain("peer-body");
-    if (status === "failed") expect(html.match(/Rejected &lt;token&gt;/g)).toHaveLength(1);
+    expect(html).toContain('class="activity-rail-label">notification</span>');
+    if (status === "failed") {
+      expect(html.match(/>Rejected &lt;token&gt;</g)).toHaveLength(1);
+      expect(html).toContain("activity-rail-row-failed peer-notice");
+    }
   });
 
   it.each(["renamed <sender>", null, "", undefined])(

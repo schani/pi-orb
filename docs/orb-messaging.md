@@ -4,7 +4,11 @@
 
 ## Decisions (2026-10-14, America/Los_Angeles)
 
-Peer messages are non-human agent input, independent of spawn ancestry; alerts address the issuing orb's user, never its parent. **Selected: Correspondence band**, full literal text and linked sender on gray paper, distinct from black human input and white receiving replies. The approved [hosted HTML study](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/8d9db27e-ba25-44c6-b48e-25edf2b2bc43/cross-orb-messages/index.html) retains rejected **Peer rail** (collapsed disclosure hides the body) and **White ruled dispatch** (less background distinction from replies).
+Peer messages are non-human agent input, independent of spawn ancestry; alerts address the issuing orb's user, never its parent.
+
+**Presentation (decided 2026-11-06, America/Los_Angeles):** peer input is a normal notification activity step. It interleaves and folds with adjacent reasoning, tools and subagent notices; expanding reveals full literal text and a linked sender. Pending notifications retain delivery status and red failure state, with full wrapping diagnostics available on expansion. Authoritative provenance, current-name enrichment and inbox/history correlation are unchanged; no persisted-state, protocol or prompt changes.
+
+The [2026-10-14 HTML study](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/8d9db27e-ba25-44c6-b48e-25edf2b2bc43/cross-orb-messages/index.html) selected the gray **Correspondence band** for source distinction, rejecting **Peer rail** because it hid bodies and **White ruled dispatch** for weaker distinction from replies. The 2026-11-06 decision prioritizes folding long peer messages into ordinary activity over always-visible bodies, superseding that presentation choice.
 
 **Wake:** reuse message-driven wake for stopped/sleeping targets, including manually stopped targets when send follows Stop. Admission cancels scheduled sleep and clears existing inhibition; Stop after send cancels wake authority, not queued content. Sends during stopping wait for drain. Eligible failed targets retain the existing state-version-fenced one-attempt wake rule (`docs/lifecycle.md`). Rejected: queue-only or rejection solely because stopped/sleeping.
 
@@ -52,6 +56,6 @@ The inspected orb had a separate four-hour stall after `model_error`: one Native
 
 ## Presentation and observability
 
-Tool responses identify target/inbox record or typed rejection/unknown acceptance. Pending/history bands retain sender/body and visible durable errors (`docs/web-ui.md`). One content-free `lifecycle: orb=<target> message-accepted sender=<sender> message=<message-id>` edge correlates each new acceptance; retries emit none. Existing wake/delivery/failure edges, native history and inbox status/errors explain subsequent outcomes without logging message text.
+Tool responses identify target/inbox record or typed rejection/unknown acceptance. Pending/history notifications retain sender/body and inspectable durable errors (`docs/web-ui.md`). One content-free `lifecycle: orb=<target> message-accepted sender=<sender> message=<message-id>` edge correlates each new acceptance; retries emit none. Existing wake/delivery/failure edges, native history and inbox status/errors explain subsequent outcomes without logging message text.
 
 Busy peer acceptance reports `delivery:steer` with the current operation ID; native history and replicated singleton receipts expose consumption. A receipt captured before rejected native admission is not duplicate acceptance: first successful submission returns `duplicate:false`, then exact retries deduplicate. Sleep rejection remains retryable; `central-delivery-blocked` records the content-free deferral edge and pending inbox rows remain visible.

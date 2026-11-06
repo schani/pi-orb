@@ -1,5 +1,28 @@
 # Testing
 
+## Orb messages as notification activity (2026-11-06, America/Los_Angeles; local, undeployed)
+
+Before rebasing onto the Terraform Google-provider update, fresh-install qualification passed 1,051 web tests/120 files, three Chromium activity-strip cases, root/workspace/E2E typecheck, root lint (warnings/infos only) and web production build (chunk-size warning). The broad web suite and build were not repeated after rebase; npm dependencies were unchanged. No DST failure or trace.
+
+After rebase onto `2f424624`, fresh `npm ci` passed (zero vulnerabilities; three lifecycle scripts blocked by existing policy). All repeated checks passed without new failures:
+
+- `npx vitest run apps/web/src/components/HistoryView.test.tsx apps/web/src/components/ActivityStrip.test.tsx apps/web/src/styles.contract.test.ts apps/web/src/lib/queued-messages.test.ts`: 134 tests/4 files.
+- `npx vitest run --config e2e/vitest.config.ts e2e/activity-strip-frontend.e2e.test.ts`: three Chromium cases, including peer/pending failures at 1280px and 320px.
+- `npm run typecheck`: all workspaces and E2E.
+- `npm run lint`: zero errors, 521 warnings/100 infos.
+- `git diff --check`: clean.
+
+Canonical first-failure evidence (local logs are disposable):
+
+- Tests-first unit/style run: 12 failed/105 passed. Two CSS contracts reported `missing CSS rule .rec-you, .rec-alert`; two notification disclosures reported `Target cannot be null or undefined`; maximal-run grouping expected one `rec-orb`, received two; seven attribution cases lacked the notification label. Peer receipts now join agent turns as ordinary notification steps; contracts reflect the new layout.
+- Initial Chromium grouping run: 2 failed/1 skipped, at 1280px and 320px. `locator('.activity-strip')`: `Expected: 1`, `Received: 0`. Peer receipts had split turns; grouping fixes this.
+- Next Chromium run: 2 failed/1 passed. `.activity-strip-dot`: `Expected: 3`, `Received: 2`. Synthetic tool results had null parents and were correctly unpaired; the fixture now supplies causal ancestry, retaining the three-step assertion.
+- Next Chromium run: 2 failed/1 passed. Desktop `.peer-body`: `Expected: visible`, `Received: hidden`; the test clicked a remembered-open disclosure closed. It now asserts open state and explicitly closes/reopens. Phone: `locator.click: Timeout 30000ms exceeded`, with `.peer-sender` from `.activity-rail-metric` reporting `intercepts pointer events`. The first bounded-layout attempt still failed at 320px (1 failed/2 passed): an equally specific later generic rule overrode it. Peer rules now follow generic styles; sender metrics truncate without shrinking status. Browser assertions cover unclipped labels, disjoint bounds and no overflow for UUIDs and long names.
+- Subsequent unit run: 1 failed/116 passed; escaped error text expected once, received twice because the title attribute repeated visible text. The oracle counts visible text. Expanded diagnostics expose complete escaped wrapping text without duplicating the preview.
+- Draft browser syntax failed before tests: `[PARSE_ERROR] Expected a semicolon or an implicit semicolon after a statement, but found none`; removed the extra closing parenthesis. E2E typecheck reported `TS2304: Cannot find name 'innerWidth'`; callbacks now use typed `ownerDocument/defaultView` rather than unavailable DOM globals.
+
+The existing provider full-slice assertion now checks notification disclosure rather than gray-band presentation; it was not run locally. No runtime/protocol/harness code changed; full runtime E2E, deployment and merge are not claimed.
+
 ## Pi 1.5 integration (2026-11-05, PST; local, undeployed)
 
 Question 89 in `docs/open-questions.md` approves native lazy record upgrades/recovery and memory-first progress. Seven registry artifacts were integrity-verified; comparison of 3,767 published files finds exactly the 15 sealed deviations across three patches/39 hunks. Native progress/recovery, declaration rendering and removed conveniences remain pristine. A fresh `npm ci` passes with zero audit findings. Chord's exact optional WebSocket peer initially caused deterministic ERESOLVE; the scoped newer-peer override resolves it without downgrade or legacy-peer installation (`docs/stack.md`).
