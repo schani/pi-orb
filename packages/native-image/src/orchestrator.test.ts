@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { errAsync, okAsync, type ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import {
@@ -119,6 +120,27 @@ class FakeEffects implements ImageBuildEffects {
 }
 
 describe("native image build orchestration", () => {
+  it("records the release's exact security base and resolved package inventory", async () => {
+    const release = await readFile(
+      new URL("../../../infra/build-push.sh", import.meta.url),
+      "utf8",
+    );
+    const baseImage = release.match(/BASE_IMAGE=\$\{BASE_IMAGE:-([^}]+)\}/)?.[1];
+    expect(baseImage).toBe("projects/debian-cloud/global/images/debian-12-bookworm-v20261027");
+    const effects = new FakeEffects();
+    const result = await buildNativeImage(
+      { ...input(), baseImage: baseImage ?? "" },
+      effects,
+      effects.controller.signal,
+    );
+    expect(result.isOk()).toBe(true);
+    expect(effects.manifest).toMatchObject({
+      baseImageResource: baseImage,
+      baseImageId: "9876",
+      packageInventory: "curl\t1.0\n",
+    });
+  });
+
   it("rejects moving base-image references and invalid versions before effects", () => {
     expect(validateImageBuildInput({ ...input(), baseImage: "debian-12" }).isErr()).toBe(true);
     expect(validateImageBuildInput({ ...input(), version: "Latest" }).isErr()).toBe(true);

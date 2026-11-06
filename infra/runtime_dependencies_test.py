@@ -75,6 +75,28 @@ class RuntimeDependenciesTests(unittest.TestCase):
             'esbuild@0.28.2': True,
         })
 
+    def test_native_security_baseline_and_acceptance_are_pinned(self):
+        native = (ROOT / 'infra/native-vm/install.sh').read_text()
+        acceptance = (ROOT / 'infra/native-vm/acceptance.sh').read_text()
+        expected = {
+            'docker-ce': '5:29.9.3-1~debian.12~bookworm',
+            'docker-ce-cli': '5:29.9.3-1~debian.12~bookworm',
+            'containerd.io': '2.4.2-3~debian.12~bookworm',
+            'google-guest-agent': '1:20261021.00-g1',
+        }
+        for package, version in expected.items():
+            with self.subTest(package=package):
+                self.assertIn(f'{package}={version}', native)
+                self.assertIn(f"dpkg-query -W -f='${{Version}}' {package}", acceptance)
+                self.assertIn(version, acceptance)
+        self.assertIn('apt-get upgrade -y --with-new-pkgs --no-install-recommends', native)
+        self.assertIn('dockerd --validate --config-file=/etc/docker/daemon.json', native)
+        self.assertIn('containerd --config /etc/containerd/config.toml config dump', native)
+        self.assertIn("dpkg-query -W -f='${Package}\\t${Version}\\t${Installed-Size}\\n'", native)
+        for name in ['infra/build-push.sh', 'infra/native-vm/README.md']:
+            self.assertIn('projects/debian-cloud/global/images/debian-12-bookworm-v20261027',
+                          (ROOT / name).read_text())
+
     def test_native_node_archive_is_checksum_verified_before_extraction(self):
         source = (ROOT / 'infra/native-vm/install.sh').read_text()
         download = ('curl -fsSL https://nodejs.org/dist/v26.13.0/'

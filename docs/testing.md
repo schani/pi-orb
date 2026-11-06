@@ -2623,3 +2623,93 @@ Integration ancestor `35ba0ae5` passed 143 targeted E2E unit tests and 54 focuse
 scheduler/replay/timer checks, workspace/E2E typecheck, lint and resource audit.
 Reviewed receipts remain unchanged in the qualification directory's `integration260/`.
 The historical 6,086-test full pass predates this cleanup; full new-head CI is pending.
+
+## Native security baseline (2026-11-05, PST; local, undeployed)
+
+Prepared on `c181b7981df6dd20da5c2813b523cf3c0789d273`, without commits.
+The historical four-file source archive was allowlisted before extraction;
+23,424 bytes, SHA-256
+`a14c50f667f77f0abccae1fc1b948a1b1fe2e5e74de4201a121b10863269cb6b`.
+Its bundle contains only `d88e8f41` and `bef49842` above public prerequisite
+`7c25f138`; only needed native deltas were adapted to current main.
+Q87 approval lifts the preparation/qualification hold, not deployment.
+
+Tests preceded implementation. The new pin contract failed on all four old
+packages and absent refresh; manifest and host-key tests rejected the old base
+and guest version. Evidence root: `.context/native-platform-security/`;
+`pins-first-failure.log` and `native-first-failure.log` preserve those failures.
+The first focused lint failure was a new test's line wrapping
+(`focused-lint.log`); corrected without behavior changes.
+
+After `npm ci` (zero audit findings), these commands passed:
+
+- `npx vitest run packages/native-image`: 209 cases / 19 files, including DST;
+  `native-suite.log`. No new DST failure or replay.
+- `npm run test:infra`: 156 Node, 262 Python and 34 native guest cases,
+  plus real filesystem check; `test-infra.log`.
+- `npm run typecheck --workspace @pi-orb/native-image`: `native-typecheck.log`.
+- Focused Biome checks, shell syntax and `git diff --check`.
+
+Public Docker/Google InRelease signatures, signed index digests, exact package
+versions and downloaded `.deb` sizes/SHA-256 were verified under `apt/`
+(`*-signature.log`, `availability.log`, signed metadata and package records).
+Docker's Bookworm amd64 index has no containerd 2.3.7 LTS. No substitute was used.
+Native `pg_textsearch` source/version 1.3.1, existing PGlite extension payload,
+npm manifests/lockfile, Pi, Node, npm, rustup, gcloud and providers are unchanged.
+
+**First fresh image failed before validation.** Operation `28c3734e36034ee6`,
+version `q87-native-a8f46d2c`, installed all four exact targets (554-package
+inventory), sealed successfully and captured workspace image
+`3999812297424932290` READY against base `1253207937433879378`.
+Successful runtime-image create returned owned ID `5764779311865302407`
+PENDING; the READY-only success parser rejected it as `invalid image response shape`.
+Why Google returned PENDING is unproven. No validator ran or accepted manifest
+was emitted. Exact and operation-filtered checks confirm all resources and the
+operation key absent. [Failure receipt](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/55be2793-d9e4-48c3-8574-6a2f84ddf39e/evidence/q87/native-image-first-failure.md);
+private first evidence: `fresh-image-a8f46d2c/056-capture-gcloud.log`.
+The source archive SHA-256 remains
+`bddb07306d038004e6269a044bd68518fc8f4a60ea55187b3de3c32da0668c14`;
+all 390 uploaded files matched at final comparison. This operation does not
+qualify subsequent tooling changes.
+
+**Capture prerequisite (awaiting Sol round 2).** The minimal fix reuses existing
+12-read/60-second recovery for validated PENDING success, fencing the create ID
+before the first describe and accepting only READY. Tests-first RED is retained
+in `capture-pending-first-failure.log`. Focused 60 cases and full native suite
+226 cases / 19 files (including DST), native typecheck, scoped lint and diff
+checks pass (`capture-pending-*.log`); no new failure or DST replay.
+No second live operation has run; fresh exact-source image qualification follows
+round-2 approval. Cause, cleanup and limits:
+`docs/postmortems/2026-11-05-native-capture-pending.md`.
+
+**Retained daemon stores PASS: 164 exact assertions.** The final corrected
+private-root fixture opened actual Docker 29.1.3/containerd.io 2.3.4-2 stores
+under 29.9.3/2.4.2-3 using the containerd overlayfs snapshotter. Image/container
+identities, complete configuration, volume/network metadata and all image,
+writable-layer, volume and workspace sentinels survived pair replacement and
+new-pair restart. Stopped containers stayed stopped; the previously running
+always-policy container restarted automatically. Both saved config files were
+naturally rewritten, including stopped containers' ExtraHosts trimming; no
+saved config was edited manually. The only additional allowed HostConfig
+transition was exact `Dns: null → []`, reproduced old→old and traced to the
+shared upstream `InitDNSHostConfig` path. All other fields remained equal.
+
+Preserved fixture failures: pre-readiness SSH 4003; missing extracted libnftables
+(resolved by private library extraction before daemon startup); strict DNS
+assumption; empty-IPRange inspect serialization. The final explicit nonempty
+IPRange fixture retains full network equality. Guest roots, processes, cgroups,
+mounts, sockets and operation key were cleaned; exact-fenced VM
+`1147808958950444971` and disk `6684345038438174635` returned GET 404 after deletion.
+[Retained-store receipt](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/55be2793-d9e4-48c3-8574-6a2f84ddf39e/evidence/q87/native-retained-store.md),
+local `.context/native-store-qualification/summary.md`.
+This is not VM reboot/stop-start, full-image replacement, default networking,
+E2E or rollback qualification. Exact-source normal CI/full-suite/PostgreSQL/E2E
+and fresh image acceptance remain unestablished (`TODO.md`); no deployment.
+
+Historical archive receipts do not qualify this checkout: combined `0f8414e8`
+(including a separate rustup update) had fresh acceptance and reported owned
+cleanup, but no old store was opened. Its full `npm test` was tool-cancelled at
+300s without a complete result; original `npm-test-first.log` and
+`npm-test-first.plain.log` were referenced under
+`.context/native-security-baseline/`, not included in the source-only archive.
+No passing rerun or cause/fix is claimed for that incomplete run.
