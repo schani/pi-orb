@@ -2495,6 +2495,36 @@ pre,
   border-top: 0;
 }
 
+.mcp-health-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+.project-mcp-connection .activity-rail-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
+}
+.mcp-health {
+  color: var(--g3);
+}
+.mcp-health-available {
+  color: var(--ok);
+}
+.mcp-health-unavailable,
+.mcp-health-needs-auth {
+  color: var(--bad);
+}
+.project-mcp-connection > summary:focus-visible .mcp-health {
+  color: inherit;
+}
+@media (max-width: 600px) {
+  .mcp-health-toolbar .icon-button {
+    width: 48px;
+    height: 48px;
+  }
+}
+
 /* MCP forms share the chat disclosure, with form gutters and an inverted focus row. */
 .project-mcp-connection .reasoning-body {
   padding-top: 4px;
