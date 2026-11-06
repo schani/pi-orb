@@ -8,7 +8,9 @@
     "build": "node --experimental-strip-types src/cli.ts"
   },
   "dependencies": {
-    "determined": "^0.4.1",
     "neverthrow": "^8.2.0"
+  },
+  "devDependencies": {
+    "determined": "^0.4.1"
   }
 }
