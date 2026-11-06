@@ -78,7 +78,7 @@ test("recurring firewall authority excludes the foundation build firewall", () =
   assert.doesNotMatch(block, /compute\.googleapis\.com\/(Network|Subnetwork|Address)/);
 });
 
-test("foundation plan reader grants exactly seven project reads to only the deployer", () => {
+test("foundation plan reader grants exactly ten project reads to only the deployer", () => {
   const role = iam.match(
     /resource "google_project_iam_custom_role" "deployer_foundation_plan_reader" \{[\s\S]*?\n\}/,
   )?.[0];
@@ -89,10 +89,13 @@ test("foundation plan reader grants exactly seven project reads to only the depl
   const permissions = role.match(/permissions\s*= \[([\s\S]*?)\]/)?.[1];
   assert(permissions);
   assert.deepEqual([...permissions.matchAll(/"([^"]+)"/g)].map((match) => match[1]).sort(), [
+    "artifactregistry.repositories.getIamPolicy",
     "iam.roles.get",
     "iam.serviceAccounts.get",
     "iam.serviceAccounts.getIamPolicy",
+    "iam.workloadIdentityPoolProviders.get",
     "iam.workloadIdentityPools.get",
+    "iam.workloadIdentityPools.getAttestationRules",
     "resourcemanager.projects.getIamPolicy",
     "servicenetworking.services.get",
     "storage.buckets.getIamPolicy",

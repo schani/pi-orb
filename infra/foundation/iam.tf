@@ -46,6 +46,9 @@ resource "google_project_iam_custom_role" "deployer_foundation_plan_reader" {
     "iam.roles.get",
     "servicenetworking.services.get",
     "resourcemanager.projects.getIamPolicy",
+    "iam.workloadIdentityPools.getAttestationRules",
+    "artifactregistry.repositories.getIamPolicy",
+    "iam.workloadIdentityPoolProviders.get",
   ]
 }
 

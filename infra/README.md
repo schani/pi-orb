@@ -338,5 +338,5 @@ policies, generic OIDC verification rules — is
 
 [Q87](../docs/open-questions.md#dependency-update-state-conversions--87) approves upstream conversions: application **7.21.0 → 8.10.0**, foundation **6.50.0 → 8.10.0**; no provider-8 apply or deployment.
 Application refreshed planning passed; foundation qualification remains **incomplete**, blocked by read denials.
-The [approved read grant](foundation/README.md#foundation-plan-read-authority-approved-2026-11-05-pst) is pending; full fresh foundation qualification must follow it.
+The [approved read extension](foundation/README.md#foundation-plan-read-authority-approved-2026-11-05-pst) is pending; full fresh foundation qualification must follow it.
 [Sanitized receipt](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/a96a1275-06be-4cda-8451-a9b2b8d4495d/evidence/q87-google/provider-qualification.md) retains native provider conversion/plan evidence; source and mock contracts do not prove conversions.

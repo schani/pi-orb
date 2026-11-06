@@ -124,9 +124,9 @@ receive the updated shared IAM grant; they do not need new personal credentials.
 
 ### Foundation-plan read authority (approved 2026-11-05, PST)
 
-Pending: project role `piOrbFoundationPlanReader` in `playground-dev-6ae7`, one additive member for `pi-orb-amp-deployer`; existing grants/conditions unchanged.
-Exactly seven reads: `iam.workloadIdentityPools.get`, `storage.buckets.getIamPolicy`, `iam.serviceAccounts.get`, `iam.serviceAccounts.getIamPolicy`, `iam.roles.get`, `servicenetworking.services.get`, `resourcemanager.projects.getIamPolicy`.
-Grant-only source: `c181b798` plus these two resources, provider **6.50.0**, standard backend lock; reviewed saved plan must contain exactly **two managed creates**, no other managed actions, before explicit apply approval.
+Project role `piOrbFoundationPlanReader` in `playground-dev-6ae7` and its sole `pi-orb-amp-deployer` binding are applied with seven reads; the extension to ten was approved 2026-11-06, PST, and awaits grant. Existing grants/conditions remain unchanged.
+Ten approved reads: `iam.workloadIdentityPools.get`, `storage.buckets.getIamPolicy`, `iam.serviceAccounts.get`, `iam.serviceAccounts.getIamPolicy`, `iam.roles.get`, `servicenetworking.services.get`, `resourcemanager.projects.getIamPolicy`, `iam.workloadIdentityPools.getAttestationRules`, `artifactregistry.repositories.getIamPolicy`, `iam.workloadIdentityPoolProviders.get`.
+Grant-only extension: provider **6.50.0**, standard backend lock; the reviewed saved plan must contain exactly **one managed role update**, no other managed actions, before explicit apply approval.
 Afterwards, full fresh **8.10.0** refreshed qualification using copied state/local backend is required; [read-denial evidence](../README.md#google-provider-8100-qualification-2026-11-05-pst) remains unresolved.
 
 ### Release logging-exclusion authority (2026-09-11; applied and federation-verified)
