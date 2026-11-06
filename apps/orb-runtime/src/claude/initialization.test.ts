@@ -291,7 +291,7 @@ it.each(failures)(
   },
 );
 
-it("labels visible OAuth bridge failures and recovery without changing sanitized guidance", async () => {
+it("labels bridge failures and recovery while preserving sanitized guidance", async () => {
   let onState: mcpModule.ClaudeMcpDeps["onState"];
   vi.spyOn(mcpModule, "createClaudeMcp").mockImplementation((deps) => {
     onState = deps.onState;
@@ -301,49 +301,29 @@ it("labels visible OAuth bridge failures and recovery without changing sanitized
   expect((await f.attach()).isOk()).toBe(true);
   expect(onState).toBeDefined();
   const report = createMcpStateReporter(onState);
-  report("datadog", "failed", "MCP datadog unavailable; check project MCP settings", {
-    code: "network",
-  });
-  report(
-    "datadog",
-    "needs-auth",
-    "MCP datadog authorization required; reconnect in project MCP settings",
-    { code: "auth_required" },
-  );
+  report("datadog", "failed", "check project MCP settings", { code: "network" });
+  report("datadog", "needs-auth", "reconnect in project MCP settings", { code: "auth_required" });
   report("datadog", "connected");
-  const events = f.history.view.filter(
-    (record) => record.type === "event" && record.eventType === "claude.mcp",
+  const events = f.history.view.flatMap((record) =>
+    record.type === "event" && record.eventType === "claude.mcp" ? [record] : [],
   );
-  expect(events).toMatchObject([
-    {
-      content: [
-        { type: "text", text: "OAuth bridge: MCP datadog unavailable; check project MCP settings" },
-      ],
-      custom: { display: true },
-      overflow: { state: "failed", code: "network", source: "sdk", observation: "bridge" },
-    },
-    {
-      content: [
-        {
-          type: "text",
-          text: "OAuth bridge: MCP datadog authorization required; reconnect in project MCP settings",
-        },
-      ],
-      custom: { display: true },
-      overflow: {
-        state: "needs-auth",
-        code: "auth_required",
-        source: "sdk",
-        observation: "bridge",
-      },
-    },
-    {
-      content: [{ type: "text", text: "OAuth bridge: MCP datadog: connected" }],
-      custom: { display: true },
-      overflow: { state: "connected", source: "sdk", observation: "bridge" },
-    },
+  expect(events.map((event) => event.content)).toEqual([
+    [{ type: "text", text: "OAuth bridge: check project MCP settings" }],
+    [{ type: "text", text: "OAuth bridge: reconnect in project MCP settings" }],
+    [{ type: "text", text: "OAuth bridge: MCP datadog: connected" }],
   ]);
-  expect(events).toHaveLength(3);
+  expect(events.map((event) => event.overflow)).toEqual([
+    { server: "datadog", state: "failed", code: "network", source: "sdk", observation: "bridge" },
+    {
+      server: "datadog",
+      state: "needs-auth",
+      code: "auth_required",
+      source: "sdk",
+      observation: "bridge",
+    },
+    { server: "datadog", state: "connected", source: "sdk", observation: "bridge" },
+  ]);
+  expect(events.every((event) => event.custom?.display === true)).toBe(true);
   await f.agent.closeExtensions();
 });
 

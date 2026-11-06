@@ -1,5 +1,11 @@
 import type { SDKSystemMessage } from "@anthropic-ai/claude-agent-sdk";
-import { createMcpStateReporter, type OrbMcpState } from "../mcp/transport.ts";
+import type { OrbMcpState } from "../mcp/transport.ts";
+
+export interface ClaudeMcpState extends OrbMcpState {
+  message: string;
+  source: string;
+  observation: "native";
+}
 
 const sources = new Set([
   "sdk",
@@ -14,32 +20,38 @@ const sources = new Set([
   "agent",
 ]);
 
-/** Per-turn native metadata is distinct from the OAuth bridge's upstream HTTP health. */
-export function createClaudeMcpStatusReporter(onState: (event: OrbMcpState) => void) {
-  const report = createMcpStateReporter(onState);
+/** Native metadata does not establish the OAuth bridge's upstream HTTP health. */
+export function createClaudeMcpStatusReporter(onState: (event: ClaudeMcpState) => void) {
+  const states = new Map<string, Pick<ClaudeMcpState, "state" | "source">>();
   return (servers: SDKSystemMessage["mcp_servers"]) => {
     for (const { name, status, source } of servers) {
       if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(name)) continue;
+      const state = status === "disabled" ? "disconnected" : status;
       if (
-        status !== "connected" &&
-        status !== "failed" &&
-        status !== "needs-auth" &&
-        status !== "disabled" &&
-        status !== "disconnected"
+        state !== "connected" &&
+        state !== "failed" &&
+        state !== "needs-auth" &&
+        state !== "disconnected"
       )
         continue;
       const safeSource = source !== undefined && sources.has(source) ? source : "unknown";
-      report(
-        name,
-        status === "disabled" ? "disconnected" : status,
-        `MCP ${name} (${safeSource}): native ${status}`,
-        status === "failed"
-          ? { code: "connection_failed" }
-          : status === "needs-auth"
-            ? { code: "auth_required" }
-            : undefined,
-        { source: safeSource, observation: "native" },
-      );
+      const previous = states.get(name);
+      if (previous?.state === state && previous.source === safeSource) continue;
+      states.set(name, { state, source: safeSource });
+      if (state === "connected" && (!previous || previous.state === "connected")) continue;
+      onState({
+        server: name,
+        state,
+        source: safeSource,
+        observation: "native",
+        message: `MCP ${name} (${safeSource}): native ${status}`,
+        diagnostic:
+          status === "failed"
+            ? { code: "connection_failed" }
+            : status === "needs-auth"
+              ? { code: "auth_required" }
+              : undefined,
+      });
     }
   };
 }

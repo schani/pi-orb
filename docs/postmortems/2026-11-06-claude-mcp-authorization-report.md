@@ -29,8 +29,8 @@ Inspected source: `apps/orb-runtime/src/claude/agent.ts`, `apps/orb-runtime/src/
 
 The SDK's `system/init` includes `mcp_servers` names, statuses and optional sources. Its public `mcpServerStatus()` exposes status/source/scope metadata. The runtime ignores init MCP status and never calls that method. Generic system-history mapping retains only native type/UUID, not MCP status details. Configured OAuth bridge transport diagnostics publish safe `claude.mcp` edges; ambient native repository HTTP connections do not traverse that bridge.
 
-Thus absent public tool errors cannot exclude a startup/discovery failure. Conversely, agent prose cannot establish one. The supported outcome is an observability gap, not a proved invalid grant, provider failure or name-collision defect. Actionable follow-up is tracked only in `TODO.md`.
+Thus absent public tool errors cannot exclude a startup/discovery failure. Conversely, agent prose cannot establish one. The supported outcome is an observability gap, not a proved invalid grant, provider failure or name-collision defect.
 
 ## Local candidate diagnostics
 
-The local candidate records bounded per-turn init status/source and independent native/OAuth bridge failure/recovery edges in root history; visible bridge events say `OAuth bridge:` and retain sanitized guidance. Disabled/disconnected repeats and recovery have regression coverage. This is not deployed and cannot reconstruct the historical native status, effective source or failure. Source/status rules and the SDK strict-config capability finding are in `docs/mcp.md`; configuration and prompts are unchanged. Local focused checks are not browser/E2E, provider or deployment qualification; the voluntarily cancelled broad unit run is partial evidence only.
+The local candidate adds sanitized per-turn native status/source and independent OAuth bridge edges in root history (`docs/mcp.md`). It is not deployed and cannot reconstruct historical status or precedence. Prompts/configuration are unchanged. Focused local checks are not E2E/provider/deployment qualification; the voluntarily cancelled broad unit run is partial evidence only.

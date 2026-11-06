@@ -14,8 +14,6 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- [x] **Capture Claude native MCP status/source** (2026-11-06; `docs/postmortems/2026-11-06-claude-mcp-authorization-report.md`). Implemented locally, not deployed: per-turn init failure/recovery edges include sanitized source and repository-configured servers; native and bridge channels coalesce independently. Focused tests cover durable root history, source changes, startup failures/recovery, pending stability and secret exclusion. Healthy startup stays silent; no status polling, prompt/config-precedence changes or new persisted state.
-
 - **Attribute Claude shutdown race 1f315657** (2026-11-04): capture and reproduce the initial-close/late-edge ordering before changing quiescence logic. See `docs/postmortems/2026-11-04-claude-query-rotation-1f315657.md`.
 - **Refresh native Docker/containerd security pins** (2026-11-03; `docs/dependency-audit.md`): Docker 29.9.3 and containerd 2.3.7 LTS targets, subject to Debian package availability; paired refresh held under the 2026-10-24 decision in [docs/deployment.md](docs/deployment.md), pending [question 87](docs/open-questions.md#dependency-update-state-conversions--87). Refresh base/guest-agent security inputs and qualify the native image; record installed versions, not source-only assumptions.
 

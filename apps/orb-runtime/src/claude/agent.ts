@@ -60,7 +60,6 @@ import type { HookEnvSource } from "../hooks/env-file.ts";
 import { BootHookRunner } from "../hooks/runner.ts";
 import { NodeHookSpawner } from "../hooks/spawner.ts";
 import { fetchMcpCatalog } from "../mcp/boot.ts";
-import type { OrbMcpState } from "../mcp/transport.ts";
 import { triggerOrbName } from "../naming/client.ts";
 import { readRootReadme } from "../naming/context.ts";
 import { fetchOwnerSkills } from "../owner-skills/endpoint.ts";
@@ -83,7 +82,7 @@ import { readExecutionIdentity } from "./execution-identity.ts";
 import { ClaudeHistory, type HistoryFiles, nativeHistoryFiles } from "./history.ts";
 import { FileIdleStopFence } from "./idle-stop-fence.ts";
 import { type ClaudeMcpRuntime, createClaudeMcp } from "./mcp.ts";
-import { createClaudeMcpStatusReporter } from "./mcp-status.ts";
+import { type ClaudeMcpState, createClaudeMcpStatusReporter } from "./mcp-status.ts";
 import {
   type ModelUsageReceiver,
   type ModelUsageReceiverError,
@@ -335,7 +334,7 @@ export class ClaudeOrbAgent implements OrbAgent {
   private mcpConfigs: readonly McpConfig[] = [];
   private projectSecrets: Readonly<Record<string, string>> = {};
   private mcp: ClaudeMcpRuntime | null = null;
-  private nativeMcpStatus = createClaudeMcpStatusReporter((event) => this.publishMcpState(event));
+  private nativeMcpStatus = createClaudeMcpStatusReporter((event) => this.publishNativeMcp(event));
   private readonly options: ClaudeOrbAgentOptions;
   private readonly files: HistoryFiles;
   private readonly workflowAdmissions = new Map<string, ReadonlySet<string> | null>();
@@ -966,15 +965,34 @@ export class ClaudeOrbAgent implements OrbAgent {
       this.fail(authSettings.error.code, authSettings.error.message);
       return errAsync(authSettings.error);
     }
-    this.nativeMcpStatus = createClaudeMcpStatusReporter((event) => this.publishMcpState(event));
+    this.nativeMcpStatus = createClaudeMcpStatusReporter((event) => this.publishNativeMcp(event));
     if (this.options.broker !== null) {
       const mcp = createClaudeMcp({
         configs: this.mcpConfigs,
         secrets: this.projectSecrets,
         broker: this.options.broker,
         task: new NoSimulationTask(`claude-mcp-${this.options.orbId}`, false),
-        onState: (event) =>
-          this.publishMcpState({ ...event, source: "sdk", observation: "bridge" }),
+        onState: (state) => {
+          const recorded = this.platformEvent(
+            "claude.mcp",
+            `OAuth bridge: ${state.message ?? `MCP ${state.server}: ${state.state}`}`,
+            {
+              server: state.server,
+              state: state.state,
+              source: "sdk",
+              observation: "bridge",
+              ...(state.diagnostic === undefined
+                ? {}
+                : {
+                    code: state.diagnostic.code,
+                    ...(state.diagnostic.httpStatus === undefined
+                      ? {}
+                      : { httpStatus: state.diagnostic.httpStatus }),
+                  }),
+            },
+          );
+          if (recorded.isErr()) this.fail("claude_mcp_publication_failed", recorded.error.message);
+        },
       });
       if (mcp.isErr()) return errAsync(mcp.error);
       this.mcp = mcp.value;
@@ -1379,26 +1397,14 @@ export class ClaudeOrbAgent implements OrbAgent {
     this.publishChildren();
     return ok(undefined);
   }
-  private publishMcpState(state: OrbMcpState): void {
-    const message = state.message ?? `MCP ${state.server}: ${state.state}`;
-    const recorded = this.platformEvent(
-      "claude.mcp",
-      state.observation === "bridge" ? `OAuth bridge: ${message}` : message,
-      {
-        server: state.server,
-        state: state.state,
-        ...(state.source === undefined ? {} : { source: state.source }),
-        ...(state.observation === undefined ? {} : { observation: state.observation }),
-        ...(state.diagnostic === undefined
-          ? {}
-          : {
-              code: state.diagnostic.code,
-              ...(state.diagnostic.httpStatus === undefined
-                ? {}
-                : { httpStatus: state.diagnostic.httpStatus }),
-            }),
-      },
-    );
+  private publishNativeMcp(state: ClaudeMcpState): void {
+    const recorded = this.platformEvent("claude.mcp", state.message, {
+      server: state.server,
+      state: state.state,
+      source: state.source,
+      observation: state.observation,
+      ...(state.diagnostic ? { code: state.diagnostic.code } : {}),
+    });
     if (recorded.isErr()) this.fail("claude_mcp_publication_failed", recorded.error.message);
   }
   private onMessage(message: SDKMessage): void {
