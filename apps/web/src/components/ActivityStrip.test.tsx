@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { type ActivityItem, type ActivityStepState, groupActivity } from "./ActivityStrip.tsx";
-import { toolRunStep } from "./ToolActivity.tsx";
+import { toolCallStep } from "./ToolActivity.tsx";
 
 function step(key: string, state: ActivityStepState): ActivityItem {
   const node = <p>row {key}</p>;
@@ -57,7 +57,7 @@ describe("ActivityStrip open memory", () => {
   });
 });
 
-describe("toolRunStep", () => {
+describe("toolCallStep", () => {
   const call = (callId: string) => ({
     type: "tool_call" as const,
     callId,
@@ -73,24 +73,34 @@ describe("toolRunStep", () => {
     ...extra,
   });
 
-  it("reports the worst call state and the first call's code", () => {
+  it("reports one call's state, category and code", () => {
+    expect(toolCallStep({ call: call("a"), callRecordId: "r", result: result("a") })).toEqual({
+      state: "success",
+      label: "codemode",
+      headline: "run a",
+    });
     expect(
-      toolRunStep([
-        { call: call("a"), callRecordId: "r", result: result("a") },
-        { call: call("b"), callRecordId: "r", result: result("b", { isError: true }) },
-      ]),
-    ).toEqual({ state: "failed", label: "codemode", headline: "run a +1" });
-    expect(toolRunStep([{ call: call("a"), callRecordId: "r" }])?.state).toBe("running");
+      toolCallStep({ call: call("b"), callRecordId: "r", result: result("b", { isError: true }) })
+        ?.state,
+    ).toBe("failed");
+    expect(toolCallStep({ call: call("c"), callRecordId: "r" })?.state).toBe("running");
+    expect(toolCallStep({ callId: "d", name: "bash", state: "running" })).toEqual({
+      state: "running",
+      label: "commands",
+      headline: "bash",
+    });
   });
 
-  it("keeps runs with images or charts out of the strip", () => {
+  it("keeps calls with images or charts out of the strip", () => {
     expect(
-      toolRunStep([
-        { call: call("a"), callRecordId: "r", result: result("a", { hasImages: true }) },
-      ]),
+      toolCallStep({
+        call: call("a"),
+        callRecordId: "r",
+        result: result("a", { hasImages: true }),
+      }),
     ).toBeUndefined();
     expect(
-      toolRunStep([{ call: call("a"), callRecordId: "r", result: result("a", { charts: ["c"] }) }]),
+      toolCallStep({ call: call("a"), callRecordId: "r", result: result("a", { charts: ["c"] }) }),
     ).toBeUndefined();
   });
 });

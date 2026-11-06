@@ -1557,7 +1557,7 @@ describe("frontend-only browser behavior", () => {
       for (const index of [0, 1])
         await strips.nth(index).locator(":scope > summary .activity-rail-label").click();
       const rows = page.locator(".rec-orb .activity-rail-row");
-      await expectPage(rows).toHaveCount(7);
+      await expectPage(rows).toHaveCount(8);
       const geometry = await rows.evaluateAll((elements) =>
         elements.map((element) => {
           const box = element.getBoundingClientRect();
@@ -1586,28 +1586,27 @@ describe("frontend-only browser behavior", () => {
         true,
         true,
         true,
+        true,
         false,
         true,
         true,
         false,
       ]);
-      expectPage(geometry.map((row) => row.border)).toEqual(Array(7).fill("0px"));
+      expectPage(geometry.map((row) => row.border)).toEqual(Array(8).fill("0px"));
       for (const row of geometry) {
         expectPage(row.lineColor).toBe("rgb(153, 153, 153)");
         expectPage(row.left + row.lineLeft).toBeCloseTo(row.markerCenter, 0);
         if (row.metricRight !== undefined)
           expectPage((row.summaryRight ?? 0) - row.metricRight).toBeLessThan(12);
       }
-      for (const index of [0, 1, 2, 4, 5]) expectPage(geometry[index]?.lineBottom).toBe(-4);
+      for (const index of [0, 1, 2, 3, 5, 6]) expectPage(geometry[index]?.lineBottom).toBe(-4);
       expectPage(geometry[0]?.lineTop).toBe(12);
-      expectPage(geometry[4]?.lineTop).toBe(12);
-      expectPage(geometry[3]?.lineBottom).toBeGreaterThan(0);
-      expectPage(geometry[6]?.lineBottom).toBeGreaterThan(0);
-      await expectPage(rows.nth(2).locator(".activity-rail-metric")).toHaveText("2 files");
-      await expectPage(rows.nth(3).locator(".activity-rail-metric")).toHaveText("+1 −1");
+      expectPage(geometry[5]?.lineTop).toBe(12);
+      expectPage(geometry[4]?.lineBottom).toBeGreaterThan(0);
+      expectPage(geometry[7]?.lineBottom).toBeGreaterThan(0);
+      await expectPage(rows.nth(4).locator(".activity-rail-metric")).toHaveText("+1 −1");
       const read = rows.nth(2);
       await read.locator(":scope > summary").click();
-      await read.locator(".tool-activity-call > summary").first().click();
       const output = read.locator(".tool-call-output").first();
       await expectPage(output).toBeVisible();
       const expanded = await read.evaluate((element) => ({

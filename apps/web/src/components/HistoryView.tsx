@@ -36,7 +36,7 @@ import {
   ToolActivity,
   type ToolCallBlock,
   type ToolResultBlock,
-  toolRunStep,
+  toolCallStep,
 } from "./ToolActivity.tsx";
 
 const ChatMarkdown = memo(UnmemoizedChatMarkdown);
@@ -457,18 +457,18 @@ function renderAgentRecords(
     const key = isValidElement(node) && node.key !== null ? node.key : `node-${items.length}`;
     items.push({ key, node });
   };
-  let runIndex = 0;
   let currentCalls: PersistedToolCall[] = [];
 
+  // Each tool call is its own step; a lone call still renders as today's category row.
   const flushTools = () => {
-    if (currentCalls.length === 0) return;
-    const key = `tools-${runIndex}`;
-    const node = <PersistedActivity calls={currentCalls} key={key} />;
-    const facts = toolRunStep(currentCalls);
-    const identity = currentCalls[0]?.call.callId ?? key;
-    const step = facts === undefined ? undefined : { key, identity, node, ...facts };
-    items.push({ key, node, ...(step === undefined ? {} : { step }) });
-    runIndex += 1;
+    for (const call of currentCalls) {
+      const key = call.call.detailKey;
+      const node = <PersistedActivity calls={[call]} key={key} />;
+      const facts = toolCallStep(call);
+      const step =
+        facts === undefined ? undefined : { key, identity: call.call.callId, node, ...facts };
+      items.push({ key, node, ...(step === undefined ? {} : { step }) });
+    }
     currentCalls = [];
   };
 
@@ -694,11 +694,12 @@ interface LiveAgentContent {
 
 function liveAgentItems(live: LiveAgentContent): ActivityItem[] {
   const items: ActivityItem[] = [];
-  const facts = toolRunStep([], live.tools);
-  if (facts !== undefined) {
-    const node = <LiveActivity calls={live.tools} key="live-tools" />;
-    const identity = live.tools[0]?.callId ?? "live-tools";
-    items.push({ key: "live-tools", node, step: { key: "live-tools", identity, node, ...facts } });
+  for (const tool of live.tools) {
+    const key = `live-${tool.callId}`;
+    const node = <LiveActivity calls={[tool]} key={key} />;
+    const facts = toolCallStep(tool);
+    if (facts !== undefined)
+      items.push({ key, node, step: { key, identity: tool.callId, node, ...facts } });
   }
   for (const block of live.blocks) {
     const key = block.blockId;

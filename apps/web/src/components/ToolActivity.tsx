@@ -164,7 +164,7 @@ function headline(category: Category): string | undefined {
         : undefined;
   return category.calls.length === 1 ? first.headline : undefined;
 }
-function boundedReadLabel(call: Call): string {
+function boundedReadLabel(call: Pick<Call, "headline" | "offset" | "limit">): string {
   if (call.offset === undefined && call.limit === undefined) return call.headline;
   const start = call.offset ?? 1;
   const range = `:${start}${call.limit === undefined ? "+" : `–${start + call.limit - 1}`}`;
@@ -518,35 +518,36 @@ export function ToolActivity({
   );
 }
 
-/** Strip facts for one tool run, or undefined when its images or charts must stay visible. */
-export function toolRunStep(
-  persisted: readonly PersistedToolCall[],
-  live: readonly LiveToolCall[] = [],
+/** Strip facts for one tool call, or undefined when its images or charts must stay visible. */
+export function toolCallStep(
+  tool: PersistedToolCall | LiveToolCall,
 ): { state: "success" | "failed" | "running"; label: string; headline: string } | undefined {
-  if (persisted.some(({ result }) => result?.hasImages === true || result?.charts !== undefined))
+  const { name, headline, state } =
+    "call" in tool
+      ? {
+          name: tool.call.name,
+          headline:
+            tool.call.code ??
+            (tool.call.name === "read"
+              ? boundedReadLabel({
+                  headline: tool.call.headline ?? "",
+                  ...(tool.call.offset === undefined ? {} : { offset: tool.call.offset }),
+                  ...(tool.call.limit === undefined ? {} : { limit: tool.call.limit }),
+                })
+              : (tool.call.headline ?? tool.call.name)),
+          state:
+            tool.result === undefined
+              ? (tool.live?.state ?? "running")
+              : tool.result.isError
+                ? "failed"
+                : "completed",
+        }
+      : { name: tool.name, headline: tool.code ?? tool.name, state: tool.state };
+  if ("call" in tool && (tool.result?.hasImages === true || tool.result?.charts !== undefined))
     return undefined;
-  const calls = [
-    ...persisted.map(({ call, result, live: chip }) => ({
-      name: call.name,
-      headline: call.code ?? call.headline ?? call.name,
-      state:
-        result === undefined ? (chip?.state ?? "running") : result.isError ? "failed" : "completed",
-    })),
-    ...live.map((call) => ({
-      name: call.name,
-      headline: call.code ?? call.name,
-      state: call.state,
-    })),
-  ];
-  const first = calls[0];
-  if (first === undefined) return undefined;
   return {
-    state: calls.some((call) => call.state === "running")
-      ? "running"
-      : calls.some((call) => call.state === "failed")
-        ? "failed"
-        : "success",
-    label: [...new Set(calls.map((call) => categoryFor(call.name).label))].join(" / "),
-    headline: calls.length > 1 ? `${first.headline} +${calls.length - 1}` : first.headline,
+    state: state === "completed" ? "success" : state,
+    label: categoryFor(name).label,
+    headline,
   };
 }

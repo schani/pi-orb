@@ -251,7 +251,7 @@ describe("HistoryView turn structure", () => {
     expect(html).not.toContain("<script>");
     expect(html).not.toContain('role="alert"');
   });
-  it("folds each activity run into one strip, splitting at prose", () => {
+  it("folds each activity run into one strip with a dot per call, splitting at prose", () => {
     const record: MessageRecord = {
       ...message("activity", "assistant", ""),
       content: [
@@ -268,28 +268,15 @@ describe("HistoryView turn structure", () => {
     );
     const strips = html.split("Explanation between runs");
     expect(strips).toHaveLength(2);
+    const states = (part: string) =>
+      [...part.matchAll(/data-step="(\w+)"/g)].map((match) => match[1]);
     for (const part of strips) {
       expect(part.match(/class="activity-rail-row[^"]*activity-strip"/g)).toHaveLength(1);
-      expect([...part.matchAll(/data-step="(\w+)"/g)].map((match) => match[1])).toEqual([
-        "thinking",
-        "running",
-      ]);
       expect(part).not.toContain("tool-activity-category");
     }
+    expect(states(strips[0] ?? "")).toEqual(["thinking", "running", "running"]);
+    expect(states(strips[1] ?? "")).toEqual(["thinking", "running"]);
     expect(html).not.toContain("Next plan");
-
-    const single = renderToStaticMarkup(
-      <HistoryView
-        records={[{ ...record, content: record.content.slice(1, 3) }]}
-        liveBlocks={[]}
-        tools={[]}
-        busy={false}
-      />,
-    );
-    expect(single).not.toContain("activity-strip");
-    expect(single).toMatch(
-      /class="activity-rail-row[^"]*tool-activity-category[^"]*"[\s\S]*?<\/details><details class="activity-rail-row[^"]*tool-activity-category/,
-    );
   });
   it.each([
     [
@@ -1376,15 +1363,11 @@ describe("HistoryView", () => {
     const html = renderToStaticMarkup(
       <HistoryView records={records} liveBlocks={[]} tools={[]} busy={false} />,
     );
-    expect(html).toContain('class="activity-rail-headline" title="provider.ts"');
-    expect(html).not.toContain(">1 file</span>");
-    expect(html).not.toContain("2 reads");
-    expect(html).toContain("provider.ts:1–180");
-    expect(html).toContain("provider.ts:180–329");
-    expect(html).not.toContain("1 file read");
+    expect(html).toContain('aria-label="read · provider.ts:1–180"');
+    expect(html).toContain('aria-label="read · provider.ts:180–329"');
   });
 
-  it("groups edit, command, and read calls on one activity rail with diff and failure totals", () => {
+  it("gives each edit, command, and read call its own dot with its outcome", () => {
     const callRecord: HistoryRecord = {
       id: "calls",
       parentId: null,
@@ -1466,16 +1449,16 @@ describe("HistoryView", () => {
     const html = renderToStaticMarkup(
       <HistoryView records={records} liveBlocks={[]} tools={[]} busy={false} />,
     );
-    expect(html.match(/class="activity-rail-row [^"]* tool-activity-category"/g)).toHaveLength(3);
-    expect(html).toContain('class="activity-rail-headline" title="src/a.ts"');
-    expect(html).not.toContain("1 file changed");
-    expect(html).toContain("+2");
-    expect(html).toContain("−1");
-    expect(html).toContain("2 ran");
-    expect(html).toContain("1 failed");
-    expect(html).toContain("2 files");
-    expect(html).toContain(">src/b.ts</code></summary>");
-    expect(html).toContain('class="tool-call-status tool-call-failed">failed');
+    expect(html).not.toContain("tool-activity-category");
+    expect([...html.matchAll(/data-step="(\w+)"/g)].map((match) => match[1])).toEqual([
+      "success",
+      "failed",
+      "success",
+      "success",
+      "success",
+    ]);
+    expect(html).toContain('aria-label="edit · src/a.ts"');
+    expect(html).toContain('aria-label="read · src/b.ts"');
     expect(html).not.toContain("one test failed");
     expect(
       renderToStaticMarkup(
