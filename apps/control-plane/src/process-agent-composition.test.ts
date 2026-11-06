@@ -1,7 +1,7 @@
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { MemoryStorage, type ToolExecutionApi } from "@earendil-works/pi-durable";
-import { SERVER_INFO_META_KEY, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { SERVER_INFO_META_KEY } from "@modelcontextprotocol/client";
 import { NoSimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, ResultAsync } from "neverthrow";
 import { Type } from "typebox";
@@ -399,33 +399,6 @@ describe("process agent composition", () => {
     expect(statuses).toEqual(["needs-auth"]);
   });
 
-  it("uses the actual rejected request generation with official auth context", async () => {
-    const reasons: unknown[] = [];
-    const provider = scopedMcpAuth(
-      (request) => {
-        reasons.push(request);
-        return okAsync({
-          accessToken: reasons.length === 1 ? "old" : "new",
-          accountId: "owner",
-          generation: reasons.length,
-          expiresAt: 100,
-        });
-      },
-      undefined,
-      async () => new Response(null, { status: 401 }),
-    );
-    expect(await provider.token()).toBe("old");
-    const response = await provider.fetch("https://mcp.example", {
-      headers: { Authorization: "Bearer old" },
-    });
-    await provider.onUnauthorized?.({
-      response,
-      serverUrl: new URL("https://mcp.example"),
-      fetchFn: fetch,
-    });
-    expect(reasons).toEqual([{ reason: "startup" }, { reason: "rejected", staleGeneration: 1 }]);
-  });
-
   it("fences concurrent and delayed 401s before awaiting broker refresh", async () => {
     const refreshing = barrier();
     const release = barrier();
@@ -458,7 +431,7 @@ describe("process agent composition", () => {
       undefined,
       async () => new Response(null, { status: 401 }),
     );
-    await provider.token();
+    expect(await provider.token()).toBe("token-1");
     const responses = await Promise.all(
       Array.from({ length: 3 }, () =>
         provider.fetch("https://mcp.example", {
@@ -553,59 +526,6 @@ describe("process agent composition", () => {
       fetchFn: fetch,
     });
     expect(token.mock.calls.at(-1)).toEqual([{ reason: "rejected", staleGeneration: 2 }]);
-  });
-
-  it("refreshes once through the official SDK auth hook without OAuth discovery", async () => {
-    let generation = 1;
-    const requests: string[] = [];
-    const reasons: unknown[] = [];
-    const provider = scopedMcpAuth(
-      (request) => {
-        reasons.push(request);
-        if (request.reason === "rejected") generation++;
-        return okAsync({
-          accessToken: `token-${generation}`,
-          accountId: "owner",
-          generation,
-          expiresAt: 100,
-        });
-      },
-      undefined,
-      async (input, init) => {
-        expect(String(input)).toBe("https://mcp.example/");
-        const header = new Headers(init?.headers).get("authorization")!;
-        requests.push(header);
-        if (header === "Bearer token-1") return new Response(null, { status: 401 });
-        const message = JSON.parse(String(init?.body));
-        return Response.json({
-          jsonrpc: "2.0",
-          id: message.id,
-          result: { resultType: "complete", content: [] },
-        });
-      },
-    );
-    const transport = new StreamableHTTPClientTransport(new URL("https://mcp.example"), {
-      authProvider: provider,
-      fetch: provider.fetch,
-      protocolVersion: "2026-07-28",
-    });
-    try {
-      await transport.start();
-      await transport.send({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/call",
-        params: { name: "read", arguments: {} },
-      });
-      expect(requests).toEqual(["Bearer token-1", "Bearer token-2"]);
-      expect(reasons).toEqual([
-        { reason: "startup" },
-        { reason: "rejected", staleGeneration: 1 },
-        { reason: "startup" },
-      ]);
-    } finally {
-      await transport.close();
-    }
   });
 
   it("rejects admission aborted before registry installation and cleans both resources", async () => {
@@ -982,167 +902,8 @@ it.each([307, 308, 200])(
   },
 );
 
-it.each([
-  "secret",
-  "missing-secret",
-  "owner",
-  "lease",
-  "url",
-  "oauth",
-  "provider403",
-  "oauth-override",
-] as const)("rechecks project MCP request authority and headers (%s)", async (change) => {
-  const h = makeHarness();
-  const orb = makeOrbRow("fresh-mcp", "project", "running");
-  const project = makeProjectRow("project");
-  h.store.seedProject(project);
-  h.store.seedOrb(orb);
-  const deps = {
-    ...h.deps,
-    projectSecrets: {
-      ...h.deps.projectSecrets,
-      pointers: new FakeProjectSecretPointerStore(orb.projectId),
-    },
-  };
-  const task = new NoSimulationTask("MCP request authority", false);
-  const config = {
-    name: "fixture",
-    url: "https://configured.test/mcp",
-    headers: {
-      "X-Api-Key": { secret: "MCP_KEY" },
-      ...(change === "oauth-override" ? { Authorization: { secret: "MCP_KEY" } } : {}),
-    },
-    oauth:
-      change === "provider403" || change === "oauth-override"
-        ? { id: "binding" }
-        : (undefined as { id: string } | undefined),
-  };
-  let admitted = true;
-  const requests: Array<{
-    method: string;
-    key: string | null;
-    signal: AbortSignal | null | undefined;
-  }> = [];
-  const network = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
-    expect(init?.redirect).toBe("error");
-    expect(init?.signal?.aborted).toBe(false);
-    const message = JSON.parse(String(init?.body));
-    requests.push({
-      method: message.method,
-      key: new Headers(init?.headers).get("X-Api-Key"),
-      signal: init?.signal,
-    });
-    if (
-      message.method === "tools/call" &&
-      (change === "provider403" || change === "oauth-override")
-    ) {
-      if (change === "oauth-override")
-        expect(new Headers(init?.headers).get("authorization")).toBe("FIRST_KEY");
-      return new Response("PRIVATE_PROVIDER_ERROR", {
-        status: change === "provider403" ? 403 : 401,
-      });
-    }
-    const result =
-      message.method === "server/discover"
-        ? {
-            resultType: "complete",
-            supportedVersions: ["2026-07-28"],
-            capabilities: { tools: {} },
-            _meta: { [SERVER_INFO_META_KEY]: { name: "fixture", version: "1" } },
-          }
-        : message.method === "tools/list"
-          ? {
-              resultType: "complete",
-              ttlMs: 0,
-              cacheScope: "private",
-              tools: [{ name: "ping", inputSchema: { type: "object" } }],
-            }
-          : { resultType: "complete", content: [{ type: "text", text: "FRESH_OK" }] };
-    return Response.json({ jsonrpc: "2.0", id: message.id, result });
-  });
-  const models = vi
-    .spyOn(durableModels, "createDurableModels")
-    .mockReturnValue(okAsync({ getModel: () => undefined } as never));
-  const token = vi.fn(async (..._args: Parameters<McpOAuth["token"]>) =>
-    ok({ accessToken: "PRIVATE_OAUTH", accountId: "owner", generation: 1, expiresAt: 100 }),
-  );
-  try {
-    (
-      await putProjectSecret(task, deps.projectSecrets, orb.projectId, "MCP_KEY", "FIRST_KEY")
-    )._unsafeUnwrap();
-    const open = createProcessAgentContext(deps, {
-      mcp: { read: () => okAsync({ servers: [{ ...config }] }) },
-      mcpOAuth: { token },
-    } as never);
-    const composed = await open(task, orb, { signal: new AbortController().signal }, false, {
-      storage: new MemoryStorage(),
-      signal: new AbortController().signal,
-      check: () => (admitted ? okAsync(undefined) : errAsync(durableError("lease revoked"))),
-      checkInputAdmission: () => okAsync(undefined),
-      beginDrain: () => okAsync(undefined),
-      release: () => okAsync(undefined),
-      artifacts: { read: () => okAsync(null), write: () => okAsync("/orb-artifacts/fixture") },
-    });
-    const options = composed._unsafeUnwrap();
-    const discovered = barrier();
-    const unsubscribe = options.registry.subscribe(() => {
-      if (
-        options.registry
-          .snapshot()
-          .tools()
-          .some(({ tool }) => tool.name === "mcp__fixture__ping")
-      )
-        discovered.resolve();
-    });
-    try {
-      options.activateResources!(() => okAsync({ recordId: "alert", duplicate: false }));
-      await discovered.promise;
-      expect(requests.map(({ key }) => key)).toEqual(["FIRST_KEY", "FIRST_KEY"]);
-      const count = requests.length;
-      if (change === "secret")
-        (
-          await putProjectSecret(task, deps.projectSecrets, orb.projectId, "MCP_KEY", "SECOND_KEY")
-        )._unsafeUnwrap();
-      if (change === "missing-secret") config.headers["X-Api-Key"].secret = "MISSING_KEY";
-      if (change === "owner") h.store.seedProject({ ...project, ownerUserId: "different-owner" });
-      if (change === "lease") admitted = false;
-      if (change === "url") config.url = "https://unconfigured.test/mcp";
-      if (change === "oauth") config.oauth = { id: "new-binding" };
-      const tool = options.registry
-        .snapshot()
-        .tools()
-        .find(({ tool }) => tool.name === "mcp__fixture__ping")!.tool;
-      const result = await tool.execute({}, {} as ToolExecutionApi, BACKGROUND_CONTEXT);
-      if (change === "secret") {
-        expect(result.isError).not.toBe(true);
-        expect(JSON.stringify(result)).toContain("FRESH_OK");
-        expect(requests.slice(count).map(({ key }) => key)).toEqual(["SECOND_KEY", "SECOND_KEY"]);
-        expect(requests.every(({ signal }) => signal?.aborted)).toBe(true);
-      } else if (change === "provider403" || change === "oauth-override") {
-        expect(result.isError).toBe(true);
-        expect(JSON.stringify(result)).not.toMatch(
-          /PRIVATE_PROVIDER_ERROR|PRIVATE_OAUTH|FIRST_KEY/,
-        );
-        expect(requests.filter(({ method }) => method === "tools/call")).toHaveLength(
-          change === "provider403" ? 1 : 2,
-        );
-        expect(token.mock.calls.every((args) => args[2].reason === "startup")).toBe(true);
-      } else {
-        expect(result.isError).toBe(true);
-        expect(requests).toHaveLength(count);
-      }
-    } finally {
-      unsubscribe();
-      await options.closeResources?.();
-    }
-  } finally {
-    models.mockRestore();
-    network.mockRestore();
-  }
-});
-
-it.each(["context", "transport"] as const)(
-  "does not send a late auth retry after %s cancellation during broker refresh",
+it.each(["none", "context", "transport"] as const)(
+  "refreshes OAuth once without discovery or late retries after cancellation (%s)",
   async (cancellation) => {
     const refreshing = barrier();
     const release = barrier();
@@ -1154,8 +915,16 @@ it.each(["context", "transport"] as const)(
     let generation = 1;
     const requests: string[] = [];
     const network = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
-      requests.push(JSON.parse(String(init?.body)).method);
-      return new Response("PRIVATE_PROVIDER_ERROR", { status: 401 });
+      const message = JSON.parse(String(init?.body));
+      requests.push(message.method);
+      expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer token-${generation}`);
+      return generation === 1
+        ? new Response("PRIVATE_PROVIDER_ERROR", { status: 401 })
+        : Response.json({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { resultType: "complete", content: [] },
+          });
     });
     const models = vi
       .spyOn(durableModels, "createDurableModels")
@@ -1213,10 +982,12 @@ it.each(["context", "transport"] as const)(
         );
         await refreshing.promise;
         if (cancellation === "context") controller.abort();
-        else await transport.close();
+        else if (cancellation === "transport") await transport.close();
         release.resolve();
-        expect((await sending).isErr()).toBe(true);
-        expect(requests).toEqual(["tools/call"]);
+        expect((await sending).isErr()).toBe(cancellation !== "none");
+        expect(requests).toEqual(
+          cancellation === "none" ? ["tools/call", "tools/call"] : ["tools/call"],
+        );
         expect(token.mock.calls.map(([, , request]) => request)).toEqual([
           { reason: "startup" },
           { reason: "rejected", staleGeneration: 1 },

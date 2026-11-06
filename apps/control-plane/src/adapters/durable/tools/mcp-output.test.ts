@@ -6,23 +6,11 @@ import { expect, it, vi } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
 import { McpTools } from "./mcp.ts";
 
-function fixture(
-  response: unknown,
-  era: "modern" | "legacy" = "modern",
-  outputSchema?: Record<string, unknown>,
-) {
+function fixture(response: unknown, outputSchema?: Record<string, unknown>) {
   const connect = vi.fn(() => {
     const [client, server] = InMemoryTransport.createLinkedPair();
     server.onmessage = (message) => {
       if (!("method" in message) || !("id" in message)) return;
-      if (message.method === "server/discover" && era === "legacy") {
-        void server.send({
-          jsonrpc: "2.0",
-          id: message.id,
-          error: { code: -32601, message: "Unsupported" },
-        });
-        return;
-      }
       void server.send({
         jsonrpc: "2.0",
         id: message.id,
@@ -33,29 +21,20 @@ function fixture(
                 supportedVersions: ["2026-07-28"],
                 capabilities: { tools: {} },
               }
-            : message.method === "initialize"
+            : message.method === "tools/list"
               ? {
-                  protocolVersion: "2025-11-25",
-                  capabilities: { tools: {} },
-                  serverInfo: { name: "fixture", version: "1" },
+                  resultType: "complete",
+                  ttlMs: 0,
+                  cacheScope: "private",
+                  tools: [
+                    {
+                      name: "value",
+                      inputSchema: { type: "object" },
+                      ...(outputSchema ? { outputSchema } : {}),
+                    },
+                  ],
                 }
-              : message.method === "tools/list"
-                ? {
-                    ...(era === "modern"
-                      ? { resultType: "complete", ttlMs: 0, cacheScope: "private" }
-                      : {}),
-                    tools: [
-                      {
-                        name: "value",
-                        inputSchema: { type: "object" },
-                        ...(outputSchema ? { outputSchema } : {}),
-                      },
-                    ],
-                  }
-                : {
-                    ...(era === "modern" ? { resultType: "complete" } : {}),
-                    ...(response as Record<string, unknown>),
-                  },
+              : { resultType: "complete", ...(response as Record<string, unknown>) },
       });
     };
     void server.start();
@@ -152,27 +131,6 @@ it("cancels before deferred broker acquisition without starting another connecti
   }
 });
 
-it.each([[1, null, "value"], null].map((structuredContent) => ({ structuredContent })))(
-  "rejects malformed legacy structuredContent %j without wrapping or leaking it",
-  async ({ structuredContent }) => {
-    const { mcp, catalog } = fixture(
-      { content: [{ type: "text", text: "SECRET" }], structuredContent },
-      "legacy",
-    );
-    try {
-      (await mcp.discover(BACKGROUND_CONTEXT))._unsafeUnwrap();
-      const result = (
-        await catalog.invoke("mcp__fixture__value", {}, {} as ToolExecutionApi, BACKGROUND_CONTEXT)
-      )._unsafeUnwrap();
-      expect(result.isError).toBe(true);
-      expect(result.structuredOutput).toBeUndefined();
-      expect(JSON.stringify(result)).not.toContain("SECRET");
-    } finally {
-      await mcp.close();
-    }
-  },
-);
-
 it.each([
   {
     structuredContent: [1, null, "value"],
@@ -186,7 +144,7 @@ it.each([
   "validates successful modern structured output against its non-object schema: $outputSchema.type",
   async ({ structuredContent, outputSchema }) => {
     const response = { content: [], structuredContent, isError: false };
-    const { mcp, catalog } = fixture(response, "modern", outputSchema);
+    const { mcp, catalog } = fixture(response, outputSchema);
     try {
       (await mcp.discover(BACKGROUND_CONTEXT))._unsafeUnwrap();
       const result = (

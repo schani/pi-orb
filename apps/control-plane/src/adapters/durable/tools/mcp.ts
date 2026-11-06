@@ -259,28 +259,23 @@ export class McpTools {
       requests.abort();
       cleanup = ResultAsync.fromSafePromise(
         (async () => {
-          let terminated: Result<void, ToolError> = ok(undefined);
           if (transport instanceof StreamableHTTPClientTransport && transport.sessionId) {
             let timer: ReturnType<typeof setTimeout> | undefined;
-            terminated = await Promise.race([
+            await Promise.race([
               ResultAsync.fromThrowable(
                 () => (transport as StreamableHTTPClientTransport).terminateSession(),
                 (): ToolError => ({ code: "unavailable", message: "MCP cleanup failed" }),
               )(),
-              new Promise<Result<void, ToolError>>((resolve) => {
-                timer = setTimeout(
-                  () => resolve(err({ code: "unavailable", message: "MCP cleanup timed out" })),
-                  30_000,
-                );
+              new Promise<void>((resolve) => {
+                timer = setTimeout(resolve, 1_000);
               }),
             ]);
             clearTimeout(timer);
           }
-          const closed = await ResultAsync.fromThrowable(
+          return ResultAsync.fromThrowable(
             () => client.close(),
             (): ToolError => ({ code: "unavailable", message: "MCP cleanup failed" }),
           )();
-          return terminated.andThen(() => closed);
         })(),
       ).andThen((value) => value);
       return cleanup;

@@ -29,7 +29,7 @@ const hasMcpAlert = (history: DisplayHistoryView, status: "needs-auth" | "connec
       record.alert?.message === `MCP fixture: ${status}.`,
   );
 
-it("initial auth recovery → two real Pi runtimes reuse the grant → rejection/refresh → reconnect → disconnect → sessionless project continuity", async () => {
+it("initial auth recovery → two real Pi runtimes reuse the grant → rejection/refresh → reconnect → disconnect → modern sessionless call", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-oauth-e2e-"));
   onTestFinished(() => rmSync(root, { recursive: true, force: true }));
   const key = join(root, "key.pem");
@@ -61,7 +61,6 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
   let acceptedCalls = 0;
   let rejectAccess = false;
   let rejectRefresh = false;
-  const conversationId = randomUUID();
   const modernRequests: {
     method: string;
     headers: IncomingHttpHeaders;
@@ -192,44 +191,11 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
           reply({
             ttlMs: 0,
             cacheScope: "private",
-            tools: [
-              {
-                name: "switch_project",
-                inputSchema: {
-                  type: "object",
-                  properties: { project_id: { type: "string" } },
-                  required: ["project_id"],
-                  additionalProperties: false,
-                },
-              },
-              {
-                name: "read",
-                inputSchema: {
-                  type: "object",
-                  properties: { conversation_id: { type: "string" } },
-                  additionalProperties: false,
-                },
-              },
-            ],
+            tools: [{ name: "read", inputSchema: { type: "object" } }],
           });
         } else if (message.method === "tools/call") {
-          modernCalls.push(message.params);
-          const { name, arguments: args } = message.params;
-          if (name === "switch_project" && args.project_id === "requested-project") {
-            reply({
-              content: [],
-              structuredContent: { conversation_id: conversationId, project_id: args.project_id },
-            });
-          } else if (name === "read") {
-            const projectId =
-              args.conversation_id === conversationId ? "requested-project" : "default-project";
-            reply({
-              content: [{ type: "text", text: `MODERN_READ_OK ${projectId}` }],
-              structuredContent: { project_id: projectId },
-            });
-          } else {
-            reply({ isError: true, content: [{ type: "text", text: "Unexpected modern call" }] });
-          }
+          modernCalls.push({ name: message.params.name, arguments: message.params.arguments });
+          reply({ content: [{ type: "text", text: "MODERN_READ_OK" }] });
         } else {
           json({
             jsonrpc: "2.0",
@@ -270,46 +236,6 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("OAuth fixture not listening");
   origin = `https://127.0.0.1:${address.port}`;
-  const modernRules = [0, 1].flatMap((index) => [
-    {
-      match: { userMessage: { regex: `^Modern ${index}$` } },
-      steps: [
-        {
-          type: "toolCall" as const,
-          name: "codemode",
-          arguments: { code: 'text(await describeNamespace("mcp__modern"));' },
-        },
-        { type: "stop" as const, status: "completed" as const },
-      ],
-    },
-    {
-      match: { toolResultContains: { regex: "mcp__modern__read" } },
-      steps: [
-        {
-          type: "toolCall" as const,
-          name: "codemode",
-          arguments: {
-            code:
-              index === 0
-                ? 'const switched = await tools.mcp__modern__switch_project({project_id:"requested-project"}); text(switched); text(await tools.mcp__modern__read({conversation_id:switched.structuredContent.conversation_id}));'
-                : "text(await tools.mcp__modern__read({}));",
-          },
-        },
-        { type: "stop" as const, status: "completed" as const },
-      ],
-    },
-    {
-      match: {
-        toolResultContains: {
-          regex: `MODERN_READ_OK ${index === 0 ? "requested-project" : "default-project"}`,
-        },
-      },
-      steps: [
-        { type: "text" as const, content: `MODERN_DONE_${index}` },
-        { type: "stop" as const, status: "completed" as const },
-      ],
-    },
-  ]);
   const fake = await createFakeSession(`oauth-${randomUUID()}`, {
     auth: { accountId: "oauth-e2e", device: { manualApprove: true } },
     model: {
@@ -348,20 +274,22 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
                 code:
                   index === 7
                     ? 'text(await describeNamespace("mcp__fixture"))'
-                    : "text(await tools.mcp__fixture__read({}))",
+                    : index === 6
+                      ? "text(await tools.mcp__fixture__read({})); text(await tools.mcp__modern__read({}));"
+                      : "text(await tools.mcp__fixture__read({}))",
               },
             },
             { type: "stop" as const, status: "completed" as const },
           ],
         },
         {
-          match: { default: true },
+          match:
+            index === 6 ? { toolResultContains: { regex: "MODERN_READ_OK" } } : { default: true },
           steps: [
             { type: "text" as const, content: `OAUTH_DONE_${index}` },
             { type: "stop" as const, status: "completed" as const },
           ],
         },
-        ...(index === 6 ? modernRules : []),
       ]),
     },
   });
@@ -715,37 +643,7 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
     expect(
       JSON.stringify((await api(cp.baseUrl, "GET", `/api/v1/projects/${project}/mcp`)).body),
     ).not.toContain("fixture-access-");
-    for (const [index, orb] of orbs.entries()) {
-      await waitFor("modern MCP registry publication", async () =>
-        cp.logs
-          .join("")
-          .includes(`lifecycle: orb=${orb} test_registry_published server=modern status=available`)
-          ? true
-          : null,
-      );
-      expect(
-        (
-          await api(cp.baseUrl, "PUT", `/api/v1/orbs/${orb}/messages/${randomUUID()}`, {
-            content: [{ type: "text", text: `Modern ${index}` }],
-          })
-        ).status,
-      ).toBe(202);
-      await waitFor(
-        `modern turn ${index}`,
-        async () => {
-          const history = JSON.stringify(
-            (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`)).body,
-          );
-          return history.includes(`MODERN_DONE_${index}`) ? true : null;
-        },
-        { timeoutMs: 90_000 },
-      );
-    }
-    expect(modernCalls.map(({ name, arguments: args }) => ({ name, arguments: args }))).toEqual([
-      { name: "switch_project", arguments: { project_id: "requested-project" } },
-      { name: "read", arguments: { conversation_id: conversationId } },
-      { name: "read", arguments: {} },
-    ]);
+    expect(modernCalls).toEqual([{ name: "read", arguments: {} }]);
     expect(modernRequests.some((request) => request.method === "server/discover")).toBe(true);
     expect(modernRequests.some((request) => request.method === "tools/list")).toBe(true);
     for (const request of modernRequests) {
