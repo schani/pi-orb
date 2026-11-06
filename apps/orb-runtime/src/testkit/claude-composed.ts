@@ -165,14 +165,6 @@ export class ComposedClaudeFixture {
     if (text === null) throw new Error("fixture session journal not committed");
     return JSON.parse(text);
   }
-  resultForInitial(message: SDKMessage = rootResult): SDKMessage {
-    const delivery = Object.values(this.state.deliveries)
-      .filter((delivery) => !delivery.steer)
-      .at(-1);
-    const uuid = this.state.compaction?.commandUuid ?? delivery?.uuid;
-    if (uuid === undefined) throw new Error("Initial input missing.");
-    return { ...message, user_message_uuid: uuid, user_message_uuids: [uuid] } as SDKMessage;
-  }
   receipt(message: SDKUserMessage) {
     this.append({
       type: "user",

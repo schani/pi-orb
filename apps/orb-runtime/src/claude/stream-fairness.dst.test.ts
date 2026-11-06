@@ -1,6 +1,6 @@
 import type { SimulationTask } from "determined";
 import { expect, it } from "vitest";
-import { ComposedClaudeFixture, submitReceipt } from "../testkit/claude-composed.ts";
+import { ComposedClaudeFixture, rootResult, submitReceipt } from "../testkit/claude-composed.ts";
 import { runDst } from "../testkit/sim.ts";
 
 it.each([false, true])(
@@ -49,7 +49,7 @@ it.each([false, true])(
               await submitReceipt(task, f);
               armed = true;
               streamStarted();
-              await f.query.emit(task, f.resultForInitial());
+              await f.query.emit(task, rootResult);
             },
           },
           {

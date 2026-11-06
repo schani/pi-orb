@@ -165,17 +165,6 @@ function fixture(
       ),
     nativePath,
     emit: (message: SDKMessage) => sdk.emitUnscheduled(message),
-    resultForInitial(message: SDKMessage = rootResult): SDKMessage {
-      const delivery = Object.values(state.deliveries)
-        .filter((delivery) => !delivery.steer)
-        .at(-1);
-      if (delivery === undefined) throw new Error("Initial input missing.");
-      return {
-        ...message,
-        user_message_uuid: delivery.uuid,
-        user_message_uuids: [delivery.uuid],
-      } as SDKMessage;
-    },
     exit: () => {
       sdk.exit();
       sdk.endOutput();
@@ -557,12 +546,12 @@ it("holds root/child ownership through SDK close, actual process exit, and final
   expect((await f.attach()).isOk()).toBe(true);
   await f.agent.submitMessage([{ type: "text", text: "hello" }], "op");
   await f.emit(task("task_started"));
-  await f.emit(f.resultForInitial(result));
+  await f.emit(result);
   expect(f.agent.gateView().activity).toBe("busy");
   await f.emit(task("task_notification"));
   expect(f.agent.gateView().activity).toBe("busy");
   await f.emit(rootRequest);
-  await f.emit(f.resultForInitial(result));
+  await f.emit(result);
   const delivery = Object.values(f.state.deliveries)[0];
   f.persist({
     type: "user",
@@ -585,12 +574,12 @@ it("awaits a new native root handoff after an asynchronous child's terminal noti
   await f.attach();
   await f.agent.submitMessage([{ type: "text", text: "hello" }], "op");
   await f.emit(task("task_started"));
-  await f.emit(f.resultForInitial(result));
+  await f.emit(result);
   await f.emit(task("task_notification"));
   expect(f.closeRequests()).toBe(1);
   expect(f.agent.gateView().activity).toBe("busy");
   await f.emit(rootRequest);
-  await f.emit(f.resultForInitial(result));
+  await f.emit(result);
   const delivery = Object.values(f.state.deliveries)[0];
   f.persist({ type: "user", uuid: delivery?.uuid, message: { content: "hello" } });
   f.exit();
@@ -633,7 +622,7 @@ it("persists hook-owned child admission until a terminal native notification", a
     uuid: "event",
     session_id: f.state.id,
   } as unknown as SDKMessage);
-  await f.emit(f.resultForInitial(result));
+  await f.emit(result);
   expect(f.agent.gateView().activity).toBe("busy");
   await f.emit(task("task_notification"));
   expect(f.state.ownedChildren).toEqual({});
@@ -793,16 +782,14 @@ it.each(["status", "assistant"] as const)(
     await f.agent.submitMessage([{ type: "text", text: "hello" }], "op");
     const delivery = Object.values(f.state.deliveries)[0];
     f.persist({ type: "user", uuid: delivery?.uuid, message: { content: "hello" } });
-    await f.emit(
-      f.resultForInitial({
-        ...result,
-        uuid: "drain-result",
-        num_turns: 1,
-        queued_turn_count: 0,
-        stop_reason: "end_turn",
-        result: "private-result",
-      } as unknown as SDKMessage),
-    );
+    await f.emit({
+      ...result,
+      uuid: "drain-result",
+      num_turns: 1,
+      queued_turn_count: 0,
+      stop_reason: "end_turn",
+      result: "private-result",
+    } as unknown as SDKMessage);
     await f.emit(
       (source === "status"
         ? {
@@ -888,7 +875,7 @@ it.each(["rotation", "interrupt"] as const)(
     f.persist({ type: "user", uuid: delivery?.uuid, message: { content: "hello" } });
     if (kind === "interrupt") await f.emit(nativeHook("initial-hook"));
     const aborted = kind === "interrupt" ? f.agent.abortOperation() : null;
-    if (kind === "rotation") await f.emit(f.resultForInitial(result));
+    if (kind === "rotation") await f.emit(result);
     await f.awaitCloseRequest(2);
     f.exitWithoutOutput();
     await f.emit(nativeHook("late-hook", "SessionStart"));
@@ -954,7 +941,7 @@ it.each(["rotation", "interrupt"] as const)(
     const delivery = Object.values(f.state.deliveries)[0];
     f.persist({ type: "user", uuid: delivery?.uuid, message: { content: "hello" } });
     const aborted = kind === "interrupt" ? f.agent.abortOperation() : null;
-    if (kind === "rotation") await f.emit(f.resultForInitial(result));
+    if (kind === "rotation") await f.emit(result);
     await f.awaitCloseRequest(2);
     const started = nativeHook("late-hook", "SessionStart");
     await f.emit(started);
@@ -982,7 +969,7 @@ it("waits for final SDK stdout after process exit", async () => {
   await f.agent.submitMessage([{ type: "text", text: "hello" }], "op");
   const delivery = Object.values(f.state.deliveries)[0];
   f.persist({ type: "user", uuid: delivery?.uuid, message: { content: "hello" } });
-  await f.emit(f.resultForInitial(result));
+  await f.emit(result);
   f.exitWithoutOutput();
   expect(f.agent.gateView().activity).toBe("busy");
   f.endOutput();
@@ -1008,7 +995,7 @@ it("retains busy on final fsync failure rather than advertising a safe idle stop
   const f = fixture();
   await f.attach();
   await f.agent.submitMessage([{ type: "text", text: "hello" }], "op");
-  await f.emit(f.resultForInitial(result));
+  await f.emit(result);
   f.persist({ type: "user", uuid: "u", message: { content: "hello" } });
   f.failHistory();
   f.exit();
@@ -1146,7 +1133,7 @@ it("retains visible SDK error diagnostics across later success and history reope
       errors: [],
     },
   });
-  await f.emit(f.resultForInitial(rootResult));
+  await f.emit(rootResult);
   f.exit();
   await f.agent.closeExtensions();
   expect(errors()).toHaveLength(6);
@@ -1223,7 +1210,7 @@ it("does not persist successful shutdown evidence and resets the next query's ev
       true,
     );
     f.persist({ type: "user", uuid: f.state.deliveries[id]?.uuid, message: { content: id } });
-    await f.emit(f.resultForInitial({ ...result, uuid: `${id}-result` } as unknown as SDKMessage));
+    await f.emit({ ...result, uuid: `${id}-result` } as unknown as SDKMessage);
     if (id === "second") await f.emit(rootRequest);
     f.exit();
     await f.agent.closeExtensions();

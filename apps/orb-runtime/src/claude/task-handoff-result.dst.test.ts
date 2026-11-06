@@ -5,6 +5,7 @@ import {
   ComposedClaudeFixture,
   childEdge,
   rootRequest,
+  rootResult,
   submitReceipt,
 } from "../testkit/claude-composed.ts";
 import { runDst } from "../testkit/sim.ts";
@@ -70,7 +71,7 @@ it.each(
                   status: "requesting",
                 } as SDKMessage);
                 if (release === "after-result")
-                  await f.query.emit(task, { ...f.resultForInitial(), num_turns: 3 } as SDKMessage);
+                  await f.query.emit(task, { ...rootResult, num_turns: 3 } as SDKMessage);
                 if (inventory === "before") await f.query.emit(task, background([]));
                 for (const id of ["first", "second"])
                   await f.query.emit(task, {
@@ -87,7 +88,7 @@ it.each(
                   },
                 ]);
                 if (release === "during-response")
-                  await f.query.emit(task, { ...f.resultForInitial(), num_turns: 3 } as SDKMessage);
+                  await f.query.emit(task, { ...rootResult, num_turns: 3 } as SDKMessage);
                 f.append({
                   type: "assistant",
                   uuid: "handoff-answer",
@@ -101,7 +102,7 @@ it.each(
                     uuid: "handoff-answer",
                     message: { content: [{ type: "text", text: "Handoff complete." }] },
                   },
-                  { ...f.resultForInitial(), num_turns: 2 },
+                  { ...rootResult, num_turns: 2 },
                 ] as SDKMessage[];
                 if (delivery === "buffered") {
                   await task.checkpoint(
@@ -200,7 +201,10 @@ it("a zero-turn local command without task handoffs still completes", async () =
     const input = await f.query.input.next();
     if (input.done) throw new Error("SDK input missing.");
     f.receipt(input.value);
-    await f.query.emitUnscheduled(f.resultForInitial(acknowledgment));
+    await f.query.emitUnscheduled({
+      ...acknowledgment,
+      user_message_uuids: [input.value.uuid],
+    } as SDKMessage);
     expect(f.query.closeRequested).toBe(true);
     f.query.exit();
     f.query.endOutput();
@@ -235,7 +239,7 @@ it("a failed acknowledgment publication retains handoff ownership and blocks adm
     if (input.done) throw new Error("SDK input missing.");
     f.receipt(input.value);
     await f.query.emitUnscheduled(childEdge("task_started"));
-    await f.query.emitUnscheduled(f.resultForInitial());
+    await f.query.emitUnscheduled(rootResult);
     await f.query.emitUnscheduled(childEdge("task_notification"));
     f.failCommit = true;
     await f.query.emitUnscheduled(acknowledgment);
@@ -267,7 +271,7 @@ it("a handoff arriving during synthesis survives the earlier handoff's result in
             await submitReceipt(task, f);
             for (const id of ["first", "second"])
               await f.query.emit(task, { ...childEdge("task_started"), task_id: id } as SDKMessage);
-            await f.query.emit(task, f.resultForInitial());
+            await f.query.emit(task, rootResult);
             await f.query.emit(task, {
               ...childEdge("task_notification"),
               task_id: "first",
@@ -277,14 +281,14 @@ it("a handoff arriving during synthesis survives the earlier handoff's result in
               ...childEdge("task_notification"),
               task_id: "second",
             } as SDKMessage);
-            await f.query.emit(task, f.resultForInitial());
+            await f.query.emit(task, rootResult);
             expect(Object.keys(f.journal().pendingHandoffs ?? {})).toEqual(["second"]);
             expect(f.agent.liveView()?.subagents.map((child) => child.id)).toEqual(["second"]);
             expect(f.query.closeRequested).toBe(false);
             await f.query.emit(task, acknowledgment);
             expect(Object.keys(f.journal().pendingHandoffs ?? {})).toEqual(["second"]);
             await f.query.emit(task, rootRequest);
-            await f.query.emit(task, f.resultForInitial());
+            await f.query.emit(task, rootResult);
             expect(f.query.closeRequested).toBe(true);
             f.query.exit();
             f.query.endOutput();

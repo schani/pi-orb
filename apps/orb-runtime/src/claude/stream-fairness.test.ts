@@ -174,15 +174,7 @@ it.each(["duplicate delivery", "replication snapshot"] as const)(
     } as unknown as SDKMessage;
     f.append(assistant);
     await flushes(() => f.query.enqueue(assistant));
-    await flushes(() =>
-      f.query.enqueue({
-        ...f.resultForInitial(),
-        user_message_uuids: [
-          Object.values(f.state.deliveries).find((delivery) => !delivery.steer)?.uuid,
-          uuid,
-        ],
-      } as SDKMessage),
-    );
+    await flushes(() => f.query.enqueue({ ...rootResult, user_message_uuid: uuid } as SDKMessage));
     await flushes(() => finish(f));
     expect(await nextInput).toEqual({ done: true, value: undefined });
     expect(f.agent.getHealth()).toMatchObject({ status: "ready", activity: "idle" });

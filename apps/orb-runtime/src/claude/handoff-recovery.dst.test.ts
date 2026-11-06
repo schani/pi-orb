@@ -2,7 +2,12 @@ import { join } from "node:path";
 import type { JsonObject } from "@pi-orb/protocol";
 import { err, Result } from "neverthrow";
 import { expect, it } from "vitest";
-import { ComposedClaudeFixture, childEdge, submitReceipt } from "../testkit/claude-composed.ts";
+import {
+  ComposedClaudeFixture,
+  childEdge,
+  rootResult,
+  submitReceipt,
+} from "../testkit/claude-composed.ts";
 import { runDst } from "../testkit/sim.ts";
 import { ClaudeHistory } from "./history.ts";
 import { qualifyClaudeRestart, reconcileClaudeHandoffs } from "./restore.ts";
@@ -19,12 +24,12 @@ it.each(["terminal", "disposition"] as const)(
             name: "native-and-restore",
             f: async (task) => {
               await submitReceipt(task, f);
-              await f.query.emit(task, f.resultForInitial());
+              await f.query.emit(task, rootResult);
               await f.query.emit(task, childEdge("task_started"));
               await f.query.emit(task, childEdge("task_notification"));
-              await f.query.emit(task, f.resultForInitial());
+              await f.query.emit(task, rootResult);
               await f.query.emit(task, {
-                ...f.resultForInitial(),
+                ...rootResult,
                 uuid: "33333333-3333-4333-8333-333333333333",
               });
               expect(f.journal().pendingHandoffs?.child).toBeDefined();

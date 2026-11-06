@@ -6,6 +6,7 @@ import {
   ComposedClaudeFixture,
   nativeHook,
   nativeHookResponse,
+  rootResult,
 } from "../testkit/claude-composed.ts";
 import { claudeBootEntries } from "./boot-notification.ts";
 import { planBootNotification } from "./boot-policy.ts";
@@ -37,7 +38,8 @@ function summary(f: ComposedClaudeFixture) {
 }
 
 it("claims native compaction before initialization, freezes the published frontier, and commits the summary before idle", async () => {
-  const f = new ComposedClaudeFixture();
+  const startup = gate();
+  const f = new ComposedClaudeFixture(startup.promise);
   try {
     f.append({ type: "assistant", uuid: "before", message: { content: "before" } });
     await f.attach();
@@ -49,6 +51,9 @@ it("claims native compaction before initialization, freezes the published fronti
       compactionAfterId: "before",
     });
     const query = await next;
+    await query.emit(task, { ...rootResult, num_turns: 0 } as SDKMessage);
+    expect(query.closeRequested).toBe(false);
+    startup.release();
     const command = await query.input.next();
     expect(command).toMatchObject({
       done: false,
@@ -93,7 +98,7 @@ it("claims native compaction before initialization, freezes the published fronti
       compact_result: "success",
     } as SDKMessage);
     expect(f.agent.gateView().activity).toBe("busy");
-    await query.emit(task, f.resultForInitial());
+    await query.emit(task, rootResult);
     query.exit();
     expect(f.agent.gateView().activity).toBe("busy");
     query.endOutput();
@@ -128,7 +133,7 @@ it("claims native compaction before initialization, freezes the published fronti
     expect(delivered.isOk()).toBe(true);
     const input = await f.query.input.next();
     f.receipt(input.value!);
-    await f.query.emit(task, f.resultForInitial());
+    await f.query.emit(task, rootResult);
     f.query.exit();
     f.query.endOutput();
     await f.agent.closeExtensions();
@@ -138,6 +143,7 @@ it("claims native compaction before initialization, freezes the published fronti
       ),
     ).toHaveLength(1);
   } finally {
+    startup.release();
     f.dispose();
   }
 });
@@ -163,7 +169,7 @@ it.each(["failed", "aborted"] as const)(
           compact_result: "failed",
           compact_error: "private provider error content",
         } as SDKMessage);
-      await query.emit(task, f.resultForInitial());
+      await query.emit(task, rootResult);
       query.exit();
       query.endOutput();
       await aborting;
@@ -243,7 +249,7 @@ it.each(["completed", "failed", "aborted"] as const)(
           status: null,
           compact_result: "failed",
         } as SDKMessage);
-      await query.emit(task, f.resultForInitial());
+      await query.emit(task, rootResult);
       query.exit();
       query.endOutput();
       await aborting;
@@ -301,7 +307,7 @@ it("holds child/hook ownership and fails busy on missing durable summary or pers
     const query = await next;
     await query.input.next();
     await query.emit(task, nativeHook("hook"));
-    await query.emit(task, f.resultForInitial());
+    await query.emit(task, rootResult);
     expect(query.closeRequested).toBe(false);
     expect(f.agent.canCompact().isErr()).toBe(true);
     await query.emit(task, nativeHookResponse(nativeHook("hook")));
@@ -386,7 +392,7 @@ it("never releases the compaction gate after a native fsync failure", async () =
     await query.input.next();
     summary(f);
     f.failSync = true;
-    await query.emit(task, f.resultForInitial());
+    await query.emit(task, rootResult);
     query.exit();
     query.endOutput();
     await f.agent.closeExtensions();
