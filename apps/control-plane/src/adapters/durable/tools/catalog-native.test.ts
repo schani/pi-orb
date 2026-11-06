@@ -16,7 +16,7 @@ import {
   type ToolExecutionResult,
 } from "@earendil-works/pi-durable";
 import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
-import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
+import { InMemoryTransport } from "@modelcontextprotocol/client";
 import { errAsync, okAsync } from "neverthrow";
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
@@ -307,22 +307,28 @@ it.each(["root", "child"] as const)(
         {
           name: "fixture",
           connect: () => {
-            const { client, server } = createInMemoryTransportPair();
-            server.onMessage((message) => {
+            const [client, server] = InMemoryTransport.createLinkedPair();
+            server.onmessage = (message) => {
               if (!("method" in message) || !("id" in message)) return;
               void server.send({
                 jsonrpc: "2.0",
                 id: message.id,
                 result:
-                  message.method === "initialize"
+                  message.method === "server/discover"
                     ? {
-                        protocolVersion: "2025-11-25",
+                        resultType: "complete",
+                        supportedVersions: ["2026-07-28"],
                         capabilities: { tools: {}, resources: {} },
-                        serverInfo: { name: "fixture", version: "1" },
+                        _meta: {
+                          "io.modelcontextprotocol/serverInfo": { name: "fixture", version: "1" },
+                        },
                         instructions: "Fixture server instructions before first use",
                       }
                     : message.method === "tools/list"
                       ? {
+                          resultType: "complete",
+                          ttlMs: 0,
+                          cacheScope: "private",
                           tools: [
                             {
                               name: "raw",
@@ -336,9 +342,9 @@ it.each(["root", "child"] as const)(
                             },
                           ],
                         }
-                      : raw,
+                      : { resultType: "complete", ...raw },
               });
-            });
+            };
             void server.start();
             return okAsync(client);
           },

@@ -1,5 +1,11 @@
 # Testing
 
+## Official MCP client for Pi execution (2026-11-06, PST; local, undeployed)
+
+After trimming: core MCP **46/8 files**, production composition/relay **37/3 files**, scoped browser/runtime MCP E2E **1/1** (77.114s, outer exit 0, verified fixture cleanup). Final root/workspace/E2E types and root lint pass (warnings/infos only; `sol-loop-{types,lint}.log`). Checks retain modern wire metadata/sessionlessness, legacy OAuth recovery, no-replay, cancellation/cleanup and credential privacy; they do not qualify live modern PostHog or deployment.
+
+Receipts and first failures remain under `.context/mcp-official-pr/`; the earlier 118-test/14-file receipt belongs to `7ba93f4`, before trimming. `sol-loop-trim-first-failure.md` explains the corrected display-history assertion; `sol-loop-trim-fixed-e2e.{log,exit}` and its provider manifest record qualification. Earlier `e2e-scoped-first.log`, `e2e-scoped-second.log`, `composition-cancel-red.log` and `review-cleanup-red.log` remain intact. Broad root qualification is **not green**: `unit-full.log` was interrupted; later QA lost owned fixtures during shutdown. No full-suite claim or historical-interruption fix is made.
+
 ## Orb messages as notification activity (2026-11-06, America/Los_Angeles; local, undeployed)
 
 Before rebasing onto the Terraform Google-provider update, fresh-install qualification passed 1,051 web tests/120 files, three Chromium activity-strip cases, root/workspace/E2E typecheck, root lint (warnings/infos only) and web production build (chunk-size warning). The broad web suite and build were not repeated after rebase; npm dependencies were unchanged. No DST failure or trace.

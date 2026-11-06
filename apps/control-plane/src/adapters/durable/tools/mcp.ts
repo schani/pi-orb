@@ -5,25 +5,29 @@ import {
   type ToolExecutionResult,
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
-import type { McpTransport } from "@earendil-works/pi-mcp";
 import {
-  McpAuthRequiredError,
-  McpClient,
-  McpHttpError,
-  McpTimeoutError,
-  toLlmContent,
-} from "@earendil-works/pi-mcp";
+  Client,
+  InsufficientScopeError,
+  SdkError,
+  SdkErrorCode,
+  SdkHttpError,
+  StreamableHTTPClientTransport,
+  specTypeSchemas,
+  type Transport,
+  UnauthorizedError,
+} from "@modelcontextprotocol/client";
 import { err, errAsync, ok, okAsync, Result, ResultAsync } from "neverthrow";
 import { type TSchema, Type } from "typebox";
 import { Check } from "typebox/value";
 import { type CallableCatalog, errorResult, type ToolError } from "./catalog.ts";
+import { toLlmContent } from "./mcp-content.ts";
 
 /** connect must resolve scoped broker credentials afresh; no credentials are retained in the catalog. */
 export interface McpEndpoint {
   name: string;
   description?: string;
   unavailableState?: () => "needs-auth" | "unavailable";
-  connect(context: Context): ResultAsync<McpTransport, ToolError>;
+  connect(context: Context): ResultAsync<Transport, ToolError>;
 }
 export type McpServerStatus =
   | { name: string; status: "pending" | "available" }
@@ -77,7 +81,7 @@ export class McpTools {
       },
     });
   }
-  private readonly running = new Set<McpClient>();
+  private readonly running = new Set<() => ResultAsync<void, ToolError>>();
   private readonly resourceEndpoints = new Map<string, McpEndpoint>();
   private publishStatus(status: McpServerStatus, ctx: Context): ResultAsync<void, ToolError> {
     if (this.closed || ctx.abortSignal?.aborted)
@@ -133,20 +137,34 @@ export class McpTools {
             return errorResult({ code: "unavailable", message: "MCP resource server unavailable" });
           const rows: JsonValue[] = [];
           for (const endpoint of endpoints) {
-            const response = await this.using<unknown>(endpoint, ctx, async (client) => {
-              const options = { ...(ctx.abortSignal ? { signal: ctx.abortSignal } : {}) };
+            const response = await this.using<unknown>(endpoint, ctx, async (client, signal) => {
+              const options = { timeout: 30_000, signal };
               if (read)
                 return {
                   server: endpoint.name,
                   uri: input.uri!,
-                  ...(await client.readResource(input.uri!, options)),
+                  ...(await client.readResource({ uri: input.uri! }, options)),
                 };
               const key = name === "list_mcp_resources" ? "resources" : "resourceTemplates";
               if (input.server) {
                 const page =
                   name === "list_mcp_resources"
-                    ? await client.listResourcesPage(input.cursor, options)
-                    : await client.listResourceTemplatesPage(input.cursor, options);
+                    ? await client.request(
+                        {
+                          method: "resources/list",
+                          params: input.cursor === undefined ? {} : { cursor: input.cursor },
+                        },
+                        specTypeSchemas.ListResourcesResult,
+                        options,
+                      )
+                    : await client.request(
+                        {
+                          method: "resources/templates/list",
+                          params: input.cursor === undefined ? {} : { cursor: input.cursor },
+                        },
+                        specTypeSchemas.ListResourceTemplatesResult,
+                        options,
+                      );
                 const values = (page as unknown as Record<string, unknown>)[key];
                 return {
                   server: endpoint.name,
@@ -158,8 +176,8 @@ export class McpTools {
               }
               const items =
                 name === "list_mcp_resources"
-                  ? await client.listResources(options)
-                  : await client.listResourceTemplates(options);
+                  ? (await client.listResources(undefined, options)).resources
+                  : (await client.listResourceTemplates(undefined, options)).resourceTemplates;
               return items.map((item) => ({ server: endpoint.name, ...item }));
             });
             if (response.isErr()) {
@@ -217,13 +235,52 @@ export class McpTools {
   private using<T>(
     endpoint: McpEndpoint,
     ctx: Context,
-    fn: (client: McpClient) => Promise<T>,
+    fn: (client: Client, signal: AbortSignal) => Promise<T>,
     diagnostics?: McpDiscoveryDiagnostics,
   ): ResultAsync<T, ToolError> {
     if (this.closed) return errAsync({ code: "unavailable", message: "MCP tools closed" });
     if (ctx.abortSignal?.aborted) return errAsync({ code: "cancelled", message: "MCP cancelled" });
-    const client = new McpClient({ name: "pi-orb", version: "1", requestTimeoutMs: 30_000 });
-    this.running.add(client);
+    const client = new Client(
+      { name: "pi-orb", version: "1" },
+      {
+        capabilities: {},
+        versionNegotiation: { mode: "auto" },
+        inputRequired: { autoFulfill: false },
+      },
+    );
+    const requests = new AbortController();
+    const signal = ctx.abortSignal
+      ? AbortSignal.any([ctx.abortSignal, requests.signal])
+      : requests.signal;
+    let transport: Transport | undefined;
+    let cleanup: ResultAsync<void, ToolError> | undefined;
+    const close = (): ResultAsync<void, ToolError> => {
+      if (cleanup) return cleanup;
+      requests.abort();
+      cleanup = ResultAsync.fromSafePromise(
+        (async () => {
+          if (transport instanceof StreamableHTTPClientTransport && transport.sessionId) {
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            await Promise.race([
+              ResultAsync.fromThrowable(
+                () => (transport as StreamableHTTPClientTransport).terminateSession(),
+                (): ToolError => ({ code: "unavailable", message: "MCP cleanup failed" }),
+              )(),
+              new Promise<void>((resolve) => {
+                timer = setTimeout(resolve, 1_000);
+              }),
+            ]);
+            clearTimeout(timer);
+          }
+          return ResultAsync.fromThrowable(
+            () => client.close(),
+            (): ToolError => ({ code: "unavailable", message: "MCP cleanup failed" }),
+          )();
+        })(),
+      ).andThen((value) => value);
+      return cleanup;
+    };
+    this.running.add(close);
     return ResultAsync.fromSafePromise(
       (async () => {
         let phase: Parameters<McpDiscoveryDiagnostics["record"]>[0]["phase"] = "transport";
@@ -242,29 +299,33 @@ export class McpTools {
             elapsedMs: diagnostics.now() - started,
             aborted: ctx.abortSignal?.aborted ?? false,
             errorCategory:
-              cause instanceof McpTimeoutError
+              cause instanceof SdkError && cause.code === SdkErrorCode.RequestTimeout
                 ? "request_timeout"
-                : cause instanceof McpAuthRequiredError
+                : cause instanceof UnauthorizedError ||
+                    (cause instanceof SdkHttpError && cause.status === 401)
                   ? "auth_required"
-                  : cause instanceof McpHttpError
+                  : cause instanceof SdkHttpError || cause instanceof InsufficientScopeError
                     ? "http"
                     : category,
-            ...(cause instanceof McpHttpError ? { httpStatus: cause.status } : {}),
-            ...(cause instanceof McpTimeoutError ? { requestTimeoutMs: cause.timeoutMs } : {}),
+            ...(cause instanceof SdkHttpError
+              ? { httpStatus: cause.status }
+              : cause instanceof InsufficientScopeError
+                ? { httpStatus: 403 }
+                : {}),
+            ...(cause instanceof SdkError && cause.code === SdkErrorCode.RequestTimeout
+              ? { requestTimeoutMs: 30_000 }
+              : {}),
           });
         };
         const abort = () => {
           report("cancelled");
-          void ResultAsync.fromPromise(client.close(), () => ({
-            code: "cancelled" as const,
-            message: "MCP cancelled",
-          }));
+          void close();
         };
         ctx.abortSignal?.addEventListener("abort", abort, { once: true });
         const result = await ResultAsync.fromPromise(
           Promise.resolve().then(() =>
             this.closed || ctx.abortSignal?.aborted
-              ? errAsync<McpTransport, ToolError>({ code: "cancelled", message: "MCP cancelled" })
+              ? errAsync<Transport, ToolError>({ code: "cancelled", message: "MCP cancelled" })
               : endpoint.connect(ctx),
           ),
           () => ({ code: "unavailable" as const, message: "MCP broker connection failed" }),
@@ -274,14 +335,23 @@ export class McpTools {
             report(error.code);
             return error;
           })
-          .andThen((transport) => {
+          .andThen((connected) => {
+            transport = connected;
             if (this.closed || ctx.abortSignal?.aborted)
-              return ResultAsync.fromPromise(transport.close(), () => ({
+              return ResultAsync.fromPromise(connected.close(), () => ({
                 code: "unavailable" as const,
                 message: "MCP cleanup failed",
               })).andThen(() =>
                 errAsync<T, ToolError>({ code: "cancelled", message: "MCP cancelled" }),
               );
+            const send = connected.send.bind(connected);
+            connected.send = (message, options) =>
+              send(message, {
+                ...options,
+                requestSignal: options?.requestSignal
+                  ? AbortSignal.any([signal, options.requestSignal])
+                  : signal,
+              });
             const failed = (cause: unknown): ToolError => {
               report("unavailable", cause);
               return {
@@ -290,32 +360,32 @@ export class McpTools {
               };
             };
             stage("initialize");
-            return ResultAsync.fromThrowable(() => client.connect(transport), failed)().andThen(
-              () => {
-                if (this.closed || ctx.abortSignal?.aborted)
-                  return errAsync<T, ToolError>({ code: "cancelled", message: "MCP cancelled" });
-                const description = endpoint.description ?? client.serverInfo?.name;
-                this.catalog.namespace({
-                  name: `mcp__${endpoint.name}`,
-                  ...(description ? { description } : {}),
-                  ...(client.instructions ? { instructions: client.instructions } : {}),
-                });
-                stage("list_tools");
-                return ResultAsync.fromThrowable(() => fn(client), failed)();
-              },
-            );
+            return ResultAsync.fromThrowable(
+              () => client.connect(connected, { timeout: 30_000, signal }),
+              failed,
+            )().andThen(() => {
+              if (this.closed || ctx.abortSignal?.aborted)
+                return errAsync<T, ToolError>({ code: "cancelled", message: "MCP cancelled" });
+              const description = endpoint.description ?? client.getServerVersion()?.name;
+              const instructions = client.getInstructions();
+              this.catalog.namespace({
+                name: `mcp__${endpoint.name}`,
+                ...(description ? { description } : {}),
+                ...(instructions ? { instructions } : {}),
+              });
+              stage("list_tools");
+              return ResultAsync.fromThrowable(() => fn(client, signal), failed)();
+            });
           });
         stage("close");
-        const cleanup = await ResultAsync.fromPromise(client.close(), () => {
-          report("unavailable");
-          return { code: "unavailable" as const, message: "MCP cleanup failed" };
-        });
+        const cleaned = await close();
+        if (cleaned.isErr()) report(cleaned.error.code);
         ctx.abortSignal?.removeEventListener("abort", abort);
-        this.running.delete(client);
+        this.running.delete(close);
         if (this.closed || ctx.abortSignal?.aborted)
           return err<T, ToolError>({ code: "cancelled", message: "MCP cancelled" });
         if (result.isErr()) return result;
-        return cleanup.map(() => result.value);
+        return cleaned.map(() => result.value);
       })(),
     ).andThen((value) => value);
   }
@@ -331,13 +401,13 @@ export class McpTools {
       const discovered = await this.using(
         endpoint,
         ctx,
-        async (client) => ({
-          tools: client.serverCapabilities?.tools
-            ? await client.listTools({ ...(ctx.abortSignal ? { signal: ctx.abortSignal } : {}) })
+        async (client, signal) => ({
+          tools: client.getServerCapabilities()?.tools
+            ? (await client.listTools(undefined, { timeout: 30_000, signal })).tools
             : [],
-          resources: !!client.serverCapabilities?.resources,
-          instructions: client.instructions,
-          description: endpoint.description ?? client.serverInfo?.name,
+          resources: !!client.getServerCapabilities()?.resources,
+          instructions: client.getInstructions(),
+          description: endpoint.description ?? client.getServerVersion()?.name,
         }),
         this.diagnostics,
       ).andThen((value) => {
@@ -402,28 +472,33 @@ export class McpTools {
           }),
           execute: async (args, api, context) => {
             let progress = okAsync<void, ToolError>(undefined);
-            const called = await this.using(endpoint, context, (client) =>
-              client.callTool(tool.name, args as Record<string, unknown>, {
-                ...(context.abortSignal ? { signal: context.abortSignal } : {}),
-                onProgress: (p) => {
-                  if (api.details)
-                    progress = progress.andThen(() =>
-                      ResultAsync.fromPromise(
-                        api.details(
-                          {
-                            progress: p.progress,
-                            ...(p.total === undefined ? {} : { total: p.total }),
-                          },
-                          context,
+            const called = await this.using(endpoint, context, (client, signal) =>
+              client.callTool(
+                { name: tool.name, arguments: args as Record<string, unknown> },
+                {
+                  timeout: 30_000,
+                  toolDefinition: tool,
+                  signal,
+                  onprogress: (p) => {
+                    if (api.details)
+                      progress = progress.andThen(() =>
+                        ResultAsync.fromPromise(
+                          api.details(
+                            {
+                              progress: p.progress,
+                              ...(p.total === undefined ? {} : { total: p.total }),
+                            },
+                            context,
+                          ),
+                          () => ({
+                            code: "unavailable" as const,
+                            message: "MCP progress publication failed",
+                          }),
                         ),
-                        () => ({
-                          code: "unavailable" as const,
-                          message: "MCP progress publication failed",
-                        }),
-                      ),
-                    );
+                      );
+                  },
                 },
-              }),
+              ),
             );
             const published = await progress;
             if (published.isErr())
@@ -480,10 +555,11 @@ export class McpTools {
   close(): ResultAsync<void, ToolError> {
     this.closed = true;
     return ResultAsync.fromPromise(
-      Promise.all([...this.running].map((c) => c.close())).then(() => {
+      Promise.all([...this.running].map((close) => close())).then((results) => {
         this.running.clear();
+        return Result.combine(results).map(() => undefined);
       }),
-      () => ({ code: "unavailable", message: "MCP cleanup failed" }),
-    );
+      () => ({ code: "unavailable" as const, message: "MCP cleanup failed" }),
+    ).andThen((value) => value);
   }
 }

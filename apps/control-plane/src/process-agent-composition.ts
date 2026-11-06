@@ -11,7 +11,7 @@ import {
   type ToolExecutionApi,
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
-import { type AuthProvider, StreamableHttpTransport } from "@earendil-works/pi-mcp";
+import { type AuthProvider, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { McpConfig } from "@pi-orb/protocol";
 import { err, ok, okAsync, Result, ResultAsync } from "neverthrow";
 import type { DurableAgent } from "./adapters/durable/agent.ts";
@@ -121,8 +121,11 @@ export function refreshProcessTools(
 export function scopedMcpAuth(
   token: (request: TokenRequest) => ResultAsync<TokenGrant, ToolError>,
   onState?: (state: "needs-auth" | "available" | "unavailable") => void,
-): AuthProvider {
+  network: typeof fetch = (input, init) => fetch(input, init),
+): AuthProvider & { fetch: typeof fetch } {
   let last: TokenGrant | undefined;
+  let rejectedGeneration: number | undefined;
+  const rejectedRequests = new WeakMap<Response, TokenGrant>();
   const resolve = async (request: TokenRequest) => {
     const grant = await token(request);
     // MCP's AuthProvider requires rejection; McpTools catches it at its adapter boundary.
@@ -131,14 +134,32 @@ export function scopedMcpAuth(
       return Promise.reject(new Error("MCP credential unavailable"));
     }
     onState?.("available");
-    last = grant.value;
+    if (!last || grant.value.generation >= last.generation) last = grant.value;
     return grant.value.accessToken;
   };
   return {
     token: () => resolve({ reason: "startup" }),
-    onUnauthorized: async ({ token: rejected }) => {
-      if (last && rejected === last.accessToken)
-        await resolve({ reason: "rejected", staleGeneration: last.generation });
+    fetch: async (input, init) => {
+      // Capture the wire credential before another request can advance the broker generation.
+      const grant =
+        last && new Headers(init?.headers).get("authorization") === `Bearer ${last.accessToken}`
+          ? last
+          : undefined;
+      const response = await network(input, init);
+      if (response.status === 401 && grant) rejectedRequests.set(response, grant);
+      return response;
+    },
+    onUnauthorized: async ({ response }) => {
+      const rejected = rejectedRequests.get(response);
+      rejectedRequests.delete(response);
+      if (
+        rejected &&
+        rejected.generation === last?.generation &&
+        rejected.generation !== rejectedGeneration
+      ) {
+        rejectedGeneration = rejected.generation;
+        await resolve({ reason: "rejected", staleGeneration: rejected.generation });
+      }
     },
   };
 }
@@ -544,14 +565,18 @@ export function createProcessAgentContext(
                       headers.set(name, value);
                     if (lease && (await lease.check()).isErr())
                       return new Response(null, { status: 403 });
-                    const response = await fetch(input, {
+                    const signal =
+                      init?.method === "DELETE"
+                        ? (init.signal ?? null)
+                        : ctx.abortSignal && init?.signal
+                          ? AbortSignal.any([ctx.abortSignal, init.signal])
+                          : (ctx.abortSignal ?? init?.signal ?? null);
+                    if (signal?.aborted) return new Response(null, { status: 408 });
+                    const response = await (authProvider?.fetch ?? fetch)(input, {
                       ...init,
                       redirect: "error",
                       headers,
-                      signal:
-                        ctx.abortSignal && init?.signal
-                          ? AbortSignal.any([ctx.abortSignal, init.signal])
-                          : (ctx.abortSignal ?? init?.signal ?? null),
+                      signal,
                     });
                     if (response.status === 401) state = "needs-auth";
                     return response;
@@ -581,8 +606,7 @@ export function createProcessAgentContext(
                     : undefined;
                   return Result.fromThrowable(
                     () =>
-                      new StreamableHttpTransport({
-                        url: server.url,
+                      new StreamableHTTPClientTransport(new URL(server.url), {
                         fetch: fetcher,
                         ...(authProvider ? { authProvider } : {}),
                       }),

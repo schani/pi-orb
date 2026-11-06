@@ -1,4 +1,4 @@
-import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
+import { InMemoryTransport } from "@modelcontextprotocol/client";
 import { okAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import { createDurableTools } from "./index.ts";
@@ -10,9 +10,17 @@ it("preserves MCP structuredContent/isError/metadata in script results and decla
       {
         name: "case",
         connect: () => {
-          const { client, server } = createInMemoryTransportPair();
-          server.onMessage((m) => {
+          const [client, server] = InMemoryTransport.createLinkedPair();
+          server.onmessage = (m) => {
             if (!("method" in m) || !("id" in m)) return;
+            if (m.method === "server/discover") {
+              void server.send({
+                jsonrpc: "2.0",
+                id: m.id,
+                error: { code: -32601, message: "Unsupported" },
+              });
+              return;
+            }
             void server.send({
               jsonrpc: "2.0",
               id: m.id,
@@ -44,7 +52,7 @@ it("preserves MCP structuredContent/isError/metadata in script results and decla
                         _meta: { trace: "kept" },
                       },
             });
-          });
+          };
           void server.start();
           return okAsync(client);
         },
