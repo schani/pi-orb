@@ -339,4 +339,4 @@ policies, generic OIDC verification rules — is
 [Q87](../docs/open-questions.md#dependency-update-state-conversions--87) approves upstream conversions: application **7.21.0 → 8.10.0**, foundation **6.50.0 → 8.10.0**; no provider-8 apply or deployment.
 Merged-source baseline/candidate normal plans show no provider-induced managed changes; both database guards pass.
 The [ten-read grant](foundation/README.md#foundation-plan-read-authority-approved-2026-11-05-pst) was applied and verified 2026-11-06, PST.
-[Sanitized receipt](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/a96a1275-06be-4cda-8451-a9b2b8d4495d/evidence/q87-google/final-merged-qualification.md) records native conversions, preservation checks and the exact merged source.
+[Sanitized receipt](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/18691495-8394-4da5-ac1b-b8ae46edb2e5/evidence/q87-google/final-merged-qualification.md) records native conversions, preservation checks and the exact merged source.
