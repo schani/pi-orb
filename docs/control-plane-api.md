@@ -132,7 +132,7 @@ WS   /api/v1/orbs/:orbId/terminal
 
 Cookie-authenticated unsafe requests and browser WebSocket upgrades require the exact configured Origin; absent/null/foreign origins fail. Any foreign Origin on cookie reads also fails. Bound OAuth GET callbacks are narrow exceptions. No separate CSRF-token exchange or credentialed CORS is used. Invalid explicit Authorization never falls back to cookies. Machine tokens require the exact app-origin audience and immutable admitted subject; runtime bearers remain separate and neither bearer class requires browser Origin. Spoofed IAP headers grant no authority.
 
-`GET /auth/login?returnTo=<local-path>` starts login; `GET /auth/callback` validates the sealed ten-minute transaction, PKCE, state, nonce and Google identity. `POST /auth/logout` requires app Origin and clears the app cookie. APIs never redirect into login. The files host allows only hosted GET/HEAD and login/callback. Authentication failures are typed 401/403/503 (internal invariants 500), not redirects. Public shell, minimal health and workload discovery/JWKS remain accessible.
+`GET /auth/login?returnTo=<local-path>` starts login; `GET /auth/callback` validates the sealed ten-minute transaction, PKCE, state, nonce and Google identity. `POST /auth/logout` requires app Origin and clears the app cookie. APIs never redirect into login. The files host allows only hosted/live GET/HEAD and login/callback. Authentication failures are typed 401/403/503 (internal invariants 500), not redirects. Public shell, minimal health and workload discovery/JWKS remain accessible.
 
 `GET /api/v1/session` returns a no-store principal (cookie sessions additionally set `logoutAvailable: true`):
 
@@ -155,10 +155,14 @@ The machine ops principal requires `X-Pi-Orb-User-Id` with a known UUID for exac
 orbs. Each file contains `path`, `url`, `size`, `mediaType`, and numeric `updatedAt`; cleanup issues
 contain `path` (nullable), `lastError`, and `lastErrorAt`. Missing orbs return `404`.
 
-File links navigate to the separate files hostname. That hostname serves only hosted reads;
+File links navigate to the separate files hostname. That hostname serves only hosted/live reads;
 application APIs and WebSockets reject requests originating from hosted documents. Runtime uploads
 use the orb's existing bearer and cannot select another namespace. See `docs/hosting.md` for the
 wire protocol, storage, and lifecycle contract.
+
+### Live orb files (2026-11-05, PST; qualification pending)
+
+Existing orb HTTP responses expose optional `OrbView.filesBaseUrl`, derived from files-origin configuration and orb identity, not persisted state. Owner-only GET/HEAD reads use `/files/<uuid><encoded-absolute-path>` or `/files/repo/<uuid>/<encoded-relative-path>` on the files origin; full contract: `docs/orb-files.md`.
 
 ### Deployment facts (decided and implemented 2026-09-04)
 

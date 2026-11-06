@@ -45,6 +45,7 @@ import {
   OidcTokenSigner,
   OidcTokenVerifier,
 } from "./adapters/oidc/signer.ts";
+import { NodeOrbFilesTransport } from "./adapters/orb-files-http.ts";
 import { PiAuthGate } from "./adapters/pi-auth/gate.ts";
 import { PiActivityHeadlineGenerator } from "./adapters/pi-headline-generator.ts";
 import { PiOrbNameGenerator } from "./adapters/pi-name-generator.ts";
@@ -134,6 +135,8 @@ import { registerIssuerRoutes } from "./http/issuer-routes.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
 import { MCP_OAUTH_CALLBACK, registerMcpOAuthRoutes } from "./http/mcp-oauth-routes.ts";
 import { registerMcpRoutes } from "./http/mcp-routes.ts";
+import { registerOrbFilesBoundary, registerOrbFilesGateway } from "./http/orb-files-gateway.ts";
+import { orbFilesBaseUrl } from "./http/orb-files-url.ts";
 import { registerPreviewAuth } from "./http/preview-auth-routes.ts";
 import { previewRoutingUrl, registerPreviewGateway } from "./http/preview-gateway.ts";
 import { createPreviewHosts, type PreviewHosts } from "./http/preview-host.ts";
@@ -633,6 +636,9 @@ export async function main(
     logger: false,
     rewriteUrl: (request) => previewRoutingUrl(previewHosts, request),
   });
+  const filesBaseUrl = (orbId: string): string | null =>
+    orbFilesBaseUrl(hostingOrigin, deps.hostProvider.kind, orbId);
+  registerOrbFilesBoundary(app, { filesOrigin: hostingOrigin, appOrigin });
   startupPhase("http.complete");
   const stop = new AbortController();
   registerResponseDrain(app, stop.signal);
@@ -909,7 +915,7 @@ export async function main(
       });
     } else {
       app.addHook("onRequest", async (request, reply) => {
-        if (request.previewIdentity || previewHosts?.parse(request.headers.host) === undefined)
+        if (request.previewIdentity || previewHosts.parse(request.headers.host) === undefined)
           return;
         const principal = await principalResolver(request);
         if (principal.isErr() || principal.value.kind !== "user")
@@ -945,6 +951,12 @@ export async function main(
     principalResolver,
     async (browser) => {
       startupPhase("browser-initialize.start");
+      registerOrbFilesGateway(browser, httpTask, {
+        deps,
+        filesOrigin: hostingOrigin,
+        appOrigin,
+        transport: new NodeOrbFilesTransport(),
+      });
       registerBrowserHostingRoutes(browser, httpTask, {
         store: deps.store,
         hosting: deps.hosting,
@@ -954,7 +966,7 @@ export async function main(
       startupPhase("websocket.start");
       await registerLiveProxy(browser, httpTask, deps);
       startupPhase("websocket.complete");
-      registerRoutes(browser, httpTask, deps, systemView, signingKeyDeps);
+      registerRoutes(browser, httpTask, deps, systemView, signingKeyDeps, filesBaseUrl);
       registerMcpOAuthRoutes(browser, httpTask, database.mcp, mcpOAuth, appOrigin);
       registerMcpRoutes(browser, httpTask, database.mcp, async (projectId, config) => {
         const snapshot = await getProjectSecretSnapshot(httpTask, deps.projectSecrets, projectId);

@@ -121,7 +121,7 @@ deletion removes every object `data` file; tests distinguish that byte namespace
 
 ## Serving and access
 
-**Implemented 2026-09-19; not deployed:** the single application accepts uploads with runtime incarnation bearers and serves private GET/HEAD using the files origin's own Google login and host-only sealed cookie. Only unauthenticated top-level file navigation initiates login; HEAD, API and asset requests fail with typed errors. The files host exposes hosted GET/HEAD and login/callback, never ordinary APIs or WebSockets. There is no shared-domain cookie, app-token handoff, signed public download or files logout UI; its session expires independently of app logout. Authentication and exact-Origin checks: `docs/credentials.md`.
+**Implemented 2026-09-19; not deployed:** the single application accepts uploads with runtime incarnation bearers and serves private GET/HEAD using the files origin's own Google login and host-only sealed cookie. Only unauthenticated top-level file navigation initiates login; HEAD, API and asset requests fail with typed errors. The files host exposes hosted/live GET/HEAD and login/callback, never ordinary APIs or WebSockets. Live links and the shared-origin exposure contract: `docs/orb-files.md`. There is no shared-domain cookie, app-token handoff, signed public download or files logout UI; its session expires independently of app logout. Authentication and exact-Origin checks: `docs/credentials.md`.
 
 Orb id-tokens for audience `urn:pi-orb:access` (`docs/ports.md`) also admit hosted reads, as header
 or files-host cookie, for orbs with the token orb's owner; the path's orb ID must be canonical. They

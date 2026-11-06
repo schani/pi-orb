@@ -151,9 +151,7 @@ describe.each(["chromium", "webkit"] as const)("tool-returned image previews · 
       const read = imageActivity(page, "artifacts/dashboard-preview.svg");
       const generic = imageActivity(page, "browser_snapshot");
       const failed = imageActivity(page, "visual_diff");
-      const textOnly = page
-        .locator("details.tool-activity-category:not(.tool-image-activity)")
-        .first();
+      const textOnly = page.locator("details.activity-strip").first();
 
       await expectPage(read).toHaveCount(1);
       await expectPage(generic).toHaveCount(1);
@@ -602,10 +600,7 @@ describe.each(["chromium", "webkit"] as const)("tool-returned image previews · 
       });
       try {
         await gotoFrontendHistory(page, url, ORB_ID);
-        const read = page
-          .locator("details.tool-activity-category")
-          .filter({ hasText: "HistoryView.tsx" })
-          .filter({ hasText: "docs/web-ui.md" });
+        const read = page.locator("details.activity-strip");
         await expectPage(read).toBeVisible();
         await page.evaluate(async () => {
           await Reflect.get(globalThis, "document").fonts.ready;
@@ -619,16 +614,17 @@ describe.each(["chromium", "webkit"] as const)("tool-returned image previews · 
           ).toEqual({ overflow: false, scrollTop: 0 });
         };
         await assertBoundedHistory();
-        await expectPage(page.locator("details.tool-activity-category")).toHaveCount(1);
+        await expectPage(read.locator(".activity-strip-dot")).toHaveCount(2);
+        await expectPage(page.locator("details.tool-activity-category")).toHaveCount(0);
         await expectPage(page.locator(".tool-image-preview, img.msg-image")).toHaveCount(0);
-        await read.locator(":scope > summary").click();
+        await read.locator(":scope > summary .activity-rail-label").click();
         await assertBoundedHistory();
-        await expectPage(read.locator("details.tool-activity-call")).toHaveCount(2);
+        await expectPage(read.locator("details.tool-activity-category")).toHaveCount(2);
         const empty = read
-          .locator("details.tool-activity-call")
+          .locator("details.tool-activity-category")
           .filter({ hasText: "HistoryView.tsx" });
         const normal = read
-          .locator("details.tool-activity-call")
+          .locator("details.tool-activity-category")
           .filter({ hasText: "docs/web-ui.md" });
         if (schedule !== "normal-first") {
           const resultRequested = page.waitForRequest((request) =>

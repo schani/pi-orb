@@ -138,6 +138,10 @@ it.each(["chromium", "webkit"] as const)(
         // Publication order differs from canonical order; ordinal pairing is wrong.
         emit(reasoning("redacted"));
         emit(reasoning("headingless"));
+        const strip = page.locator(".activity-strip");
+        await expect(strip.locator('[data-step="thinking"]')).toHaveCount(2);
+        await expect(rows).toHaveCount(0);
+        await strip.locator(":scope > summary .activity-rail-label").click();
         await expect(rows).toHaveCount(2);
         await expect(rows.locator("summary .activity-rail-label")).toHaveText([
           "thinking",

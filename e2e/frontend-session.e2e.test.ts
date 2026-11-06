@@ -1359,7 +1359,7 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
-  it("aligns run glyphs with file dots and keeps collapsed chevrons on a visible rail", async () => {
+  it("aligns run glyphs with the row text and keeps collapsed chevrons on a visible rail", async () => {
     for (const width of [1280, 390, 320]) {
       const page = await browser.newPage({ viewport: { width, height: 900 } });
       try {
@@ -1381,36 +1381,24 @@ describe("frontend-only browser behavior", () => {
             markerCenterX: box.left + box.width / 2,
           };
         });
-        const read = page
-          .locator(".tool-activity-category")
-          .filter({
-            has: page.locator(".activity-rail-label", { hasText: /^read$/ }),
-          })
-          .first();
-        const commands = page
-          .locator(".tool-activity-category")
+        const strip = page.locator(".activity-strip", {
+          has: page.locator('[aria-label="commands · npm test -- HistoryView.test.tsx"]'),
+        });
+        await strip.locator(":scope > summary .activity-rail-label").click();
+        const commands = strip
+          .locator(":scope > .activity-strip-body > .tool-activity-category")
           .filter({
             has: page.locator(".activity-rail-label", { hasText: /^commands$/ }),
           })
           .first();
-        await read.locator(":scope > summary").click();
         await commands.locator(":scope > summary").click();
-        await commands.locator(".tool-activity-call > summary").first().click();
         await expectPage(
           commands.locator(".tool-command-line .tool-command-text").first(),
         ).toContainText("npm test -- HistoryView.test.tsx");
         await expectPage(commands.locator(".tool-call-output").first()).toContainText(
           "PASS HistoryView.test.tsx",
         );
-        const dotLeft = await read
-          .locator(".tool-call-marker")
-          .first()
-          .evaluate((element) => {
-            const range = element.ownerDocument.createRange();
-            range.selectNodeContents(element);
-            return range.getBoundingClientRect().left;
-          });
-        const summaryLeft = await read
+        const summaryLeft = await commands
           .locator(":scope > summary .activity-rail-summary")
           .evaluate((element) => element.getBoundingClientRect().left);
         const command = await commands
@@ -1434,8 +1422,7 @@ describe("frontend-only browser behavior", () => {
             };
           });
         assert.ok(command, "Missing command geometry");
-        expectPage(dotLeft).toBeCloseTo(summaryLeft, 0);
-        expectPage(command.runGlyphLeft).toBeCloseTo(dotLeft, 0);
+        expectPage(command.runGlyphLeft).toBeCloseTo(summaryLeft, 0);
         expectPage(command.commandTextLeft - command.bodyLeft).toBeCloseTo(command.outputIndent, 0);
         expectPage(command.outputLeft).toBe(command.bodyLeft);
         expectPage(command.outputIndent).toBeGreaterThan(30);
@@ -1451,7 +1438,7 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
-  it("joins activity rail through disclosures but stops at prose", async () => {
+  it("joins top-level rail rows and nests expanded strip steps in the band", async () => {
     const page = await browser.newPage();
     const id = "frontend-auth-copy-test";
     await page.route(`**/api/v1/orbs/${id}`, async (route) => {
@@ -1552,8 +1539,8 @@ describe("frontend-only browser behavior", () => {
     });
     try {
       await page.goto(`${origin}/orbs/${id}`);
-      const rows = page.locator(".rec-orb .activity-rail-row");
-      await expectPage(rows).toHaveCount(5);
+      const rows = page.locator(".rec-orb .rec-bd > .activity-rail-row");
+      await expectPage(rows).toHaveCount(2);
       const geometry = await rows.evaluateAll((elements) =>
         elements.map((element) => {
           const box = element.getBoundingClientRect();
@@ -1563,9 +1550,6 @@ describe("frontend-only browser behavior", () => {
           const line = element.ownerDocument.defaultView?.getComputedStyle(element, "::before");
           return {
             left: box.left,
-            right: box.right,
-            top: box.top,
-            bottom: box.bottom,
             markerCenter: marker === undefined ? 0 : marker.left + marker.width / 2,
             metricRight: metric?.right,
             summaryRight: summary?.right,
@@ -1578,24 +1562,38 @@ describe("frontend-only browser behavior", () => {
           };
         }),
       );
-      expectPage(geometry.map((row) => row.adjacent)).toEqual([true, true, false, true, false]);
-      expectPage(geometry.map((row) => row.border)).toEqual(Array(5).fill("0px"));
+      expectPage(geometry.map((row) => row.adjacent)).toEqual([false, false]);
       for (const row of geometry) {
+        expectPage(row.border).toBe("0px");
         expectPage(row.lineColor).toBe("rgb(153, 153, 153)");
         expectPage(row.left + row.lineLeft).toBeCloseTo(row.markerCenter, 0);
-        if (row.metricRight !== undefined)
-          expectPage((row.summaryRight ?? 0) - row.metricRight).toBeLessThan(12);
+        expectPage((row.summaryRight ?? 0) - (row.metricRight ?? 0)).toBeLessThan(12);
+        expectPage(row.lineTop).toBe(12);
+        expectPage(row.lineBottom).toBeGreaterThan(0);
       }
-      for (const index of [0, 1, 3]) expectPage(geometry[index]?.lineBottom).toBe(-4);
-      expectPage(geometry[0]?.lineTop).toBe(12);
-      expectPage(geometry[3]?.lineTop).toBe(12);
-      expectPage(geometry[2]?.lineBottom).toBeGreaterThan(0);
-      expectPage(geometry[4]?.lineBottom).toBeGreaterThan(0);
-      await expectPage(rows.nth(1).locator(".activity-rail-metric")).toHaveText("2 files");
-      await expectPage(rows.nth(2).locator(".activity-rail-metric")).toHaveText("+1 −1");
-      const read = rows.nth(1);
+
+      const strip = rows.first();
+      await strip.locator(":scope > summary .activity-rail-label").click();
+      const nested = strip.locator(":scope > .activity-strip-body > .activity-rail-row");
+      await expectPage(nested).toHaveCount(4);
+      const band = await strip.evaluate((element) => {
+        const body = element.querySelector(".activity-strip-body");
+        const text = element.querySelector(":scope > summary .activity-rail-summary");
+        const marker = body?.querySelector(":scope > .activity-rail-row .activity-rail-marker");
+        return {
+          background:
+            body === null
+              ? null
+              : element.ownerDocument.defaultView?.getComputedStyle(body).backgroundColor,
+          markerLeft: marker?.getBoundingClientRect().left,
+          textLeft: text?.getBoundingClientRect().left,
+        };
+      });
+      expectPage(band.background).toBe("rgb(242, 242, 242)");
+      expectPage(band.markerLeft ?? 0).toBeCloseTo(band.textLeft ?? Infinity, 0);
+      await expectPage(nested.nth(3).locator(".activity-rail-metric")).toHaveText("+1 −1");
+      const read = nested.nth(1);
       await read.locator(":scope > summary").click();
-      await read.locator(".tool-activity-call > summary").first().click();
       const output = read.locator(".tool-call-output").first();
       await expectPage(output).toBeVisible();
       const expanded = await read.evaluate((element) => ({
@@ -1611,29 +1609,20 @@ describe("frontend-only browser behavior", () => {
       expectPage(expanded.bodyRight).toBe(expanded.right);
       expectPage(expanded.topRule).toBe("0px");
       expectPage(expanded.innerRule).toBe("1px");
-      const joined = await read.evaluate((element) => ({
-        bottom: element.getBoundingClientRect().bottom,
-        nextTop: element.nextElementSibling?.getBoundingClientRect().top,
-        lineBottom: element.ownerDocument.defaultView?.getComputedStyle(element, "::before").bottom,
+      const reasoningRow = nested.first();
+      await reasoningRow.locator(":scope > summary").click();
+      await expectPage(reasoningRow.locator(".reasoning-body")).toBeVisible();
+      const reasoning = await reasoningRow.locator(".reasoning-body").evaluate((element) => ({
+        border: element.ownerDocument.defaultView?.getComputedStyle(element).borderTopWidth,
+        contentLeft:
+          element.getBoundingClientRect().left +
+          Number.parseFloat(
+            element.ownerDocument.defaultView?.getComputedStyle(element).paddingLeft ?? "0",
+          ),
+        textLeft: element.parentElement
+          ?.querySelector("summary .activity-rail-summary")
+          ?.getBoundingClientRect().left,
       }));
-      expectPage(joined.lineBottom).toBe("-4px");
-      expectPage(joined.nextTop).toBe(joined.bottom + 4);
-      await rows.first().locator(":scope > summary").click();
-      await expectPage(rows.first().locator(".reasoning-body")).toBeVisible();
-      const reasoning = await rows
-        .first()
-        .locator(".reasoning-body")
-        .evaluate((element) => ({
-          border: element.ownerDocument.defaultView?.getComputedStyle(element).borderTopWidth,
-          contentLeft:
-            element.getBoundingClientRect().left +
-            Number.parseFloat(
-              element.ownerDocument.defaultView?.getComputedStyle(element).paddingLeft ?? "0",
-            ),
-          textLeft: element.parentElement
-            ?.querySelector("summary .activity-rail-summary")
-            ?.getBoundingClientRect().left,
-        }));
       expectPage(reasoning.border).toBe("0px");
       expectPage(reasoning.contentLeft).toBeGreaterThanOrEqual(reasoning.textLeft ?? Infinity);
     } finally {

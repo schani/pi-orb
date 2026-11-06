@@ -101,6 +101,10 @@ Only registered isolated GCE/Docker ports are supported. Activity protects idle 
 agent-working mutation; explicit Stop wins. No retries or body/message replay. Domain/TLS and
 external ingress acceptance remain pending; source qualification is not deployment.
 
+## Live guest-file reads (approved 2026-11-05)
+
+GET/HEAD `/v1/files?path=<encoded-absolute-path>` streams files under runtime bearer/incarnation admission; optional `base=repo` instead resolves `path` relative to the configured initial repository. Typed failures use HTTP status codes and JSON `{ error }` responses; access, lifetime and exposure contract: `docs/orb-files.md`.
+
 ## Transport and control-plane handoff
 
 The browser opens `/api/v1/orbs/{orbId}/live`. Native Claude attachment requires running compute; central Pi can attach read-only while stopped and before execution readiness. It offers the WebSocket subprotocol `pi-orb.runtime.v1`.

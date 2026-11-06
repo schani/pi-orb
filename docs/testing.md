@@ -12,14 +12,14 @@ The initial tools suite fails 19/212 cases: old WatchCall/end handling, native r
 
 The complete local root run on `4ce1227` records 6,448 passes, two failures and nine conditional skips. Both failures are stale version contracts: Docker COPY expects 1.4 patch filenames, and HTTP security expects Pi/Chord 1.4 with the older finite minimatch allowlist. Their narrow port passes all 16 affected cases, retains the security assertions and adds only resolved safe minimatch 11.0.3; original failures remain intact. This failed run is not a full-green or current-head qualification claim.
 
-Evidence, exact commands, first failures, source/lock/seal inventories and derived-trace provenance: `/workspace/pi-1.5-evidence/`. Counts above overlap. Full root/infrastructure/E2E, packaged-image and exact-head hosted qualification are separate gates, not implied by these focused receipts. No cloud release, merge or deployment.
+Evidence, exact commands, first failures, source/lock/seal inventories and derived-trace provenance: [curated qualification/replay archive](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/18691495-8394-4da5-ac1b-b8ae46edb2e5/evidence/pr263-pi-1.5-qualification-d720f139.tgz). Counts above overlap. Full root/infrastructure/E2E, packaged-image and exact-head hosted qualification are separate gates, not implied by these focused receipts. No cloud release, merge or deployment.
 
 
 ## Pi convenience removals (2026-11-05, PST; local, undeployed)
 
 Pi remains pinned at 1.4.0. The user approved native declaration caps, canonical/normalized namespace matching and native omitted-transport continuation behavior; all image/output/CPU/WASM/worker-exit, null/privacy, journal/replay and batch-admission guards remain. The sealed set covers 15 files. These checks cover only the 1.4 convenience removals; the subsequent 1.5 native-state/recovery approval is recorded in question 89 in `docs/open-questions.md`.
 
-Fresh `npm ci` preceded tests. Baseline: 99 focused Vitest and 23 installer cases passed. Tests-first final RED: seven expected failures/98 passes; an earlier draft also over-specified the MCP result type, corrected without changing its input-contract assertion. First logs remain intact. After removing only the three convenience hunks/target and refreshing seals, another clean `npm ci` passed with zero audit findings. Serial focused/retained-guard checks pass **181 Vitest cases** (including two existing DST suites) and **23 installer cases**; the application test count drops by one because declarations.js is now pristine. Root/workspace/E2E types and root lint pass (existing lint warnings/infos). No new DST trace/failure. Evidence and exact commands: `/workspace/pi-1.5-evidence/`.
+Fresh `npm ci` preceded tests. Baseline: 99 focused Vitest and 23 installer cases passed. Tests-first final RED: seven expected failures/98 passes; an earlier draft also over-specified the MCP result type, corrected without changing its input-contract assertion. First logs remain intact. After removing only the three convenience hunks/target and refreshing seals, another clean `npm ci` passed with zero audit findings. Serial focused/retained-guard checks pass **181 Vitest cases** (including two existing DST suites) and **23 installer cases**; the application test count drops by one because declarations.js is now pristine. Root/workspace/E2E types and root lint pass (existing lint warnings/infos). No new DST trace/failure. Evidence and exact commands: [curated qualification/replay archive](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/18691495-8394-4da5-ac1b-b8ae46edb2e5/evidence/pr263-pi-1.5-qualification-d720f139.tgz).
 
 These local removal checks do not qualify Pi 1.5, full root/infrastructure/E2E, packaged images, live cloud behavior or deployment.
 
@@ -126,6 +126,7 @@ Executable acceptance scenarios own scheduling/effects; unit contracts own strea
 ### CI and listeners
 
 CI exports exact allowlisted diagnostic leaves only from jobs selecting their producers, never workspace/auth trees or raw alert/sleep bodies. Foundation OpenTofu checks use `infra/foundation/test-tofu.sh`; `test:infra` owns the Node contracts once. Release-report contracts own deployment uploads/policy; browser-evidence contracts own diagnostic producers/E2E uploads.
+Research public sources in a separate public-only cache with explicit filenames; parse private plans in memory and emit only allowlisted facts, never recursive content searches or raw dumps ([incident](postmortems/2026-11-06-private-plan-output.md)).
 
 Qualification requires `checks`, the existing `control-plane-image` offline packaged-worker/Git/skills proof, and all eight provider shard contexts on the first exact-source main attempt. Branch-protection API access was denied (403), not permission to drop a context. Both installation and post-seal SSH graphs execute their existing boot-graph checks.
 
@@ -2624,16 +2625,30 @@ scheduler/replay/timer checks, workspace/E2E typecheck, lint and resource audit.
 Reviewed receipts remain unchanged in the qualification directory's `integration260/`.
 The historical 6,086-test full pass predates this cleanup; full new-head CI is pending.
 
+## Compact live-file links (2026-11-05, PST; local, undeployed)
+
+[Durable qualification archive](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/08059a1f-04fb-4ca2-907f-e38b2140e180/evidence/pr266-qualification.tar.gz) (SHA-256 `681f425111eb656aa7bc48336ba6e5f4dc9c6d56be57e164ebbd306f6ef6c7d7`) retains earlier local qualification, first failures and controlled corrective evidence through orb archival. These historical/pre-integration receipts do not qualify new committed-head CI.
+
+Current focused gates and real public-HTTPS click: `docs/orb-files.md`. Historical pre-compact full suites do not qualify current source. Preserve first failures under `.context/orb-files/compact-implementation/frontend/` and `final/`; approved checksums and completed gates are in `final/qualified/`.
+
+Native-click tests own separate HTTP source/target servers; synthetic routed HTTPS also aborted outside the app. Both browsers and the real public HTTPS click passed; no product native-click fix is claimed. String-arrow `locator.evaluate` returned a function/undefined: both CSS assertions now await `toHaveCSS` with unchanged exact RGB, without larger timeouts. Test CommonMark-normalized destinations, not a custom walker. Restart/cleanup evidence: `.context/process-host-dev/compact-smoke.json`, `final/qualified/restarted-dashboard.txt`. Full exact-head release qualification remains separate.
+
+## Recovered identity throttles (2026-11-06, PST; local, undeployed)
+
+After `npm ci`, final-source validation passed: `npx vitest run apps/orb-runtime/src/id-token` (31 tests, including existing cold-start DST); `python3 -m unittest infra.rollout_monitor_test` (21); `npm run test:infra` (156 Node, 271 Python, 34 native-VM); typecheck; lint (520 existing warnings, 99 infos). Full units/E2E await PR CI; live Cloud Run propagation is unqualified.
+
+Tests-first evidence remains in `.context/retry-*-red.log`: absent trace, recovery classification, disappearing inventory, premature 1,080-second finalization, a stale read crossing 1,090, and a blanket cutoff dropping independent tail faults. Regressions cover concurrent invocation isolation, mixed outcomes, malformed/foreign logs, reverse delivery, ERROR severity, sticky independent faults, query truncation/failure, cutoff-tail recovery and independent faults throughout the ingestion tail. No concurrency state machine was added.
+
 ## Native security baseline (2026-11-05, PST; qualified, undeployed)
 
 Qualified clean source: `2d5c8e3c2218326e48ed049c410cb4e6713bd51b`; CI-qualified head: `671343ba`.
 Tests first: pin/base/guest contracts and successful-PENDING recovery failed before correction.
 Local passes: 226 native tests including DST; infra contracts; workspace typecheck/lint, shell syntax, artifact guard and diff checks.
-[CI receipt](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/55be2793-d9e4-48c3-8574-6a2f84ddf39e/evidence/q87/native-ci.md): all 10 checks green on `671343ba`, including full suite, PostgreSQL, E2E and Durable.
-[Review ledger](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/55be2793-d9e4-48c3-8574-6a2f84ddf39e/evidence/q87/native-sol-loop.md): two Sol approvals; behavior remains frozen.
-[Fresh-image PASS](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/55be2793-d9e4-48c3-8574-6a2f84ddf39e/evidence/q87/native-image-accepted.md): exact source qualified; all 390 uploaded and 32 tooling hashes match.
-[Retained-store PASS](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/55be2793-d9e4-48c3-8574-6a2f84ddf39e/evidence/q87/native-retained-store.md): 164 exact assertions across daemon-pair replacement/restart; only evidenced upstream ExtraHosts/DNS normalization allowed.
-[First-failure evidence](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/55be2793-d9e4-48c3-8574-6a2f84ddf39e/evidence/q87/native-image-first-failure.md): valid PENDING rejected by READY-only parser; bounded same-ID recovery fix in `docs/postmortems/2026-11-05-native-capture-pending.md`.
+[CI receipt](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/18691495-8394-4da5-ac1b-b8ae46edb2e5/evidence/q87/native-ci.md): all 10 checks green on `671343ba`, including full suite, PostgreSQL, E2E and Durable.
+[Review ledger](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/18691495-8394-4da5-ac1b-b8ae46edb2e5/evidence/q87/native-sol-loop.md): two Sol approvals; behavior remains frozen.
+[Fresh-image PASS](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/18691495-8394-4da5-ac1b-b8ae46edb2e5/evidence/q87/native-image-accepted.md): exact source qualified; all 390 uploaded and 32 tooling hashes match.
+[Retained-store PASS](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/18691495-8394-4da5-ac1b-b8ae46edb2e5/evidence/q87/native-retained-store.md): 164 exact assertions across daemon-pair replacement/restart; only evidenced upstream ExtraHosts/DNS normalization allowed.
+[First-failure evidence](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/18691495-8394-4da5-ac1b-b8ae46edb2e5/evidence/q87/native-image-first-failure.md): valid PENDING rejected by READY-only parser; bounded same-ID recovery fix in `docs/postmortems/2026-11-05-native-capture-pending.md`.
 Exact ownership-fenced cleanup verified all owned image/retained-store resources, processes, keys and SSH cache entries absent; unrelated entries preserved.
 Qualification excludes retained-workspace VM reboot/stop-start, full-image replacement, default networking and rollback; remaining release gates: `TODO.md`. No production apply/deployment.
 Historical archived `npm test` was tool-cancelled at 300s and remains incomplete; no cause/fix claimed ([original receipt](https://github.com/schani/pi-orb/blob/671343ba9ac6adaee0aa250be283a826a02133e3/docs/testing.md#native-security-baseline-2026-11-05-pst-local-undeployed)).

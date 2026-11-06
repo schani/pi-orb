@@ -119,6 +119,7 @@ Subsystem designs:
 - [docs/workload-identity.md](docs/workload-identity.md) — requirements for orb-issued OIDC identity and keyless federation with cloud providers and private services
 - [docs/workload-identity-recipes.md](docs/workload-identity-recipes.md) — relying-party integration recipes for that identity: GCP workload identity federation, AWS web-identity roles, and generic OIDC verification
 - [docs/ports.md](docs/ports.md) — HTTP preview contracts: isolated origins, authentication, runtime proxy, DST and pending ingress acceptance
+- [docs/orb-files.md](docs/orb-files.md) — live guest-file links, owner-only access, fixed files origin and runtime streaming
 - [docs/hosting.md](docs/hosting.md) — system-hosted orb files: durable namespaces, object storage, publication, serving, and lifecycle ownership
 - [docs/deployment.md](docs/deployment.md) — Cloud Run/OpenTofu deployment direction (operational workflow: `infra/README.md`)
 - [docs/control-plane-consolidation.md](docs/control-plane-consolidation.md) — single-service application authentication, implementation record and cutover/qualification gates
@@ -337,6 +338,7 @@ Reference material:
 - [docs/postmortems/2026-10-18-central-drain-close-race.md](docs/postmortems/2026-10-18-central-drain-close-race.md) — native failure/storage-close race blocked central deletion
 - [docs/postmortems/2026-10-23-frontend-chart-qualification.md](docs/postmortems/2026-10-23-frontend-chart-qualification.md) — responsive focus ownership and isolated Mermaid measurement
 - [docs/postmortems/2026-10-20-stopped-central-agent-recovery.md](docs/postmortems/2026-10-20-stopped-central-agent-recovery.md) — release shutdown during stopped-VM admission exposed a central recovery eligibility gap
+- [docs/postmortems/2026-11-06-private-plan-output.md](docs/postmortems/2026-11-06-private-plan-output.md) — private plan output boundaries
 - [docs/postmortems/2026-11-03-preview-request-log-exclusion.md](docs/postmortems/2026-11-03-preview-request-log-exclusion.md) — doubled backslashes made the preview request-log exclusion match nothing
 - [docs/postmortems/2026-11-03-preview-admission-clock-skew.md](docs/postmortems/2026-11-03-preview-admission-clock-skew.md) — preview admissions signed at the runtime's expiry limit failed under clock skew
 - [docs/postmortems/2026-10-24-claude-terminal-failure.md](docs/postmortems/2026-10-24-claude-terminal-failure.md) — subscription-limit failure retained a task synthesis handoff and busy ownership

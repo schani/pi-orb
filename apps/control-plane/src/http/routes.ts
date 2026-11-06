@@ -283,8 +283,12 @@ export function registerRoutes(
   deps: ControlPlaneDeps,
   system: SystemView,
   signingKeys?: SigningKeyDeps,
+  filesBaseUrl?: ViewConfig["filesBaseUrl"],
 ): void {
-  const config: ViewConfig = { centralAgent: deps.agentPlane?.placement === "central" };
+  const config: ViewConfig = {
+    centralAgent: deps.agentPlane?.placement === "central",
+    ...(filesBaseUrl ? { filesBaseUrl } : {}),
+  };
   const viewerUserId = (request: FastifyRequest): string | null => {
     const principal = requirePrincipal(request);
     return principal.isOk() && principal.value.kind === "user" ? principal.value.user.id : null;

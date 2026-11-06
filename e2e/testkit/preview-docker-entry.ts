@@ -1,14 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { chmod, rm } from "node:fs/promises";
-import websocket from "@fastify/websocket";
-import Fastify from "fastify";
 import type { OrbAgent } from "../../apps/orb-runtime/src/domain/orb-agent.ts";
 import { RuntimePreviewService } from "../../apps/orb-runtime/src/domain/preview.ts";
 import { PreviewActivity } from "../../apps/orb-runtime/src/domain/preview-activity.ts";
 import { createExecutionPreview } from "../../apps/orb-runtime/src/execution/preview.ts";
 import { buildExecutionServer } from "../../apps/orb-runtime/src/execution/server.ts";
-import { registerPreviewRoutes } from "../../apps/orb-runtime/src/http/preview-route.ts";
+import { buildRuntimeServer } from "../../apps/orb-runtime/src/http/server.ts";
 import { HmacPreviewVerifier } from "../../apps/orb-runtime/src/preview/admission.ts";
+import type { TerminalManager } from "../../apps/orb-runtime/src/terminal/manager.ts";
 import { startPreviewApplication } from "./preview-application.ts";
 import { startPreviewSocketBridge } from "./preview-socket-bridge.ts";
 import { startPreviewViteApplication } from "./preview-vite-application.ts";
@@ -42,6 +41,12 @@ const agent = {
 } as unknown as OrbAgent;
 // The execution mode is the image's central-Pi server; fixture routes then need its bearer.
 const execution = process.env["PREVIEW_FIXTURE_EXECUTION"] === "1";
+const service = new RuntimePreviewService({
+  agent,
+  orbId,
+  verifier: new HmacPreviewVerifier(token),
+  reservedPorts: () => [8080, 8081],
+});
 const app = execution
   ? buildExecutionServer({
       token,
@@ -55,17 +60,13 @@ const app = execution
         reservedPorts: () => [8080, 8081],
       }),
     })
-  : Fastify();
-const service = new RuntimePreviewService({
-  agent,
-  orbId,
-  verifier: new HmacPreviewVerifier(token),
-  reservedPorts: () => [8080, 8081],
-});
-if (!execution) {
-  await app.register(websocket);
-  app.get("/v1/health", () => health);
-}
+  : buildRuntimeServer(
+      agent,
+      { closeAll: () => undefined } as unknown as TerminalManager,
+      token,
+      service,
+      "0",
+    );
 app.get("/__fixture/info", () => ({
   ports: [application.port, wrong.port, vite.port],
   requests: application.requests,
@@ -87,7 +88,6 @@ app.post<{ Body: { value: string } }>("/__fixture/vite", async (request) => {
   await vite.update(request.body.value);
   return { ok: true };
 });
-if (!execution) await app.register(async (scope) => registerPreviewRoutes(scope, service));
 if (process.env["PREVIEW_FIXTURE_UNIX"] === "1") {
   await startPreviewSocketBridge("/fixture/broker.sock", 8081);
   await rm("/fixture/runtime.sock", { force: true });

@@ -154,6 +154,7 @@ it("selects shared and forced-process files once but both genuine provider compo
   expect(docker.filter((file) => process.includes(file))).toEqual([
     resolve(root, "e2e/cross-axis.e2e.test.ts"),
     resolve(root, "e2e/full-slice.e2e.test.ts"),
+    resolve(root, "e2e/live-files.e2e.test.ts"),
     resolve(root, "e2e/preview-access-token.e2e.test.ts"),
     resolve(root, "e2e/preview-central.e2e.test.ts"),
     resolve(root, "e2e/preview-docker.e2e.test.ts"),

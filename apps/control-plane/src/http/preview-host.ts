@@ -1,7 +1,14 @@
 import { err, ok, Result } from "neverthrow";
 import { getDomain } from "tldts";
 
-export interface PreviewTarget {
+export interface IsolatedTarget {
+  readonly orbId: string;
+  readonly origin: string;
+}
+export interface IsolatedHosts {
+  parse(authority: string | undefined): IsolatedTarget | undefined;
+}
+export interface PreviewTarget extends IsolatedTarget {
   readonly orbId: string;
   readonly port: number;
   readonly origin: string;

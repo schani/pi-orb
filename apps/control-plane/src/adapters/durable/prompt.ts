@@ -32,7 +32,7 @@ export function renderPrompt(snapshot: PromptSnapshot): string {
     .join("\n\n");
   return [
     "You are a coding assistant. Use tools to inspect and change the project. Be concise. Produce Markdown. Mermaid is supported.",
-    environmentPrompt,
+    environmentPrompt(),
     instructions ? `<project_instructions>\n${instructions}\n</project_instructions>` : "",
     snapshot.appendSystem ?? "",
     piEnvironmentPrompt,

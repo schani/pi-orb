@@ -60,6 +60,17 @@ describe("orb sleep protocol", () => {
     ).toBe(true);
   });
 
+  it("rejects file-serving metadata in agent boot context", () => {
+    const response = { v: 1, context: null, userTimeZone: null };
+    expect(Check(OrbBootContextResponseSchema, response)).toBe(true);
+    expect(
+      Check(OrbBootContextResponseSchema, {
+        ...response,
+        filesBaseUrl: "https://files.example.org/files/12345678-1234-1234-1234-123456789abc",
+      }),
+    ).toBe(false);
+  });
+
   it("accepts absent or exact initial model intent and rejects malformed present values", () => {
     const response = { v: 1, context: null, userTimeZone: null };
     expect(Check(OrbBootContextResponseSchema, response)).toBe(true);

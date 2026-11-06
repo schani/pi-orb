@@ -905,7 +905,10 @@ flowchart LR
           .evaluate((e) => Math.abs(e.scrollHeight - e.clientHeight - e.scrollTop)),
       )
       .toBeLessThanOrEqual(1);
-    await unsafe.getByRole("button", { name: "Show Mermaid source" }).click();
+    const sourceToggle = unsafe.getByRole("button", { name: "Show Mermaid source" });
+    await sourceToggle.focus();
+    await expectPage(sourceToggle).toBeFocused();
+    await sourceToggle.click();
     await expectPage(unsafe.locator("pre code")).toHaveText(hostile);
     await unsafe.getByRole("button", { name: "Show diagram" }).click();
     await unsafe.getByRole("button", { name: "Open diagram" }).click();

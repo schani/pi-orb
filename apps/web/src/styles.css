@@ -2353,6 +2353,142 @@ pre,
   white-space: nowrap;
 }
 
+/* Activity strip: one dot per step; each dot owns a gapless 12×20px hover target. */
+.activity-strip .activity-rail-summary {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.activity-strip-dots {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  height: var(--row);
+  overflow: hidden;
+}
+
+.activity-strip-more {
+  flex: none;
+  margin-right: 4px;
+  color: var(--g3);
+}
+
+.activity-strip-dot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.activity-strip-dot::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--k);
+  content: "";
+}
+
+.activity-strip-dot.activity-strip-thinking::before {
+  width: 3px;
+  height: 3px;
+  background: var(--g2);
+}
+
+.activity-strip-dot.activity-strip-notification::before {
+  background: var(--g2);
+}
+
+.activity-strip-dot.activity-strip-failed::before {
+  background: var(--bad);
+}
+
+.activity-strip-dot.activity-strip-running::before {
+  background: var(--ok);
+  box-shadow:
+    0 0 0 2px var(--w),
+    0 0 0 3px var(--ok);
+  animation: activity-strip-blink 1s steps(2) infinite;
+}
+
+.activity-strip-dot:hover:not(:disabled),
+.activity-strip-picked {
+  background: #ddd;
+}
+
+.activity-strip-dot:hover::before,
+.activity-strip-picked::before {
+  transform: scale(1.6);
+}
+
+.activity-strip-dot.activity-strip-running:hover::before,
+.activity-strip-running.activity-strip-picked::before {
+  box-shadow:
+    0 0 0 2px #ddd,
+    0 0 0 3px var(--ok);
+}
+
+/* Expanded steps nest in the strip's band, like calls inside a category. */
+.activity-strip-body {
+  padding: 2px 8px 4px calc(2ch + 16px);
+  background: var(--g1);
+}
+
+.activity-strip-body > .activity-rail-row {
+  background: var(--g1);
+  border: 0;
+}
+
+.activity-strip-body > .activity-rail-row:last-child {
+  margin-bottom: 0;
+}
+
+.activity-strip-body > .activity-rail-row > summary {
+  padding: 0;
+}
+
+.activity-strip-body > .activity-rail-row > summary:hover {
+  background: var(--w);
+}
+
+.activity-strip-body
+  > .activity-rail-row
+  > :is(.reasoning-body, .tool-activity-calls, .subagent-notice-body) {
+  padding-left: calc(2ch + 8px);
+  background: var(--w);
+  border-top: 0;
+}
+
+@keyframes activity-strip-blink {
+  50% {
+    opacity: 0.15;
+  }
+}
+
+.activity-strip-tip {
+  position: fixed;
+  z-index: 20;
+  padding: 0 6px;
+  overflow: hidden;
+  color: var(--w);
+  background: var(--k);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.activity-strip-tip-label.activity-strip-failed {
+  color: #ff7a6b;
+}
+
+.activity-strip-tip-label.activity-strip-running {
+  color: #59d77f;
+}
+
 .activity-rail-headline,
 .activity-rail-metric,
 .tool-call-status {
@@ -2894,7 +3030,8 @@ pre,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .bit-register-frames {
+  .bit-register-frames,
+  .activity-strip-dot.activity-strip-running::before {
     animation: none;
   }
 }
