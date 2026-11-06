@@ -14,6 +14,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
+- **Decide response to Cloud Run service gaps** (`docs/postmortems/2026-11-06-control-plane-blackouts.md`). Two unexplained gaps removed all service for 7 min and 102 s on 2026-11-06. Open a Google support case with the instance IDs and evaluate what one-instance operation can tolerate.
 - **Attribute Claude shutdown race 1f315657** (2026-11-04): capture and reproduce the initial-close/late-edge ordering before changing quiescence logic. See `docs/postmortems/2026-11-04-claude-query-rotation-1f315657.md`.
 - **Qualify native security production release** (deferred; `docs/host-provider.md`): exercise retained workspace/Docker/containerd stores through actual VM reboot, VM stop/start and full-image replacement; verify missing-disk refusal, networking and full-system native acceptance, then normal release gates. PR daemon-pair evidence does not qualify these boundaries. Q87 authorizes qualification and upstream bookkeeping conversions, not production apply/deployment.
 

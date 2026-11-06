@@ -2630,14 +2630,29 @@ describe("full slice E2E", () => {
       });
       await page.setViewportSize({ width: 320, height: 844 });
       await page.goto(`${base}/orbs/${secondOrbId}`);
-      const band = page.locator(".rec-peer");
-      await expectPage(band).toHaveCount(1);
+      const band = page.locator(`.peer-notice:has(.peer-sender[href="/orbs/${spawnedOrbId}"])`);
+      const revealPeerNotification = async (senderName: string) => {
+        const dot = page.getByRole("button", {
+          name: `notification · ${senderName}`,
+          exact: true,
+        });
+        await expectPage(dot.or(band).first()).toBeVisible();
+        if ((await dot.count()) > 0) await dot.click();
+        else if ((await band.getAttribute("open")) === null)
+          await band.locator(":scope > summary .activity-rail-label").click();
+        await expectPage(band).toHaveAttribute("open", "");
+        await expectPage(band.locator(".activity-rail-label")).toHaveText("notification");
+      };
+      const senderView = await api(base, "GET", `/api/v1/orbs/${spawnedOrbId}`);
+      const senderName = senderView.body["name"];
+      await revealPeerNotification(
+        typeof senderName === "string" && senderName.trim() ? senderName.trim() : spawnedOrbId,
+      );
       await expectPage(band.locator(".peer-sender")).toHaveAttribute(
         "href",
         `/orbs/${spawnedOrbId}`,
       );
       await expectPage.poll(() => band.locator(".peer-body").textContent()).toBe(PEER_BODY);
-      await expectPage(band).toHaveCSS("background-color", "rgb(242, 242, 242)");
       await expectPage(band.locator("script, img, strong")).toHaveCount(0);
       await page
         .locator("body")
@@ -2648,9 +2663,12 @@ describe("full slice E2E", () => {
           if (!view) return false;
           const rect = element.getBoundingClientRect();
           return (
-            [element, ...element.querySelectorAll(".peer-body, .peer-heading")].every(
-              (part) => part.scrollWidth <= part.clientWidth,
-            ) &&
+            [
+              element,
+              ...element.querySelectorAll(
+                ".peer-body, .activity-rail-summary, .activity-rail-metric",
+              ),
+            ].every((part) => part.scrollWidth <= part.clientWidth) &&
             rect.left >= 0 &&
             rect.right <= view.innerWidth &&
             element.ownerDocument.documentElement.scrollWidth <= view.innerWidth &&
@@ -2665,6 +2683,7 @@ describe("full slice E2E", () => {
       });
       expect(renamed.status).toBe(200);
       await page.reload();
+      await revealPeerNotification("Renamed peer");
       await expectPage(band.locator(".peer-sender")).toHaveText("Renamed peer");
       const requests = await fakeControl(fake.sessionKey, "/requests");
       expect(JSON.stringify(requests)).toContain(
