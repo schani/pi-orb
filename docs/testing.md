@@ -2624,137 +2624,16 @@ scheduler/replay/timer checks, workspace/E2E typecheck, lint and resource audit.
 Reviewed receipts remain unchanged in the qualification directory's `integration260/`.
 The historical 6,086-test full pass predates this cleanup; full new-head CI is pending.
 
-## Native security baseline (2026-11-05, PST; local, undeployed)
+## Native security baseline (2026-11-05, PST; qualified, undeployed)
 
-Preparation began on `c181b7981df6dd20da5c2813b523cf3c0789d273`.
-The historical four-file source archive was allowlisted before extraction;
-23,424 bytes, SHA-256
-`a14c50f667f77f0abccae1fc1b948a1b1fe2e5e74de4201a121b10863269cb6b`.
-Its bundle contains only `d88e8f41` and `bef49842` above public prerequisite
-`7c25f138`; only needed native deltas were adapted to current main.
-Q87 approval lifts the preparation/qualification hold, not deployment.
-
-Tests preceded implementation. The new pin contract failed on all four old
-packages and absent refresh; manifest and host-key tests rejected the old base
-and guest version. Evidence root: `.context/native-platform-security/`;
-`pins-first-failure.log` and `native-first-failure.log` preserve those failures.
-The first focused lint failure was a new test's line wrapping
-(`focused-lint.log`); corrected without behavior changes.
-
-After `npm ci` (zero audit findings), these commands passed:
-
-- `npx vitest run packages/native-image`: 209 cases / 19 files, including DST;
-  `native-suite.log`. No new DST failure or replay.
-- `npm run test:infra`: 156 Node, 262 Python and 34 native guest cases,
-  plus real filesystem check; `test-infra.log`.
-- `npm run typecheck --workspace @pi-orb/native-image`: `native-typecheck.log`.
-- Focused Biome checks, shell syntax and `git diff --check`.
-
-Public Docker/Google InRelease signatures, signed index digests, exact package
-versions and downloaded `.deb` sizes/SHA-256 were verified under `apt/`
-(`*-signature.log`, `availability.log`, signed metadata and package records).
-Docker's Bookworm amd64 index has no containerd 2.3.7 LTS. No substitute was used.
-Native `pg_textsearch` source/version 1.3.1, existing PGlite extension payload,
-npm manifests/lockfile, Pi, Node, npm, rustup, gcloud and providers are unchanged.
-
-**First fresh image failed before validation.** Operation `28c3734e36034ee6`,
-version `q87-native-a8f46d2c`, installed all four exact targets (554-package
-inventory), sealed successfully and captured workspace image
-`3999812297424932290` READY against base `1253207937433879378`.
-Successful runtime-image create returned owned ID `5764779311865302407`
-PENDING; the READY-only success parser rejected it as `invalid image response shape`.
-Why Google returned PENDING is unproven. No validator ran or accepted manifest
-was emitted. Exact and operation-filtered checks confirm all resources and the
-operation key absent. [Failure receipt](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/55be2793-d9e4-48c3-8574-6a2f84ddf39e/evidence/q87/native-image-first-failure.md);
-private first evidence: `fresh-image-a8f46d2c/056-capture-gcloud.log`.
-The source archive SHA-256 remains
-`bddb07306d038004e6269a044bd68518fc8f4a60ea55187b3de3c32da0668c14`;
-all 390 uploaded files matched at final comparison. This operation does not
-qualify subsequent tooling changes.
-
-**Capture prerequisite (Sol approved, two rounds).** The minimal fix reuses existing
-12-read/60-second recovery for validated PENDING success, fencing the create ID
-before the first describe and accepting only READY. Tests-first RED is retained
-in `capture-pending-first-failure.log`. Focused 60 cases and full native suite
-226 cases / 19 files (including DST), native typecheck, scoped lint and diff
-checks pass (`capture-pending-*.log`); no new failure or DST replay.
-Prerequisite `df7084ce7cbb5faa0551441cac15623a43a2860b` precedes native refresh
-`2d5c8e3c2218326e48ed049c410cb4e6713bd51b`. Behavior and source/tooling
-inventories were frozen after approval; the final receipt commit changes docs
-only. Cause, cleanup and limits:
-`docs/postmortems/2026-11-05-native-capture-pending.md`.
-
-**Fresh native image PASS (18:07:57–18:20:22 PST).** Operation
-`fff7addc415246dd`, version `q87-native-b9e57f31`, accepted clean exact source
-`2d5c8e3c2218326e48ed049c410cb4e6713bd51b` (`sourceDirty: false`). Archive
-SHA-256 `bddb07306d038004e6269a044bd68518fc8f4a60ea55187b3de3c32da0668c14`;
-all 390 uploaded and 32 tooling per-file hashes matched the frozen inventories,
-accepted manifest and final tracked source. Base ID `1253207937433879378`,
-runtime image ID `4363597010943641246` and workspace image ID
-`4129969387249632967` were verified, including builder/validator source-image
-identities.
-
-| Package | Actual installed version |
-| --- | --- |
-| Docker Engine | `5:29.9.3-1~debian.12~bookworm` |
-| Docker CLI | `5:29.9.3-1~debian.12~bookworm` |
-| containerd.io | `2.4.2-3~debian.12~bookworm` |
-| google-guest-agent | `1:20261021.00-g1` |
-
-All four match the pins; the complete 554-package inventory equals the first
-operation's inventory. Installation, native PTY, 34 guest contracts, boot graph,
-sealing, workspace integrity and captures passed. Fresh validator boot,
-host-key stability, guest acceptance, exact package/configuration checks,
-default-disabled Docker/containerd and exact-validator Cloud Logging passed.
-Synthetic Claude/native Bash/MCP, isolated network sandbox, receipts, hooks,
-drain, continuation and retained-session gates passed; this is not billing or
-organization-policy qualification. Both live create responses were READY, not
-live PENDING coverage; deterministic unit tests cover same-ID PENDING recovery.
-
-After exact name/ID, operation/version and source-disk/source-disk-ID ownership
-fences against the accepted receipt, cleanup confirmed all eight exact resources
-absent and operation-filtered instances/disks/images empty. The operation key,
-process and owned SSH host-cache entries are absent; other cache entries were
-preserved. Disk remained 6% used, 45 GiB free. First-failure evidence hashes and
-its completed cleanup remain unchanged. No new acceptance failure, assertion
-change or deadline increase occurred.
-[Accepted-image receipt](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/55be2793-d9e4-48c3-8574-6a2f84ddf39e/evidence/q87/native-image-accepted.md);
-private source/manifest/cleanup receipts: `fresh-image-b9e57f31/`.
-
-Final local `npm run typecheck`, `npm run lint`, `git diff --check` and
-`python3 infra/artifact_guard.py` pass (`final-receipts/`). Normal CI,
-full-suite, E2E and PostgreSQL results remain pending in PR checks; prior local
-or native acceptance results do not establish those gates.
-
-**Retained daemon stores PASS: 164 exact assertions.** The final corrected
-private-root fixture opened actual Docker 29.1.3/containerd.io 2.3.4-2 stores
-under 29.9.3/2.4.2-3 using the containerd overlayfs snapshotter. Image/container
-identities, complete configuration, volume/network metadata and all image,
-writable-layer, volume and workspace sentinels survived pair replacement and
-new-pair restart. Stopped containers stayed stopped; the previously running
-always-policy container restarted automatically. Both saved config files were
-naturally rewritten, including stopped containers' ExtraHosts trimming; no
-saved config was edited manually. The only additional allowed HostConfig
-transition was exact `Dns: null → []`, reproduced old→old and traced to the
-shared upstream `InitDNSHostConfig` path. All other fields remained equal.
-
-Preserved fixture failures: pre-readiness SSH 4003; missing extracted libnftables
-(resolved by private library extraction before daemon startup); strict DNS
-assumption; empty-IPRange inspect serialization. The final explicit nonempty
-IPRange fixture retains full network equality. Guest roots, processes, cgroups,
-mounts, sockets and operation key were cleaned; exact-fenced VM
-`1147808958950444971` and disk `6684345038438174635` returned GET 404 after deletion.
-[Retained-store receipt](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/55be2793-d9e4-48c3-8574-6a2f84ddf39e/evidence/q87/native-retained-store.md),
-local `.context/native-store-qualification/summary.md`.
-This is not VM reboot/stop-start, full-image replacement, default networking,
-E2E or rollback qualification. Production-only retained-workspace reboot,
-stop/start, full-image replacement, networking, missing-disk and full-system
-native gates remain deferred (`TODO.md`); no merge or deployment is authorized.
-
-Historical archive receipts do not qualify this checkout: combined `0f8414e8`
-(including a separate rustup update) had fresh acceptance and reported owned
-cleanup, but no old store was opened. Its full `npm test` was tool-cancelled at
-300s without a complete result; original `npm-test-first.log` and
-`npm-test-first.plain.log` were referenced under
-`.context/native-security-baseline/`, not included in the source-only archive.
-No passing rerun or cause/fix is claimed for that incomplete run.
+Qualified clean source: `2d5c8e3c2218326e48ed049c410cb4e6713bd51b`; CI-qualified head: `671343ba`.
+Tests first: pin/base/guest contracts and successful-PENDING recovery failed before correction.
+Local passes: 226 native tests including DST; infra contracts; workspace typecheck/lint, shell syntax, artifact guard and diff checks.
+[CI receipt](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/55be2793-d9e4-48c3-8574-6a2f84ddf39e/evidence/q87/native-ci.md): all 10 checks green on `671343ba`, including full suite, PostgreSQL, E2E and Durable.
+[Review ledger](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/55be2793-d9e4-48c3-8574-6a2f84ddf39e/evidence/q87/native-sol-loop.md): two Sol approvals; behavior remains frozen.
+[Fresh-image PASS](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/55be2793-d9e4-48c3-8574-6a2f84ddf39e/evidence/q87/native-image-accepted.md): exact source qualified; all 390 uploaded and 32 tooling hashes match.
+[Retained-store PASS](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/55be2793-d9e4-48c3-8574-6a2f84ddf39e/evidence/q87/native-retained-store.md): 164 exact assertions across daemon-pair replacement/restart; only evidenced upstream ExtraHosts/DNS normalization allowed.
+[First-failure evidence](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/55be2793-d9e4-48c3-8574-6a2f84ddf39e/evidence/q87/native-image-first-failure.md): valid PENDING rejected by READY-only parser; bounded same-ID recovery fix in `docs/postmortems/2026-11-05-native-capture-pending.md`.
+Exact ownership-fenced cleanup verified all owned image/retained-store resources, processes, keys and SSH cache entries absent; unrelated entries preserved.
+Qualification excludes retained-workspace VM reboot/stop-start, full-image replacement, default networking and rollback; remaining release gates: `TODO.md`. No production apply/deployment.
+Historical archived `npm test` was tool-cancelled at 300s and remains incomplete; no cause/fix claimed ([original receipt](https://github.com/schani/pi-orb/blob/671343ba9ac6adaee0aa250be283a826a02133e3/docs/testing.md#native-security-baseline-2026-11-05-pst-local-undeployed)).
