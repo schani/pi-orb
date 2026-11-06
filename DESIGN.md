@@ -129,6 +129,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-11-06-claude-mcp-authorization-report.md](docs/postmortems/2026-11-06-claude-mcp-authorization-report.md) — unsupported public authorization claims, current project grant and missing native MCP status/source evidence
 - [docs/postmortems/2026-11-05-claude-query-rotation-93add73b.md](docs/postmortems/2026-11-05-claude-query-rotation-93add73b.md) — unowned zero-turn acknowledgment can prematurely drain an admitted human root; historical attribution incomplete
 - [docs/postmortems/2026-11-04-claude-query-rotation-1f315657.md](docs/postmortems/2026-11-04-claude-query-rotation-1f315657.md) — retained late root/task shutdown edges; initial close trigger and task classification unproven
 - [docs/postmortems/2026-11-04-npm12-bundled-sqlite.md](docs/postmortems/2026-11-04-npm12-bundled-sqlite.md) — npm 12 bundled-script denial, explicit pinned SQLite installation and qualification limits
