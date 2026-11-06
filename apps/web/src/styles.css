@@ -2399,6 +2399,10 @@ pre,
   background: var(--g2);
 }
 
+.activity-strip-dot.activity-strip-notification::before {
+  background: var(--g2);
+}
+
 .activity-strip-dot.activity-strip-failed::before {
   background: var(--bad);
 }

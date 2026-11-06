@@ -1,6 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { messageNotice } from "../testkit/display-fixtures.ts";
 import { type ActivityItem, type ActivityStepState, groupActivity } from "./ActivityStrip.tsx";
+import { subagentStep } from "./SubagentNotice.tsx";
 import { toolCallStep } from "./ToolActivity.tsx";
 
 function step(key: string, state: ActivityStepState): ActivityItem {
@@ -102,5 +104,15 @@ describe("toolCallStep", () => {
     expect(
       toolCallStep({ call: call("a"), callRecordId: "r", result: result("a", { charts: ["c"] }) }),
     ).toBeUndefined();
+  });
+});
+
+describe("subagentStep", () => {
+  it("renders receipts as notification dots", () => {
+    expect(subagentStep(messageNotice("Done.", "notice", "child", "Check"))).toEqual({
+      state: "notification",
+      label: "notification",
+      headline: "Done.",
+    });
   });
 });

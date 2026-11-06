@@ -1,7 +1,7 @@
 import { Fragment, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { ActivityRailOpen, ActivityRailRow } from "./ActivityRailRow.tsx";
 
-export type ActivityStepState = "thinking" | "success" | "failed" | "running";
+export type ActivityStepState = "thinking" | "success" | "notification" | "failed" | "running";
 
 export interface ActivityStep {
   key: string;
