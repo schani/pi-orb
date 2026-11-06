@@ -854,7 +854,7 @@ flowchart LR
     const boards = page.locator(".mermaid-diagram");
     await expectPage(boards).toHaveCount(7);
     await expectPage.poll(() => telemetry.length).toBe(7);
-    for (const index of [0, 1, 2, 4, 5]) {
+    for (const index of [0, 1, 2, 4, 5, 6]) {
       const svg = boards.nth(index).locator(".mermaid-canvas svg");
       await expectPage(svg).toBeVisible();
       const size = await svg.boundingBox();
@@ -898,6 +898,13 @@ flowchart LR
     }
     expect(scripts.some((path) => /mermaid-render-.*\.js$/.test(path))).toBe(true);
     expect(scripts.every((path) => path.startsWith("/assets/"))).toBe(true);
+    await expectPage
+      .poll(() =>
+        page
+          .locator(".orb-transcript-scroll")
+          .evaluate((e) => Math.abs(e.scrollHeight - e.clientHeight - e.scrollTop)),
+      )
+      .toBeLessThanOrEqual(1);
     await unsafe.getByRole("button", { name: "Show Mermaid source" }).click();
     await expectPage(unsafe.locator("pre code")).toHaveText(hostile);
     await unsafe.getByRole("button", { name: "Show diagram" }).click();
