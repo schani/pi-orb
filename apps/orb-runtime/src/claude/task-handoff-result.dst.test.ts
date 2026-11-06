@@ -201,7 +201,10 @@ it("a zero-turn local command without task handoffs still completes", async () =
     const input = await f.query.input.next();
     if (input.done) throw new Error("SDK input missing.");
     f.receipt(input.value);
-    await f.query.emitUnscheduled(acknowledgment);
+    await f.query.emitUnscheduled({
+      ...acknowledgment,
+      user_message_uuids: [input.value.uuid],
+    } as SDKMessage);
     expect(f.query.closeRequested).toBe(true);
     f.query.exit();
     f.query.endOutput();

@@ -1653,6 +1653,12 @@ export class ClaudeOrbAgent implements OrbAgent {
         ids.every((id) => this.passiveContextUuids.has(id))
       )
         return;
+      const successfulUnownedZeroTurn =
+        message.subtype === "success" &&
+        !message.is_error &&
+        message.num_turns === 0 &&
+        message.user_message_uuid === undefined &&
+        ids.length === 0;
       this.lastRootResult = {
         resultId: message.uuid ?? null,
         subtype: message.subtype,
@@ -1728,9 +1734,20 @@ export class ClaudeOrbAgent implements OrbAgent {
       const previousHandoffs = Object.keys(this.state?.pendingHandoffs ?? {}).sort();
       let completedHandoffs: string[] = [];
       if (this.closing === null) {
-        if (this.pendingSteers.size === 0 && (message.queued_turn_count ?? 0) === 0)
-          completedHandoffs = this.activity.rootFinished(message.num_turns > 0);
-        else this.activity.rootStarted();
+        if (this.pendingSteers.size === 0 && (message.queued_turn_count ?? 0) === 0) {
+          if (!successfulUnownedZeroTurn)
+            completedHandoffs = this.activity.rootFinished(message.num_turns > 0);
+          else if (
+            !this.observeContinuation &&
+            this.activity.operationId !== null &&
+            !this.configuring &&
+            this.activity.drainHolds.includes("root") &&
+            !this.hasOwnedWork()
+          ) {
+            this.observeContinuation = true;
+            this.decisionObservation = "";
+          }
+        } else this.activity.rootStarted();
         if (previousHandoffs.length > 0) {
           const recorded = this.platformEvent(
             "claude.handoff_result",

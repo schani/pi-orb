@@ -1,3 +1,4 @@
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { ok } from "neverthrow";
 import { expect, it } from "vitest";
 import {
@@ -469,3 +470,68 @@ it.each(["receipt", "uncertain", "child"] as const)(
     });
   },
 );
+
+it("startup and orphan acknowledgment schedules preserve the human root", async ({ signal }) => {
+  await runDst({ name: "claude-orphan-ack-startup", iterations: 20, signal }, async (sim) => {
+    let release = () => {};
+    const account = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const f = new ComposedClaudeFixture(account);
+    let acknowledged = false;
+    try {
+      (await f.attach())._unsafeUnwrap();
+      const next = f.nextQuery();
+      const admitted = f.agent.deliverInboxMessage(
+        "human",
+        ["human"],
+        [{ type: "text", text: "hello" }],
+      );
+      await next;
+      const result = await sim.runTasks([
+        {
+          name: "startup",
+          f: async (task) => {
+            await task.checkpoint("initialization may finish before orphan acknowledgment");
+            release();
+          },
+        },
+        {
+          name: "orphan",
+          f: async (task) => {
+            await f.query.emit(task, { ...rootResult, num_turns: 0 } as SDKMessage);
+            expect(f.query.closeRequested).toBe(false);
+            acknowledged = true;
+          },
+        },
+        {
+          name: "human",
+          f: async (task) => {
+            (await admitted)._unsafeUnwrap();
+            const input = (await f.query.input.next()).value!;
+            f.receipt(input);
+            while (!acknowledged) await task.sleep(1, "human result follows orphan acknowledgment");
+            await f.query.emit(task, {
+              ...rootResult,
+              user_message_uuids: [input.uuid],
+            } as SDKMessage);
+            expect(f.query.closeRequested).toBe(true);
+            f.query.exit();
+            await task.checkpoint("native exit before stdout drain");
+            expect(f.agent.gateView().activity).toBe("busy");
+            f.query.endOutput();
+            await f.agent.closeExtensions();
+            expect(f.agent.getHealth()).toMatchObject({ status: "ready", activity: "idle" });
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    } finally {
+      release();
+      f.query.exit();
+      f.query.endOutput();
+      await f.agent.closeExtensions();
+      f.dispose();
+    }
+  });
+});

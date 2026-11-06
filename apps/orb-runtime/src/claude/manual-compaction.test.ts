@@ -38,7 +38,8 @@ function summary(f: ComposedClaudeFixture) {
 }
 
 it("claims native compaction before initialization, freezes the published frontier, and commits the summary before idle", async () => {
-  const f = new ComposedClaudeFixture();
+  const startup = gate();
+  const f = new ComposedClaudeFixture(startup.promise);
   try {
     f.append({ type: "assistant", uuid: "before", message: { content: "before" } });
     await f.attach();
@@ -50,6 +51,9 @@ it("claims native compaction before initialization, freezes the published fronti
       compactionAfterId: "before",
     });
     const query = await next;
+    await query.emit(task, { ...rootResult, num_turns: 0 } as SDKMessage);
+    expect(query.closeRequested).toBe(false);
+    startup.release();
     const command = await query.input.next();
     expect(command).toMatchObject({
       done: false,
@@ -139,6 +143,7 @@ it("claims native compaction before initialization, freezes the published fronti
       ),
     ).toHaveLength(1);
   } finally {
+    startup.release();
     f.dispose();
   }
 });
