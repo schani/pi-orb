@@ -5,7 +5,7 @@ Upstream: https://github.com/earendil-works/pi/tree/v1.5.0/packages/durable
 Published artifact: https://registry.npmjs.org/@earendil-works/pi-durable/-/pi-durable-1.5.0.tgz
 Artifact SHA-256: `7e95b160ebebb7059dd5f5502419b85d52f1e0432a9e914e608364ae9b2b2a69`.
 Artifact integrity: `sha512-xeBP2vIo5NvsCMQ4Y/V+Z164xQEi9JWiBWHdjn4Z15EnFqV3c0FxJAX26FqyyyintrYyk+Enre94GNcvRlBA5g==`.
-Patch SHA-256: `2c448708ded63a7528a3751091e15df49f0a8b25af48a920c51ba1f840ea86ac`.
+Patch SHA-256: `251c4401fea01280e9d95c71c43f1cf28fb5aaa1b05e2f66b87bfdff5699e15f`.
 
 **Decision (2026-10-16):** retain upstream native execution, task identity, journal and replay. Export the existing `CodemodeRunDoc` and `CodemodeJournalDoc` through the public code-mode JavaScript/declaration barrels so chart replay reads native successful journal entries and completion decoration updates native `run.result` in the same commit. Private imports, copied document tokens and a second task document/journal are rejected.
 
@@ -45,3 +45,5 @@ Artifact integrity: `sha512-VeWxNqTHSqRCf8AcY/6kvNwh+neRL6MPxZPePVztIQy6qqK9MR/Y
 Patch SHA-256: `f7d82a2a5b31d2d2ea11ce3674bb9adcd726bafd1cce43a0de62eada03ccaa37`.
 
 Two files/17 hunks retain typed, bounded Codex failure facts and request-bound safe broker metadata. Rebase follows the native catch block after upstream removed obsolete custom-input cleanup; transport selection and request behavior remain native. Runtime errors expose only valid WebSocket close codes; typed diagnostics keep allowlisted codes, validated request IDs and bounded numeric fields. Pristine/patched file hashes are sealed by `scripts/apply-dependency-patches.mjs`.
+
+**Decision (2026-11-06):** `Waiters.add` marks its already-aborted rejection handled. Callers return that promise across the Session line, so an in-flight commit could leave it unobserved past a macrotask and Node would exit. Evidence: `docs/postmortems/2026-11-06-control-plane-blackouts.md`.

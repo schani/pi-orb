@@ -259,3 +259,22 @@ index eb64e47..54cb9ff 100644
      /**
       * Admit a submission inside the caller's commit `tx` (`Harness.commit()`, `Conversation.commit()`, a task's
       * `runtime.commit()`), with the same rules, and return its ID: the admission is stored with that commit, or not at all
+diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/util.js b/node_modules/@earendil-works/pi-durable/dist/harness/util.js
+index b089b700..86582dad 100644
+--- a/node_modules/@earendil-works/pi-durable/dist/harness/util.js
++++ b/node_modules/@earendil-works/pi-durable/dist/harness/util.js
+@@ -4,8 +4,12 @@ export class Waiters {
+     #sets = new Map();
+     add(key, context) {
+         const signal = context.abortSignal;
+-        if (signal?.aborted)
+-            return Promise.reject(signal.reason);
++        if (signal?.aborted) {
++            const rejected = Promise.reject(signal.reason);
++            // Delivered later, across the Session line: handled now, so it is not reported unhandled.
++            rejected.catch(() => { });
++            return rejected;
++        }
+         const waiter = Promise.withResolvers();
+         const set = this.#sets.get(key) ?? new Set();
+         this.#sets.set(key, set.add(waiter));
