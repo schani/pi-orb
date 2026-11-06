@@ -87,3 +87,41 @@ the launcher log was empty and status recorded **observed**. Direct `nohup`
 launch retained no raw OS exit-code receipt; captured exit 0 is not claimed.
 Summary: `/workspace/validation-recovery-evidence/FINAL-MONITOR-SUMMARY.txt`.
 The SDK-cache, actual-expiry and credential-environment limits above still apply.
+
+## Recurrence and separate control — 2026-10-29, PDT
+
+[Deploy 40998883469](https://github.com/schani/pi-orb/actions/runs/40998883469)
+shipped [PR 230](https://github.com/schani/pi-orb/pull/230), source `c8aa6e96`.
+Its release transaction is **validated**, with all twelve gates passed.
+PostgreSQL 17.11 returned RUNNABLE with `cloudsql.enable_pg_textsearch=on`;
+shutdown at 20:58:57 and readiness at 20:59:04 establish the required restart.
+Protected SQL changes were limited to that flag and revision metadata;
+database, user and secret-version metadata were unchanged. Fixtures, owned
+build resources, migration job and release lock were confirmed absent.
+
+The GitHub workflow remains **failure**: its 21:17:53–21:36:07 monitor recorded
+**regression**, 13 samples and one HTTP 429; ERROR and HTTP 5xx were zero.
+Typed denial and source evidence establish the operator orb's two-second mint
+floor, not ingress capacity. SDK 591's double STS refresh exposes the burst
+mechanism; the exact calling OS PID remains unproven. Original artifacts and
+their eight-file hash manifest remain unchanged. Original monitor SHA-256:
+`5b55e1b532e1bd759fe6bbb909eb356a75a829ca1f85f22c051353f9653fc6be`.
+
+The approved separate control ran 21:45:31–22:04:03: **observed**, 18 samples,
+recorded duration 1,111 seconds, zero ERROR/HTTP 429/HTTP 5xx. It used the exact
+canonical monitor source and unchanged assertions, filters and timeouts;
+issuer revision `00079-gfl` and generation `1793332596` were unchanged.
+Central inference remains **unobserved**. The independently reviewed private
+adapter covered every owned monitor/API credential path with fixed access and
+invoker tokens acquired before the window, executable refresh disabled, and
+verified expiry beyond the normal budget plus margin. Both credential files
+were mode 0600 and subsequently removed; both observer processes were closed.
+Control monitor SHA-256:
+`ca02cd8237aa4845fb1a2fe20155e86dc61d402c6cf4baa6fa6aa2593eb2d328`.
+
+An extra **global zero-mint** diagnostic failed: one successful HTTP 200 mint
+at 21:47:45 had an unknown caller. This was not a shipped monitor predicate
+and does not establish an observer-isolation failure. Scoped isolation is not
+a claim that every caller stopped minting. The control qualifies only its own
+window; it neither relabels the original workflow nor changes normal gates.
+No third window, redeployment, 429 exclusion or product change was used.
