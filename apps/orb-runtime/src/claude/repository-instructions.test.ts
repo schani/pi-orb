@@ -12,6 +12,7 @@ it("leaves repository instructions to native project discovery", async () => {
     const options = fixture.query.options;
     expect(options.cwd).toBe(fixture.dir);
     expect(options.settingSources).toEqual(["user", "project", "local"]);
+    expect(options.strictMcpConfig).toBe(true);
     expect(options.tools).toEqual({ type: "preset", preset: "claude_code" });
     expect(options.systemPrompt).toMatchObject({ type: "preset", preset: "claude_code" });
     const system = JSON.stringify(options.systemPrompt);

@@ -1016,6 +1016,7 @@ export class ClaudeOrbAgent implements OrbAgent {
     this.queryAbort = new AbortController();
     const options: Options = {
       abortController: this.queryAbort,
+      strictMcpConfig: true,
       ...(this.mcp === null ? {} : { mcpServers: this.mcp.mcpServers }),
       cwd: state.cwd,
       env: {

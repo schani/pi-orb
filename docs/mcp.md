@@ -56,9 +56,11 @@ Request-time broker fetch preserves generation fencing and bounded refresh. Reje
 
 ## Claude POC boundary
 
+**Decision (2026-11-06):** Claude SDK 0.3.318 queries set `strictMcpConfig: true`: only supplied `mcpServers` and MCP declared by explicitly supplied `agents` are used. Repository `.mcp.json`, user, plugin and on-disk-agent MCP (including subagent frontmatter) are excluded. Settings sources, skills and other settings remain unchanged. This boundary does not establish a historical failure's cause.
+
 **Local implementation (2026-10-04; not deployed):** control-plane project MCP configuration also feeds the co-located Claude SDK 0.3.289. Static URL/header bindings map directly to public `Options.mcpServers` HTTP entries. OAuth entries use public in-process `McpSdkServerConfigWithInstance` and the MCP SDK's raw request handlers; they forward tools, resources and prompts through a client using the existing request-time broker fetch and credential resolver. `tools/list` forwards native JSON Schema without converting it to a permissive Zod shape. This bridge introduces neither guest OAuth login/storage nor a new network service.
 
-Each query owns its OAuth bridge. Query teardown closes both MCP ends, cancels request transport and awaits admitted operations; the next query creates fresh clients. Native Claude task ownership remains the aggregate-activity input. Safe connection/auth failure and recovery edges use the existing coalesced publisher and must enter the root's durable history. Native repository/CLI MCP configuration remains separate and available through Claude's selected settings sources. Dynamic upstream list-change notifications, sampling and elicitation are not forwarded by this bridge; fake-client contracts establish schema, credential refresh and cleanup behavior, not provider or native-child qualification.
+Each query owns its OAuth bridge. Query teardown closes both MCP ends, cancels request transport and awaits admitted operations; the next query creates fresh clients. Native Claude task ownership remains the aggregate-activity input. Safe connection/auth failure and recovery edges use the existing coalesced publisher and must enter the root's durable history. Dynamic upstream list-change notifications, sampling and elicitation are not forwarded by this bridge; fake-client contracts establish schema, credential refresh and cleanup behavior, not provider or native-child qualification.
 
 ## Visibility and replication
 
