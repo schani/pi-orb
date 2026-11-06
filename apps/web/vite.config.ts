@@ -17,8 +17,9 @@ export default defineConfig(({ mode }) => ({
   ],
   server: {
     // Binds all interfaces. The dev server is unauthenticated: never expose it publicly.
+    // pi-orb HTTP previews (`pi-orb expose`) authenticate before forwarding.
     host: true,
-    allowedHosts: ["vibestation"],
+    allowedHosts: ["vibestation", ".piorb.live"],
     proxy:
       mode === "frontend"
         ? {}
