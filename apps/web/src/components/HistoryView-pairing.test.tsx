@@ -201,7 +201,7 @@ describe("persisted tool pairing across display boundaries", () => {
         { type: "reasoning", text: "", redacted: true },
       ]),
     ]);
-    expect(html.match(/activity-rail-label">thinking/g)).toHaveLength(2);
+    expect(html.match(/data-step="thinking"/g)).toHaveLength(2);
   });
   it.each([
     ["prose", [message("prose", "assistant", [{ type: "text", text: "Between calls" }])]],

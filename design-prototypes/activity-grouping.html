@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pi-orb · activity grouping</title>
+<style>
+@font-face { font-family: "Iosevka Etoile"; font-weight: 400; src: url("fonts/iosevka-etoile-regular-ad661117aee2.woff2"), url("../apps/web/public/fonts/iosevka-etoile-regular-ad661117aee2.woff2"); }
+@font-face { font-family: "Iosevka Etoile"; font-weight: 700; src: url("fonts/iosevka-etoile-bold-94f81a8590a8.woff2"), url("../apps/web/public/fonts/iosevka-etoile-bold-94f81a8590a8.woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-weight: 400; src: url("fonts/jetbrains-mono-regular-fa06becb7e66.woff2"), url("../apps/web/public/fonts/jetbrains-mono-regular-fa06becb7e66.woff2"); }
+:root {
+  --w: #fff; --k: #000; --g1: #f2f2f2; --g2: #999; --g3: #555;
+  --ok: #1a7e37; --bad: #b42318;
+  --text: "Iosevka Etoile", serif; --mono: "JetBrains Mono", monospace;
+  --row: 20px;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--w); color: var(--k); font: 13px/var(--row) var(--text); }
+header.study { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 16px; height: 32px; padding: 0 12px; background: var(--w); border-bottom: 1px solid var(--k); }
+header.study b { font-weight: 700; }
+header.study nav { display: flex; gap: 0; margin-left: auto; }
+header.study a, header.study button { padding: 0 8px; color: var(--k); text-decoration: none; background: none; border: 1px solid var(--k); margin-left: -1px; font: inherit; cursor: pointer; height: 22px; line-height: 20px; }
+header.study a:hover, header.study button:hover { background: var(--g1); }
+header.study button[aria-pressed="true"] { background: var(--k); color: var(--w); }
+section { max-width: 920px; margin: 0 auto; padding: 28px 12px 36px; border-bottom: 1px solid var(--g2); scroll-margin-top: 32px; }
+section h2 { margin: 0; font-size: 13px; font-weight: 700; }
+section p.why { margin: 0 0 12px; color: var(--g3); }
+.frame { border: 1px solid var(--k); }
+
+/* ---- production transcript CSS (apps/web/src/styles.css) ---- */
+.rec-you { padding: 9px 12px; color: var(--w); background: var(--k); }
+.rec-orb { padding: 4px 12px; }
+.rec-bd { min-width: 0; }
+.prose { margin: 4px 0; }
+.activity-rail-row { position: relative; margin-bottom: 4px; background: var(--w); }
+.activity-rail-row > summary, .call > summary, .call-flat {
+  display: grid; grid-template-columns: 2ch minmax(0, 1fr) auto; gap: 8px; align-items: center;
+  min-height: var(--row); cursor: pointer; list-style: none;
+}
+.activity-rail-row > summary { padding: 0 8px; user-select: none; }
+summary::-webkit-details-marker { display: none; }
+.activity-rail-row > summary:hover { background: var(--g1); }
+.rec-bd > .activity-rail-row::before { position: absolute; z-index: 1; top: 0; bottom: -4px; left: calc(8px + 0.5ch); width: 1px; background: var(--g2); content: ""; pointer-events: none; }
+.rec-bd > .activity-rail-row:not(.activity-rail-row + .activity-rail-row)::before { top: 12px; }
+.rec-bd > .activity-rail-row:not(:has(+ .activity-rail-row))::before { bottom: 0; }
+.rec-bd > .activity-rail-row:not([open]):not(:has(+ .activity-rail-row))::before { bottom: calc(100% - 12px); }
+.activity-rail-marker { position: relative; z-index: 2; width: 1ch; height: 12px; line-height: 12px; background: var(--w); color: var(--g3); text-align: center; }
+.activity-rail-marker::before { content: "\25b8"; }
+.activity-rail-row[open] > summary .activity-rail-marker::before { content: "\25be"; }
+.activity-rail-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity-rail-headline, .activity-rail-metric { color: var(--g3); white-space: nowrap; }
+.running > summary .activity-rail-marker, .running > summary .activity-rail-label, .running > summary .activity-rail-metric { color: var(--ok); }
+.failed > summary .activity-rail-marker, .failed > summary .activity-rail-label, .failed > summary .activity-rail-metric { color: var(--bad); }
+.body { padding: 2px 8px 4px calc(2ch + 16px); color: var(--g3); background: var(--g1); }
+.body .rec-bd { padding: 0; }
+.code { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--k); }
+.mono { font-family: var(--mono); font-size: 12px; }
+
+/* nested rows inside an expanded group */
+.body > .activity-rail-row { margin: 2px 0; }
+.body > .activity-rail-row > summary:hover { background: var(--w); }
+.body > .activity-rail-row, .body > .activity-rail-row .activity-rail-marker { background: var(--g1); }
+.body > .activity-rail-row > summary { padding: 0; }
+.body > .activity-rail-row > .body { background: var(--w); padding-left: calc(2ch + 8px); }
+
+/* 2 · strip */
+.strip { display: flex; flex-wrap: wrap; gap: 2px; align-items: center; height: 12px; overflow: hidden; }
+.cell { width: 6px; height: 12px; border: 1px solid var(--g2); background: var(--w); cursor: pointer; flex: none; }
+.cell.thinking { height: 6px; border-color: var(--g2); }
+.cell.codemode { background: var(--k); border-color: var(--k); }
+.cell.notification { background: var(--g2); border-color: var(--g2); }
+.cell.failed { background: var(--bad); border-color: var(--bad); }
+.cell.running { background: var(--ok); border-color: var(--ok); animation: blink 1s steps(2) infinite; }
+.cell:hover, .cell.sel { outline: 1px solid var(--k); outline-offset: 1px; }
+@keyframes blink { 50% { opacity: .2; } }
+.strip-summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.readout { padding: 0 8px 0 calc(2ch + 16px); color: var(--g3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: var(--row); }
+.readout b { color: var(--k); font-weight: 400; }
+
+/* 3 · sources */
+.source-tag { color: var(--g3); }
+</style>
+</head>
+<body>
+<header class="study">
+  <b>activity grouping</b>
+  <nav>
+    <a href="#today">0</a><a href="#fold">1</a><a href="#strip">2</a><a href="#sources">3</a><a href="#tail">4</a><a href="#intent">5</a>
+  </nav>
+  <nav style="margin-left:0">
+    <button id="live" aria-pressed="true">live</button><button id="done" aria-pressed="false">done</button>
+  </nav>
+</header>
+
+<section id="today">
+  <h2>0 · Today</h2>
+  <p class="why">Same-category merging only. Interleaving defeats it: 35 rows.</p>
+  <div class="frame" data-design="today"></div>
+</section>
+<section id="fold">
+  <h2>1 · Fold</h2>
+  <p class="why">One row per activity span. Headline is the latest thinking; failures pinned below. Opens to today's rows.</p>
+  <div class="frame" data-design="fold"></div>
+</section>
+<section id="strip">
+  <h2>2 · Strip</h2>
+  <p class="why">One cell per step, in order: thinking short, codemode black, notification gray, failure red, running green. Hover reads a step; click opens it.</p>
+  <div class="frame" data-design="strip"></div>
+</section>
+<section id="sources">
+  <h2>3 · Sources</h2>
+  <p class="why">Split by who produced it: the orb's own work, and one row per subagent. Each keeps its own latest headline and count.</p>
+  <div class="frame" data-design="sources"></div>
+</section>
+<section id="tail">
+  <h2>4 · Tail</h2>
+  <p class="why">Last three steps stay visible while live; everything earlier folds. When the turn ends, the tail folds too.</p>
+  <div class="frame" data-design="tail"></div>
+</section>
+<section id="intent">
+  <h2>5 · Intent</h2>
+  <p class="why">Thinking is absorbed into the action it led to: each codemode row is headed by its last thought, consecutive notifications merge. Moderate compression, keeps the narrative.</p>
+  <div class="frame" data-design="intent"></div>
+</section>
+
+<script>
+const SUB = "Stabilize resume-budget DST";
+const SUBID = "5944:call_7f5f…/c2";
+const RAW = [
+  ["n", "Receipts ready: .context/pr267-babysit/resume-guard/RESULTS.md. One-line move only; diff --check clean. Fresh configured 12 iterations PASS; full root suite queued."],
+  ["t", "Clarifying reconnect behavior · Evaluating idle-timer isolation"],
+  ["t", "Refreshing visible connection · Updating reset-tab setup"],
+  ["t", "Checking annotated replay snapshots · Inspecting control activity API"],
+  ["t", "Planning test-client reconnect · Checking client reconnect logic"],
+  ["c", "text(await tools.bash({command:\"sed -n '285,345p' apps/control-plane/src/domain/control-state.ts; sed -n '190,225p' apps/control-plane/src/domain/lifecycle.ts\"}))"],
+  ["t", "Selecting reconnect correction · Validating reconnect registration"],
+  ["t", "Reviewing replay logic · Authorizing root-gate fix"],
+  ["c", "text(await tools.steer_subagent({agent_id:\"5944:call_7f5fa0288de34514baaa159be3d3db04|ctc_03c25a7d/c2\",message:\"Authorize root-gate fix; keep diff minimal\"}))"],
+  ["n", "Ignored instrumented pre/post copies now confirm exact root cause dynamically; tracked source+trace SHA256 unchanged. Post-fix setup-tab visible on first reconnect."],
+  ["n", "Correction count: 42 lifecycle events pre and 42 post, messages+virtual timestamps exactly equal (not 44). Instrumentation snapshots confirm live registration."],
+  ["t", "Reconnecting the test connection · Checking CI test status"],
+  ["c", "text(await tools.bash({command:\"gh pr checks 267 --json name,state,link; git diff --stat; date -u +'%FT%TZ'\",timeout:30})); text(await tools.get_subagent_result({agent_id:\"5944:call_7f5f…\"}))"],
+  ["n", "Reconnect fix original trace replay now diverges as expected at position 16539: baseline reconcile-loop tick at t334339.913 versus new 'store latency' checkpoint."],
+  ["t", "Inspecting seed configuration"],
+  ["c", "text(await tools.bash({command:\"sed -n '70,195p' apps/control-plane/src/testkit/sim.ts; python3 - <<'PY'\\nimport json\\np='test-failures/resume-guard-three-attempts.json'\\nPY\"}))"],
+  ["t", "Checking recovery-state invariants · Checking unreachable recovery ordering"],
+  ["t", "Checking reconnect behavior · Checking idle guard behavior"],
+  ["t", "Checking test harness timing · Adjusting test timing setup"],
+  ["t", "Reviewing harness timeout setup · Reviewing recovery assertions"],
+  ["t", "Waiting for fresh failure · Monitoring pending test runs"],
+  ["t", "Waiting for author"],
+  ["c", "// @options: {\"timeout_ms\": 1200000, \"max_output_tokens\": 3000}\ntext(await tools.get_subagent_result({agent_id:\"5944:call_7f5f…\"}))"],
+  ["n", "Corrected tiny diff ready: lifecycle test +2 reconnect lines, move unregister; docs/testing +8 evidence lines and postmortem final paragraph only (no source change)."],
+  ["n", "Pushed 9afe5b0dd3b844f590fdb73218a70a9207df3dbe to same PR267 branch; working tree clean. Starting full root Vitest --maxWorkers=1 then test:integration."],
+  ["t", "Reviewing corrected source and docs · Updating corrected PR body"],
+  ["f", "text(await tools.bash({command:\"gh pr edit 267 --body-file .context/pr267-body.md\"}))\n✕ failed: could not read .context/pr267-body.md: no such file"],
+  ["t", "Monitoring old-head failure logs · Checking old-run failures"],
+  ["t", "Capturing current run table"],
+  ["c", "text(await tools.bash({command:\"gh run list --branch fix/claude-initial-input-completion --limit 12 --json databaseId,headSha,workflowName,status,conclusion,url\"}))"],
+  ["t", "Checking workflow statuses"],
+  ["c", "text(await tools.bash({command:\"gh run list --branch fix/claude-initial-input-completion --limit 12 --json databaseId,headSha,workflowName,status,conclusion --jq '.[]|[.workflowName,.status]'\"}))"],
+  ["t", "Monitoring full unit run · Waiting for CI completion"],
+  ["t", "Preparing squash commit message · Preparing squash merge"],
+  ["c", "// @options: {\"timeout_ms\": 1200000, \"max_output_tokens\": 3000}\ntext(await tools.get_subagent_result({agent_id:\"5944:call_7f5f…\"}))"],
+];
+let live = true;
+
+function steps() {
+  return RAW.map(([k, text], i) => {
+    const kind = k === "t" ? "thinking" : k === "n" ? "notification" : "codemode";
+    const state = k === "f" ? "failed" : (live && i === RAW.length - 1) ? "running" : "neutral";
+    return { i, kind, text, state };
+  });
+}
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const firstLine = (s) => s.split("\n").find((l) => !l.startsWith("// @options")) ?? s;
+
+function row({ label, headline, metric, state = "neutral", body = "", open = false, cls = "" }) {
+  return `<details class="activity-rail-row ${state} ${cls}"${open ? " open" : ""}><summary><span class="activity-rail-marker"></span><span class="activity-rail-summary"><span class="activity-rail-label">${label}</span>${headline !== undefined ? ` · <span class="activity-rail-headline" title="${esc(headline)}">${esc(headline)}</span>` : ""}</span>${metric !== undefined ? `<span class="activity-rail-metric">${metric}</span>` : ""}</summary>${body ? `<div class="body">${body}</div>` : ""}</details>`;
+}
+function stepBody(s) {
+  if (s.kind === "codemode") return `<div class="code">${esc(s.text)}</div>`;
+  return esc(s.text);
+}
+function stepRow(s) {
+  if (s.kind === "thinking") return row({ label: "thinking", headline: s.text, body: stepBody(s) });
+  if (s.kind === "notification") return row({ label: "notification", headline: s.text, metric: `<span title="${SUB} · ${SUBID}">${SUB}</span>`, body: stepBody(s) });
+  const metric = s.state === "failed" ? "2 calls · 1 failed" : s.state === "running" ? "running" : undefined;
+  return row({ label: "codemode", headline: firstLine(s.text), metric, state: s.state, body: stepBody(s) });
+}
+function countText(list) {
+  const c = { thinking: 0, codemode: 0, notification: 0 };
+  list.forEach((s) => c[s.kind]++);
+  return [["thinking", c.thinking], ["codemode", c.codemode], ["notification", c.notification]].filter(([, n]) => n).map(([k, n]) => `${n} ${k}`).join(" · ");
+}
+const latestThought = (list) => [...list].reverse().find((s) => s.kind === "thinking")?.text;
+const groupState = (list) => list.some((s) => s.state === "running") ? "running" : "neutral";
+function turn(inner) {
+  const after = live ? "" : `<div class="prose">PR 267 merged (squash). Resume-budget DST fix: reconnect re-registers before the idle guard runs; 12/12 fresh iterations and the original trace replay pass.</div>`;
+  return `<div class="rec-you">babysit PR 267</div><div class="rec-orb"><div class="rec-bd"><div class="prose">CI failed on the resume-budget DST. Replaying the trace and delegating root cause.</div>${inner}${after}</div></div>`;
+}
+const failedPins = (list) => list.filter((s) => s.state === "failed").map(stepRow).join("");
+
+const DESIGNS = {
+  today: (S) => S.map(stepRow).join(""),
+
+  fold: (S) => {
+    const state = groupState(S);
+    const metric = `${S.length} steps`;
+    return row({ label: "activity", headline: latestThought(S), metric, state, body: S.map(stepRow).join("") }) + failedPins(S);
+  },
+
+  strip: (S) => {
+    const cells = S.map((s) => `<span class="cell ${s.kind} ${s.state}" data-i="${s.i}" title="${s.kind} · ${esc(firstLine(s.text))}"></span>`).join("");
+    const state = groupState(S);
+    const metric = `${S.length}`;
+    const last = S[S.length - 1];
+    return `<details class="activity-rail-row strip-row ${state}"><summary><span class="activity-rail-marker"></span><span class="strip-summary"><span class="activity-rail-label">activity</span><span class="strip">${cells}</span></span><span class="activity-rail-metric">${metric}</span></summary><div class="body">${S.map(stepRow).join("")}</div></details><div class="readout" data-default="${esc(last.kind + " · " + firstLine(last.text))}"><b>${last.kind}</b> · ${esc(firstLine(last.text))}</div><div class="strip-open"></div>`;
+  },
+
+  sources: (S) => {
+    const own = S.filter((s) => s.kind !== "notification");
+    const sub = S.filter((s) => s.kind === "notification");
+    const ownMetric = countText(own);
+    return row({ label: "orb", headline: latestThought(own), metric: ownMetric, state: groupState(own), body: own.map(stepRow).join("") })
+      + failedPins(S)
+      + row({ label: SUB, headline: sub[sub.length - 1].text, metric: `${sub.length} notifications`, body: sub.map((s) => row({ label: "notification", headline: s.text, body: esc(s.text) })).join("") });
+  },
+
+  tail: (S) => {
+    const n = live ? 3 : 0;
+    const earlier = S.slice(0, S.length - n), tail = S.slice(S.length - n);
+    const pins = failedPins(earlier);
+    return row({ label: `${earlier.length} ${live ? "earlier" : "steps"}`, headline: live ? undefined : latestThought(S), metric: countText(earlier), body: earlier.map(stepRow).join("") }) + pins + tail.map(stepRow).join("");
+  },
+
+  intent: (S) => {
+    const out = [];
+    let thoughts = [], notes = [];
+    const flushNotes = () => {
+      if (!notes.length) return;
+      out.push(row({ label: "notification", headline: notes[notes.length - 1].text, metric: `${notes.length > 1 ? notes.length + " · " : ""}${SUB}`, body: notes.map((s) => `<div>${esc(s.text)}</div>`).join("") }));
+      notes = [];
+    };
+    const flushThoughts = () => {
+      if (!thoughts.length) return;
+      out.push(row({ label: "thinking", headline: thoughts[thoughts.length - 1].text, metric: thoughts.length > 1 ? `${thoughts.length}` : undefined, body: thoughts.map((s) => `<div>${esc(s.text)}</div>`).join("") }));
+      thoughts = [];
+    };
+    for (const s of S) {
+      if (s.kind === "notification") { flushThoughts(); notes.push(s); continue; }
+      flushNotes();
+      if (s.kind === "thinking") { thoughts.push(s); continue; }
+      const head = thoughts.length ? thoughts[thoughts.length - 1].text : firstLine(s.text);
+      const metric = s.state === "failed" ? "1 failed" : s.state === "running" ? "running" : thoughts.length ? `${thoughts.length} thinking` : undefined;
+      const body = thoughts.map((t) => `<div>${esc(t.text)}</div>`).join("") + `<div class="code">${esc(s.text)}</div>`;
+      out.push(row({ label: "codemode", headline: head, metric, state: s.state, body }));
+      thoughts = [];
+    }
+    flushNotes(); flushThoughts();
+    return out.join("");
+  },
+};
+
+function render() {
+  const S = steps();
+  document.querySelectorAll("[data-design]").forEach((el) => { el.innerHTML = turn(DESIGNS[el.dataset.design](S)); });
+  wireStrip();
+}
+function wireStrip() {
+  const frame = document.querySelector('[data-design="strip"]');
+  const readout = frame.querySelector(".readout");
+  const openSlot = frame.querySelector(".strip-open");
+  const S = steps();
+  frame.querySelectorAll(".cell").forEach((cell) => {
+    const s = S[+cell.dataset.i];
+    cell.addEventListener("mouseenter", () => { readout.innerHTML = `<b>${s.kind}</b> · ${esc(firstLine(s.text))}`; });
+    cell.addEventListener("mouseleave", () => { readout.innerHTML = `<b>${readout.dataset.default.split(" · ")[0]}</b> · ${esc(readout.dataset.default.split(" · ").slice(1).join(" · "))}`; });
+    cell.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const wasSel = cell.classList.contains("sel");
+      frame.querySelectorAll(".cell.sel").forEach((c) => c.classList.remove("sel"));
+      if (wasSel) { openSlot.innerHTML = ""; return; }
+      cell.classList.add("sel");
+      openSlot.innerHTML = `<div style="padding-left:calc(2ch + 16px)">${stepRow(s).replace("<details ", "<details open ")}</div>`;
+    });
+  });
+}
+for (const id of ["live", "done"]) {
+  document.getElementById(id).addEventListener("click", () => {
+    live = id === "live";
+    document.getElementById("live").setAttribute("aria-pressed", String(live));
+    document.getElementById("done").setAttribute("aria-pressed", String(!live));
+    render();
+  });
+}
+render();
+</script>
+</body>
+</html>

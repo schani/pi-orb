@@ -1552,8 +1552,12 @@ describe("frontend-only browser behavior", () => {
     });
     try {
       await page.goto(`${origin}/orbs/${id}`);
+      const strips = page.locator(".rec-orb .activity-strip");
+      await expectPage(strips).toHaveCount(2);
+      for (const index of [0, 1])
+        await strips.nth(index).locator(":scope > summary .activity-rail-label").click();
       const rows = page.locator(".rec-orb .activity-rail-row");
-      await expectPage(rows).toHaveCount(5);
+      await expectPage(rows).toHaveCount(7);
       const geometry = await rows.evaluateAll((elements) =>
         elements.map((element) => {
           const box = element.getBoundingClientRect();
@@ -1578,22 +1582,30 @@ describe("frontend-only browser behavior", () => {
           };
         }),
       );
-      expectPage(geometry.map((row) => row.adjacent)).toEqual([true, true, false, true, false]);
-      expectPage(geometry.map((row) => row.border)).toEqual(Array(5).fill("0px"));
+      expectPage(geometry.map((row) => row.adjacent)).toEqual([
+        true,
+        true,
+        true,
+        false,
+        true,
+        true,
+        false,
+      ]);
+      expectPage(geometry.map((row) => row.border)).toEqual(Array(7).fill("0px"));
       for (const row of geometry) {
         expectPage(row.lineColor).toBe("rgb(153, 153, 153)");
         expectPage(row.left + row.lineLeft).toBeCloseTo(row.markerCenter, 0);
         if (row.metricRight !== undefined)
           expectPage((row.summaryRight ?? 0) - row.metricRight).toBeLessThan(12);
       }
-      for (const index of [0, 1, 3]) expectPage(geometry[index]?.lineBottom).toBe(-4);
+      for (const index of [0, 1, 2, 4, 5]) expectPage(geometry[index]?.lineBottom).toBe(-4);
       expectPage(geometry[0]?.lineTop).toBe(12);
-      expectPage(geometry[3]?.lineTop).toBe(12);
-      expectPage(geometry[2]?.lineBottom).toBeGreaterThan(0);
-      expectPage(geometry[4]?.lineBottom).toBeGreaterThan(0);
-      await expectPage(rows.nth(1).locator(".activity-rail-metric")).toHaveText("2 files");
-      await expectPage(rows.nth(2).locator(".activity-rail-metric")).toHaveText("+1 −1");
-      const read = rows.nth(1);
+      expectPage(geometry[4]?.lineTop).toBe(12);
+      expectPage(geometry[3]?.lineBottom).toBeGreaterThan(0);
+      expectPage(geometry[6]?.lineBottom).toBeGreaterThan(0);
+      await expectPage(rows.nth(2).locator(".activity-rail-metric")).toHaveText("2 files");
+      await expectPage(rows.nth(3).locator(".activity-rail-metric")).toHaveText("+1 −1");
+      const read = rows.nth(2);
       await read.locator(":scope > summary").click();
       await read.locator(".tool-activity-call > summary").first().click();
       const output = read.locator(".tool-call-output").first();
@@ -1618,10 +1630,10 @@ describe("frontend-only browser behavior", () => {
       }));
       expectPage(joined.lineBottom).toBe("-4px");
       expectPage(joined.nextTop).toBe(joined.bottom + 4);
-      await rows.first().locator(":scope > summary").click();
-      await expectPage(rows.first().locator(".reasoning-body")).toBeVisible();
+      await rows.nth(1).locator(":scope > summary").click();
+      await expectPage(rows.nth(1).locator(".reasoning-body")).toBeVisible();
       const reasoning = await rows
-        .first()
+        .nth(1)
         .locator(".reasoning-body")
         .evaluate((element) => ({
           border: element.ownerDocument.defaultView?.getComputedStyle(element).borderTopWidth,

@@ -45,6 +45,12 @@ for (const width of [1280, 390, 320]) {
         "frontend-fixture-orb",
       );
       const rows = page.locator(".subagent-notice:not(.subagent-message-notice)");
+      await expectPage(rows).toHaveCount(1);
+      const strip = rows
+        .first()
+        .locator("xpath=following-sibling::details[contains(@class, 'activity-strip')][1]");
+      await expectPage(strip.locator(".activity-strip-dot")).toHaveCount(2);
+      await strip.locator(":scope > summary .activity-rail-label").click();
       await expectPage(rows).toHaveCount(3);
       await expectPage(page.locator("body")).not.toContainText("private-child-");
       const measure = async () =>

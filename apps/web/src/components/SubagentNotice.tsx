@@ -85,3 +85,17 @@ export function SubagentNotice({
 export function isSubagentNotice(record: Pick<DisplayEvent, "subagent">): boolean {
   return record.subagent !== undefined;
 }
+
+/** Strip facts for one subagent receipt, matching the row's label and failure state. */
+export function subagentStep(
+  record: DisplayEvent,
+): { state: "success" | "failed"; label: string; headline: string } | undefined {
+  const notice = record.subagent;
+  if (notice === undefined) return undefined;
+  const isMessage = notice.messagePreview !== undefined;
+  return {
+    state: !isMessage && notice.status === "error" ? "failed" : "success",
+    label: isMessage ? "notification" : (text(notice.description) ?? "Subagent"),
+    headline: (isMessage ? notice.messagePreview : notice.headline) ?? "",
+  };
+}

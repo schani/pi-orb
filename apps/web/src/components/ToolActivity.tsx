@@ -517,3 +517,36 @@ export function ToolActivity({
     </>
   );
 }
+
+/** Strip facts for one tool run, or undefined when its images or charts must stay visible. */
+export function toolRunStep(
+  persisted: readonly PersistedToolCall[],
+  live: readonly LiveToolCall[] = [],
+): { state: "success" | "failed" | "running"; label: string; headline: string } | undefined {
+  if (persisted.some(({ result }) => result?.hasImages === true || result?.charts !== undefined))
+    return undefined;
+  const calls = [
+    ...persisted.map(({ call, result, live: chip }) => ({
+      name: call.name,
+      headline: call.code ?? call.headline ?? call.name,
+      state:
+        result === undefined ? (chip?.state ?? "running") : result.isError ? "failed" : "completed",
+    })),
+    ...live.map((call) => ({
+      name: call.name,
+      headline: call.code ?? call.name,
+      state: call.state,
+    })),
+  ];
+  const first = calls[0];
+  if (first === undefined) return undefined;
+  return {
+    state: calls.some((call) => call.state === "running")
+      ? "running"
+      : calls.some((call) => call.state === "failed")
+        ? "failed"
+        : "success",
+    label: [...new Set(calls.map((call) => categoryFor(call.name).label))].join(" / "),
+    headline: calls.length > 1 ? `${first.headline} +${calls.length - 1}` : first.headline,
+  };
+}

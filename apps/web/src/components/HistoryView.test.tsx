@@ -251,7 +251,7 @@ describe("HistoryView turn structure", () => {
     expect(html).not.toContain("<script>");
     expect(html).not.toContain('role="alert"');
   });
-  it("keeps adjacent reasoning and tool categories as sibling rail rows, splitting at prose", () => {
+  it("folds each activity run into one strip, splitting at prose", () => {
     const record: MessageRecord = {
       ...message("activity", "assistant", ""),
       content: [
@@ -266,17 +266,30 @@ describe("HistoryView turn structure", () => {
     const html = renderToStaticMarkup(
       <HistoryView records={[record]} liveBlocks={[]} tools={[]} busy={false} />,
     );
-    expect(html).toMatch(
-      /class="activity-rail-row[^"]*reasoning[^"]*"[\s\S]*?<\/details><details class="activity-rail-row[^"]*tool-activity-category/,
+    const strips = html.split("Explanation between runs");
+    expect(strips).toHaveLength(2);
+    for (const part of strips) {
+      expect(part.match(/class="activity-rail-row[^"]*activity-strip"/g)).toHaveLength(1);
+      expect([...part.matchAll(/data-step="(\w+)"/g)].map((match) => match[1])).toEqual([
+        "thinking",
+        "running",
+      ]);
+      expect(part).not.toContain("tool-activity-category");
+    }
+    expect(html).not.toContain("Next plan");
+
+    const single = renderToStaticMarkup(
+      <HistoryView
+        records={[{ ...record, content: record.content.slice(1, 3) }]}
+        liveBlocks={[]}
+        tools={[]}
+        busy={false}
+      />,
     );
-    expect(html).toMatch(
+    expect(single).not.toContain("activity-strip");
+    expect(single).toMatch(
       /class="activity-rail-row[^"]*tool-activity-category[^"]*"[\s\S]*?<\/details><details class="activity-rail-row[^"]*tool-activity-category/,
     );
-    expect(html).toMatch(
-      /Explanation between runs[\s\S]*?<\/div><details class="activity-rail-row[^"]*reasoning/,
-    );
-    expect(html).not.toContain("Next plan");
-    expect(html).toContain('title="b.ts"');
   });
   it.each([
     [
@@ -723,12 +736,8 @@ describe("HistoryView turn structure", () => {
 
     expect(html.match(/class="rec rec-orb"/g)).toHaveLength(1);
     expect(html.match(/class="visually-hidden">Orb:<\/span>/g)).toHaveLength(1);
-    expect(html.match(/class="activity-rail-row [^"]* reasoning"/g)).toHaveLength(2);
-    expect(html.match(/activity-rail-label">thinking</g)).toHaveLength(2);
-    expect(html).toContain(
-      'class="activity-rail-headline" title="Persisted plan">Persisted plan</span>',
-    );
-    expect(html).toContain('class="activity-rail-headline" title="Live plan">Live plan</span>');
+    expect(html.match(/class="activity-rail-row[^"]*activity-strip"/g)).toHaveLength(1);
+    expect(html.match(/data-step="thinking"/g)).toHaveLength(2);
     expect(html).not.toContain("considering persisted evidence");
     expect(html).not.toContain("considering live evidence");
     expect(
@@ -771,7 +780,7 @@ describe("HistoryView turn structure", () => {
     );
 
     expect(html).not.toContain("same reasoning");
-    expect(html.match(/activity-rail-label">thinking/g)).toHaveLength(2);
+    expect(html.match(/data-step="thinking"/g)).toHaveLength(2);
     expect(html.match(/class="rec rec-orb"/g)).toHaveLength(1);
   });
 
@@ -1211,22 +1220,26 @@ describe("HistoryView", () => {
       },
     ];
 
+    const liveCall = {
+      callId: "live-call",
+      name: "read",
+      state: "running" as const,
+      message: "Waiting for execution.",
+    };
     const html = renderToStaticMarkup(
-      <HistoryView
-        records={records}
-        liveBlocks={[]}
-        tools={[
-          {
-            callId: "live-call",
-            name: "read",
-            state: "running",
-            message: "Waiting for execution.",
-          },
-        ]}
-        busy
-      />,
+      <HistoryView records={records} liveBlocks={[]} tools={[]} busy />,
+    );
+    const withLive = renderToStaticMarkup(
+      <HistoryView records={records} liveBlocks={[]} tools={[liveCall]} busy />,
+    );
+    const liveOnly = renderToStaticMarkup(
+      <HistoryView records={[]} liveBlocks={[]} tools={[liveCall]} busy />,
     );
 
+    expect([...withLive.matchAll(/data-step="(\w+)"/g)].map((match) => match[1])).toEqual([
+      "success",
+      "running",
+    ]);
     expect(html).toContain("activity-rail-row-completed tool-activity-category");
     expect(html).toContain('class="activity-rail-label">commands</span>');
     expect(html).toContain('<code class="trunc" title="echo tool-input">echo tool-input</code>');
@@ -1257,7 +1270,7 @@ describe("HistoryView", () => {
       ),
     ).toContain("tool-output");
     expect(html).not.toMatch(/<details[^>]*\sopen(?:=|>)/);
-    expect(html).toContain("Waiting for execution.");
+    expect(liveOnly).toContain("Waiting for execution.");
   });
 
   it("shows a singleton read's path instead of a count", () => {
