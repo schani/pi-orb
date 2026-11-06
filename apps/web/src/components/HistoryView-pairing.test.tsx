@@ -7,6 +7,16 @@ import { HistoryView } from "./HistoryView.tsx";
 import type { PersistedToolCall } from "./ToolActivity.tsx";
 
 const captured: PersistedToolCall[][] = [];
+// Pairing is under test, not folding: render every step instead of a closed strip.
+vi.mock("./ActivityStrip.tsx", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./ActivityStrip.tsx")>();
+  const { Fragment, createElement } = await import("react");
+  return {
+    ...actual,
+    groupActivity: (items: Parameters<typeof actual.groupActivity>[0]) =>
+      items.map((item) => createElement(Fragment, { key: item.key }, item.node)),
+  };
+});
 vi.mock("./ToolActivity.tsx", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./ToolActivity.tsx")>();
   return {
@@ -201,7 +211,7 @@ describe("persisted tool pairing across display boundaries", () => {
         { type: "reasoning", text: "", redacted: true },
       ]),
     ]);
-    expect(html.match(/data-step="thinking"/g)).toHaveLength(2);
+    expect(html.match(/activity-rail-label">thinking/g)).toHaveLength(2);
   });
   it.each([
     ["prose", [message("prose", "assistant", [{ type: "text", text: "Between calls" }])]],

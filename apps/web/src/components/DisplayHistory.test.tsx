@@ -13,7 +13,7 @@ const base = {
 };
 
 describe("browser summary rendering", () => {
-  it("renders every summary in a group; capped title equals heading", () => {
+  it("renders every call's summary in its strip dot; capped label equals heading", () => {
     const headline = `${"é".repeat(510)}…`;
     const records: DisplayRecord[] = [
       {
@@ -45,9 +45,8 @@ describe("browser summary rendering", () => {
         detailContext={detailContext()}
       />,
     );
-    expect(html).toContain("2 ran");
-    expect(html).toContain("other");
-    expect(html).toContain(`title="${headline}"`);
+    expect(html).toContain(`aria-label="commands · ${headline}"`);
+    expect(html).toContain('aria-label="commands · other"');
   });
   it("keeps a compact child message in the native activity rail", () => {
     const records = [messageNotice("Actual child message", "notice", "child", "Check deployment")];
