@@ -2,7 +2,7 @@
 set -euo pipefail
 unit=google-guest-agent-manager.service
 fail() { printf 'PI_ORB_SEAL_GUARD_FAILED=%s\n' "$1" >&2; exit 1; }
-[ "$(dpkg-query -W -f='${Version}' google-guest-agent)" = '1:20260715.00-g1' ] || fail google_package_version
+[ "$(dpkg-query -W -f='${Version}' google-guest-agent)" = '1:20261021.00-g1' ] || fail google_package_version
 [ "$(systemctl show "$unit" -p Type --value)" = notify ] || fail google_manager_type
 [ "$(systemctl is-enabled "$unit")" = enabled ] || fail google_manager_enabled
 

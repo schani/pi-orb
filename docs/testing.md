@@ -2661,3 +2661,17 @@ Native-click tests own separate HTTP source/target servers; synthetic routed HTT
 After `npm ci`, final-source validation passed: `npx vitest run apps/orb-runtime/src/id-token` (31 tests, including existing cold-start DST); `python3 -m unittest infra.rollout_monitor_test` (21); `npm run test:infra` (156 Node, 271 Python, 34 native-VM); typecheck; lint (520 existing warnings, 99 infos). Full units/E2E await PR CI; live Cloud Run propagation is unqualified.
 
 Tests-first evidence remains in `.context/retry-*-red.log`: absent trace, recovery classification, disappearing inventory, premature 1,080-second finalization, a stale read crossing 1,090, and a blanket cutoff dropping independent tail faults. Regressions cover concurrent invocation isolation, mixed outcomes, malformed/foreign logs, reverse delivery, ERROR severity, sticky independent faults, query truncation/failure, cutoff-tail recovery and independent faults throughout the ingestion tail. No concurrency state machine was added.
+
+## Native security baseline (2026-11-05, PST; qualified, undeployed)
+
+Qualified clean source: `2d5c8e3c2218326e48ed049c410cb4e6713bd51b`; CI-qualified head: `671343ba`.
+Tests first: pin/base/guest contracts and successful-PENDING recovery failed before correction.
+Local passes: 226 native tests including DST; infra contracts; workspace typecheck/lint, shell syntax, artifact guard and diff checks.
+[CI receipt](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/18691495-8394-4da5-ac1b-b8ae46edb2e5/evidence/q87/native-ci.md): all 10 checks green on `671343ba`, including full suite, PostgreSQL, E2E and Durable.
+[Review ledger](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/18691495-8394-4da5-ac1b-b8ae46edb2e5/evidence/q87/native-sol-loop.md): two Sol approvals; behavior remains frozen.
+[Fresh-image PASS](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/18691495-8394-4da5-ac1b-b8ae46edb2e5/evidence/q87/native-image-accepted.md): exact source qualified; all 390 uploaded and 32 tooling hashes match.
+[Retained-store PASS](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/18691495-8394-4da5-ac1b-b8ae46edb2e5/evidence/q87/native-retained-store.md): 164 exact assertions across daemon-pair replacement/restart; only evidenced upstream ExtraHosts/DNS normalization allowed.
+[First-failure evidence](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/18691495-8394-4da5-ac1b-b8ae46edb2e5/evidence/q87/native-image-first-failure.md): valid PENDING rejected by READY-only parser; bounded same-ID recovery fix in `docs/postmortems/2026-11-05-native-capture-pending.md`.
+Exact ownership-fenced cleanup verified all owned image/retained-store resources, processes, keys and SSH cache entries absent; unrelated entries preserved.
+Qualification excludes retained-workspace VM reboot/stop-start, full-image replacement, default networking and rollback; remaining release gates: `TODO.md`. No production apply/deployment.
+Historical archived `npm test` was tool-cancelled at 300s and remains incomplete; no cause/fix claimed ([original receipt](https://github.com/schani/pi-orb/blob/671343ba9ac6adaee0aa250be283a826a02133e3/docs/testing.md#native-security-baseline-2026-11-05-pst-local-undeployed)).

@@ -52,6 +52,15 @@ runtime_pid=$(pgrep --parent "$runtime_supervisor_pid" --full '/usr/local/bin/no
 test "$(printf '%s\n' "$runtime_pid" | wc -l)" = 1
 curl --fail --silent --show-error http://127.0.0.1:8080/v1/health | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "ready"'
 
+test "$(dpkg-query -W -f='${Version}' docker-ce)" = '5:29.9.3-1~debian.12~bookworm'
+test "$(dpkg-query -W -f='${Version}' docker-ce-cli)" = '5:29.9.3-1~debian.12~bookworm'
+test "$(dpkg-query -W -f='${Version}' containerd.io)" = '2.4.2-3~debian.12~bookworm'
+test "$(dpkg-query -W -f='${Version}' google-guest-agent)" = '1:20261021.00-g1'
+docker --version
+containerd --version
+dockerd --validate --config-file=/etc/docker/daemon.json
+containerd --config /etc/containerd/config.toml config dump >/dev/null
+
 for unit in docker.service docker.socket containerd.service; do
   test "$(systemctl is-enabled "$unit")" = disabled
   ! systemctl is-active --quiet "$unit"
