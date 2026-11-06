@@ -12,8 +12,16 @@ class ConsolidationTest(unittest.TestCase):
         suites = ['state_split.test.mjs', 'adopt.test.mjs', 'iam_contract.test.mjs']
         scripts = json.loads(Path('package.json').read_text())['scripts']
         ci = Path('.github/workflows/ci.yml').read_text()
-        self.assertIn('run: infra/foundation/test-tofu.sh', ci)
+        self.assertEqual(ci.count('run: infra/test-tofu.sh'), 1)
+        self.assertNotIn('run: infra/foundation/test-tofu.sh', ci)
         self.assertNotIn('run: infra/foundation/test.sh', ci)
+        tofu = Path('infra/test-tofu.sh').read_text()
+        self.assertEqual(tofu.count('"$root/foundation/test-tofu.sh"'), 1)
+        for runner, tests in [(tofu, '$root/tests'),
+                              (Path('infra/foundation/test-tofu.sh').read_text(), '$root/foundation/tests')]:
+            self.assertIn(f'cp -R "{tests}" "$module/"', runner)
+            self.assertIn('tofu -chdir="$module" test', runner)
+            self.assertNotIn('node --test', runner)
         for suite in suites:
             self.assertEqual(scripts['test:infra'].count('infra/foundation/' + suite), 1)
 

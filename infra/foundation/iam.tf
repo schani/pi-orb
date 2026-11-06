@@ -33,6 +33,28 @@ resource "google_service_account" "deployer" {
   display_name = "pi-orb Amp deployer"
 }
 
+resource "google_project_iam_custom_role" "deployer_foundation_plan_reader" {
+  project     = var.project
+  role_id     = "piOrbFoundationPlanReader"
+  title       = "pi-orb foundation plan reader"
+  description = "Read foundation resources for deployment plan qualification."
+  permissions = [
+    "iam.workloadIdentityPools.get",
+    "storage.buckets.getIamPolicy",
+    "iam.serviceAccounts.get",
+    "iam.serviceAccounts.getIamPolicy",
+    "iam.roles.get",
+    "servicenetworking.services.get",
+    "resourcemanager.projects.getIamPolicy",
+  ]
+}
+
+resource "google_project_iam_member" "deployer_foundation_plan_reader" {
+  project = var.project
+  role    = google_project_iam_custom_role.deployer_foundation_plan_reader.name
+  member  = "serviceAccount:${google_service_account.deployer.email}"
+}
+
 resource "google_project_iam_member" "orb_vm_log_writer" {
   project = var.project
   role    = "roles/logging.logWriter"

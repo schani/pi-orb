@@ -1,8 +1,41 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const iam = readFileSync(new URL("./iam.tf", import.meta.url), "utf8");
+
+test("both roots pin Google 8.10.0 in configuration and lockfile", () => {
+  for (const root of ["./", "../"]) {
+    const main = readFileSync(new URL(`${root}main.tf`, import.meta.url), "utf8");
+    const lock = readFileSync(new URL(`${root}.terraform.lock.hcl`, import.meta.url), "utf8");
+    assert.match(main, /google = \{\s+source\s+= "opentofu\/google"\s+version = "8\.10\.0"/);
+    assert.match(
+      lock,
+      /provider "registry\.opentofu\.org\/opentofu\/google" \{\s+version\s+= "8\.10\.0"\s+constraints = "8\.10\.0"/,
+    );
+  }
+});
+
+test("both roots inherit provider deletion policies without overriding defaults", () => {
+  for (const root of ["./", "../"]) {
+    const directory = new URL(root, import.meta.url);
+    for (const file of readdirSync(directory).filter((name) => name.endsWith(".tf"))) {
+      assert.doesNotMatch(readFileSync(new URL(file, directory), "utf8"), /\bdeletion_policy\s*=/);
+    }
+  }
+});
+
+test("provider upgrade preserves explicit destruction guards", () => {
+  const main = readFileSync(new URL("./main.tf", import.meta.url), "utf8");
+  const bucket = main.match(/resource "google_storage_bucket" "state" \{[\s\S]*?\n\}/)?.[0];
+  assert(bucket);
+  assert.match(bucket, /force_destroy\s+= false/);
+  assert.match(bucket, /lifecycle \{\s+prevent_destroy = true\s+\}/);
+  const sql = readFileSync(new URL("../sql.tf", import.meta.url), "utf8");
+  assert.match(sql, /deletion_protection = true/);
+  const run = readFileSync(new URL("../run.tf", import.meta.url), "utf8");
+  assert.match(run, /deletion_protection\s+= false/);
+});
 
 test("Claude subscription parent grants only control-plane version access", () => {
   const claude = readFileSync(new URL("../claude-auth.tf", import.meta.url), "utf8");
@@ -37,6 +70,49 @@ test("recurring firewall authority excludes the foundation build firewall", () =
   assert.match(block, /global\/firewalls\/pi-orb-iap-to-orb-ssh\\"/);
   assert.doesNotMatch(block, /pi-orb-image-build/);
   assert.doesNotMatch(block, /compute\.googleapis\.com\/(Network|Subnetwork|Address)/);
+});
+
+test("foundation plan reader grants exactly seven project reads to only the deployer", () => {
+  const roles = [
+    ...iam.matchAll(
+      /resource "google_project_iam_custom_role" "deployer_foundation_plan_reader" \{([\s\S]*?)\n\}/g,
+    ),
+  ];
+  assert.equal(roles.length, 1);
+  const role = roles[0][1];
+  assert.match(role, /project\s+= var\.project/);
+  assert.match(role, /role_id\s+= "piOrbFoundationPlanReader"/);
+  assert.equal([...iam.matchAll(/role_id\s+= "piOrbFoundationPlanReader"/g)].length, 1);
+  const permissions = role.match(/permissions\s*= \[([\s\S]*?)\]/)?.[1];
+  assert(permissions);
+  assert.deepEqual([...permissions.matchAll(/"([^"]+)"/g)].map((match) => match[1]).sort(), [
+    "iam.roles.get",
+    "iam.serviceAccounts.get",
+    "iam.serviceAccounts.getIamPolicy",
+    "iam.workloadIdentityPools.get",
+    "resourcemanager.projects.getIamPolicy",
+    "servicenetworking.services.get",
+    "storage.buckets.getIamPolicy",
+  ]);
+  const members = [
+    ...iam.matchAll(
+      /resource "google_project_iam_member" "deployer_foundation_plan_reader" \{([\s\S]*?)\n\}/g,
+    ),
+  ];
+  assert.equal(members.length, 1);
+  assert.equal(
+    [...iam.matchAll(/google_project_iam_custom_role\.deployer_foundation_plan_reader\.name/g)]
+      .length,
+    1,
+  );
+  assert.equal(
+    members[0][1].trim(),
+    [
+      "project = var.project",
+      "  role    = google_project_iam_custom_role.deployer_foundation_plan_reader.name",
+      `  member  = "serviceAccount:\${google_service_account.deployer.email}"`,
+    ].join("\n"),
+  );
 });
 
 test("application IAP administration is absent", () => {

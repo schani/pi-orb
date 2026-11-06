@@ -122,6 +122,26 @@ Verify the new grant in an empty HOME/gcloud configuration through the real resu
 hook before revoking the administrator's temporary login. Already-running orbs
 receive the updated shared IAM grant; they do not need new personal credentials.
 
+### Foundation-plan read authority (approved 2026-11-05, PST)
+
+Add project custom role `piOrbFoundationPlanReader` in `playground-dev-6ae7` and one
+additive IAM member for existing `pi-orb-amp-deployer` only, with exactly:
+- `iam.workloadIdentityPools.get`, `storage.buckets.getIamPolicy`;
+- `iam.serviceAccounts.get`, `iam.serviceAccounts.getIamPolicy`, `iam.roles.get`;
+- `servicenetworking.services.get`, `resourcemanager.projects.getIamPolicy`.
+
+These seven reads address the observed foundation-plan denials. Project scope is deliberately
+approved; narrow resource conditions were not chosen. Existing hosting creator/manager, logging
+and SSH roles serve different scopes/purposes. Do not broaden them or change existing bindings
+or conditions. No extra/list/write permissions, outputs or configuration framework.
+
+**Pending; not executed:** no grant or administrator login. Proposed procedure: isolate source
+`c181b798` with foundation provider **6.50.0** plus only these two IAM resources, using the standard
+backend lock. The administrator's saved plan must show exactly **two managed creates**, no other
+existing-resource actions, before review and explicit apply approval. No provider-8 apply or deployment.
+After granting, rerun the full fresh **8.10.0** refreshed plan with a local backend and copied state;
+[the retained 403 evidence](../README.md#google-provider-8100-qualification-2026-11-05-pst) remains unresolved.
+
 ### Release logging-exclusion authority (2026-09-11; applied and federation-verified)
 
 `google_project_iam_custom_role.deployer_logging_exclusions` grants only

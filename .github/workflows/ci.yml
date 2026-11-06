@@ -141,8 +141,8 @@ jobs:
           done
           exit 1
 
-      - name: Test foundation contracts
-        run: infra/foundation/test-tofu.sh
+      - name: Test infrastructure contracts
+        run: infra/test-tofu.sh
 
       - name: Typecheck
         run: npm run typecheck
