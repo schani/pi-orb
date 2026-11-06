@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 from infra.release_state import Result, fail
 from infra import rollout_monitor as monitor
@@ -20,20 +21,21 @@ class MonitorTest(unittest.TestCase):
                  'jsonPayload': {'prompt': 'secret'},
                  'httpRequest': {'status': 503, 'requestUrl': 'secret'}}]
         self.assertEqual(monitor.log_counts(rows),
-                         {'errors': 1, 'http429': 0, 'http5xx': 1})
+                         {'errors': 1, 'errorsRaw': 1, 'http429': 0, 'http5xx': 1,
+                          'http429Recovered': 0, 'http429Unrecovered': 0})
         self.assertNotIn('secret', json.dumps(monitor.log_counts(rows)))
 
     def test_window_cannot_finish_early_and_first_fault_is_not_erased(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'monitor.json'
-            clock = iter([0, 0, 60, 120, 1080])
+            clock = iter([0, 0, 0, 60, 60, 120, 120, 1090, 1090])
             samples = iter([Result({'health': 'ok'}), fail('http', 'health unavailable'),
                             Result({'health': 'ok'}), Result({'health': 'ok'})])
             with patch.object(monitor, 'sample', side_effect=lambda *_: next(samples)):
                 result = monitor.observe({}, output, clock=lambda: next(clock), sleep=lambda _: None)
             self.assertIsNotNone(result.error)
             evidence = json.loads(output.read_text())
-            self.assertEqual(evidence['durationSeconds'], 1080)
+            self.assertEqual(evidence['durationSeconds'], 1090)
             self.assertEqual(evidence['metricLagSeconds'], 180)
             self.assertEqual(evidence['samples'][1]['outcome'], 'unavailable')
             self.assertEqual(evidence['samples'][1]['category'], 'http')
@@ -79,7 +81,7 @@ class MonitorTest(unittest.TestCase):
     def test_generic_error_is_a_regression_not_a_healthy_sample(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'monitor.json'
-            clock = iter([0, 1080])
+            clock = iter([0, 1090, 1090])
             with patch.object(monitor, 'sample', return_value=Result({'logs': {'errors': 1}})):
                 self.assertIsNotNone(monitor.observe({}, output, clock=lambda: next(clock)).error)
             self.assertEqual(json.loads(output.read_text())['outcome'], 'regression')
@@ -88,11 +90,196 @@ class MonitorTest(unittest.TestCase):
         self.assertEqual(monitor.log_counts([{'httpRequest': {'status': 429}}])['http429'], 1)
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'monitor.json'
-            clock = iter([0, 1080])
+            clock = iter([0, 1090, 1090])
             with patch.object(monitor, 'sample', return_value=Result({
-                    'health': 'ok', 'logs': {'http429': 1}})):
+                    'health': 'ok', 'logs': {'http429': 1, 'http429Unrecovered': 1}})):
                 self.assertIsNotNone(monitor.observe({}, output, clock=lambda: next(clock)).error)
             self.assertEqual(json.loads(output.read_text())['outcome'], 'regression')
+
+    @staticmethod
+    def request(status, seconds=0, trace='a' * 32, **extra):
+        return {'logName': 'projects/project/logs/run.googleapis.com%2Frequests',
+                'trace': 'projects/project/traces/' + trace,
+                'resource': {'type': 'cloud_run_revision', 'labels': {
+                    'service_name': 'pi-orb-issuer', 'location': 'region', 'revision_name': 'revision'}},
+                'timestamp': (datetime(2026, 11, 6, tzinfo=timezone.utc) +
+                              timedelta(seconds=seconds)).isoformat(),
+                'httpRequest': {'status': status, 'requestMethod': 'POST',
+                                'requestUrl': 'https://issuer.example/runtime/v1/id-token'},
+                **extra}
+
+    def test_only_later_same_invocation_http_success_recovers_throttling(self):
+        throttled = self.request(429)
+        recovered = self.request(200, 2)
+        other = self.request(429, 1, trace='b' * 32)
+        for successes, expected in [([], 0), ([recovered], 1),
+                                     ([self.request(200, 2, trace='c' * 32)], 0),
+                                     ([self.request(200, 11)], 0),
+                                     ([self.request(200, -1)], 0)]:
+            with self.subTest(successes=successes):
+                counts = monitor.log_counts([other, throttled], successes, 'project', 'region', 'revision')
+                self.assertEqual(counts['http429'], 2)
+                self.assertEqual(counts['http429Recovered'], expected)
+                self.assertEqual(counts['http429Unrecovered'], 2 - expected)
+        # Multiple throttles, reverse log delivery, and an unrelated error.
+        counts = monitor.log_counts([self.request(429, 1), throttled,
+                                     {'severity': 'ERROR'}], [recovered], 'project', 'region', 'revision')
+        self.assertEqual(counts['http429Recovered'], 2)
+        self.assertEqual(counts['errors'], 1)
+        expired = monitor.log_counts([throttled, self.request(429, 9)],
+                                     [self.request(200, 11)], 'project', 'region', 'revision')
+        self.assertEqual(expired['http429Recovered'], 0)
+        self.assertNotIn('issuer.example', json.dumps(counts))
+        self.assertNotIn('a' * 32, json.dumps(counts))
+
+    def test_malformed_or_non_identity_logs_cannot_claim_recovery(self):
+        throttled, success = self.request(429), self.request(200, 2)
+        malformed = [
+            {'trace': None}, {'trace': 'projects/other/traces/' + 'a' * 32},
+            {'trace': 'projects/project/traces/' + '0' * 32},
+            {'timestamp': 'unknown'}, {'resource': {}},
+            {'resource': {'type': 'cloud_run_revision', 'labels': {
+                'service_name': 'pi-orb-issuer', 'location': 'other', 'revision_name': 'revision'}}},
+            {'timestamp': '2026-11-06'},
+            {'trace': 'malformed'},
+            {'logName': 'projects/project/logs/run.googleapis.com%2Fstdout'},
+            {'httpRequest': {'status': 200, 'requestMethod': 'GET',
+                             'requestUrl': 'https://issuer.example/runtime/v1/id-token'}},
+            {'httpRequest': {'status': 200, 'requestMethod': 'POST',
+                             'requestUrl': 'https://issuer.example/other'}},
+            {'httpRequest': {'status': 200, 'requestMethod': 'POST',
+                             'requestUrl': 'https://issuer.example/runtime/v1/id-token?secret=1'}},
+        ]
+        for fields in malformed:
+            with self.subTest(fields=fields):
+                self.assertEqual(monitor.log_counts([throttled], [{**success, **fields}],
+                                                   'project', 'region', 'revision')['http429Recovered'], 0)
+        # A recovered native HTTP error is not an independent generic ERROR.
+        counts = monitor.log_counts([{**throttled, 'severity': 'ERROR'}], [success], 'project', 'region', 'revision')
+        self.assertEqual(counts['errors'], 0)
+        self.assertEqual(counts['errorsRaw'], 1)
+        pending = monitor.log_counts([{**throttled, 'severity': 'ERROR'}], [],
+                                     'project', 'region', 'revision')
+        self.assertEqual(pending['errors'], 0)
+        self.assertEqual(pending['errorsRaw'], 1)
+        self.assertEqual(pending['http429Unrecovered'], 1)
+
+    def test_pending_throttle_does_not_latch_but_other_first_faults_do(self):
+        for first in ({'http429': 1, 'http429Unrecovered': 1},
+                      {'http429': 1, 'http429Unrecovered': 1, 'http5xx': 1},
+                      {'http429': 1, 'http429Unrecovered': 1, 'errors': 1}):
+            with tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / 'monitor.json'
+                clock = iter([0, 0, 0, 1090, 1090])
+                samples = iter([Result({'logs': first}), Result({'logs': {
+                    'http429': 1, 'http429Recovered': 1, 'http429Unrecovered': 0}})])
+                with patch.object(monitor, 'sample', side_effect=lambda *_: next(samples)):
+                    result = monitor.observe({}, output, clock=lambda: next(clock), sleep=lambda _: None)
+                self.assertEqual(result.error is None, not (first.get('http5xx') or first.get('errors')))
+                evidence = json.loads(output.read_text())
+                self.assertEqual(evidence['samples'][0]['logs']['http429Unrecovered'], 1)
+
+    def test_final_read_waits_for_retry_budget_and_its_ingestion_lag(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'monitor.json'
+            elapsed = [1080]
+            calls = []
+            def capture(*_):
+                calls.append(elapsed[0])
+                if len(calls) == 2:
+                    self.assertEqual(json.loads(output.read_text())['outcome'], 'observing')
+                return Result({'logs': {'http429': 1, 'http429Recovered': int(elapsed[0] >= 1090),
+                                        'http429Unrecovered': int(elapsed[0] < 1090)}})
+            def sleep(_):
+                elapsed[0] = 1090
+            times = iter([0])
+            def clock():
+                return next(times, elapsed[0])
+            with patch.object(monitor, 'sample', side_effect=capture):
+                result = monitor.observe({}, output, clock=clock, sleep=sleep)
+            self.assertIsNone(result.error)
+            self.assertEqual(calls, [1080, 1090])
+            self.assertEqual(json.loads(output.read_text())['durationSeconds'], 1090)
+
+    def test_sample_crossing_deadline_needs_a_fresh_final_log_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'monitor.json'
+            elapsed, calls = [1070], []
+            def capture(*_):
+                calls.append(elapsed[0])
+                elapsed[0] = 1091
+                return Result({'logs': {'http429': 1, 'http429Unrecovered': int(len(calls) == 1)}})
+            times = iter([0])
+            with patch.object(monitor, 'sample', side_effect=capture):
+                result = monitor.observe({}, output, clock=lambda: next(times, elapsed[0]),
+                                         sleep=lambda _: None)
+            self.assertIsNone(result.error)
+            self.assertEqual(calls, [1070, 1091])
+
+    def test_a_disappearing_throttle_inventory_is_incomplete_not_recovered(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'monitor.json'
+            clock = iter([0, 0, 0, 1090, 1090])
+            samples = iter([Result({'logs': {'http429': 1, 'http429Unrecovered': 1}}),
+                            Result({'logs': {'http429': 0, 'http429Unrecovered': 0}})])
+            with patch.object(monitor, 'sample', side_effect=lambda *_: next(samples)):
+                result = monitor.observe({}, output, clock=lambda: next(clock), sleep=lambda _: None)
+            self.assertIsNotNone(result.error)
+            self.assertEqual(json.loads(output.read_text())['outcome'], 'incomplete')
+
+    def test_fixed_failure_window_allows_tail_retry_during_ingestion(self):
+        class Logs:
+            def __init__(self, owner):
+                self.calls = []
+                self.owner = owner
+            def json(self, args):
+                self.calls.append(args)
+                return Result([self.owner.request(429, 900)] if len(self.calls) == 1 else
+                              [self.owner.request(200, 910)])
+        cloud = Logs(self)
+        result = monitor.rollout_logs(cloud, 'project', 'region', 'revision',
+                                      '2026-11-06T00:00:00Z')
+        self.assertIsNone(result.error)
+        self.assertEqual(result.value['counts']['http429Recovered'], 1)
+        self.assertIn('timestamp<="2026-11-06T00:15:00Z"', cloud.calls[0][2])
+        self.assertIn('timestamp<="2026-11-06T00:15:10Z"', cloud.calls[1][2])
+        self.assertIn('httpRequest.status=200', cloud.calls[1][2])
+        self.assertIn('projects/project/traces/' + 'a' * 32, cloud.calls[1][2])
+
+    def test_ingestion_tail_keeps_independent_errors_5xx_and_lifecycle_logs(self):
+        class Logs:
+            def json(self, args):
+                self.query = args[2]
+                return Result([{'severity': 'ERROR', 'timestamp': '2026-11-06T00:18:10Z'},
+                               {'httpRequest': {'status': 503}, 'timestamp': '2026-11-06T00:18:10Z'},
+                               {'textPayload': 'lifecycle: drain-integrity',
+                                'timestamp': '2026-11-06T00:17:00Z'}])
+        cloud = Logs()
+        result = monitor.rollout_logs(cloud, 'project', 'region', 'revision',
+                                      '2026-11-06T00:00:00Z')
+        self.assertIn('((httpRequest.status=429 AND timestamp<="2026-11-06T00:15:00Z") OR ',
+                      cloud.query)
+        # Logging NOT matches absent status fields too; != would drop application logs.
+        self.assertIn('((NOT httpRequest.status=429) AND (severity>=ERROR OR ', cloud.query)
+        self.assertEqual(result.value['counts']['errors'], 1)
+        self.assertEqual(result.value['counts']['http5xx'], 1)
+        self.assertEqual(result.value['lifecycle'], {'drain-integrity': 1})
+
+    def test_log_query_errors_truncation_and_bad_envelopes_are_incomplete(self):
+        for response in (fail('http', 'logs unavailable'), Result([{}] * 1000),
+                         Result({}), Result([{'httpRequest': None}])):
+            for query in (1, 2):
+                class Logs:
+                    def __init__(self, owner):
+                        self.count = 0
+                        self.owner = owner
+                    def json(self, _args):
+                        self.count += 1
+                        return response if self.count == query else Result([self.owner.request(429)])
+                with self.subTest(response=response, query=query):
+                    result = monitor.rollout_logs(Logs(self), 'project', 'region', 'revision',
+                                                  '2026-11-06T00:00:00Z')
+                    self.assertIsNotNone(result.error)
 
     def test_owner_inventory_cannot_succeed_with_an_unexpected_empty_fleet(self):
         with patch.object(monitor, 'api', return_value=Result({'items': []})):
@@ -139,7 +326,7 @@ class MonitorTest(unittest.TestCase):
                     Result({'items': [{'id': '00000000-0000-4000-8000-000000000001'}]}),
                     Result({'items': [{'harness': 'pi', 'state': 'running', 'centralAgent': True},
                                       {'harness': 'claude', 'state': 'archived'}]})]):
-            result = monitor.sample(cloud, record, 'start')
+            result = monitor.sample(cloud, record, '2026-11-06T00:00:00Z')
         self.assertIsNone(result.error)
         self.assertEqual(result.value['metrics']['sqlCpu']['maximum'], 1)
         self.assertEqual(result.value['metrics']['runCpu']['maximum'], 1)

@@ -1,3 +1,4 @@
+import { randomBytes, randomUUID } from "node:crypto";
 import {
   ID_TOKEN_PATH,
   IdTokenErrorSchema,
@@ -5,6 +6,7 @@ import {
   IdTokenResponseSchema,
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
+import { Result } from "neverthrow";
 import { Check } from "typebox/value";
 import type { BrokerEnv } from "../broker/endpoint.ts";
 import type { IdTokenEndpoint, IdTokenEndpointResult, IdTokenRequest } from "./token.ts";
@@ -18,6 +20,8 @@ import type { IdTokenEndpoint, IdTokenEndpointResult, IdTokenRequest } from "./t
  */
 export class HttpIdTokenEndpoint implements IdTokenEndpoint {
   private readonly env: BrokerEnv;
+  // One endpoint per CLI invocation; only retries share its native request trace.
+  private traceId: string | undefined;
 
   constructor(env: BrokerEnv) {
     this.env = env;
@@ -28,6 +32,14 @@ export class HttpIdTokenEndpoint implements IdTokenEndpoint {
     request: IdTokenRequest,
     timeoutMs: number,
   ): Promise<IdTokenEndpointResult> {
+    const traceContext = Result.fromThrowable(
+      () => {
+        this.traceId ??= randomUUID().replaceAll("-", "");
+        return `${this.traceId}/${randomBytes(8).readBigUInt64BE() || 1n};o=0`;
+      },
+      (): IdTokenEndpointResult => ({ kind: "internal", message: "request trace unavailable" }),
+    )();
+    if (traceContext.isErr()) return Promise.resolve(traceContext.error);
     const body: IdTokenRequestBody = {
       audience: request.audience,
       ...(request.ttlSeconds === undefined ? {} : { ttlSeconds: request.ttlSeconds }),
@@ -42,6 +54,7 @@ export class HttpIdTokenEndpoint implements IdTokenEndpoint {
       headers: {
         authorization: `Bearer ${this.env.runtimeToken}`,
         "content-type": "application/json",
+        "x-cloud-trace-context": traceContext.value,
       },
       body: JSON.stringify(body),
       signal: deadline,

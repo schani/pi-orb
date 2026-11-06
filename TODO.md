@@ -48,7 +48,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 - **Validate transcript target UUIDs before store lookup** (2026-10-13; `docs/postmortems/2026-10-13-rollout-monitor-anomalies.md`). Return a typed client-visible invalid-target response, not PostgreSQL 22P02 → internal 500. Test the HTTP boundary with real PostgreSQL; retain content-free route/error correlation for unexpected lookup failures.
 
-- **Classify rollout-monitor HTTP 429s** (2026-10-13; `docs/postmortems/2026-10-13-rollout-monitor-anomalies.md`). Distinguish typed application mint-floor denials from Cloud Run ingress refusals with durable content-free evidence. Test both paths; preserve fail-closed handling of unknown 429s.
+- **Qualify native retry tracing for rollout-monitor HTTP 429s** (2026-11-06; `docs/deployment.md`, `docs/postmortems/2026-10-13-rollout-monitor-anomalies.md`). Verify live trace propagation and same-invocation recovery for application mint-floor and Cloud Run ingress 429s. Recovery is outcome-based; unknown or unproven recovery remains fail-closed.
 
 - **Surface invariant history-poll blockage to the user** (2026-10-13; `docs/postmortems/2026-10-13-claude-history-nul.md`). Expose parked replication and blocked inbox delivery without claiming delivery before receipt commit; retain content-free durable diagnosis.
 
