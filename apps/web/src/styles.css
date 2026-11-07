@@ -80,6 +80,11 @@
   box-sizing: border-box;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 html,
 body,
 #root {
@@ -1863,7 +1868,6 @@ body:has(.orb-page) {
 
 .rec-you,
 .rec-orb,
-.rec-peer,
 .rec-alert {
   display: block;
 }
@@ -1909,29 +1913,8 @@ body:has(.orb-page) {
   border-left: 2px dotted var(--w);
 }
 
-.rec-peer {
-  min-width: 0;
-  padding: 9px 12px;
-  background: var(--g1);
-  color: var(--k);
-}
-
-.rec-peer.rec-q {
-  color: var(--k);
-  border-left-color: var(--g3);
-}
-
-.peer-heading {
-  margin-bottom: 4px;
-  overflow-wrap: anywhere;
-}
-
-.peer-sender {
-  color: var(--k);
-  border-bottom: 1px solid currentcolor;
-}
-
 .peer-body {
+  padding: 8px 8px 4px calc(2ch + 16px);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -1942,14 +1925,6 @@ body:has(.orb-page) {
   color: inherit;
   border: 1px solid currentcolor;
   line-height: 16px;
-}
-
-.peer-heading .rec-status {
-  margin-left: 6px;
-}
-
-.rec-peer .error-text {
-  overflow-wrap: anywhere;
 }
 
 .msg-text,
@@ -2525,6 +2500,36 @@ pre,
   border-top: 0;
 }
 
+.mcp-health-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+.project-mcp-connection .activity-rail-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
+}
+.mcp-health {
+  color: var(--g3);
+}
+.mcp-health-available {
+  color: var(--ok);
+}
+.mcp-health-unavailable,
+.mcp-health-needs-auth {
+  color: var(--bad);
+}
+.project-mcp-connection > summary:focus-visible .mcp-health {
+  color: inherit;
+}
+@media (max-width: 600px) {
+  .mcp-health-toolbar .icon-button {
+    width: 48px;
+    height: 48px;
+  }
+}
+
 /* MCP forms share the chat disclosure, with form gutters and an inverted focus row. */
 .project-mcp-connection .reasoning-body {
   padding-top: 4px;
@@ -2903,6 +2908,29 @@ pre,
 }
 .tool-command .tool-call-output {
   margin-left: 0;
+}
+
+.peer-notice > summary {
+  grid-template-columns: 2ch minmax(0, 1fr) minmax(0, 40%);
+}
+
+.peer-notice .activity-rail-metric {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.peer-sender {
+  overflow: hidden;
+  color: inherit;
+  text-overflow: ellipsis;
+  border-bottom: 1px solid currentcolor;
+}
+
+.peer-notice .rec-status {
+  flex: none;
+  margin-right: 0;
 }
 
 .subagent-message-notice > summary {

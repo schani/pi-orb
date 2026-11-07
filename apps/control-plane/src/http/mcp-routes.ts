@@ -3,7 +3,14 @@ import type { SimulationTask } from "determined";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { Result } from "neverthrow";
 import { Check } from "typebox/value";
-import type { McpConfigError, McpStore } from "../domain/mcp.ts";
+import {
+  type McpConfigError,
+  type McpHealthDeps,
+  type McpStore,
+  readProjectMcpStatus,
+} from "../domain/mcp.ts";
+import type { UserScope } from "../domain/user-scope.ts";
+import { requirePrincipal } from "./browser-identity.ts";
 
 export function sendMcpError(reply: FastifyReply, error: McpConfigError) {
   return reply.status({ not_found: 404, conflict: 409, unavailable: 503 }[error.code]).send({
@@ -88,6 +95,49 @@ export function registerMcpRoutes(
       }
       reply.header("cache-control", "no-store");
       const result = await store.replace(task, request.params.projectId, request.body);
+      return result.isErr() ? sendMcpError(reply, result.error) : reply.send(result.value);
+    },
+  );
+}
+
+export function registerProjectMcpStatusRoute(
+  app: FastifyInstance,
+  task: SimulationTask,
+  userScope: UserScope,
+  deps: McpHealthDeps,
+): void {
+  app.get<{ Params: { projectId: string } }>(
+    "/api/v1/projects/:projectId/mcp/status",
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      const principal = requirePrincipal(request);
+      if (principal.isErr())
+        return reply.code(401).send({
+          error: { code: "unauthorized", message: "Authentication required", retryable: false },
+        });
+      const selected = await userScope.resolve(
+        task,
+        principal.value,
+        request.headers["x-pi-orb-user-id"],
+      );
+      if (selected.isErr()) {
+        const invalid =
+          selected.error.type === "invalid_user_selection" ||
+          selected.error.type === "user_not_found";
+        return reply.code(invalid ? 400 : 503).send({
+          error: {
+            code: invalid ? "invalid_request" : "unavailable",
+            message: invalid ? selected.error.message : "User selection unavailable",
+            retryable: !invalid,
+          },
+        });
+      }
+      const result = await readProjectMcpStatus(
+        task,
+        deps,
+        request.params.projectId,
+        selected.value.id,
+      );
       return result.isErr() ? sendMcpError(reply, result.error) : reply.send(result.value);
     },
   );

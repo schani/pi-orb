@@ -55,9 +55,17 @@ Pi's detailed compatibility review supersedes a generic patch/minor estimate: gr
 
 - **Security gaps:** native Docker **29.1.3 → 29.9.3** and containerd **2.3.4 → 2.3.7 LTS** lag security fixes; the paired refresh is held pending state approval below. Docker's Debian repository exposed only containerd **2.3.6 / 2.4.2**, so upstream LTS availability is not proof of an installable replacement. Actual deployed versions are unknown. Native Debian base **2026-09-02** and guest agent **2026-07-15** need security refresh and qualification; source cannot establish freshness of floating installed APT packages. Tracked in `TODO.md`.
 - **Search extension policy:** native `pg_textsearch` stays at **1.3.1** until Cloud SQL supports the exact target; availability alone does not authorize or qualify an upgrade. PGlite `0.0.13` already embeds **1.5.1**; that mismatch is not permission to change native. Inspect embedded versions before any npm extension update; do not bypass the Cloud SQL gate. Binding decision: `docs/history-search.md` (2026-11-04). The accepted older-version/backport risk remains; no unsupported upgrade is promised or queued. PostgreSQL **17.11** is current on its supported major; no need to move to 18.
-- **State approval hold (2026-11-04):** Google provider updates and the paired Docker/containerd refresh remain held under the 2026-10-24 decision in [docs/deployment.md](deployment.md), pending [question 87](open-questions.md#dependency-update-state-conversions--87). The initial audit missed that deferral. No state changes, apply or deployment occurred. Application Google provider **7.21.0 → 7.46.2** on the current major (**8.10.0** newest); foundation **6.50.0** is latest on major 6.
+- **State-conversion approval (2026-11-05, PST):** The user approved Google-provider-managed OpenTofu state upgrades and native Docker/containerd retained-configuration normalization for dependency-update PRs. Use automatic upstream conversions, without custom migrations or compatibility machinery. Reviewed infrastructure plans, retained-store qualification and normal checks remain required. No resource redesign, secret rotation, production apply or deployment is authorized. This supersedes the earlier hold for preparation and qualification only.
 - **Other stale pins:** rustup **1.29.2 → 1.29.3**; CI gcloud **590.0.1 → 592.0.0**; Iosevka **34.9.0 → 34.9.1**.
 - **Current:** Node **26.13.0**, Bun **1.4.4**, OpenTofu **1.13.2**, all **eight GitHub Action SHAs**, TypeScript **7.0.2**, Vite **8.3.5**, Playwright **1.64.1**, React **19.3.1**.
+
+## Dependency ownership (2026-11-06, PST)
+
+Runtime owns Chord **1.5.0**: `apps/orb-runtime/src/execution/server.ts` imports `BACKGROUND_CONTEXT` and `withAbortSignal`; it and `line-reader.ts` also import `Context` types. Keep runtime `ws` in production: `preview/loopback-websocket.ts` uses it, not just tests. Runtime `determined` also has production callers. Native-image's `determined` belongs in development dependencies: only DST tests import its types; retain those tests.
+
+Root-owned esbuild **0.28.2** supplies native acceptance/build tooling and fork reproduction; shared workspace resolution at this explicit tooling boundary is intentional. Keep the scoped Chord WebSocket peer override. Do not duplicate root build tools into every workspace or infer runtime removals from an import-only scan.
+
+Qualified with clean root and selective production workspace installs, runtime execution/preview/Claude imports outside the checkout, native CLI launch without `determined`, CLI bundle inspection, types, and existing DST/acceptance/patch-boundary tests. The lockfile changes only the two workspace declarations; no external versions or artifacts change.
 
 ## Historical October 16 inventory and subsequent decisions
 
@@ -212,7 +220,7 @@ The table distinguishes removing a package from **all three graphs** from removi
 
 These are package-name removals, not measured install-size savings or lock-record counts; shared/nested dependencies remain. Replacing safe parsers, OAuth/crypto, scheduler, terminal engines, or harnesses to reduce a name count is not prudent.
 
-Baseline manifest ownership findings: runtime imports Pi AI/agent-core/Chord without owning declarations (plus a pi-mcp test import); native-image acceptance/build and fork reproduction consume hoisted esbuild (`0.28.2`, current). Baseline Node typings resolved transitively to **26.1.1** against Node24; latest overall **26.6.5** was not the right target. The approved toolchain pins root `@types/node` **24.19.2**. Runtime `ws` and native-image `determined` have real test-only direct use and plausible dev reclassification; neither becomes removed from the relevant production/plugin/DST graphs. Remaining ownership work is tracked only in `TODO.md`.
+Baseline Node typings resolved transitively to **26.1.1** against Node24; latest overall **26.6.5** was not the right target. The approved October 16 toolchain pinned root `@types/node` **24.19.2**; later Node and dependency-ownership decisions above supersede this baseline.
 
 ### Authoritative npm migration sources
 

@@ -389,7 +389,6 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
 type Turn =
   | { kind: "user"; record: MessageRecord }
   | { kind: "inbox-receipt"; record: EventRecord; messages: OrbMessageView[] }
-  | { kind: "peer"; record: EventRecord; senderId: string }
   | { kind: "agent"; key: string; records: Array<MessageRecord | EventRecord> }
   | { kind: "alert"; record: EventRecord; message: string }
   | { kind: "compaction"; record: CompactionRecord | EventRecord };
@@ -451,6 +450,7 @@ function renderAgentRecords(
   records: readonly (MessageRecord | EventRecord)[],
   pairing: ToolPairing,
   tools: readonly ToolChip[],
+  senderNames: ReadonlyMap<string, string | null>,
 ): ActivityItem[] {
   const items: ActivityItem[] = [];
   const push = (node: ReactNode) => {
@@ -475,6 +475,31 @@ function renderAgentRecords(
   for (const record of records) {
     if (record.type === "event") {
       flushTools();
+      if (record.eventType === "orb.message" && record.sender !== undefined) {
+        const senderId = record.sender.orbId;
+        const node = (
+          <PeerNotice
+            key={record.id}
+            id={record.id}
+            senderId={senderId}
+            name={senderNames.get(senderId)}
+            text={blockText(record.content ?? [])}
+          />
+        );
+        items.push({
+          key: record.id,
+          node,
+          step: {
+            key: record.id,
+            identity: record.id,
+            node,
+            state: "notification",
+            label: "notification",
+            headline: senderNames.get(senderId)?.trim() || senderId,
+          },
+        });
+        continue;
+      }
       const facts = subagentStep(record);
       if (facts !== undefined) {
         const node = <OwnedSubagent key={record.id} record={record} />;
@@ -577,17 +602,19 @@ const AgentRecords = memo(
     records,
     pairing,
     tools,
+    senderNames,
     live,
     busy = false,
   }: {
     records: readonly (MessageRecord | EventRecord)[];
     pairing: ToolPairing;
     tools: readonly ToolChip[];
+    senderNames: ReadonlyMap<string, string | null>;
     live?: LiveAgentContent | undefined;
     busy?: boolean;
   }) {
     const openState = useContext(OpenDetailValue);
-    const items = renderAgentRecords(records, pairing, tools);
+    const items = renderAgentRecords(records, pairing, tools, senderNames);
     if (live !== undefined) items.push(...liveAgentItems(live));
     return [
       ...groupActivity(items, openState),
@@ -598,6 +625,7 @@ const AgentRecords = memo(
   (previous, next) => {
     if (
       previous.tools !== next.tools ||
+      previous.senderNames !== next.senderNames ||
       previous.live !== next.live ||
       previous.busy !== next.busy ||
       previous.records.length !== next.records.length ||
@@ -662,7 +690,7 @@ function groupTurns(records: readonly DisplayRecord[], queuedMessages: readonly 
           });
           if (messages.length > 0) turns.push({ kind: "inbox-receipt", record, messages });
         } else if (record.eventType === "orb.message" && record.sender !== undefined) {
-          turns.push({ kind: "peer", record, senderId: record.sender.orbId });
+          appendAgentPart(record);
         } else if (record.alert !== undefined) {
           turns.push({ kind: "alert", record, message: record.alert.message });
         } else if (record.eventType === "agent.compaction") {
@@ -719,12 +747,11 @@ function liveAgentItems(live: LiveAgentContent): ActivityItem[] {
   return items;
 }
 
-function CorrespondenceBand({
+function PeerNotice({
   senderId,
   name,
   text,
   id,
-  pending = false,
   status,
   error,
 }: {
@@ -732,27 +759,41 @@ function CorrespondenceBand({
   name: string | null | undefined;
   text: string;
   id: string;
-  pending?: boolean;
   status?: string;
   error?: string;
 }) {
+  const openState = useContext(OpenDetailValue);
+  const [open, setOpen] = useState(() => openState?.opened.has(id) ?? false);
   return (
-    <article
-      className={`rec rec-peer${pending ? " rec-q" : ""}`}
-      data-history-row={pending ? undefined : id}
-      aria-label="Orb message"
-    >
-      <div className="rec-bd">
-        <div className="peer-heading">
-          <a className="peer-sender" href={`/orbs/${encodeURIComponent(senderId)}`}>
+    <ActivityRailRow
+      className="peer-notice"
+      label="notification"
+      headline={open ? undefined : error}
+      state={status === "failed" ? "failed" : "neutral"}
+      metric={
+        <>
+          <a
+            className="peer-sender"
+            title={name?.trim() || senderId}
+            href={`/orbs/${encodeURIComponent(senderId)}`}
+          >
             {name?.trim() ? name : senderId}
           </a>
           {status !== undefined && <span className="rec-status">{status}</span>}
-        </div>
-        <div className="peer-body">{text}</div>
-        {error !== undefined && <div className="error-text">{error}</div>}
+        </>
+      }
+      defaultOpen={open}
+      onToggle={(value) => {
+        setOpen(value);
+        if (value) openState?.opened.add(id);
+        else openState?.opened.delete(id);
+      }}
+    >
+      <div className="peer-body">
+        {text}
+        {open && error !== undefined && <div className="error-text">{error}</div>}
       </div>
-    </article>
+    </ActivityRailRow>
   );
 }
 
@@ -769,16 +810,18 @@ function renderInboxMessage(
   const failed = message.status === "failed";
   if (message.system?.kind === "orb_message") {
     return (
-      <CorrespondenceBand
-        key={message.id}
-        id={message.id}
-        senderId={message.system.senderOrbId}
-        name={senderNames.get(message.system.senderOrbId)}
-        text={blockText(message.content.filter((block) => block.type === "text"))}
-        pending
-        status={status}
-        {...(failed && message.error !== undefined ? { error: message.error } : {})}
-      />
+      <article className="rec rec-orb" key={message.id} aria-label="Orb message">
+        <div className="rec-bd">
+          <PeerNotice
+            id={message.id}
+            senderId={message.system.senderOrbId}
+            name={senderNames.get(message.system.senderOrbId)}
+            text={blockText(message.content.filter((block) => block.type === "text"))}
+            status={status}
+            {...(failed && message.error !== undefined ? { error: message.error } : {})}
+          />
+        </div>
+      </article>
     );
   }
   return (
@@ -821,16 +864,6 @@ function renderTurn(
           {turn.messages.map((message) => renderInboxMessage(message, orbState, senderNames))}
         </div>
       );
-    case "peer":
-      return (
-        <CorrespondenceBand
-          key={turn.record.id}
-          id={turn.record.id}
-          senderId={turn.senderId}
-          name={senderNames.get(turn.senderId)}
-          text={blockText(turn.record.content ?? [])}
-        />
-      );
     case "user":
       return (
         <article className="rec rec-you" key={turn.record.id} data-history-row={turn.record.id}>
@@ -849,6 +882,7 @@ function renderTurn(
               records={turn.records}
               pairing={pairing}
               tools={tools}
+              senderNames={senderNames}
               live={live}
               busy={busy}
             />
@@ -1013,6 +1047,7 @@ export const HistoryView = memo(function HistoryView({
                   records={[]}
                   pairing={pairing}
                   tools={tools}
+                  senderNames={senderNames}
                   live={liveAgentContent}
                   busy={busy}
                 />

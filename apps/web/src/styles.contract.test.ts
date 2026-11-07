@@ -31,6 +31,12 @@ function media(condition: string): string {
   return blocks.join("\n");
 }
 
+it("disables mobile text autosizing so long rows keep the base size", () => {
+  const html = rule("html");
+  expect(html).toContain("-webkit-text-size-adjust: 100%");
+  expect(html).toContain("text-size-adjust: 100%");
+});
+
 it("hides a failed chart canvas while retaining its mount target", () => {
   expect(rule(".chart-canvas[hidden]")).toContain("display: none");
 });
@@ -290,7 +296,7 @@ describe("dashboard layout contract", () => {
 
 describe("orb workspace layout contract", () => {
   it("uses gutter-free inverted user paper and plain white orb paper", () => {
-    expect(rule(".rec-you,\n.rec-orb,\n.rec-peer,\n.rec-alert")).toContain("display: block");
+    expect(rule(".rec-you,\n.rec-orb,\n.rec-alert")).toContain("display: block");
     const user = rule(".rec-you");
     expect(user).toContain("background: var(--k)");
     expect(user).toContain("color: var(--w)");
@@ -302,13 +308,13 @@ describe("orb workspace layout contract", () => {
     expect(error).toContain("background: var(--w)");
   });
 
-  it("keeps correspondence on gray paper with wrapping literal text, sender, and failures", () => {
-    expect(rule(".rec-peer")).toContain("background: var(--g1)");
-    expect(rule(".rec-peer")).toContain("color: var(--k)");
-    expect(rule(".peer-heading")).toContain("overflow-wrap: anywhere");
+  it("keeps notification bodies literal and wrapping, with linked senders", () => {
+    expect(rule(".peer-notice > summary")).toContain("minmax(0, 40%)");
+    expect(rule(".peer-sender")).toContain("text-overflow: ellipsis");
+    expect(rule(".peer-notice .rec-status")).toContain("flex: none");
+    expect(rule(".peer-sender")).toContain("border-bottom: 1px solid currentcolor");
     expect(rule(".peer-body")).toContain("white-space: pre-wrap");
     expect(rule(".peer-body")).toContain("overflow-wrap: anywhere");
-    expect(rule(".rec-peer .error-text")).toContain("overflow-wrap: anywhere");
   });
 
   it("scrolls wide tables instead of breaking words to squeeze columns", () => {
@@ -387,7 +393,7 @@ describe("orb workspace layout contract", () => {
 
   it("retains the diagnostic gutter and keeps queue state visible", () => {
     expect(rule(".rec")).toContain("grid-template-columns: 32px minmax(0, 1fr)");
-    expect(rule(".rec-you,\n.rec-orb,\n.rec-peer,\n.rec-alert")).toContain("display: block");
+    expect(rule(".rec-you,\n.rec-orb,\n.rec-alert")).toContain("display: block");
     expect(rule(".busy-indicator")).toContain("padding: 0 12px");
     expect(rule(".rec-q")).toContain("border-left: 2px dotted var(--w)");
     expect(rule(".rec-status")).toContain("border: 1px solid currentcolor");

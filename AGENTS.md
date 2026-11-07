@@ -97,5 +97,6 @@ Don't overbuild, neither in production nor in test code!
 When the user asks you to babysit a PR:
 
 - Make sure the PR only includes files that are actually needed.
+- Run a sol loop.
 - Monitor CI. If it fails, fix it.
 - Once CI is green, merge the PR.

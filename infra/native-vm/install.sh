@@ -11,6 +11,7 @@ exit 101
 EOF
 chmod 755 /usr/sbin/policy-rc.d
 apt-get update
+apt-get upgrade -y --with-new-pkgs --no-install-recommends
 apt-get install -y --no-install-recommends ca-certificates curl xz-utils git ripgrep zip unzip sudo python3 python3-venv python-is-python3 build-essential pkg-config libssl-dev iproute2 util-linux openssl
 curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/github.gpg
 curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg -o /etc/apt/keyrings/google.asc
@@ -20,7 +21,7 @@ echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/github.gpg] https://cli.github
 echo 'deb [signed-by=/etc/apt/keyrings/google.asc] https://packages.cloud.google.com/apt cloud-sdk main' >/etc/apt/sources.list.d/google-cloud-sdk.list
 echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable' >/etc/apt/sources.list.d/docker.list
 apt-get update
-apt-get install -y --no-install-recommends gh chromium google-cloud-cli docker-ce=5:29.1.3-1~debian.12~bookworm docker-ce-cli=5:29.1.3-1~debian.12~bookworm containerd.io=2.3.4-2~debian.12~bookworm docker-buildx-plugin docker-compose-plugin
+apt-get install -y --no-install-recommends gh chromium google-cloud-cli google-guest-agent=1:20261021.00-g1 docker-ce=5:29.9.3-1~debian.12~bookworm docker-ce-cli=5:29.9.3-1~debian.12~bookworm containerd.io=2.4.2-3~debian.12~bookworm docker-buildx-plugin docker-compose-plugin
 curl -fsSL https://nodejs.org/dist/v26.13.0/node-v26.13.0-linux-x64.tar.xz -o /tmp/node.tar.xz
 echo 'd28a96af6c38596f6d9d97c0ee531c13d238d757742387d1928de822d959e997  /tmp/node.tar.xz' | sha256sum -c -
 tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1
@@ -56,9 +57,11 @@ mkdir -p /workspace /etc/docker /etc/containerd
 cat >/etc/docker/daemon.json <<'EOF'
 {"data-root":"/workspace/docker","log-driver":"local"}
 EOF
+dockerd --validate --config-file=/etc/docker/daemon.json
 containerd config default >/etc/containerd/config.toml
 sed -i 's#^root = .*#root = "/workspace/containerd"#' /etc/containerd/config.toml
 python3 -c 'import tomllib; assert tomllib.load(open("/etc/containerd/config.toml", "rb"))["root"] == "/workspace/containerd"'
+containerd --config /etc/containerd/config.toml config dump >/dev/null
 install -m755 infra/native-vm/bootstrap.py /usr/local/bin/pi-orb-bootstrap
 install -m755 infra/native-vm/prepare_workspace.py /usr/local/bin/pi-orb-prepare-workspace
 install -m755 infra/native-vm/boot_diagnostic.py /usr/local/bin/pi-orb-boot-diagnostic

@@ -62,7 +62,7 @@ const packages = [
     package: "node_modules/@earendil-works/pi-durable",
     version: "1.5.0",
     patch: "@earendil-works+pi-durable+1.5.0.patch",
-    sha: "2c448708ded63a7528a3751091e15df49f0a8b25af48a920c51ba1f840ea86ac",
+    sha: "251c4401fea01280e9d95c71c43f1cf28fb5aaa1b05e2f66b87bfdff5699e15f",
     files: {
       "node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js": [
         "f60aaa081e12fd6dcc82dd6463d6f3750802c09a90d9388a5e31671b73822bcd",
@@ -91,6 +91,10 @@ const packages = [
       "node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts": [
         "eff2fd6232680d3367a9e7c69fe158b38e1aff2d5f182086bfe6bfc1f2b1bb66",
         "0d12a4adfa4e037d4555a9b0caeebfb3e80eda02cceada27ba5a0689ca29199e",
+      ],
+      "node_modules/@earendil-works/pi-durable/dist/harness/util.js": [
+        "5519388f097d51fbf8f5811edd11d04076523253a2a11ae8689082ae8e2df4d9",
+        "6e842a44631ad46b2be026f8a5a06e6805155fdc92a518a910bf8269cd109d95",
       ],
     },
   },

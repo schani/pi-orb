@@ -99,6 +99,7 @@ PUT  /api/v1/projects/:projectId/secrets/:name
 DELETE /api/v1/projects/:projectId/secrets/:name
 GET  /api/v1/projects/:projectId/mcp
 PUT  /api/v1/projects/:projectId/mcp
+GET  /api/v1/projects/:projectId/mcp/status
 POST /api/v1/projects/:projectId/mcp/describe
 GET  /api/v1/projects/:projectId/mcp/:id/oauth
 POST /api/v1/projects/:projectId/mcp/:id/oauth/connect
@@ -354,6 +355,8 @@ Projects gain one write-only secret inventory inherited by every current and fut
 ### Project MCP (implemented 2026-09-08)
 
 `GET .../mcp` returns `{revision, servers}` with secret references, never resolved headers. `PUT` atomically replaces that project's catalog using the expected revision; deletion-fenced, stale, or missing-secret-reference writes return 409, missing projects 404, malformed/duplicate entries 400, and unavailable storage 503. `POST .../mcp/describe` accepts one configuration and returns a bounded `{description}` after authenticated public-HTTPS inspection using project secrets. It does not persist the candidate or perform OAuth. All successful responses are non-cacheable. The separate incarnation-authenticated `GET /runtime/v1/mcp` returns only the caller's project catalog; it grants no configuration-write authority. Exact configuration fields, limits, probe network restrictions and restart-only catalog adoption: `docs/mcp.md`.
+
+`GET .../mcp/status` (local 2026-11-06) requires the project's owner and checks saved credentials from the control plane through read-only initialization/tools discovery. It returns `{revision, servers:[{name, status: "available" | "unavailable" | "needs-auth" | "unknown", diagnostic?}]}` with `Cache-Control: no-store`. Diagnostics are `auth_required | invalid_binding | connection_failed | credentials_unavailable`, never raw remote text or configuration. Missing/foreign projects return the same project-specific 404. No runtime connection, tool invocation, grant invalidation, health persistence or polling; public-HTTPS/DNS/redirect policy and budgets are specified in `docs/mcp.md`. OAuth grant status remains independent of check success.
 
 OAuth (implemented locally 2026-09-10) adds `oauth: {id}` to a catalog entry. Status returns `{status: "connected" | "pending" | "auth_required"}`; same-origin JSON `connect` starts a bounded browser ceremony and returns `{url}`, and `disconnect` fences the grant and returns `{status: "auth_required"}`. The stable callback is `${PI_ORB_APP_ORIGIN}/api/v1/mcp/oauth/callback`, with single-use hashed state, browser-cookie binding and PKCE. Success returns to the existing Config dialog at `/projects/:projectId/mcp`; callback validation failures redirect to a clean error page. Tokens and verifiers are never browser API data. The incarnation-authenticated `POST /runtime/v1/mcp/:id/token` derives the project, checks the current catalog ID/URL and reauthenticates after broker work; body `{url, rejectedGeneration?}`, response `{accessToken, expiresAt, generation}`. Authorization repair does not restart an existing orb or replay the failed MCP operation. Detailed storage, errors, safety, cleanup and provider gates: `docs/mcp.md`.
 

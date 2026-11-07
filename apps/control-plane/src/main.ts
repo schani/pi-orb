@@ -36,7 +36,7 @@ import {
 import { createFilesystemHostedByteStore } from "./adapters/hosting/filesystem.ts";
 import { createGcsHostedByteStore, createGcsTokenProvider } from "./adapters/hosting/gcs.ts";
 import { createMcpOAuthFetch, SdkMcpOAuth } from "./adapters/mcp-oauth.ts";
-import { probeMcp } from "./adapters/mcp-probe.ts";
+import { checkMcp, probeMcp } from "./adapters/mcp-probe.ts";
 import { OAuthUpstreamRefresher } from "./adapters/oauth/refresher.ts";
 import { readIssuerUrl } from "./adapters/oidc/issuer-url.ts";
 import {
@@ -134,7 +134,7 @@ import {
 import { registerIssuerRoutes } from "./http/issuer-routes.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
 import { MCP_OAUTH_CALLBACK, registerMcpOAuthRoutes } from "./http/mcp-oauth-routes.ts";
-import { registerMcpRoutes } from "./http/mcp-routes.ts";
+import { registerMcpRoutes, registerProjectMcpStatusRoute } from "./http/mcp-routes.ts";
 import { registerOrbFilesBoundary, registerOrbFilesGateway } from "./http/orb-files-gateway.ts";
 import { orbFilesBaseUrl } from "./http/orb-files-url.ts";
 import { registerPreviewAuth } from "./http/preview-auth-routes.ts";
@@ -967,6 +967,13 @@ export async function main(
       await registerLiveProxy(browser, httpTask, deps);
       startupPhase("websocket.complete");
       registerRoutes(browser, httpTask, deps, systemView, signingKeyDeps, filesBaseUrl);
+      registerProjectMcpStatusRoute(browser, httpTask, deps.userScope, {
+        store: deps.store,
+        catalog: database.mcp,
+        projectSecrets: deps.projectSecrets,
+        oauth: mcpOAuth,
+        probe: checkMcp,
+      });
       registerMcpOAuthRoutes(browser, httpTask, database.mcp, mcpOAuth, appOrigin);
       registerMcpRoutes(browser, httpTask, database.mcp, async (projectId, config) => {
         const snapshot = await getProjectSecretSnapshot(httpTask, deps.projectSecrets, projectId);

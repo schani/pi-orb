@@ -1375,7 +1375,7 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
           `${prefix}projects/${input.project}/zones/${input.zone}/disks/${source}` ||
         image.labels?.["pi-orb-native-build"] !== input.operationId ||
         image.labels?.["pi-orb-native-version"] !== input.version ||
-        (image.status !== "READY" && (createResponse || image.status !== "PENDING"))
+        (image.status !== "READY" && image.status !== "PENDING")
       )
         return err(invalid());
       return ok({
@@ -1391,7 +1391,8 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
     name: string,
     source: string,
     signal: AbortSignal,
-    createStatus: TransientHttpStatus,
+    createStatus?: TransientHttpStatus,
+    expectedId?: string,
   ): ResultAsync<CapturedImage, ImageBuildError> {
     const deadline = this.cleanupTiming.now() + 60_000;
     const timer = (this.cleanupTiming.createDeadline ?? captureDeadline)(60_000);
@@ -1444,7 +1445,6 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
     };
     decision("started", createStatus);
     const recover = async (): Promise<Result<CapturedImage, ImageBuildError>> => {
-      let expectedId: string | undefined;
       for (let attempt = 0; attempt < 12; attempt++) {
         const stopped = stop();
         if (stopped !== undefined) return err(stopped);
@@ -1567,7 +1567,12 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
               stage: "capture",
               message: "capture cancelled",
             })
-          : this.captureImage(input, name, source, result.stdout, true).map(({ image }) => image),
+          : this.captureImage(input, name, source, result.stdout, true).asyncAndThen(
+              ({ image, pending }) =>
+                pending
+                  ? this.recoverCapture(input, kind, name, source, signal, undefined, image.id)
+                  : okAsync(image),
+            ),
       )
       .orElse((failure) =>
         failure.type !== "cancelled" &&

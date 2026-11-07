@@ -106,3 +106,34 @@ export const McpOAuthGrantSchema = Type.Object(
   { accessToken: Type.String(), expiresAt: Type.Number(), generation: Type.Integer() },
   { additionalProperties: false },
 );
+
+export const ProjectMcpStatusSchema = Type.Object(
+  {
+    revision: Type.Integer({ minimum: 0 }),
+    servers: Type.Array(
+      Type.Object(
+        {
+          name: Name,
+          status: Type.Union([
+            Type.Literal("available"),
+            Type.Literal("unavailable"),
+            Type.Literal("needs-auth"),
+            Type.Literal("unknown"),
+          ]),
+          diagnostic: Type.Optional(
+            Type.Union([
+              Type.Literal("auth_required"),
+              Type.Literal("invalid_binding"),
+              Type.Literal("connection_failed"),
+              Type.Literal("credentials_unavailable"),
+            ]),
+          ),
+        },
+        { additionalProperties: false },
+      ),
+      { maxItems: 20 },
+    ),
+  },
+  { additionalProperties: false },
+);
+export type ProjectMcpStatus = Static<typeof ProjectMcpStatusSchema>;
