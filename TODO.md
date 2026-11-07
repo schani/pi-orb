@@ -66,7 +66,7 @@ The only backlog: one line per item, linked to the owning doc or postmortem. Del
 - **Remove unreachable non-Linux process-host paths** (unsupervised spawn, `liveProcessRows`, non-Linux termination ladder) (`apps/control-plane/src/adapters/process/provider.ts`).
 - **Remove the unused live `message` client action** from `ClientActionSchema` and the runtime server; browsers send messages through the inbox (`packages/protocol/src/frames.ts`, `docs/runtime-protocol.md`).
 - **Remove the `central_agent_paused` special case** the control plane no longer emits (`apps/web/src/pages/OrbPage.tsx`).
-- **Align the boot-hooks skill with code** (prompt change, needs approval): context-delivery claims, and `sudo` does elevate on native GCE (`apps/orb-runtime/skills/boot-hooks/SKILL.md`, `docs/host-provider.md`); remove `bootHookPrompt`, which has no production caller.
+- **Align the boot-hooks skill with code** (prompt change, needs approval): context-delivery claims (`apps/orb-runtime/skills/boot-hooks/SKILL.md`); remove `bootHookPrompt`, which has no production caller.
 - **Soft-wrapped terminal copy:** fix upstream in wterm by exposing wrapped-continuation metadata, then upgrade (`docs/terminal.md`).
 - **Maintenance restoration watchdog:** before any deliberate UI pause, arm a watchdog independent of agent and UI that restores scaling, files routing and access (`docs/deployment.md`).
 - **Database credential rotation** (deferred by the user): recovery authority as a separate Actions job inside the release lock (`docs/deployment.md`, `docs/postmortems/2026-09-09-tracked-deployment-credentials.md`).

@@ -267,8 +267,8 @@ Every project has `maxWorkers: 1`; frontend browsers never overlap Docker networ
 | --- | --- | --- |
 | CI `checks` | Artifact guard; OpenTofu foundation checks (`infra/foundation/test-tofu.sh`); typecheck; lint; `npx vitest run --maxWorkers=1 --no-file-parallelism` with both PostgreSQL URLs against a PostgreSQL 17.11/`pg_textsearch` container; `npm run test:infra` | 45 min |
 | CI `control-plane-image` | After the tracked-artifact guard and a 15 GiB free-disk check, builds the control-plane image; boots its real ENTRYPOINT/CMD with network `none` and checks `/health` and the startup phase sequence (`scripts/control-plane-startup-smoke.mjs`); proves the packaged bounded worker, pinned Git and bundled skills offline (`scripts/control-plane-image-proof.mjs`) | 30 min |
-| E2E `E2E (N/4)` | Docker backend: `--project frontend --project provider --project postgres --shard=N/4` under the local fake provider | 40 min |
-| Durable `Central process (N/4)` | Process backend: `--project process --project provider --shard=N/4` under the local fake provider | 60 min |
+| E2E `E2E (N/4)` | Docker backend: `--bail 1 --project frontend --project provider --project postgres --shard=N/4` under the local fake provider | 60 min |
+| Durable `Central process (N/4)` | Process backend: `--bail 1 --project process --project provider --shard=N/4` under the local fake provider | 60 min |
 
 All run on `ubuntu-24.04` with the pinned Node, for pull requests and pushes to `main`; `fail-fast: false` keeps other shards' evidence. PR qualification uses no cloud credentials. Deployment is separate (`docs/deployment.md`).
 

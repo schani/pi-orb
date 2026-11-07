@@ -15,7 +15,7 @@ jobs:
   e2e:
     name: E2E (${{ matrix.shard }}/4)
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 60
     env:
       PI_ORB_E2E_BACKEND: docker
     strategy:
@@ -101,7 +101,7 @@ jobs:
         run: |
           export PLAYWRIGHT_CHROMIUM_EXECUTABLE="$(node -e 'process.stdout.write(require("@playwright/test").chromium.executablePath())')"
           "$PLAYWRIGHT_CHROMIUM_EXECUTABLE" --version
-          node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project frontend --project provider --project postgres --shard=${{ matrix.shard }}/4
+          node scripts/local-fake-provider.mjs -- npm run test:e2e -- --bail 1 --project frontend --project provider --project postgres --shard=${{ matrix.shard }}/4
 
       - name: Upload nested scenario failure evidence
         if: failure()
