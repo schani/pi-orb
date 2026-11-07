@@ -686,6 +686,8 @@ The external release job verifies its owner metadata inventory before rollout, t
 
 [Cloud Run logging](https://cloud.google.com/run/docs/logging#correlate-logs) documents `X-Cloud-Trace-Context` correlation; [trace context](https://cloud.google.com/trace/docs/trace-context#legacy-x-cloud-trace-context-header) defines its format. Live propagation is unqualified (`TODO.md`). Missing/rewritten traces or absent actual HTTP 200 fail closed; client/platform span equality is unnecessary.
 
+All added observer probes must use the same scoped credential isolation; a global zero-mint assumption is invalid when other callers remain active. Preserve original failures separately from isolated controls (`docs/postmortems/2026-10-19-observer-mint-floor.md`).
+
 **Recovery:** prefer a qualified forward fix retaining central placement, private authority, public history and workspaces. A retained-image rollback requires a qualified central-capable CP/native/config/schema combination and a new forward generation with the normal release fences/gates. Preserve failed release/lock/migration evidence; no automatic SQL DOWN, DB restore, history overwrite, user archival/deletion or old-controller revival. Backup/PITR readiness is not a rehearsed restore. Monitoring failure leaves a validated release record intact and reports incomplete observation.
 
 ## Manual GitHub Actions deployment
