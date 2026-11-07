@@ -158,11 +158,11 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
           const label = await orbAction.getAttribute("aria-label");
           const box = await orbAction.boundingBox();
           if (box === null) throw new Error("No orb action bounds");
-          const hits = await page.evaluate(
-            (points) =>
+          const hits = await orbAction.evaluate(
+            (element, points) =>
               points.map(
                 ([x, y]) =>
-                  document
+                  element.ownerDocument
                     .elementFromPoint(x ?? 0, y ?? 0)
                     ?.closest("button")
                     ?.getAttribute("aria-label") ?? null,
