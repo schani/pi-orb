@@ -172,8 +172,15 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
               [box.x + box.width / 2, box.y + box.height / 2 + 21],
             ],
           );
+          const nextBox = await page
+            .locator(".dashboard .orb-entry-actions")
+            .first()
+            .locator(".icon-button")
+            .nth(1)
+            .boundingBox();
           expectPage(box.height).toBe(20);
           expectPage(hits).toEqual([label, label]);
+          expectPage((nextBox?.x ?? 0) - box.x).toBe(44);
         }
         const geometry = await columns.evaluateAll((elements) =>
           elements.map((element) => element.getBoundingClientRect().width),

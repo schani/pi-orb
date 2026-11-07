@@ -618,22 +618,6 @@ button.text-action.error-text {
     min-height: 44px;
   }
 }
-@media (max-width: 600px), (any-pointer: coarse) {
-  .orb-entry-actions {
-    gap: 0;
-  }
-  /* The tap area overflows the 20px meta row, which stays on the grid. */
-  .orb-entry-actions .icon-button {
-    position: relative;
-    z-index: 1;
-    width: 44px;
-  }
-  .orb-entry-actions .icon-button::before {
-    position: absolute;
-    inset: -12px 0;
-    content: "";
-  }
-}
 @media (max-width: 900px) {
   .usage-overview,
   .usage-bars {
@@ -941,6 +925,23 @@ a.project-new-orb-icon:focus-visible {
   align-items: center;
   gap: 8px;
   white-space: nowrap;
+}
+
+@media (max-width: 600px), (any-pointer: coarse) {
+  .orb-entry-actions {
+    gap: 0;
+  }
+  /* The tap area overflows the 20px meta row, which stays on the grid. */
+  .orb-entry-actions .icon-button {
+    position: relative;
+    z-index: 1;
+    width: 44px;
+  }
+  .orb-entry-actions .icon-button::before {
+    position: absolute;
+    inset: -12px 0;
+    content: "";
+  }
 }
 
 .orb-entry-detail {
@@ -2536,7 +2537,9 @@ pre,
   padding-bottom: 8px;
 }
 .activity-rail-row > summary:focus-visible,
-.tool-activity-call > summary:focus-visible {
+.activity-strip-body > .activity-rail-row > summary:focus-visible,
+.tool-activity-call > summary:focus-visible,
+.project-archive > summary:focus-visible {
   color: var(--w);
   background: var(--k);
 }
@@ -2556,6 +2559,10 @@ pre,
   align-self: center;
   background: var(--w);
   text-align: center;
+}
+
+.rec-orb > .rec-bd > .activity-rail-row > summary:focus-visible .activity-rail-marker {
+  background: var(--k);
 }
 
 .tool-activity-call:not(details),
