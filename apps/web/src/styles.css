@@ -625,6 +625,7 @@ button.text-action.error-text {
   /* The tap area overflows the 20px meta row, which stays on the grid. */
   .orb-entry-actions .icon-button {
     position: relative;
+    z-index: 1;
     width: 44px;
   }
   .orb-entry-actions .icon-button::before {

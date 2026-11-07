@@ -153,6 +153,28 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
           await expectPage(action).toHaveCSS("width", width <= 600 ? "44px" : "24px");
           await expectPage(action).toHaveCSS("height", width <= 600 ? "44px" : "24px");
         }
+        if (width <= 600) {
+          const orbAction = page.locator(".dashboard .orb-entry-actions .icon-button").first();
+          const label = await orbAction.getAttribute("aria-label");
+          const box = await orbAction.boundingBox();
+          if (box === null) throw new Error("No orb action bounds");
+          const hits = await page.evaluate(
+            (points) =>
+              points.map(
+                ([x, y]) =>
+                  document
+                    .elementFromPoint(x ?? 0, y ?? 0)
+                    ?.closest("button")
+                    ?.getAttribute("aria-label") ?? null,
+              ),
+            [
+              [box.x + box.width / 2, box.y + box.height / 2 - 21],
+              [box.x + box.width / 2, box.y + box.height / 2 + 21],
+            ],
+          );
+          expectPage(box.height).toBe(20);
+          expectPage(hits).toEqual([label, label]);
+        }
         const geometry = await columns.evaluateAll((elements) =>
           elements.map((element) => element.getBoundingClientRect().width),
         );
