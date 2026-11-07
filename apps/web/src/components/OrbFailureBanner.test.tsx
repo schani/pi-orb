@@ -8,7 +8,7 @@ describe("OrbFailureBanner", () => {
       <OrbFailureBanner message={"runtime_failed: clone_failed: access denied <token>"} />,
     );
 
-    expect(html).toContain("notice notice-error");
+    expect(html).toContain("banner banner-error");
     expect(html).toContain('class="rec rec-sys orb-failure-banner"');
     expect(html).not.toContain('class="rec-px"');
     expect(html).not.toContain("···");

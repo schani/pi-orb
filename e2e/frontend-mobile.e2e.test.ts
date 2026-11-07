@@ -668,11 +668,10 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         expectPage(geometry).not.toBeNull();
         expectPage(geometry?.top).toBeCloseTo((geometry?.dialogTop ?? 0) + 1, 5);
         expectPage(geometry?.right).toBeCloseTo((geometry?.dialogRight ?? 0) - 1, 5);
-        const touchSize = closeName === "Close settings" ? 48 : 44;
-        expectPage(geometry?.width).toBe(phone ? touchSize : 32);
-        expectPage(geometry?.height).toBe(phone ? touchSize : 32);
-        expectPage(geometry?.iconWidth).toBe(18);
-        expectPage(geometry?.iconHeight).toBe(18);
+        expectPage(geometry?.width).toBe(phone ? 44 : 32);
+        expectPage(geometry?.height).toBe(phone ? 44 : 32);
+        expectPage(geometry?.iconWidth).toBe(16);
+        expectPage(geometry?.iconHeight).toBe(16);
         expectPage(geometry?.titleRight).toBeLessThanOrEqual(geometry?.left ?? 0);
       };
       try {

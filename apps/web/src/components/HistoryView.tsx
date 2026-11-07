@@ -779,7 +779,7 @@ function PeerNotice({
           >
             {name?.trim() ? name : senderId}
           </a>
-          {status !== undefined && <span className="rec-status">{status}</span>}
+          {status !== undefined && <span className="tag rec-status">{status}</span>}
         </>
       }
       defaultOpen={open}
@@ -828,7 +828,7 @@ function renderInboxMessage(
     <article className={`rec ${system ? "rec-orb" : "rec-you"} rec-q`} key={message.id}>
       <span className="visually-hidden">{system ? "System:" : "You:"}</span>
       <div className="rec-bd">
-        <span className="rec-status">{status}</span>
+        <span className="tag rec-status">{status}</span>
         {message.content.map((block, index) =>
           block.type === "text" ? (
             <ChatMarkdown key={index}>{block.text}</ChatMarkdown>

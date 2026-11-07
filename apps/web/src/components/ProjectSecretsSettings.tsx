@@ -14,7 +14,7 @@ import {
   listProjectSecrets,
   putProjectSecret,
 } from "../lib/api.ts";
-import { ProjectSecretKeyIcon } from "./ProjectSecretKeyIcon.tsx";
+import { Icon } from "./Icons.tsx";
 import { TextFieldFrame } from "./TextFieldFrame.tsx";
 
 export interface ProjectSecretsSettingsProps {
@@ -139,7 +139,7 @@ export function ProjectSecretsSettings({
               <div className="project-secret-row" key={item.name}>
                 <span className="project-secret-name">
                   <span className="project-secrets-lock">
-                    <ProjectSecretKeyIcon />
+                    <Icon name="key" />
                   </span>
                   {item.name}
                 </span>

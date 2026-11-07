@@ -75,27 +75,27 @@ describe("project orb presentation", () => {
       label: "busy",
     });
     expect(projectOrbGlyph("running")).toEqual({
-      state: "idle",
+      state: "running",
       iconHref: "/favicons/running.svg",
       label: "running",
     });
-    expect(projectOrbGlyph("starting").state).toBe("start");
-    expect(projectOrbGlyph("creating").state).toBe("start");
-    expect(projectOrbGlyph("stopping").state).toBe("start");
+    expect(projectOrbGlyph("starting").state).toBe("transitional");
+    expect(projectOrbGlyph("creating").state).toBe("transitional");
+    expect(projectOrbGlyph("stopping").state).toBe("transitional");
     expect(projectOrbGlyph("stopped")).toEqual({
-      state: "stop",
+      state: "stopped",
       iconHref: "/favicons/stopped.svg",
       label: "stopped",
     });
     expect(projectOrbGlyph("failed")).toEqual({
-      state: "fail",
+      state: "failed",
       iconHref: "/favicons/failed.svg",
       label: "failed",
     });
-    expect(projectOrbGlyph("archived").state).toBe("arch");
-    expect(projectOrbGlyph("archiving").state).toBe("archng");
+    expect(projectOrbGlyph("archived").state).toBe("archived");
+    expect(projectOrbGlyph("archiving").state).toBe("archiving");
     expect(projectOrbGlyph("deleting")).toEqual({
-      state: "del",
+      state: "deleting",
       iconHref: "/favicons/deleting.svg",
       label: "deleting",
     });
@@ -122,13 +122,13 @@ describe("project orb presentation", () => {
       expect(projectOrbGlyph(state, activity, undefined, null).state).not.toBe("alert");
     }
     expect(projectOrbGlyph("stopped", undefined, "tomorrow", "alert-id").state).toBe("alert");
-    expect(projectOrbGlyph("stopped", undefined, "tomorrow", null).state).toBe("sleep");
+    expect(projectOrbGlyph("stopped", undefined, "tomorrow", null).state).toBe("sleeping");
   });
 
   it("uses sleeping only for stopped orbs with a deadline", () => {
     const sleepUntil = "2026-09-18T00:00:00.000Z";
     expect(projectOrbGlyph("stopped", undefined, sleepUntil)).toEqual({
-      state: "sleep",
+      state: "sleeping",
       iconHref: "/favicons/sleeping.svg",
       label: "Orb sleeping",
     });

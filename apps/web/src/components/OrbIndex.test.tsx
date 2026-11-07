@@ -76,7 +76,7 @@ describe("stacked project index", () => {
     expect(html).toContain('href="/orbs/orb-1"');
     expect(html).toContain('href="/orbs/archive"');
     expect(html).toContain('class="project-archive" open=""');
-    expect(html).toContain("ix-row-arch ix-row-current");
+    expect(html).toContain("ix-row-archived ix-row-current");
     expect(html.match(/aria-current="page"/g)).toHaveLength(1);
     expect(html).toContain('class="ix-age">…</span>');
   });
@@ -123,7 +123,7 @@ describe("stacked project index", () => {
     const html = renderToStaticMarkup(
       <IndexProject {...props} list={{ items: [sleeping], error: null }} />,
     );
-    expect(html).toContain("ix-row-sleep ix-row-current");
+    expect(html).toContain("ix-row-sleeping ix-row-current");
     expect(html).toContain('src="/favicons/sleeping.svg"');
     expect(html).toContain('title="Orb sleeping"');
     expect(html).toContain('aria-current="page"');

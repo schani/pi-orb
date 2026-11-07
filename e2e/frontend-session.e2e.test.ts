@@ -451,7 +451,7 @@ describe("frontend-only browser behavior", () => {
     });
     try {
       await gotoFrontendFixture(page, `${origin}${ORB_PATH}`);
-      const notice = page.locator(".notice", { hasText: "OpenAI device login required." });
+      const notice = page.locator(".banner", { hasText: "OpenAI device login required." });
       await expectPage(notice).toBeVisible();
       await expectPage(notice).toContainText("TEST-CODE");
       await expectPage(notice).toContainText("expires in");
@@ -466,7 +466,7 @@ describe("frontend-only browser behavior", () => {
       await expectPage(row.locator(".rec-px")).toHaveCount(0);
       await expectPage(row).not.toContainText("···");
       const layout = await row.evaluate((element) => {
-        const body = element.querySelector(".notice");
+        const body = element.querySelector(".banner");
         const style = element.ownerDocument.defaultView?.getComputedStyle(element);
         const bounds = element.getBoundingClientRect();
         return {
@@ -504,7 +504,7 @@ describe("frontend-only browser behavior", () => {
     });
     try {
       await page.goto(`${origin}${ORB_PATH}`);
-      const notice = page.locator(".notice", { hasText: "Preparing OpenAI login…" });
+      const notice = page.locator(".banner", { hasText: "Preparing OpenAI login…" });
       await expectPage(notice).toBeVisible();
       await expectPage(notice.locator("a")).toHaveCount(0);
       await expectPage(notice.locator("button")).toHaveCount(0);
@@ -3213,7 +3213,7 @@ describe("frontend-only browser behavior", () => {
           `${origin}/orbs/frontend-long-history`,
           "frontend-long-history",
         );
-        const banner = page.locator(".notice-error", { hasText: error });
+        const banner = page.locator(".banner-error", { hasText: error });
         await expectPage(banner).toHaveCount(1);
         await page.getByRole("button", { name: "expire session" }).click();
         await expectPage(page.locator(".session-ribbon")).toBeVisible();
@@ -3234,7 +3234,7 @@ describe("frontend-only browser behavior", () => {
           const view = document.defaultView;
           const rect = (selector: string) =>
             document.querySelector(selector)?.getBoundingClientRect();
-          const banner = rect(".orb-header-stack .notice-error");
+          const banner = rect(".orb-header-stack .banner-error");
           const header = rect(".orb-header");
           const ribbon = rect(".session-ribbon");
           const index = rect(".orb-index");

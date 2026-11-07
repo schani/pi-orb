@@ -589,7 +589,7 @@ describe("HistoryView turn structure", () => {
       />,
     );
     expect(queuedHtml).toContain("rec rec-you rec-q");
-    expect(queuedHtml).toContain('class="rec-status">queued</span>');
+    expect(queuedHtml).toContain('class="tag rec-status">queued</span>');
     expect(queuedHtml).toContain("queued while starting");
 
     const committed: MessageRecord = {
@@ -657,7 +657,7 @@ describe("HistoryView turn structure", () => {
         ]}
       />,
     );
-    expect(html).toContain('class="rec-status">steering</span>');
+    expect(html).toContain('class="tag rec-status">steering</span>');
     expect(html).toContain("Please check the phone layout too.");
     expect(html).toContain('class="visually-hidden">You:</span>');
   });
@@ -722,7 +722,7 @@ describe("HistoryView turn structure", () => {
         queuedMessages={[failed]}
       />,
     );
-    expect(html).toContain('class="rec-status">failed</span>');
+    expect(html).toContain('class="tag rec-status">failed</span>');
     expect(html).toContain('class="error-text">400 invalid_request: message payload too large<');
     expect(html).toContain("a payload the runtime refuses");
   });
@@ -1678,7 +1678,7 @@ describe("orb correspondence", () => {
         senderNames={new Map([[senderId, "runtime handshake"]])}
       />,
     );
-    expect(html).toContain(`class="rec-status">${label}</span>`);
+    expect(html).toContain(`class="tag rec-status">${label}</span>`);
     expect(html).toContain(`href="/orbs/${senderId}">runtime handshake</a>`);
     expect(html).toContain("peer-body");
     expect(html).toContain('class="activity-rail-label">notification</span>');

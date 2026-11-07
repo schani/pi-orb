@@ -72,7 +72,7 @@ it.each(["chromium", "webkit"] as const)(
             .getByRole("link", { name: "Frontend Playground", exact: true })
             .click();
           const currentRow = page.locator(`.ix-row[href="/orbs/${id}"]`);
-          await expect(currentRow).toHaveClass(/ix-row-sleep/);
+          await expect(currentRow).toHaveClass(/ix-row-sleeping/);
           await expect(currentRow.locator(sleepingImage)).toHaveAttribute("title", "Orb sleeping");
           await expect(currentRow).toHaveCSS("background-color", "rgb(0, 0, 0)");
           await expect(page.locator(".orb-life").locator(sleepingImage)).toHaveCount(1);
@@ -96,8 +96,8 @@ it.each(["chromium", "webkit"] as const)(
             "src",
             "/favicons/stopped.svg",
           );
-          await expect(currentRow).toHaveClass(/ix-row-stop/);
-          await expect(currentRow).not.toHaveClass(/ix-row-sleep/);
+          await expect(currentRow).toHaveClass(/ix-row-stopped/);
+          await expect(currentRow).not.toHaveClass(/ix-row-sleeping/);
           await expect(page.locator("#pi-orb-favicon")).toHaveAttribute(
             "href",
             "/favicons/stopped.svg",

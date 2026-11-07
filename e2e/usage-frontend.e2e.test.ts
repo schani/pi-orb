@@ -546,8 +546,7 @@ async function checkOrbLinks(page: Page, origin: string) {
   const row = page.locator('.usage-orb-row[href="' + href + '"]');
   await row.hover();
   await expect(row).toHaveCSS("background-color", "rgb(242, 242, 242)");
-  await expect(row.locator(".usage-orb-name")).toHaveCSS("text-decoration-line", "underline");
-  await expect(row.locator(".usage-orb-value")).toHaveCSS("text-decoration-line", "none");
+  await expect(row.locator(".usage-orb-name")).toHaveCSS("text-decoration-line", "none");
   for (const part of [".usage-orb-name", ".usage-orb-bar", ".usage-orb-value"]) {
     await row.locator(part).click();
     await expect(page).toHaveURL(origin + href);
@@ -568,8 +567,12 @@ async function checkOrbLinks(page: Page, origin: string) {
   for (const target of await rows.all()) {
     await page.keyboard.press("Tab");
     await expect(target).toBeFocused();
-    await expect(target).toHaveCSS("outline-width", "2px");
-    await expect(target).toHaveCSS("outline-style", "solid");
+    await expect(target).toHaveCSS("background-color", "rgb(0, 0, 0)");
+    await expect(target).toHaveCSS("color", "rgb(255, 255, 255)");
+    await expect(target.locator(".usage-orb-bar")).toHaveCSS(
+      "background-color",
+      "rgb(255, 255, 255)",
+    );
   }
   await page.keyboard.press("Tab");
   await expect(page.locator(".usage-orb-row:focus")).toHaveCount(0);

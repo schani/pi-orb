@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { Icon } from "./Icons.tsx";
 
 interface ToolImagePreviewProps {
   src?: string;
@@ -58,12 +59,12 @@ export function ToolImagePreview({ src, toolName }: ToolImagePreviewProps) {
         }}
       >
         <button
-          className="tool-image-dialog-close"
+          className="icon-button modal-close tool-image-dialog-close"
           type="button"
           aria-label="Close image preview"
           onClick={() => dialog.current?.close()}
         >
-          ×
+          <Icon name="x" />
         </button>
         <img
           className="tool-image-full"

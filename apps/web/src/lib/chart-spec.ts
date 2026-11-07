@@ -7,6 +7,7 @@ import type {
   LineChart,
   TimelineChart,
 } from "@pi-orb/protocol";
+import { TOKENS } from "./design-tokens.ts";
 
 /** Pure Vega-Lite builders for transcript charts (docs/web-ui.md, transcript charts). */
 
@@ -20,14 +21,15 @@ export interface VegaSpec extends VegaLayer {
   params?: { name: string; value: unknown }[];
 }
 
-const INK = "#000";
-const MUTED = "#555";
-const HAIRLINE = "#999";
-const GRID = "#e6e6e6";
-const FILL = "#f2f2f2";
-const PALE = "#d9d9d9";
-const BAD = "#b42318";
-const INK_COLORS = ["#000", "#555", "#777"];
+const PAPER = TOKENS.w;
+const INK = TOKENS.k;
+const MUTED = TOKENS.g3;
+const HAIRLINE = TOKENS.g2;
+const GRID = TOKENS.g1x;
+const FILL = TOKENS.g1;
+const PALE = TOKENS.g1x;
+const BAD = TOKENS.bad;
+const INK_COLORS = [INK, MUTED, MUTED];
 const INK_DASH = [[], [6, 3], [1.5, 3]];
 /** Validated against #fff for colour-blind and normal-vision separation across all pairs. */
 const HUES = ["#2a78d6", "#eb6834", "#4a3aa7", "#1baf7a", "#c2418a", "#7a5c00"];
@@ -57,7 +59,7 @@ export const CHART_CONFIG = {
   axisBand: { domain: false, ticks: false, labelColor: INK, labelFontSize: 11, labelPadding: 8 },
   line: { strokeWidth: 2, strokeCap: "round", strokeJoin: "round" },
   bar: { cornerRadius: 0, color: INK },
-  point: { filled: true, size: 56, stroke: "#fff", strokeWidth: 2, opacity: 1 },
+  point: { filled: true, size: 56, stroke: PAPER, strokeWidth: 2, opacity: 1 },
   text: { font: "JetBrains Mono", fontSize: 11, color: INK },
   rule: { color: INK, strokeWidth: 1 },
   legend: { disable: true },
@@ -708,9 +710,9 @@ const tickLabel = (ms: number) =>
 const LANE = 22;
 /** Fill and label colour by tooltip state. */
 const SPAN_COLORS = {
-  failed: [BAD, "#fff"],
-  queued: ["#fff", MUTED],
-  "critical path": [INK, "#fff"],
+  failed: [BAD, PAPER],
+  queued: [PAPER, MUTED],
+  "critical path": [INK, PAPER],
   "": [PALE, INK],
 } as const;
 
@@ -826,7 +828,7 @@ export function heatmapSpec(spec: HeatmapChart): VegaSpec {
         })),
       ),
     },
-    mark: { type: "rect", stroke: "#fff", strokeWidth: 1 },
+    mark: { type: "rect", stroke: PAPER, strokeWidth: 1 },
     encoding: {
       x: {
         field: "x",
@@ -977,7 +979,7 @@ export function compareSpec(spec: CompareChart, { narrow }: { narrow: boolean })
       mark: {
         type: "point",
         filled: true,
-        fill: "#fff",
+        fill: PAPER,
         strokeWidth: 1.5,
         size: 40,
         yOffset: offset,

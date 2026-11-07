@@ -1,5 +1,6 @@
 import mermaid from "mermaid";
 import { ResultAsync } from "neverthrow";
+import { TOKENS } from "./design-tokens.ts";
 
 /** Browser-only adapter around Mermaid; loaded lazily so Mermaid stays out of the main bundle. */
 
@@ -20,47 +21,47 @@ mermaid.initialize({
   themeVariables: {
     fontFamily: MONO,
     fontSize: "12px",
-    background: "#fff",
-    primaryColor: "#fff",
-    primaryTextColor: "#000",
-    primaryBorderColor: "#000",
-    secondaryColor: "#f2f2f2",
-    tertiaryColor: "#fff",
-    lineColor: "#000",
-    textColor: "#000",
-    mainBkg: "#fff",
-    nodeBorder: "#000",
-    clusterBkg: "#f2f2f2",
-    clusterBorder: "#999",
-    edgeLabelBackground: "#fff",
-    actorBkg: "#fff",
-    actorBorder: "#000",
-    actorTextColor: "#000",
-    actorLineColor: "#999",
-    signalColor: "#000",
-    signalTextColor: "#000",
-    labelBoxBkgColor: "#000",
-    labelBoxBorderColor: "#000",
-    labelTextColor: "#fff",
-    loopTextColor: "#000",
-    noteBkgColor: "#f2f2f2",
-    noteBorderColor: "#999",
-    noteTextColor: "#000",
-    activationBkgColor: "#f2f2f2",
-    activationBorderColor: "#000",
+    background: TOKENS.w,
+    primaryColor: TOKENS.w,
+    primaryTextColor: TOKENS.k,
+    primaryBorderColor: TOKENS.k,
+    secondaryColor: TOKENS.g1,
+    tertiaryColor: TOKENS.w,
+    lineColor: TOKENS.k,
+    textColor: TOKENS.k,
+    mainBkg: TOKENS.w,
+    nodeBorder: TOKENS.k,
+    clusterBkg: TOKENS.g1,
+    clusterBorder: TOKENS.g2,
+    edgeLabelBackground: TOKENS.w,
+    actorBkg: TOKENS.w,
+    actorBorder: TOKENS.k,
+    actorTextColor: TOKENS.k,
+    actorLineColor: TOKENS.g2,
+    signalColor: TOKENS.k,
+    signalTextColor: TOKENS.k,
+    labelBoxBkgColor: TOKENS.k,
+    labelBoxBorderColor: TOKENS.k,
+    labelTextColor: TOKENS.w,
+    loopTextColor: TOKENS.k,
+    noteBkgColor: TOKENS.g1,
+    noteBorderColor: TOKENS.g2,
+    noteTextColor: TOKENS.k,
+    activationBkgColor: TOKENS.g1,
+    activationBorderColor: TOKENS.k,
   },
   themeCSS: `
     rect, .node rect, .actor, .note, .labelBox { rx: 0 !important; ry: 0 !important; }
     .actor { stroke-width: 1px; }
-    .actor-you { fill: #000; stroke: #000; }
-    text.actor-you-text, text.actor-you-text > tspan { fill: #fff !important; }
-    .actor-line { stroke: #999; stroke-dasharray: 2 3; }
-    .loopLine { stroke: #000; stroke-width: 1px; stroke-dasharray: 3 3; }
-    .loopText, .loopText > tspan { fill: #000; font-weight: 700; }
-    .labelText, .labelText > tspan { fill: #fff; font-weight: 700; letter-spacing: .08em; }
-    .edgeLabel, .edgeLabel p { background: #fff; color: #555; }
+    .actor-you { fill: ${TOKENS.k}; stroke: ${TOKENS.k}; }
+    text.actor-you-text, text.actor-you-text > tspan { fill: ${TOKENS.w} !important; }
+    .actor-line { stroke: ${TOKENS.g2}; stroke-dasharray: 2 3; }
+    .loopLine { stroke: ${TOKENS.k}; stroke-width: 1px; stroke-dasharray: 3 3; }
+    .loopText, .loopText > tspan { fill: ${TOKENS.k}; font-weight: 700; }
+    .labelText, .labelText > tspan { fill: ${TOKENS.w}; font-weight: 700; letter-spacing: .08em; }
+    .edgeLabel, .edgeLabel p { background: ${TOKENS.w}; color: ${TOKENS.g3}; }
     .flowchart-link { stroke-width: 1px; }
-    marker path { fill: #000; stroke: #000; }
+    marker path { fill: ${TOKENS.k}; stroke: ${TOKENS.k}; }
   `,
   flowchart: {
     useMaxWidth: false,

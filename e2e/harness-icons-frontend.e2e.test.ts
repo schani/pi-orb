@@ -358,7 +358,7 @@ it.each(["chromium", "webkit"] as const)(
           })),
         );
       check(targets).toHaveLength(16);
-      for (const target of targets) check(target).toEqual({ width: 48, height: 48 });
+      for (const target of targets) check(target).toEqual({ width: 44, height: 44 });
     } catch (error) {
       const root = join(
         import.meta.dirname,

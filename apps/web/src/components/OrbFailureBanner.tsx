@@ -6,7 +6,7 @@ interface OrbFailureBannerProps {
 export function OrbFailureBanner({ message }: OrbFailureBannerProps) {
   return message === undefined ? null : (
     <div className="rec rec-sys orb-failure-banner">
-      <div className="rec-bd notice notice-error">{message}</div>
+      <div className="rec-bd banner banner-error">{message}</div>
     </div>
   );
 }

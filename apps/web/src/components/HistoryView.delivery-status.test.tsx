@@ -26,7 +26,7 @@ function render(state: OrbView["state"], row = message, records: DisplayRecord[]
     />,
   );
 }
-const label = (html: string) => html.match(/class="rec-status">([^<]*)<\/span>/)?.[1];
+const label = (html: string) => html.match(/class="tag rec-status">([^<]*)<\/span>/)?.[1];
 
 describe("pending delivery presentation", () => {
   it.each([

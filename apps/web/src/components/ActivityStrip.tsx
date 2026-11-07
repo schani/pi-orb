@@ -139,7 +139,7 @@ export function ActivityStrip({
               role="tooltip"
               style={{
                 left: Math.max(4, tip.left - 16),
-                top: tip.top - 22,
+                top: tip.top - 24,
                 maxWidth: `min(60ch, calc(100vw - ${Math.max(4, tip.left - 16) + 8}px))`,
               }}
             >

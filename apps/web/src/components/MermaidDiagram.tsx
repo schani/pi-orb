@@ -125,12 +125,12 @@ export function MermaidDiagram({ source, copyButton }: { source: string; copyBut
           }}
         >
           <button
-            className="tool-image-dialog-close"
+            className="icon-button modal-close tool-image-dialog-close"
             type="button"
             aria-label="Close diagram"
             onClick={() => dialog.current?.close()}
           >
-            ×
+            <Icon name="x" />
           </button>
           <div
             className="mermaid-dialog-canvas"

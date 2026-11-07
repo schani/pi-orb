@@ -174,12 +174,9 @@ for (const width of [1280, 390, 320]) {
         });
         expectPage(focused).toMatchObject({
           focusVisible: true,
-          background: "rgb(255, 255, 255)",
-          color: "rgb(0, 0, 0)",
-          sourceColor: "rgb(85, 85, 85)",
-          outline: "solid",
-          outlineWidth: "1px",
-          outlineColor: "rgb(85, 85, 85)",
+          background: "rgb(0, 0, 0)",
+          color: "rgb(255, 255, 255)",
+          sourceColor: "rgb(255, 255, 255)",
         });
         expectPage(focused.summaryHeight).toBe(geometry.ordinaryHeight);
         expectPage(focused.sourceWidth).toBeGreaterThan(0);
