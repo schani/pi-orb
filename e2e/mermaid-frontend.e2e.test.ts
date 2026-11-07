@@ -124,7 +124,7 @@ it.each(["chromium", "webkit"] as const)(
       await sequence.hover();
       await sequence.getByRole("button", { name: "Open diagram" }).click();
       const dialog = page.locator("dialog.mermaid-dialog");
-      await expect(dialog.locator("svg")).toBeVisible();
+      await expect(dialog.locator(".mermaid-dialog-canvas svg")).toBeVisible();
       await page.keyboard.press("Escape");
       await expect(dialog).toBeHidden();
 

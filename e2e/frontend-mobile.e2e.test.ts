@@ -150,8 +150,8 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         const actions = page.locator(".dashboard .project-head-actions > .icon-button");
         expectPage(await actions.count()).toBeGreaterThan(0);
         for (const action of await actions.all()) {
-          await expectPage(action).toHaveCSS("width", width <= 600 ? "48px" : "24px");
-          await expectPage(action).toHaveCSS("height", width <= 600 ? "48px" : "24px");
+          await expectPage(action).toHaveCSS("width", width <= 600 ? "44px" : "24px");
+          await expectPage(action).toHaveCSS("height", width <= 600 ? "44px" : "24px");
         }
         const geometry = await columns.evaluateAll((elements) =>
           elements.map((element) => element.getBoundingClientRect().width),

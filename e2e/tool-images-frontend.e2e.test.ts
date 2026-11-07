@@ -752,7 +752,7 @@ describe.each(["chromium", "webkit"] as const)("tool-returned image previews · 
         ).toBe("none");
         await page.keyboard.press("Tab");
         await expectPage(close).toBeFocused();
-        expectPage(await outline()).toBe("solid");
+        await expectPage(close).toHaveCSS("background-color", "rgb(0, 0, 0)");
       } finally {
         await page.close();
       }

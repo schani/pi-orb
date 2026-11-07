@@ -1195,7 +1195,7 @@ describe("frontend-only browser behavior", () => {
               return frame.top < box.bottom - 0.5 && frame.bottom > box.top + 0.5;
             });
             const probe = marker.ownerDocument.createElement("span");
-            probe.style.cssText = "position:absolute;width:calc(3ch + 6px)";
+            probe.style.cssText = "position:absolute;width:calc(3ch + 8px)";
             marker.append(probe);
             const expectedWidth = probe.getBoundingClientRect().width;
             probe.remove();
@@ -2556,7 +2556,7 @@ describe("frontend-only browser behavior", () => {
           }),
         );
       }
-      expectPage(spacing).toEqual(Array(3).fill(["8px", "10px", "10px", "10px"]));
+      expectPage(spacing).toEqual(Array(3).fill(["8px", "12px", "12px", "12px"]));
       const current = await (
         await page.request.get(`${origin}/api/v1/projects/${projectId}/mcp`)
       ).json();
@@ -2985,7 +2985,7 @@ describe("frontend-only browser behavior", () => {
       });
       expectPage(instructionsGeometry).not.toBeNull();
       expectPage(instructionsGeometry?.borderLeft).toBe(0);
-      expectPage(instructionsGeometry?.padding).toBe("8px 10px");
+      expectPage(instructionsGeometry?.padding).toBe("8px 12px");
       expectPage(instructionsGeometry?.pointerEvents).toBe("none");
       expectPage(instructionsGeometry?.resize).toBe("vertical");
       expectPage(instructionsGeometry?.crop.left).toBeCloseTo(

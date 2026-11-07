@@ -606,6 +606,10 @@ button.text-action.error-text {
   color: var(--k);
   background: var(--g1);
 }
+.usage-orb-row:focus-visible {
+  color: var(--w);
+  background: var(--k);
+}
 .usage-orb-row:focus-visible .usage-orb-bar {
   background: var(--w);
 }
@@ -2530,9 +2534,15 @@ pre,
   padding-top: 4px;
   padding-bottom: 8px;
 }
+.activity-rail-row > summary:focus-visible,
+.tool-activity-call > summary:focus-visible {
+  color: var(--w);
+  background: var(--k);
+}
 .activity-rail-row
   > summary:focus-visible
-  :is(.activity-rail-marker, .activity-rail-headline, .activity-rail-metric) {
+  :is(.activity-rail-marker, .activity-rail-headline, .activity-rail-metric),
+.tool-activity-call > summary:focus-visible > :is(.tool-call-marker, .tool-call-status) {
   color: inherit;
 }
 

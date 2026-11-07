@@ -921,7 +921,7 @@ flowchart LR
     await unsafe.getByRole("button", { name: "Show diagram" }).click();
     await unsafe.getByRole("button", { name: "Open diagram" }).click();
     const dialog = page.locator("dialog.mermaid-dialog");
-    await expectPage(dialog.locator("svg")).toBeVisible();
+    await expectPage(dialog.locator(".mermaid-dialog-canvas svg")).toBeVisible();
     await expectPage(dialog.locator("script, [onerror], [onclick]")).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expectPage(dialog).toBeHidden();
