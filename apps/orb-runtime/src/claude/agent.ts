@@ -82,6 +82,7 @@ import { readExecutionIdentity } from "./execution-identity.ts";
 import { ClaudeHistory, type HistoryFiles, nativeHistoryFiles } from "./history.ts";
 import { FileIdleStopFence } from "./idle-stop-fence.ts";
 import { type ClaudeMcpRuntime, createClaudeMcp } from "./mcp.ts";
+import { type ClaudeMcpState, createClaudeMcpStatusReporter } from "./mcp-status.ts";
 import {
   type ModelUsageReceiver,
   type ModelUsageReceiverError,
@@ -333,6 +334,7 @@ export class ClaudeOrbAgent implements OrbAgent {
   private mcpConfigs: readonly McpConfig[] = [];
   private projectSecrets: Readonly<Record<string, string>> = {};
   private mcp: ClaudeMcpRuntime | null = null;
+  private nativeMcpStatus = createClaudeMcpStatusReporter((event) => this.publishNativeMcp(event));
   private readonly options: ClaudeOrbAgentOptions;
   private readonly files: HistoryFiles;
   private readonly workflowAdmissions = new Map<string, ReadonlySet<string> | null>();
@@ -972,10 +974,12 @@ export class ClaudeOrbAgent implements OrbAgent {
         onState: (state) => {
           const recorded = this.platformEvent(
             "claude.mcp",
-            state.message ?? `MCP ${state.server}: ${state.state}`,
+            `OAuth bridge: ${state.message ?? `MCP ${state.server}: ${state.state}`}`,
             {
               server: state.server,
               state: state.state,
+              source: "sdk",
+              observation: "bridge",
               ...(state.diagnostic === undefined
                 ? {}
                 : {
@@ -1392,7 +1396,19 @@ export class ClaudeOrbAgent implements OrbAgent {
     this.publishChildren();
     return ok(undefined);
   }
+  private publishNativeMcp(state: ClaudeMcpState): void {
+    const recorded = this.platformEvent("claude.mcp", state.message, {
+      server: state.server,
+      state: state.state,
+      source: state.source,
+      observation: state.observation,
+      ...(state.diagnostic ? { code: state.diagnostic.code } : {}),
+    });
+    if (recorded.isErr()) this.fail("claude_mcp_publication_failed", recorded.error.message);
+  }
   private onMessage(message: SDKMessage): void {
+    if (message.type === "system" && message.subtype === "init")
+      this.nativeMcpStatus(message.mcp_servers);
     if (this.closing !== null) this.shutdownDiagnostics.observe(message);
     if (
       this.closing !== null &&

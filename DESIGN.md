@@ -129,6 +129,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-11-06-claude-mcp-authorization-report.md](docs/postmortems/2026-11-06-claude-mcp-authorization-report.md) — unsupported public authorization claims, current project grant and missing native MCP status/source evidence
 - [docs/postmortems/2026-11-06-posthog-project-selection.md](docs/postmortems/2026-11-06-posthog-project-selection.md) — cross-call project reset, legacy session mismatch and official modern MCP adapter decision
 - [docs/postmortems/2026-11-06-control-plane-blackouts.md](docs/postmortems/2026-11-06-control-plane-blackouts.md) — two unexplained Cloud Run service gaps; corrected uncaught `AbortError` crash from a cancelled wait.
 - [docs/postmortems/2026-11-05-native-capture-pending.md](docs/postmortems/2026-11-05-native-capture-pending.md) — successful PENDING capture rejected before validation; bounded same-ID recovery, fresh qualification pending

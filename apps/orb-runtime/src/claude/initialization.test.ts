@@ -22,6 +22,7 @@ import type { ServerFrame } from "@pi-orb/protocol";
 import { NoSimulationTask, type SimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, Result } from "neverthrow";
 import { afterEach, expect, it, vi } from "vitest";
+import { createMcpStateReporter } from "../mcp/transport.ts";
 import {
   background,
   childEdge,
@@ -289,6 +290,42 @@ it.each(failures)(
     expect(f.factories()).toBe(1);
   },
 );
+
+it("labels bridge failures and recovery while preserving sanitized guidance", async () => {
+  let onState: mcpModule.ClaudeMcpDeps["onState"];
+  vi.spyOn(mcpModule, "createClaudeMcp").mockImplementation((deps) => {
+    onState = deps.onState;
+    return ok({ mcpServers: {}, close: () => okAsync(undefined) });
+  });
+  const f = fixture(true, undefined, true);
+  expect((await f.attach()).isOk()).toBe(true);
+  expect(onState).toBeDefined();
+  const report = createMcpStateReporter(onState);
+  report("datadog", "failed", "check project MCP settings", { code: "network" });
+  report("datadog", "needs-auth", "reconnect in project MCP settings", { code: "auth_required" });
+  report("datadog", "connected");
+  const events = f.history.view.flatMap((record) =>
+    record.type === "event" && record.eventType === "claude.mcp" ? [record] : [],
+  );
+  expect(events.map((event) => event.content)).toEqual([
+    [{ type: "text", text: "OAuth bridge: check project MCP settings" }],
+    [{ type: "text", text: "OAuth bridge: reconnect in project MCP settings" }],
+    [{ type: "text", text: "OAuth bridge: MCP datadog: connected" }],
+  ]);
+  expect(events.map((event) => event.overflow)).toEqual([
+    { server: "datadog", state: "failed", code: "network", source: "sdk", observation: "bridge" },
+    {
+      server: "datadog",
+      state: "needs-auth",
+      code: "auth_required",
+      source: "sdk",
+      observation: "bridge",
+    },
+    { server: "datadog", state: "connected", source: "sdk", observation: "bridge" },
+  ]);
+  expect(events.every((event) => event.custom?.display === true)).toBe(true);
+  await f.agent.closeExtensions();
+});
 
 it("captures production-spawner stderr, exit and SDK cause without credentials", async () => {
   const f = fixture(true, (input, options) => {
