@@ -1,7 +1,7 @@
 import { BACKGROUND_CONTEXT, withCancel } from "@earendil-works/chord/context";
 import { CodemodeSandbox } from "@earendil-works/pi-codemode";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
-import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
+import { InMemoryTransport } from "@modelcontextprotocol/client";
 import { okAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import { createDurableTools } from "./index.ts";
@@ -26,10 +26,18 @@ it("cancels in-flight MCP requests and closes their scoped transports", async ()
       {
         name: "mock",
         connect: () => {
-          const { client, server } = createInMemoryTransportPair();
-          server.onClose(() => closed++);
-          server.onMessage((message) => {
+          const [client, server] = InMemoryTransport.createLinkedPair();
+          server.onclose = () => closed++;
+          server.onmessage = (message) => {
             if (!("method" in message) || !("id" in message)) return;
+            if (message.method === "server/discover") {
+              void server.send({
+                jsonrpc: "2.0",
+                id: message.id,
+                error: { code: -32601, message: "Unsupported" },
+              });
+              return;
+            }
             if (message.method === "initialize")
               void server.send({
                 jsonrpc: "2.0",
@@ -62,7 +70,7 @@ it("cancels in-flight MCP requests and closes their scoped transports", async ()
               });
               entered.resolve();
             }
-          });
+          };
           void server.start();
           return okAsync(client);
         },

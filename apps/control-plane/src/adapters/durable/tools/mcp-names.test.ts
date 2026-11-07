@@ -1,6 +1,6 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { defineTool, type ToolExecutionApi } from "@earendil-works/pi-durable";
-import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
+import { InMemoryTransport } from "@modelcontextprotocol/client";
 import { errAsync, okAsync } from "neverthrow";
 import { Type } from "typebox";
 import { expect, it } from "vitest";
@@ -15,10 +15,18 @@ function endpoint(name: string, names: string[]) {
     name,
     connect: () => {
       if (state.fail) return errAsync({ code: "unavailable" as const, message: "private" });
-      const { client, server } = createInMemoryTransportPair();
-      server.onMessage((message) => {
+      const [client, server] = InMemoryTransport.createLinkedPair();
+      server.onmessage = (message) => {
         if (!("method" in message) || !("id" in message)) return;
-        const respond = (result: unknown) =>
+        if (message.method === "server/discover") {
+          void server.send({
+            jsonrpc: "2.0",
+            id: message.id,
+            error: { code: -32601, message: "Unsupported" },
+          });
+          return;
+        }
+        const respond = (result: Record<string, unknown>) =>
           server.send({ jsonrpc: "2.0", id: message.id, result });
         if (message.method === "initialize")
           void respond({
@@ -40,7 +48,7 @@ function endpoint(name: string, names: string[]) {
           state.calls.push(tool);
           void respond({ content: [{ type: "text", text: `${name}/${tool}` }] });
         }
-      });
+      };
       void server.start();
       return okAsync(client);
     },

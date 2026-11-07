@@ -1,6 +1,7 @@
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { MemoryStorage, type ToolExecutionApi } from "@earendil-works/pi-durable";
+import { SERVER_INFO_META_KEY } from "@modelcontextprotocol/client";
 import { NoSimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, ResultAsync } from "neverthrow";
 import { Type } from "typebox";
@@ -9,8 +10,10 @@ import { describe, expect, it, vi } from "vitest";
 import { DurableAgent } from "./adapters/durable/agent.ts";
 import { durableError } from "./adapters/durable/manager.ts";
 import * as durableModels from "./adapters/durable/models.ts";
+import * as durableTools from "./adapters/durable/tools/index.ts";
 import { RemoteExecutionEnv } from "./adapters/execution-client/env.ts";
 import * as brokerDomain from "./domain/broker.ts";
+import type { McpOAuth } from "./domain/mcp-oauth.ts";
 import { putProjectSecret } from "./domain/project-secrets.ts";
 import {
   admitProcessTools,
@@ -396,25 +399,133 @@ describe("process agent composition", () => {
     expect(statuses).toEqual(["needs-auth"]);
   });
 
-  it("uses rejected token generation for native MCP auth retry", async () => {
+  it("fences concurrent and delayed 401s before awaiting broker refresh", async () => {
+    const refreshing = barrier();
+    const release = barrier();
     const reasons: unknown[] = [];
-    const provider = scopedMcpAuth((request) => {
-      reasons.push(request);
-      return okAsync({
-        accessToken: reasons.length === 1 ? "old" : "new",
-        accountId: "owner",
-        generation: reasons.length,
-        expiresAt: 100,
+    let generation = 1;
+    const provider = scopedMcpAuth(
+      (request) => {
+        reasons.push(request);
+        if (request.reason === "rejected")
+          return ResultAsync.fromSafePromise(
+            (async () => {
+              refreshing.resolve();
+              await release.promise;
+              generation++;
+              return {
+                accessToken: `token-${generation}`,
+                accountId: "owner",
+                generation,
+                expiresAt: 100,
+              };
+            })(),
+          );
+        return okAsync({
+          accessToken: `token-${generation}`,
+          accountId: "owner",
+          generation,
+          expiresAt: 100,
+        });
+      },
+      undefined,
+      async () => new Response(null, { status: 401 }),
+    );
+    expect(await provider.token()).toBe("token-1");
+    const responses = await Promise.all(
+      Array.from({ length: 3 }, () =>
+        provider.fetch("https://mcp.example", {
+          headers: { Authorization: "Bearer token-1" },
+        }),
+      ),
+    );
+    const unauthorized = (response: Response) =>
+      provider.onUnauthorized!({
+        response,
+        serverUrl: new URL("https://mcp.example"),
+        fetchFn: fetch,
       });
-    });
-    expect(await provider.token()).toBe("old");
-    await provider.onUnauthorized?.({
-      response: new Response(null, { status: 401 }),
-      serverUrl: new URL("https://mcp.example"),
-      fetch,
-      token: "old",
-    });
+    const first = unauthorized(responses[0]!);
+    await refreshing.promise;
+    await unauthorized(responses[1]!);
     expect(reasons).toEqual([{ reason: "startup" }, { reason: "rejected", staleGeneration: 1 }]);
+    release.resolve();
+    await first;
+    await unauthorized(responses[2]!);
+    expect(reasons).toHaveLength(2);
+    expect(await provider.token()).toBe("token-2");
+    const latest = await provider.fetch("https://mcp.example", {
+      headers: { Authorization: "Bearer token-2" },
+    });
+    await unauthorized(latest);
+    await unauthorized(latest);
+    expect(
+      reasons.filter((request) => (request as { reason: string }).reason === "rejected"),
+    ).toEqual([
+      { reason: "rejected", staleGeneration: 1 },
+      { reason: "rejected", staleGeneration: 2 },
+    ]);
+  });
+
+  it("does not invalidate OAuth for overridden headers or unrelated responses", async () => {
+    const token = vi.fn(() =>
+      okAsync({ accessToken: "oauth", accountId: "owner", generation: 7, expiresAt: 100 }),
+    );
+    const provider = scopedMcpAuth(
+      token,
+      undefined,
+      async () => new Response(null, { status: 401 }),
+    );
+    await provider.token();
+    const responses = [
+      await provider.fetch("https://mcp.example", {
+        headers: { Authorization: "Bearer static-secret" },
+      }),
+      new Response(null, { status: 401 }),
+    ];
+    for (const response of responses)
+      await provider.onUnauthorized!({
+        response,
+        serverUrl: new URL("https://mcp.example"),
+        fetchFn: fetch,
+      });
+    expect(token.mock.calls).toEqual([[{ reason: "startup" }]]);
+  });
+
+  it("does not move the latest grant fence backwards on out-of-order broker outcomes", async () => {
+    const release = barrier();
+    let calls = 0;
+    const token = vi.fn(() => {
+      calls++;
+      if (calls === 1)
+        return ResultAsync.fromSafePromise(
+          release.promise.then(() => ({
+            accessToken: "old",
+            accountId: "owner",
+            generation: 1,
+            expiresAt: 100,
+          })),
+        );
+      return okAsync({ accessToken: "new", accountId: "owner", generation: 2, expiresAt: 100 });
+    });
+    const provider = scopedMcpAuth(
+      token,
+      undefined,
+      async () => new Response(null, { status: 401 }),
+    );
+    const old = provider.token();
+    await provider.token();
+    release.resolve();
+    await old;
+    const response = await provider.fetch("https://mcp.example", {
+      headers: { Authorization: "Bearer new" },
+    });
+    await provider.onUnauthorized!({
+      response,
+      serverUrl: new URL("https://mcp.example"),
+      fetchFn: fetch,
+    });
+    expect(token.mock.calls.at(-1)).toEqual([{ reason: "rejected", staleGeneration: 2 }]);
   });
 
   it("rejects admission aborted before registry installation and cleans both resources", async () => {
@@ -524,15 +635,21 @@ it("activates MCP without input and publishes healthy tools before held discover
       await release.promise;
     }
     const result =
-      message.method === "initialize"
+      message.method === "server/discover"
         ? {
-            protocolVersion: message.params.protocolVersion,
+            resultType: "complete",
+            supportedVersions: ["2026-07-28"],
             capabilities: { tools: {} },
-            serverInfo: { name, version: "1" },
+            _meta: { [SERVER_INFO_META_KEY]: { name, version: "1" } },
           }
         : message.method === "tools/list"
-          ? { tools: [{ name: "ping", inputSchema: { type: "object" } }] }
-          : { content: [{ type: "text", text: "AUTO_PONG" }] };
+          ? {
+              resultType: "complete",
+              ttlMs: 0,
+              cacheScope: "private",
+              tools: [{ name: "ping", inputSchema: { type: "object" } }],
+            }
+          : { resultType: "complete", content: [{ type: "text", text: "AUTO_PONG" }] };
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }), {
       headers: { "content-type": "application/json" },
     });
@@ -659,13 +776,19 @@ it.each([307, 308, 200])(
         const message = JSON.parse(String(request.body));
         if (message.id === undefined) return { statusCode: 202 };
         const result =
-          message.method === "initialize"
+          message.method === "server/discover"
             ? {
-                protocolVersion: message.params.protocolVersion,
+                resultType: "complete",
+                supportedVersions: ["2026-07-28"],
                 capabilities: { tools: {} },
-                serverInfo: { name: "fixture", version: "1" },
+                _meta: { [SERVER_INFO_META_KEY]: { name: "fixture", version: "1" } },
               }
-            : { tools: [{ name: "ping", inputSchema: { type: "object" } }] };
+            : {
+                resultType: "complete",
+                ttlMs: 0,
+                cacheScope: "private",
+                tools: [{ name: "ping", inputSchema: { type: "object" } }],
+              };
         return {
           statusCode: 200,
           data: JSON.stringify({ jsonrpc: "2.0", id: message.id, result }),
@@ -775,6 +898,252 @@ it.each([307, 308, 200])(
       models.mockRestore();
       network.mockRestore();
       await dispatcher.close();
+    }
+  },
+);
+
+it.each(["none", "context", "transport"] as const)(
+  "refreshes OAuth once without discovery or late retries after cancellation (%s)",
+  async (cancellation) => {
+    const refreshing = barrier();
+    const release = barrier();
+    const controller = new AbortController();
+    const h = makeHarness();
+    const orb = makeOrbRow("cancel-mcp", "project", "running");
+    h.store.seedProject(makeProjectRow(orb.projectId));
+    h.store.seedOrb(orb);
+    let generation = 1;
+    const requests: string[] = [];
+    const network = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      const message = JSON.parse(String(init?.body));
+      requests.push(message.method);
+      expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer token-${generation}`);
+      return generation === 1
+        ? new Response("PRIVATE_PROVIDER_ERROR", { status: 401 })
+        : Response.json({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { resultType: "complete", content: [] },
+          });
+    });
+    const models = vi
+      .spyOn(durableModels, "createDurableModels")
+      .mockReturnValue(okAsync({ getModel: () => undefined } as never));
+    const boundary = vi.spyOn(durableTools, "createDurableTools");
+    const token = vi.fn(async (...[, , request]: Parameters<McpOAuth["token"]>) => {
+      if (request.reason === "rejected") {
+        refreshing.resolve();
+        await release.promise;
+        generation++;
+      }
+      return ok({
+        accessToken: `token-${generation}`,
+        accountId: "owner",
+        generation,
+        expiresAt: 100,
+      });
+    });
+    try {
+      const open = createProcessAgentContext(h.deps, {
+        mcp: {
+          read: () =>
+            okAsync({
+              servers: [
+                {
+                  name: "fixture",
+                  url: "https://configured.test/mcp",
+                  headers: {},
+                  oauth: { id: "binding" },
+                },
+              ],
+            }),
+        },
+        mcpOAuth: { token },
+      } as never);
+      const options = (
+        await open(new NoSimulationTask("MCP cancelled refresh", false), orb, {
+          signal: new AbortController().signal,
+        })
+      )._unsafeUnwrap();
+      const endpoint = boundary.mock.calls[0]![0]!.mcp![0]!;
+      const transport = (
+        await endpoint.connect(withAbortSignal(controller.signal, BACKGROUND_CONTEXT))
+      )._unsafeUnwrap();
+      try {
+        await transport.start();
+        const sending = ResultAsync.fromPromise(
+          transport.send({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name: "read", arguments: {} },
+          }),
+          () => "cancelled",
+        );
+        await refreshing.promise;
+        if (cancellation === "context") controller.abort();
+        else if (cancellation === "transport") await transport.close();
+        release.resolve();
+        expect((await sending).isErr()).toBe(cancellation !== "none");
+        expect(requests).toEqual(
+          cancellation === "none" ? ["tools/call", "tools/call"] : ["tools/call"],
+        );
+        expect(token.mock.calls.map(([, , request]) => request)).toEqual([
+          { reason: "startup" },
+          { reason: "rejected", staleGeneration: 1 },
+          { reason: "startup" },
+        ]);
+      } finally {
+        release.resolve();
+        await transport.close();
+        await options.closeResources?.();
+      }
+    } finally {
+      release.resolve();
+      boundary.mockRestore();
+      models.mockRestore();
+      network.mockRestore();
+    }
+  },
+);
+
+it.each(["caller", "revoked-lease"] as const)(
+  "cleans up a cancelled legacy MCP call through production composition (%s)",
+  async (cancellation) => {
+    const h = makeHarness();
+    const orb = makeOrbRow("cleanup-mcp", "project", "running");
+    h.store.seedProject(makeProjectRow(orb.projectId));
+    h.store.seedOrb(orb);
+    const controller = new AbortController();
+    const entered = barrier();
+    const wire: string[] = [];
+    let admitted = true;
+    let callSignal: AbortSignal | null | undefined;
+    const network = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      expect(init?.redirect).toBe("error");
+      expect(new Headers(init?.headers).get("X-Api-Key")).toBe("scoped-key");
+      expect(init?.signal?.aborted).toBe(false);
+      if (init?.method === "DELETE") {
+        wire.push("DELETE");
+        expect(new Headers(init.headers).get("mcp-session-id")).toBe("legacy-session");
+        return new Response(null, { status: 204 });
+      }
+      if (init?.method === "GET") return new Response(null, { status: 405 });
+      const { id, method } = JSON.parse(String(init?.body));
+      if (method === "server/discover")
+        return Response.json({ jsonrpc: "2.0", id, error: { code: -32601, message: "Legacy" } });
+      if (method === "initialize")
+        return Response.json(
+          {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              protocolVersion: "2025-11-25",
+              capabilities: { tools: {} },
+              serverInfo: { name: "fixture", version: "1" },
+            },
+          },
+          { headers: { "mcp-session-id": "legacy-session" } },
+        );
+      if (id === undefined) return new Response(null, { status: 202 });
+      if (method === "tools/list")
+        return Response.json({
+          jsonrpc: "2.0",
+          id,
+          result: { tools: [{ name: "wait", inputSchema: { type: "object" } }] },
+        });
+      expect(method).toBe("tools/call");
+      wire.push("POST tools/call");
+      callSignal = init?.signal;
+      entered.resolve();
+      return new Promise<Response>((_resolve, reject) => {
+        callSignal!.addEventListener(
+          "abort",
+          () => {
+            wire.push("POST aborted");
+            reject(new DOMException("Aborted", "AbortError"));
+          },
+          { once: true },
+        );
+      });
+    });
+    const models = vi
+      .spyOn(durableModels, "createDurableModels")
+      .mockReturnValue(okAsync({ getModel: () => undefined } as never));
+    let options: Awaited<ReturnType<ReturnType<typeof createProcessAgentContext>>> | undefined;
+    try {
+      const open = createProcessAgentContext(h.deps, {
+        mcp: {
+          read: () =>
+            okAsync({
+              servers: [
+                {
+                  name: "fixture",
+                  url: "https://configured.test/mcp",
+                  headers: { "X-Api-Key": { literal: "scoped-key" } },
+                },
+              ],
+            }),
+        },
+      } as never);
+      options = await open(
+        new NoSimulationTask("MCP cancellation cleanup", false),
+        orb,
+        { signal: new AbortController().signal },
+        false,
+        {
+          storage: new MemoryStorage(),
+          signal: new AbortController().signal,
+          check: () => (admitted ? okAsync(undefined) : errAsync(durableError("lease revoked"))),
+          checkInputAdmission: () => okAsync(undefined),
+          beginDrain: () => okAsync(undefined),
+          release: () => okAsync(undefined),
+          artifacts: { read: () => okAsync(null), write: () => okAsync("/orb-artifacts/fixture") },
+        },
+      );
+      const composed = options._unsafeUnwrap();
+      const discovered = barrier();
+      const unsubscribe = composed.registry.subscribe(() => {
+        if (
+          composed.registry
+            .snapshot()
+            .tools()
+            .some(({ tool }) => tool.name === "mcp__fixture__wait")
+        )
+          discovered.resolve();
+      });
+      try {
+        composed.activateResources!(() => okAsync({ recordId: "alert", duplicate: false }));
+        await discovered.promise;
+        expect(wire).toEqual(["DELETE"]);
+        wire.length = 0;
+        const tool = composed.registry
+          .snapshot()
+          .tools()
+          .find(({ tool }) => tool.name === "mcp__fixture__wait")!.tool;
+        const call = tool.execute(
+          {},
+          {} as ToolExecutionApi,
+          withAbortSignal(controller.signal, BACKGROUND_CONTEXT),
+        );
+        await entered.promise;
+        if (cancellation === "revoked-lease") admitted = false;
+        controller.abort();
+        expect((await call).isError).toBe(true);
+        expect(callSignal?.aborted).toBe(true);
+        expect(wire).toEqual([
+          "POST tools/call",
+          "POST aborted",
+          ...(cancellation === "caller" ? ["DELETE"] : []),
+        ]);
+      } finally {
+        unsubscribe();
+      }
+    } finally {
+      controller.abort();
+      if (options?.isOk()) await options.value.closeResources?.();
+      models.mockRestore();
+      network.mockRestore();
     }
   },
 );
