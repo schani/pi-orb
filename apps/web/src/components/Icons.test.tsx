@@ -3,18 +3,17 @@ import { describe, expect, it } from "vitest";
 import { Icon, IconSprite } from "./Icons.tsx";
 
 describe("utility icons", () => {
-  it("renders the selected crisp bin with its original proportions", () => {
+  it("draws every utility icon on one 16px grid at one stroke", () => {
     const html = renderToStaticMarkup(<IconSprite />);
     const bin = html.match(/<symbol id="i-bin"[^>]*>.*?<\/symbol>/)?.[0];
-    expect(bin).toContain('viewBox="0 0 24 24"');
-    expect(bin).toContain('stroke-width="1.9"');
+    expect(bin).toContain('viewBox="0 0 16 16"');
+    expect(bin).toContain('stroke-width="1.5"');
     expect(bin).toContain('stroke-linecap="square"');
     expect(bin).toContain('stroke="currentColor"');
     expect(bin).toContain('fill="none"');
-    expect(bin).toContain('d="M4 6h16M9 6V3h6v3M6 9v11h12V9M10 10v6M14 10v6"');
-    const archive = html.match(/<symbol id="i-archive"[^>]*>/)?.[0];
-    expect(archive).toContain('viewBox="0 0 16 16"');
-    expect(archive).toContain('stroke-width="1.5"');
+    expect(bin).toContain('d="M2 4h12M6 4V2h4v2M4 6v8h8V6M6.5 7v4M9.5 7v4"');
+    expect(html).not.toContain('viewBox="0 0 24 24"');
+    expect(html).not.toContain('stroke-width="1.9"');
   });
 
   it("draws the selected bare terminal prompt on the same 16px utility grid", () => {

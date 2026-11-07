@@ -11,7 +11,7 @@ describe("OrbNotice", () => {
     expect(html).toContain('class="rec rec-sys orb-notice"');
     expect(html).not.toContain("rec-px");
     expect(html).not.toContain("···");
-    expect(html).toContain(error ? "rec-bd notice notice-error" : 'rec-bd notice"');
+    expect(html).toContain(error ? "rec-bd banner banner-error" : 'rec-bd banner"');
     expect(html).toContain("OpenAI device login required. &lt;challenge&gt;");
   });
 
@@ -25,6 +25,6 @@ describe("OrbNotice", () => {
     expect(html).not.toContain("···");
     expect(html).toContain("history unavailable: retry…");
     expect(html).toContain("Retry</button>");
-    expect(html.includes("notice-error")).toBe(error);
+    expect(html.includes("banner-error")).toBe(error);
   });
 });

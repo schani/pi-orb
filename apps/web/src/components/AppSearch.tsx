@@ -257,7 +257,9 @@ export function AppSearchDialog({
                   <span className="app-search-result-title">
                     {highlightedText(item.title, query)}
                   </span>
-                  {item.chip !== undefined && <span className="app-search-chip">{item.chip}</span>}
+                  {item.chip !== undefined && (
+                    <span className="tag app-search-chip">{item.chip}</span>
+                  )}
                   <span className="app-search-age">{item.age}</span>
                 </a>
               ))}

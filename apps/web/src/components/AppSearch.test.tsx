@@ -35,7 +35,7 @@ const source: AppSearchSource = {
       group: "orbs",
       title: "Compiler redesign",
       context: "Atlas · working set",
-      glyph: { iconHref: "/favicons/stopped.svg", state: "stop", label: "stopped" },
+      glyph: { iconHref: "/favicons/stopped.svg", state: "stopped", label: "stopped" },
       chip: "Atlas",
       age: "3d",
       keywords: ["Compiler redesign"],
@@ -87,7 +87,7 @@ describe("AppSearchDialog", () => {
     expect(html).toContain('class="glyph s-busy"');
     expect(html).toContain('src="/favicons/busy.svg"');
     expect(html).toContain('alt="busy"');
-    expect(html).toContain('class="app-search-chip">Atlas');
+    expect(html).toContain('class="tag app-search-chip">Atlas');
     expect(html).toContain('class="app-search-age">2m');
     expect(html).toContain("<mark>repair</mark>");
   });

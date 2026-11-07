@@ -39,14 +39,14 @@ export function formatTimeRemaining(deadline: string, now: number): string | nul
 
 export type OrbGlyphState =
   | "busy"
-  | "idle"
-  | "start"
-  | "stop"
-  | "sleep"
-  | "fail"
-  | "arch"
-  | "archng"
-  | "del"
+  | "running"
+  | "transitional"
+  | "stopped"
+  | "sleeping"
+  | "failed"
+  | "archived"
+  | "archiving"
+  | "deleting"
   | "alert";
 
 export interface OrbGlyph {
@@ -59,14 +59,14 @@ export interface OrbGlyph {
 
 const GLYPHS: Record<OrbGlyphState, string> = {
   busy: FAVICON_HREFS.busy,
-  idle: FAVICON_HREFS.running,
-  start: FAVICON_HREFS.transitional,
-  stop: FAVICON_HREFS.stopped,
-  sleep: FAVICON_HREFS.sleeping,
-  fail: FAVICON_HREFS.failed,
-  arch: FAVICON_HREFS.archived,
-  archng: FAVICON_HREFS.archiving,
-  del: FAVICON_HREFS.deleting,
+  running: FAVICON_HREFS.running,
+  transitional: FAVICON_HREFS.transitional,
+  stopped: FAVICON_HREFS.stopped,
+  sleeping: FAVICON_HREFS.sleeping,
+  failed: FAVICON_HREFS.failed,
+  archived: FAVICON_HREFS.archived,
+  archiving: FAVICON_HREFS.archiving,
+  deleting: FAVICON_HREFS.deleting,
   alert: FAVICON_HREFS.alert,
 };
 
@@ -83,20 +83,20 @@ export function projectOrbGlyph(
   const glyphState: OrbGlyphState = busy
     ? "busy"
     : state === "running"
-      ? "idle"
+      ? "running"
       : sleeping
-        ? "sleep"
+        ? "sleeping"
         : state === "stopped"
-          ? "stop"
+          ? "stopped"
           : state === "failed"
-            ? "fail"
+            ? "failed"
             : state === "archived"
-              ? "arch"
+              ? "archived"
               : state === "archiving"
-                ? "archng"
+                ? "archiving"
                 : state === "deleting"
-                  ? "del"
-                  : "start";
+                  ? "deleting"
+                  : "transitional";
   return {
     state: glyphState,
     iconHref: GLYPHS[glyphState],

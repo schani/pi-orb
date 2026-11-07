@@ -150,8 +150,37 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         const actions = page.locator(".dashboard .project-head-actions > .icon-button");
         expectPage(await actions.count()).toBeGreaterThan(0);
         for (const action of await actions.all()) {
-          await expectPage(action).toHaveCSS("width", width <= 600 ? "48px" : "24px");
-          await expectPage(action).toHaveCSS("height", width <= 600 ? "48px" : "24px");
+          await expectPage(action).toHaveCSS("width", width <= 600 ? "44px" : "24px");
+          await expectPage(action).toHaveCSS("height", width <= 600 ? "44px" : "24px");
+        }
+        if (width <= 600) {
+          const orbAction = page.locator(".dashboard .orb-entry-actions .icon-button").first();
+          const label = await orbAction.getAttribute("aria-label");
+          const box = await orbAction.boundingBox();
+          if (box === null) throw new Error("No orb action bounds");
+          const hits = await orbAction.evaluate(
+            (element, points) =>
+              points.map(
+                ([x, y]) =>
+                  element.ownerDocument
+                    .elementFromPoint(x ?? 0, y ?? 0)
+                    ?.closest("button")
+                    ?.getAttribute("aria-label") ?? null,
+              ),
+            [
+              [box.x + box.width / 2, box.y + box.height / 2 - 21],
+              [box.x + box.width / 2, box.y + box.height / 2 + 21],
+            ],
+          );
+          const nextBox = await page
+            .locator(".dashboard .orb-entry-actions")
+            .first()
+            .locator(".icon-button")
+            .nth(1)
+            .boundingBox();
+          expectPage(box.height).toBe(20);
+          expectPage(hits).toEqual([label, label]);
+          expectPage((nextBox?.x ?? 0) - box.x).toBe(44);
         }
         const geometry = await columns.evaluateAll((elements) =>
           elements.map((element) => element.getBoundingClientRect().width),
@@ -668,11 +697,10 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         expectPage(geometry).not.toBeNull();
         expectPage(geometry?.top).toBeCloseTo((geometry?.dialogTop ?? 0) + 1, 5);
         expectPage(geometry?.right).toBeCloseTo((geometry?.dialogRight ?? 0) - 1, 5);
-        const touchSize = closeName === "Close settings" ? 48 : 44;
-        expectPage(geometry?.width).toBe(phone ? touchSize : 32);
-        expectPage(geometry?.height).toBe(phone ? touchSize : 32);
-        expectPage(geometry?.iconWidth).toBe(18);
-        expectPage(geometry?.iconHeight).toBe(18);
+        expectPage(geometry?.width).toBe(phone ? 44 : 32);
+        expectPage(geometry?.height).toBe(phone ? 44 : 32);
+        expectPage(geometry?.iconWidth).toBe(16);
+        expectPage(geometry?.iconHeight).toBe(16);
         expectPage(geometry?.titleRight).toBeLessThanOrEqual(geometry?.left ?? 0);
       };
       try {

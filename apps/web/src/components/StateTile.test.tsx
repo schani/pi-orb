@@ -34,7 +34,7 @@ describe("Instrument tiles", () => {
   it("uses a 16px red margin flag without an exclamation mark", () => {
     const svg = readFileSync(new URL("../../public/favicons/alert.svg", import.meta.url), "utf8");
     expect(svg).toContain('viewBox="0 0 16 16"');
-    expect(svg).toContain('fill="#b21f2d"');
+    expect(svg).toContain('fill="#b42318"');
     expect(svg).not.toContain("!");
   });
 
@@ -66,7 +66,7 @@ describe("Instrument tiles", () => {
       "utf8",
     );
     expect(sleeping).toContain("<title>Orb sleeping</title>");
-    expect(sleeping).toContain('<rect x="1" y="1" width="14" height="14" rx="2" fill="#777"');
+    expect(sleeping).toContain('<rect x="1" y="1" width="14" height="14" rx="2" fill="#555555"');
     expect(sleeping).toContain('d="M10.15 3.35a4.9 4.9 0 1 0 1.65 7.2 3.35 3.35 0 0 1-1.65-7.2Z"');
     expect(sleeping).not.toMatch(/\sstroke(?:=|-)/);
     const glyph = projectOrbGlyph("stopped", undefined, "2026-09-18T00:00:00.000Z");

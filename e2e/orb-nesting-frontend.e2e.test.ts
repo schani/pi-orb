@@ -295,7 +295,7 @@ it("contains deep lineage on desktop and phone without hiding rows or changing s
             const target = tree.getByRole("button", { name: /^Delete Level 31:/ });
             await expectPage(target).toBeVisible();
             const box = await target.boundingBox();
-            expect(box?.width).toBe(20);
+            expect(box?.width).toBe(width <= 600 ? 44 : 20);
           }
           await expectPage(tree.locator("summary, details, [aria-expanded]")).toHaveCount(0);
         }

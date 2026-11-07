@@ -62,7 +62,7 @@ describe("series styles", () => {
   it("draws up to three series in ink weights and dashes", () => {
     expect(seriesStyles(1)).toEqual({ colors: ["#000"], dash: [[]] });
     expect(seriesStyles(3)).toEqual({
-      colors: ["#000", "#555", "#777"],
+      colors: ["#000", "#555", "#555"],
       dash: [[], [6, 3], [1.5, 3]],
     });
   });

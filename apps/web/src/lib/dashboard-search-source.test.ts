@@ -156,7 +156,7 @@ describe("dashboard search source", () => {
     });
 
     expect(source.items.find((item) => item.title === "Delayed work")?.glyph).toEqual({
-      state: "sleep",
+      state: "sleeping",
       iconHref: "/favicons/sleeping.svg",
       label: "Orb sleeping",
     });
