@@ -790,7 +790,6 @@ export function createProcessAgentContext(
                 : err(durableError("agent admission superseded")),
             ),
         envFor: () => env.invocation(),
-        instructionSnapshots: { personal: personal.value, project: projectInstructions.value },
         instructions,
         closeResources: () => {
           resourcesAbort.abort();

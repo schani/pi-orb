@@ -49,7 +49,6 @@ Managed text (personal, project) is **captured once per agent context; Stop/Star
 - **Claude** reads everything at each runtime boot, so every host start adopts current text.
 - Owner skill **files** are written to the host at every host start from the latest saved data, independent of the Pi context's inventory (below).
 - Empty content removes that managed source at the next boundary. Clearing future instructions does not erase conversational memory.
-- Pi records an edge-only, non-model-context custom entry `pi-orb:personal-instructions` / `pi-orb:project-instructions` with applied revision and SHA-256 when a snapshot changes or is cleared; initial empty revision 0 and unchanged restarts are silent. Bodies never appear in logs, public history or live frames. Claude records no adoption entry.
 - A failed managed read blocks readiness with a specific typed error (`personal_instructions_unavailable`, `project_instructions_unavailable`, `owner_skills_unavailable`, `git_identity_unavailable`) through the existing orb failure path; never silently empty or stale.
 - Luna naming and summary prompts never include managed instructions.
 

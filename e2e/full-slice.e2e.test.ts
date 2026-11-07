@@ -2176,10 +2176,10 @@ describe("full slice E2E", () => {
       const replica = JSON.stringify(
         (await readReplicatedHistorySnapshot(controlPlane, orbId)).records,
       );
-      expect(replica).toContain("pi-orb:personal-instructions");
-      expect(replica).toContain("pi-orb:project-instructions");
-      expect(serialized).not.toContain("PERSONAL_E2E_");
-      expect(serialized).not.toContain("PROJECT_E2E_");
+      for (const text of [serialized, replica]) {
+        expect(text).not.toContain("PERSONAL_E2E_");
+        expect(text).not.toContain("PROJECT_E2E_");
+      }
       const records = history.body["records"] as DisplayRecord[];
       expect(
         records.filter(

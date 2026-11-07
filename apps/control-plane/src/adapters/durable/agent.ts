@@ -41,7 +41,6 @@ import type {
   DeliverOrbMessageResponse,
   HistoryRecord,
   OrbMessageSystem,
-  PersonalInstructions,
   PullHistoryResponse,
   RequestResultFrame,
   RuntimeEvent,
@@ -52,11 +51,6 @@ import type {
 import { createDisplayRecordProjector, reasoningHeadline } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, type Result, ResultAsync } from "neverthrow";
-import {
-  instructionsAdoption,
-  PERSONAL_INSTRUCTIONS_ADOPTION,
-  PROJECT_INSTRUCTIONS_ADOPTION,
-} from "../../../../orb-runtime/src/domain/instructions-adoption.ts";
 import {
   codexModelDisplayName,
   eligibleCodexModels,
@@ -115,16 +109,6 @@ const Identity = defineDoc<{
     settings: {},
     publicSettingsInitialized: false,
   }),
-});
-
-const InstructionAdoptions = defineDoc<Record<string, { revision: number; sha256: string }>>({
-  kind: "orb.instruction-adoptions",
-  version: 1,
-  checkpointWhen: () => false,
-  scope: "conversation",
-  history: "latest",
-  fork: "initial",
-  initial: () => ({}),
 });
 
 function publicSettings(state: Readonly<AgentState>): AgentSettings | null {
@@ -198,10 +182,6 @@ export interface DurableAgentOptions {
   readonly checkoutCommit: string | null;
   readonly hooks?: RuntimeHooks;
   readonly instructions: string;
-  readonly instructionSnapshots?: {
-    readonly personal: PersonalInstructions;
-    readonly project: PersonalInstructions;
-  };
   readonly initialSettings?: AgentSettings;
   readonly now?: () => number;
   readonly edge?: (
@@ -400,21 +380,6 @@ export class DurableAgent implements AgentSessionFacade {
               options.now?.() ?? Date.now(),
             );
             doc.publicSettingsInitialized = true;
-          }
-          if (options.instructionSnapshots) {
-            const adoptions = await tx.doc(InstructionAdoptions, root.id);
-            for (const [customType, snapshot] of [
-              [PERSONAL_INSTRUCTIONS_ADOPTION, options.instructionSnapshots.personal],
-              [PROJECT_INSTRUCTIONS_ADOPTION, options.instructionSnapshots.project],
-            ] as const) {
-              const next = instructionsAdoption(snapshot, adoptions[customType] ?? null);
-              if (!next) continue;
-              await tx.appendEntry(root.id, {
-                kind: "orb.instructions-adoption",
-                data: { customType, data: next, timestamp: options.now?.() ?? Date.now() },
-              });
-              adoptions[customType] = next;
-            }
           }
           doc.instructionDigest = createHash("sha256").update(options.instructions).digest("hex");
           // pi-durable creates the same document lazily before the first provider request.

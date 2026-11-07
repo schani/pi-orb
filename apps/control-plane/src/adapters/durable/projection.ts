@@ -145,17 +145,6 @@ export function projectEntry(
         ? { type: "model_change", provider: data["provider"], modelId: data["modelId"] }
         : { type: "thinking_level_change", thinkingLevel: data["thinkingLevel"] }),
     });
-  if (entry.kind === "orb.instructions-adoption")
-    return mapPiEntry({
-      id,
-      parentId,
-      timestamp: new Date(
-        typeof data["timestamp"] === "number" ? data["timestamp"] : 0,
-      ).toISOString(),
-      type: "custom",
-      customType: data["customType"],
-      data: data["data"],
-    });
   if (entry.kind === "orb.harness-restarted") {
     return ok({
       id,
