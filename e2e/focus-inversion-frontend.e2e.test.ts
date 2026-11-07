@@ -87,6 +87,33 @@ it.each(["chromium", "webkit"] as const)(
         const strip = page.locator("details.activity-strip").first();
         await gotoFrontendFixture(page, mixed, strip);
         await expectFocus(page, strip.locator(":scope > summary"), INK, PAPER);
+        await page.keyboard.press("Tab");
+        await strip.locator(":scope > summary").focus();
+        const dot = strip.locator(".activity-strip-dot").first();
+        await dot.hover();
+        const hoveredDot = await dot.evaluate((element) => {
+          const view = element.ownerDocument.defaultView;
+          return {
+            background: view?.getComputedStyle(element).backgroundColor,
+            mark: view?.getComputedStyle(element, "::before").backgroundColor,
+          };
+        });
+        expect(hoveredDot).toEqual({ background: "rgba(0, 0, 0, 0)", mark: PAPER });
+        const tip = page.locator(".activity-strip-tip");
+        await expect(tip).toHaveCSS("background-color", PAPER);
+        await expect(tip).toHaveCSS("color", INK);
+        await page.mouse.move(0, 0);
+        await strip.evaluate((element) => {
+          element.insertAdjacentHTML(
+            "beforebegin",
+            '<div class="chat-markdown"><p><a class="injected" href="#linked"><code>linked</code></a></p></div>',
+          );
+        });
+        const link = page.locator("a.injected");
+        await page.keyboard.press("Tab");
+        await link.focus();
+        await expect(link.locator("code")).toHaveCSS("color", PAPER);
+        await expect(link.locator("code")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
         await strip.locator(":scope > summary .activity-rail-label").click();
         const steps = page.locator(".activity-strip-body > .activity-rail-row > summary");
         await expect(steps.first()).toBeVisible();

@@ -318,8 +318,16 @@ textarea:focus {
   background: var(--k) !important;
 }
 
-:is(button, a, summary):focus-visible * {
+:is(button, a, summary):focus-visible *:not(.activity-strip-tip, .activity-strip-tip *) {
   color: inherit !important;
+}
+
+:is(button, a, summary):focus-visible code {
+  background: transparent !important;
+}
+
+summary:focus-visible .activity-strip-dot:is(:hover, .activity-strip-picked) {
+  background: transparent;
 }
 
 button.danger:focus-visible {

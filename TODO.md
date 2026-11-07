@@ -153,6 +153,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Follow-ups
 
+- **Focus on already-inverted controls** (`docs/web-ui.md`, Design system): a selected tab, current index row or pressed icon button looks the same focused and unfocused, as does a link inside a user turn. Inversion has no contrast left to flip.
+
 - **Remove multi-call `ToolActivity` aggregation** (2026-11-06; `docs/web-ui.md` activity strip). Transcripts now render each tool call alone, so category aggregation across calls (`2 ran`, `2 files`, `CallRow`/`OwnedCallRow`, distinct-path counting) is unreachable from `HistoryView`. Delete it with its tests and the superseded prose in the consolidated-tool-activity decision.
 
 - **Verify the iPad status-bar band and input-bar viewport on the installed app** (2026-10-20; `docs/web-ui.md`). Browser checks prove the band is invisible, click-through and qualifies geometrically, and that the orb page follows a simulated shrunken/panned visual viewport at iPad width. Confirm on the user's iPadOS 26 home-screen install that the status-bar blur is gone (including with menus/dialogs open) and that focusing the composer with a hardware keyboard keeps the header in view.
