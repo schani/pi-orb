@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { SDKSystemMessage } from "@anthropic-ai/claude-agent-sdk";
 import { expect, it } from "vitest";
 import { createMcpStateReporter } from "../mcp/transport.ts";
-import { ComposedClaudeFixture } from "../testkit/claude-composed.ts";
+import { ComposedClaudeFixture, rootResult } from "../testkit/claude-composed.ts";
 import { type ClaudeMcpState, createClaudeMcpStatusReporter } from "./mcp-status.ts";
 
 it("coalesces safe native status/source edges independently of bridge HTTP health", () => {
@@ -79,13 +79,10 @@ it("coalesces safe native status/source edges independently of bridge HTTP healt
   expect(JSON.stringify(events)).not.toContain("private");
 });
 
-it("publishes repository-only per-turn init failures and recovery to durable root history", async () => {
+it("coalesces repository-only init failures and recovery across completed query rotations", async () => {
   const f = new ComposedClaudeFixture();
   try {
     expect((await f.attach()).isOk()).toBe(true);
-    expect((await f.agent.submitMessage([{ type: "text", text: "fixture" }], "op")).isOk()).toBe(
-      true,
-    );
     const init = (status: string): SDKSystemMessage => ({
       type: "system",
       subtype: "init",
@@ -103,8 +100,30 @@ it("publishes repository-only per-turn init failures and recovery to durable roo
       plugins: [],
       mcp_servers: [{ name: "repository-only", status, source: "project" }],
     });
-    for (const status of ["connected", "failed", "failed", "pending", "failed", "connected"])
+    for (const [index, status] of ["failed", "failed", "connected"].entries()) {
+      expect(
+        (await f.agent.submitMessage([{ type: "text", text: "fixture" }], `op-${index}`)).isOk(),
+      ).toBe(true);
+      expect(f.queries).toHaveLength(index + 2);
+      const input = await f.query.input.next();
+      expect(input.done).not.toBe(true);
+      f.receipt(input.value);
       await f.query.emitUnscheduled(init(status));
+      await f.query.emitUnscheduled(rootResult);
+      expect(f.query.closeRequested).toBe(true);
+      f.query.exit();
+      f.query.endOutput();
+      await f.agent.closeExtensions();
+      expect(f.agent.getHealth()).toMatchObject({ status: "ready", activity: "idle" });
+      expect(
+        f.history.view.filter(
+          (record) =>
+            record.type === "event" &&
+            record.eventType === "claude.operation_finished" &&
+            record.overflow?.outcome === "completed",
+        ),
+      ).toHaveLength(index + 1);
+    }
     const events = f.history.view.flatMap((record) =>
       record.type === "event" && record.eventType === "claude.mcp" ? [record] : [],
     );

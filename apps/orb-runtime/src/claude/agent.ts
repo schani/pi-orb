@@ -965,7 +965,6 @@ export class ClaudeOrbAgent implements OrbAgent {
       this.fail(authSettings.error.code, authSettings.error.message);
       return errAsync(authSettings.error);
     }
-    this.nativeMcpStatus = createClaudeMcpStatusReporter((event) => this.publishNativeMcp(event));
     if (this.options.broker !== null) {
       const mcp = createClaudeMcp({
         configs: this.mcpConfigs,
