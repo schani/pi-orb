@@ -9,6 +9,7 @@ import { gotoFrontendFixture } from "./testkit/frontend-fixture.ts";
 const INK = "rgb(0, 0, 0)";
 const PAPER = "rgb(255, 255, 255)";
 const BAD = "rgb(180, 35, 24)";
+const GRAY = "rgb(85, 85, 85)";
 
 const colors = (target: Locator) =>
   target.evaluate((element) => {
@@ -141,6 +142,21 @@ it.each(["chromium", "webkit"] as const)(
           }, state);
           await expectFocus(page, call, INK, PAPER);
         }
+        await expectFocus(page, page.locator(".ix-row-current"), GRAY, PAPER);
+        const terminal = page.getByRole("button", { name: "Open terminal" });
+        await terminal.evaluate((element) => element.setAttribute("aria-pressed", "true"));
+        await expectFocus(page, terminal, GRAY, PAPER);
+        await strip.evaluate((element) => {
+          element.insertAdjacentHTML(
+            "beforebegin",
+            `<div class="project-config-tabs" role="tablist"><button role="tab" aria-selected="true">A</button></div>
+            <nav class="usage-periods"><button aria-pressed="true">7d</button></nav>
+            <article class="rec rec-you"><div class="chat-markdown"><p><a class="you-link" href="#you">you</a></p></div></article>`,
+          );
+        });
+        await expectFocus(page, page.locator(".project-config-tabs > button"), GRAY, PAPER);
+        await expectFocus(page, page.locator(".usage-periods > button"), GRAY, PAPER);
+        await expectFocus(page, page.locator("a.you-link"), GRAY, PAPER);
         await page.close();
 
         const phone = await browser.newPage({ viewport: { width: 390, height: 844 } });

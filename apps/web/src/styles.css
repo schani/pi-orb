@@ -334,6 +334,21 @@ button.danger:focus-visible {
   background: var(--bad) !important;
 }
 
+/* Already inverted: focus steps the ink to gray. */
+:is(
+  .ix-row-current,
+  .orb-header-actions > .icon-button[aria-pressed="true"],
+  .project-config-tabs [aria-selected="true"],
+  .usage-periods button[aria-pressed="true"],
+  .rec-you a
+):focus-visible {
+  background: var(--g3) !important;
+}
+
+.ix-row-current:focus-visible {
+  border-bottom-color: var(--g3);
+}
+
 :focus-visible .chart-strip-spark {
   background: var(--w);
 }
