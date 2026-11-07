@@ -2239,7 +2239,7 @@ describe("orb lifecycle (DST)", () => {
             f: async (task) => {
               seedRunningOrb(task, harness, ORB);
               // One flushed record so the long idle stretch cannot evaporate the
-              // session identity (docs/history-replication.md).
+              // session identity (docs/history.md).
               harness.world.appendMessage(ORB);
               // The delivery never answers, so the batch stays outstanding for
               // as long as the scenario wants: the idle deadline is guaranteed
@@ -3414,7 +3414,7 @@ describe("orb lifecycle (DST)", () => {
 
   it("an orb with no replicated history survives stop and restart", async () => {
     await runDst({ name: "empty-history-restart", iterations: 20 }, async (sim) => {
-      // The 2026-08-03 incident shape (docs/history-replication.md): nothing replicated
+      // The 2026-08-03 incident shape (docs/history.md): nothing replicated
       // yet — with the snapshot gate, a never-flushed session serves zero
       // records — then the orb stops and restarts. Replication must resume
       // cleanly from the null cursor instead of stranding the orb. Idle
@@ -3767,7 +3767,7 @@ describe("idle auto-stop (DST)", () => {
               // One flushed record up front so the long idle stretch cannot
               // evaporate the session: a runtime restart of a session that
               // never flushed mints a fresh session identity (the
-              // docs/history-replication.md contract), which would break the
+              // docs/history.md contract), which would break the
               // burst below on an unrelated axis (trace-diagnosed 2026-08-05).
               harness.world.appendMessage(ORB);
               // Land a burst of work right at the idle deadline so the busy

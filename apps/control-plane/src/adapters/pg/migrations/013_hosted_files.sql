@@ -1,4 +1,4 @@
--- Durable system-hosted files (docs/hosting.md).
+-- Durable system-hosted files (docs/http-exposure.md).
 CREATE TABLE hosting_operations (
   id text PRIMARY KEY,
   orb_id uuid NOT NULL REFERENCES orbs(id) ON DELETE RESTRICT,

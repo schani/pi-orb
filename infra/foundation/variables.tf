@@ -14,7 +14,7 @@ variable "zone" {
 }
 
 variable "preview_domain" {
-  description = "Registered domain whose wildcard subdomains serve HTTP previews (docs/ports.md)."
+  description = "Registered domain whose wildcard subdomains serve HTTP previews (docs/http-exposure.md)."
   type        = string
   default     = "piorb.live"
 }

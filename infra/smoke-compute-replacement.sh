@@ -2,7 +2,7 @@
 set -euo pipefail
 umask 077
 
-# Disposable live-GCE acceptance smoke for docs/compute-replacement.md.
+# Disposable live-GCE acceptance smoke for docs/lifecycle.md.
 # Required environment:
 #   PI_ORB_BASE_URL, PI_ORB_GCP_PROJECT, PI_ORB_GCE_ZONE, PI_ORB_USER_ID
 # Optional:

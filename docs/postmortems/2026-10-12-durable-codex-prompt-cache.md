@@ -10,7 +10,7 @@ pi-orb had no test of the outgoing provider request's cache identity, so the omi
 
 ## Correction
 
-Upstream fixed it in pi-durable 1.0.2 ([#10424](https://github.com/earendil-works/pi/issues/10424)): a `pi.provider` conversation document (`fork: "initial"`) persists a UUIDv7 `sessionId`; generation and compaction forward it. Conversations created before the fix gain the document lazily on their next request. pi-orb adopted it with the Pi 1.1.0 upgrade (`docs/pi-adapter.md`). Compaction requests still set `cacheRetention: "none"` upstream, so they carry no key.
+Upstream fixed it in pi-durable 1.0.2 ([#10424](https://github.com/earendil-works/pi/issues/10424)): a `pi.provider` conversation document (`fork: "initial"`) persists a UUIDv7 `sessionId`; generation and compaction forward it. Conversations created before the fix gain the document lazily on their next request. pi-orb adopted it with the Pi 1.1.0 upgrade (`docs/pi.md`). Compaction requests still set `cacheRetention: "none"` upstream, so they carry no key.
 
 ## Invariant
 

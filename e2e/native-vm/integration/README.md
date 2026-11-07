@@ -1,10 +1,8 @@
-# Native VM production-provider experiment
+# Native VM production-provider probe
 
-Recorded run: `docs/native-vm-prototype.md`. These probes exercise the production native-image
-provider against disposable resources. Resource names in the cloud/identity probes
-belong to the 2026-09-05 disposable fixture; use fresh names and trust scope for a
-new run. Set `NATIVE_INTEGRATION_ROOT` to a private evidence directory;
-retain failures there.
+Manual probes that exercise the production GCE provider against disposable
+resources. Use fresh resource names and trust scope for each run. Set
+`NATIVE_INTEGRATION_ROOT` to a private evidence directory; retain failures there.
 
 `main.mjs` runs the stock control plane with isolated PGlite/file credentials and
 mock model/OAuth sessions. `api.mjs` makes authenticated Compute requests through
@@ -12,7 +10,7 @@ the VM's service account, fences every operation to the fixture orb and translat
 label. That separate
 label is essential: a production orphan sweeper otherwise stops the test VM.
 The provider, runtime transport, reconciler, token rotation and fingerprint logic
-remain the production implementations.
+are the production implementations.
 
 The test control-plane VM runs in `pi-orb-run-egress`, with the existing control
 plane service account. Orbs use `pi-orb-us-central1`, the existing orb VM account,

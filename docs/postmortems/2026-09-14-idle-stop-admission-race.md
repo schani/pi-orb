@@ -2,7 +2,7 @@
 
 **2026-09-14; deterministic validation finding, not a deployed incident.**
 
-The `scripts/subagent-liveness/evidence/*.json` paths below are archive-member paths, not tracked files. Download, checksums and replay instructions: `scripts/subagent-liveness/evidence/README.md`.
+The `scripts/subagent-liveness/evidence/*.json` paths below are archive-member paths, not tracked files. Download, checksums and replay instructions: `docs/postmortems/2026-09-14-subagent-qualification-evidence.md`.
 
 A forced composed schedule admitted a real runtime child after the control plane entered `stopping` for idle. The final history pull saw that child as busy and retained its admission record, but `reconcileStopping()` stopped the host anyway: its drain barrier checked replica completeness, not authority to stop newly admitted work.
 

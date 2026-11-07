@@ -280,7 +280,7 @@ export async function commitHistoryTransaction(
     !jsonEqual(orbRow["harness_session_header"], params.session)
   ) {
     if (currentCursor === null) {
-      // An empty replica pins nothing (docs/history-replication.md): with no
+      // An empty replica pins nothing (docs/history.md): with no
       // committed cursor a changed session identity is legitimate
       // rotation — a runtime that never flushed starts a fresh session
       // on reboot. Re-initialize instead of failing the orb.
@@ -337,7 +337,7 @@ export async function commitHistoryTransaction(
     }
     if (inserted.value.rowCount === 0) {
       // Existing row: identical content is an idempotent repeat,
-      // different content is an integrity error (docs/history-replication.md).
+      // different content is an integrity error (docs/history.md).
       const existing = await query(
         "SELECT record FROM history_records WHERE orb_id = $1 AND record_id = $2",
         [params.orbId, record.id],
@@ -388,7 +388,7 @@ export async function commitHistoryTransaction(
   return ok({ row: mapOrbRow(row), publishedAlertId: newestAlertId });
 }
 
-/** See docs/history-replication.md and docs/stack.md. */
+/** See docs/history.md and docs/stack.md. */
 export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
   private readonly db: PostgreSQLClient;
   readonly uploads: PgWorkspaceUploads;
@@ -2595,7 +2595,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         row["harness_session_id"] === null ? null : String(row["harness_session_id"]);
       if (
         storedSessionId === null ||
-        // An empty replica pins nothing (docs/history-replication.md): with no committed
+        // An empty replica pins nothing (docs/history.md): with no committed
         // cursor, a changed session identity is legitimate rotation.
         (storedCursor === null &&
           (storedSessionId !== session.id || !jsonEqual(row["harness_session_header"], session)))

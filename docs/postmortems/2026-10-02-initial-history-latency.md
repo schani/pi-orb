@@ -30,4 +30,4 @@ Incarnation 9 was stopped and its GCE host `pi-orb-b7e8855f-5315-4d5a-a81f-fa275
 
 ## Resulting proposal
 
-First separate database read, parse, projection, serialization and browser readiness with content-free phase measurements. Then evaluate a browser-specific projection-input read that prunes native overflow after ordering, preserving complete CLI and replication reads. No query or paging design was selected. The existing whole-history backlog owns this work (`TODO.md`); compact transport does not bound source reconstruction or browser summary count. Design context: `docs/history-replication.md`, `docs/transcript-cache.md`.
+First separate database read, parse, projection, serialization and browser readiness with content-free phase measurements. Then evaluate a browser-specific projection-input read that prunes native overflow after ordering, preserving complete CLI and replication reads. No query or paging design was selected. The existing whole-history backlog owns this work (`TODO.md`); compact transport does not bound source reconstruction or browser summary count. Design context: `docs/history.md`.

@@ -389,7 +389,7 @@ describe("DockerOrbHostProvider", () => {
   });
 
   it("provision never starts an existing container carrying a stale host spec", async () => {
-    // A stale-spec container is never restarted in place (docs/compute-replacement.md).
+    // A stale-spec container is never restarted in place (docs/lifecycle.md).
     dockerFake.install((args) => {
       if (args[0] === "inspect") {
         return {

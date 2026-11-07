@@ -14,7 +14,7 @@ import type { SimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, Result, type ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
 
-/** Owner skills apply to every orb of every project the owner has (docs/owner-skills-secrets.md). */
+/** Owner skills apply to every orb of every project the owner has (docs/agent-context.md). */
 export interface OwnerSkillError {
   readonly type: "owner_skill_error";
   readonly code: "invalid" | "not_found" | "conflict" | "unavailable" | "internal";

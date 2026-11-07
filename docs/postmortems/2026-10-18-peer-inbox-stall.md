@@ -23,4 +23,4 @@ Initial RED logs under `/tmp/`: `queued-model-error-complete-red.log` (four drai
 
 Receipt-race REDs: `/tmp/agent-backlog-race-first-failure.log`, `/tmp/provisional-{settled,active}-red.log` expose stale steering classification, missing canonical IDs and adoption of unrelated active work. The broader retry-boundary experiment (`/tmp/native-retry-first-failure.log`) was dropped as unrequested; existing steering boundaries suffice.
 
-Contract/invariants: `docs/orb-messaging.md`; protocol: `docs/runtime-protocol.md`; qualification and retained DST failure/replay evidence: `docs/testing.md`.
+Contract/invariants: `docs/inbox.md`; protocol: `docs/runtime-protocol.md`; qualification and retained DST failure/replay evidence: `docs/testing.md`.

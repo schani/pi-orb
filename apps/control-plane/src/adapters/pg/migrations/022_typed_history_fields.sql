@@ -1,5 +1,5 @@
 -- Typed record fields for transcripts persisted before the Pi adapter derived
--- them (docs/pi-adapter.md). `overflow` is untouched and stays lossless.
+-- them (docs/pi.md). `overflow` is untouched and stays lossless.
 -- Every statement derives exactly what `mapPiEntry` derives and nothing else: a
 -- native value of the wrong JSON type is absent rather than coerced, so no row
 -- can become schema-invalid and no shape can abort the migration.

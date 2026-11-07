@@ -347,7 +347,7 @@ export async function main(
   }
 
   // E2E mode routes central Codex auth and model calls to the mock
-  // (docs/PI-CODEX-E2E.md).
+  // (docs/testing.md).
   const mockOpenAi = readMockOpenAiEnv(process.env);
   if (mockOpenAi !== null) {
     bootTask.log("E2E mode: Codex OAuth/inference routed to", mockOpenAi.oauthBaseUrl);
@@ -452,7 +452,7 @@ export async function main(
     databaseKind: databaseKind === "pglite" ? "pglite" : "postgres",
     version: CONTROL_PLANE_VERSION,
   };
-  // Forward-only immutable-spec replacement fence (docs/compute-replacement.md).
+  // Forward-only immutable-spec replacement fence (docs/lifecycle.md).
   // An unparsable or unset value folds to 0: such a revision replaces nothing
   // a real deploy stamped, and the next real deploy replaces forward.
   const specGeneration = Number.parseInt(env("PI_ORB_HOST_SPEC_GENERATION", "0"), 10) || 0;
@@ -1160,7 +1160,7 @@ export async function main(
   signingKeyRepair = ensureSigningKeyInBackground();
 
   // Background loops: same domain code as the simulations, on real time
-  // (docs/history-replication.md, docs/lifecycle.md).
+  // (docs/history.md, docs/lifecycle.md).
   const activationReader =
     activationBucket === ""
       ? undefined

@@ -195,7 +195,7 @@ describe("orbView compute discard", () => {
   it("reports a spec replacement as routine hygiene, never as a failure", () => {
     // Same durable columns, different reason: a deploy replacing stale
     // compute must not tell the user their orb failed
-    // (docs/compute-replacement.md).
+    // (docs/lifecycle.md).
     const view = orbView(
       {
         ...orb,

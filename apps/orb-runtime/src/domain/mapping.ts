@@ -13,7 +13,7 @@ import { err, ok, type Result } from "neverthrow";
 import { Check } from "typebox/value";
 
 /**
- * Lossless Pi-entry → normalized-record mapping (docs/pi-adapter.md). Every
+ * Lossless Pi-entry → normalized-record mapping (docs/pi.md). Every
  * persisted entry maps one-to-one; a failure here fails the whole pull rather
  * than silently omitting an entry. Native entries land in `overflow.native`,
  * sanitized by `nativeForHistory`.
@@ -408,7 +408,7 @@ function mapMessageEntry(
                 (block) =>
                   block.type === "text" || block.type === "image" || block.type === "other",
               ),
-              // Code-mode charts ride in result details, outside the model's view (docs/pi-adapter.md).
+              // Code-mode charts ride in result details, outside the model's view (docs/pi.md).
               ...(isRecordObject(details) && Array.isArray(details["charts"])
                 ? details["charts"].map((data) => ({
                     type: "other" as const,
@@ -426,7 +426,7 @@ function mapMessageEntry(
     }
     default:
       // An unknown message role becomes a generic event rather than
-      // inventing a shared role (docs/pi-adapter.md).
+      // inventing a shared role (docs/pi.md).
       return ok({
         ...identity,
         type: "event",

@@ -556,7 +556,7 @@ export class ControlState {
    * Set between the stop and start halves of an unreachable-runtime host
    * restart, so a stopped host mid-restart is completed rather than being
    * mistaken for an externally stopped host. Lost on process restart; the
-   * replication caveat in docs/history-replication.md applies.
+   * replication caveat in docs/history.md applies.
    */
   markRestartPending(orbId: string): void {
     this.restartPending.add(orbId);

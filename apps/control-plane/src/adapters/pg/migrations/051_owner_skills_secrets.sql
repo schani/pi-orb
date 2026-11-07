@@ -1,5 +1,5 @@
 -- Owner-level skills and secrets apply to every project of the owner
--- (docs/owner-skills-secrets.md). Skills are readable Markdown, one row each;
+-- (docs/agent-context.md). Skills are readable Markdown, one row each;
 -- owner secrets mirror project_secret_pointers: values live only in the
 -- immutable secret store, PostgreSQL holds metadata and the version pointer.
 CREATE TABLE user_skills (

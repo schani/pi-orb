@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Reviewed executable credential source for Google external-account credentials
-# backed by pi-orb workload identity (docs/workload-identity-recipes.md).
+# backed by pi-orb workload identity (docs/workload-identity.md).
 #
 # Google's SDKs execute this on every credential refresh and read one JSON
 # object from stdout. It mints a fresh, short-lived pi-orb token on demand: no

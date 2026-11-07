@@ -41,7 +41,7 @@ reproduced the exact original URL failure before changing the selection sequence
 This forced schedule failed with the same expected-orb/received-project URL. It
 establishes a test synchronization defect, not a requirement to predict future
 results or replay old key presses. The product's partial-loading behavior and
-selection retention match `docs/dashboard-find.md`.
+selection retention match `docs/web-ui.md`.
 
 The corrected browser test retains the response gate and asserts the visible
 loading diagnostic. It explicitly proves the early ArrowDown selects the sole

@@ -41,4 +41,4 @@ gcloud logging read '(textPayload:"4647f261" OR resource.labels.instance_id="374
 
 Private copies and SHA256 manifest: ignored `.context/4647-forensics/`; not durable published artifacts. `lifecycle.jsonl` lines 5–11 retain the earlier outage/recovery; lines 12–13 retain final failure/disposal. Durable log identities and relevant values are recorded above.
 
-Diagnostic invariant: a terminal stream-consumption failure must retain a bounded, credential-redacted cause before compute disposal, without claiming the SDK is necessarily the throw site. Current implementation and limits: `docs/claude-agent-sdk.md`.
+Diagnostic invariant: a terminal stream-consumption failure must retain a bounded, credential-redacted cause before compute disposal, without claiming the SDK is necessarily the throw site. Current implementation and limits: `docs/claude.md`.

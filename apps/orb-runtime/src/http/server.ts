@@ -45,7 +45,7 @@ function runtimeError(
 }
 
 /**
- * The orb runtime's HTTP surface (docs/host-provider.md, docs/runtime-protocol.md, docs/history-replication.md): health,
+ * The orb runtime's HTTP surface (docs/host-provider.md, docs/runtime-protocol.md, docs/history.md): health,
  * idempotent history pulls, and the live WebSocket with synchronous hello
  * synchronization. The health server starts before slow initialization.
  */

@@ -356,7 +356,7 @@ export function desiredSpecFingerprintOf(
 /**
  * Provision a host for a seeded orb through the world directly, stamped the
  * way the harness's provider stamps it — or unstamped (`legacy: true`) to seed
- * the pre-fingerprint cohort described in docs/compute-replacement.md.
+ * the pre-fingerprint cohort described in docs/lifecycle.md.
  */
 export function seedProvisionedHost(
   task: SimulationTask,
@@ -460,7 +460,7 @@ export function seedOrbWithBearer(
 /**
  * Seed a running orb, then atomically fail it with an incarnation-bounded
  * discard fence — the common preamble of every failed-compute disposal
- * scenario (docs/compute-replacement.md).
+ * scenario (docs/lifecycle.md).
  */
 export async function seedFailedOrbWithDiscardIntent(
   task: SimulationTask,

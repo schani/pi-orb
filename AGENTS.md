@@ -23,7 +23,7 @@ When a task changes a requirement, decision or contract, update the owning doc i
 3. No status in docs: no deployed, undeployed, local, qualified or authorized stamps, and no qualification logs, test counts, run IDs or SHAs. Deployment state is the deployed revision versus git; evidence belongs in PR descriptions or postmortems. Agreed design that is not yet built says so once at the top of its section and has a `TODO.md` item.
 4. Keep interfaces and examples synchronized with the surrounding prose.
 5. Open questions live only in `docs/open-questions.md`. Numbering is frozen: never renumber or delete, because code and docs reference questions by number. A resolved question shrinks to one line naming the owning doc.
-6. Actionable items live only in `TODO.md`, one line each plus links, with no evidence and no done items: no TODO/FIXME comments in code, no TODOs in design prose. An item lives in exactly one of `TODO.md` / `docs/open-questions.md`.
+6. Actionable items live only in `TODO.md`, one line each plus links, with no evidence and no done items: no TODO/FIXME comments in code, no TODOs in design prose. An item lives in exactly one of `TODO.md` / `docs/open-questions.md`; when a decided question implies work, mark it resolved and move the work to `TODO.md` in the same edit.
 7. Incident forensics get a file in `docs/postmortems/`; the owning doc keeps only the resulting rule plus a link.
 8. Evidence links must resolve: tracked files, GitHub Actions runs or hosted-file URLs, never `.context/`, `/tmp/` or `/workspace/` paths.
 9. Reference docs by path (for example `docs/credentials.md`), never by section number. When adding or removing a doc, update the map in `DESIGN.md`.

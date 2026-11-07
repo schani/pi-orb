@@ -5,7 +5,7 @@ import type { ControlPlaneStore } from "./ports.ts";
 
 /**
  * An orb's own `pi-orb id-token` for this audience admits previews and hosted
- * files of orbs with the same project owner (`docs/ports.md`).
+ * files of orbs with the same project owner (`docs/http-exposure.md`).
  */
 export const ACCESS_TOKEN_AUDIENCE = "urn:pi-orb:access";
 /** Scripts send the header; browsers the host-only cookie, which also reaches WebSocket upgrades. */

@@ -19,7 +19,7 @@ export interface PullHistoryError {
 }
 
 /**
- * Pure docs/history-replication.md pull semantics over one immutable snapshot. The HTTP handler
+ * Pure docs/history.md pull semantics over one immutable snapshot. The HTTP handler
  * folds this Result into status codes.
  */
 export function computePullHistory(
@@ -42,7 +42,7 @@ export function computePullHistory(
   if (query.after !== null) {
     const index = snapshot.records.findIndex((record) => record.id === query.after);
     if (index === -1) {
-      // Persistence never silently resets to a full replay (docs/history-replication.md).
+      // Persistence never silently resets to a full replay (docs/history.md).
       return err({
         type: "pull_history_error",
         code: "cursor_not_found",

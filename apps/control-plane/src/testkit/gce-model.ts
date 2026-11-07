@@ -23,7 +23,7 @@ export interface DeterministicGceApiModelOptions {
 /**
  * Stateful deterministic Compute Engine transport model. It deliberately runs
  * the real GCE adapter state machine under DST; only Google's remote resource
- * state is modeled here (docs/compute-replacement.md).
+ * state is modeled here (docs/lifecycle.md).
  */
 export class DeterministicGceApiModel implements GceApiTransport {
   private readonly instances = new Map<string, ModeledResource>();
@@ -258,7 +258,7 @@ export class DeterministicGceApiModel implements GceApiTransport {
     const metadata = /^instances\/([^/]+)\/setMetadata$/.exec(relative);
     if (args.method === "POST" && metadata?.[1] !== undefined) {
       throw new Error(
-        `gce model: setMetadata is forbidden — the adapter must never repair ${metadata[1]} in place (docs/compute-replacement.md)`,
+        `gce model: setMetadata is forbidden — the adapter must never repair ${metadata[1]} in place (docs/lifecycle.md)`,
       );
     }
 

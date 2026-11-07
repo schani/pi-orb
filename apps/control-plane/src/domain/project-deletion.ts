@@ -28,7 +28,7 @@ const storeCommandError = (error: StoreError): ProjectCommandError =>
 
 /**
  * Atomically fence child creation and fan permanent deletion out to every
- * current child (docs/project-deletion.md). The same store operation is also
+ * current child (docs/teardown.md). The same store operation is also
  * the repair primitive used after process failure.
  */
 export function requestProjectDeletion(

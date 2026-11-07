@@ -87,7 +87,7 @@ function workspaceIdentity(harness: TestHarness): {
 
 /**
  * Immutable host-spec replacement, from the user-visible side
- * (docs/compute-replacement.md): an update never bounces a running orb, it
+ * (docs/lifecycle.md): an update never bounces a running orb, it
  * replaces stopped stale compute on the orb's next Start, and an ordinary
  * same-spec stop/start reuses the compute it already has.
  *
@@ -122,7 +122,7 @@ describe("host-spec replacement (DST)", () => {
             f: async (task) => {
               seedRunningOrb(task, harness, ORB);
               // Flush one record: a session that never flushed anything
-              // evaporates with its process by design (docs/history-replication.md),
+              // evaporates with its process by design (docs/history.md),
               // so an empty workspace could not witness workspace survival.
               harness.world.appendMessage(ORB);
               await waitUntil(
@@ -768,7 +768,7 @@ describe("host-spec replacement (DST)", () => {
                 400,
               );
               // The request preserves retained evidence: it is not this
-              // episode's to clear (docs/compute-replacement.md).
+              // episode's to clear (docs/lifecycle.md).
               expect(harness.store.orbSnapshot(ORB)).toMatchObject({
                 hostDiscardThroughIncarnation: 0,
                 hostDiscardEvidence: evidence,

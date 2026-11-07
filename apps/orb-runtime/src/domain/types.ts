@@ -7,7 +7,7 @@ import type {
 
 /**
  * A synchronous, immutable snapshot of the harness's persisted session
- * (docs/history-replication.md): complete records in append order plus identity/activity.
+ * (docs/history.md): complete records in append order plus identity/activity.
  * Captured at the start of each request; records appended afterward belong to
  * the next request.
  */

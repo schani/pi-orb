@@ -1,4 +1,4 @@
-# Private object storage for orb-hosted files (docs/hosting.md). PostgreSQL owns
+# Private object storage for orb-hosted files (docs/http-exposure.md). PostgreSQL owns
 # publication and cleanup state; this bucket contains only immutable file bytes.
 locals {
   app_origin     = local.oidc_issuer_url

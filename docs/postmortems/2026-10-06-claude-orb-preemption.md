@@ -34,7 +34,7 @@ The inspected transcript ends without another user message or assistant continua
 
 `apps/orb-runtime/src/claude/agent.ts` (`boot`, `attachSession`) publishes the interruption notice, clears old ownership, restores the native session, and reports ready/idle. SDK `resume: state.id` restores context; it does not submit a continuation prompt. The operation notice is deduplicated by operation ID, and cleared ownership prevents a repeated child notice on the second boot. `claude.auth` is emitted after each successful boot attachment, explaining both connection notices without a credential-generation change.
 
-This was the documented Claude policy at the incident, not Pi's automatic boot-resume behavior: known receipts permit manual continuation, never automatic replay. The proposed rationale is one continuation owner until native cancellation state and our resume prompt are qualified (`docs/claude-agent-sdk.md`, “Proposed boot, interruption and stop behavior”). No automatic-continuation qualification or implementation is established here. Missing orb naming was separately confirmed as a deliberate Claude naming skip, not a symptom of this interruption.
+This was the documented Claude policy at the incident, not Pi's automatic boot-resume behavior: known receipts permit manual continuation, never automatic replay. The proposed rationale is one continuation owner until native cancellation state and our resume prompt are qualified (`docs/claude.md`, “Proposed boot, interruption and stop behavior”). No automatic-continuation qualification or implementation is established here. Missing orb naming was separately confirmed as a deliberate Claude naming skip, not a symptom of this interruption.
 
 ## Evidence and limits
 
@@ -44,4 +44,4 @@ Inspection copies were `/tmp/target-orb-audit.json`, `/tmp/target-orb-events.jso
 
 ## Subsequent decisions — 2026-10-06
 
-The user requested automatic Claude restart continuation using Pi's guarded boot policy, successful authentication diagnostics outside conversation, and optional owner-Codex auto-naming. These are local implementation changes, not explanations of the historical recovery above or evidence of a target-orb deployment. Current policy and qualification: `docs/claude-agent-sdk.md`, `docs/claude-sdk-capabilities.md`, and `docs/agent-settings.md`.
+The user requested automatic Claude restart continuation using Pi's guarded boot policy, successful authentication diagnostics outside conversation, and optional owner-Codex auto-naming. These are local implementation changes, not explanations of the historical recovery above or evidence of a target-orb deployment. Current policy and qualification: `docs/claude.md`, and `docs/agent-context.md`.

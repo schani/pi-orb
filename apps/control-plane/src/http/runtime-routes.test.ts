@@ -1522,7 +1522,7 @@ describe("runtime broker routes", () => {
   it("rejects old runtime authorization while a host_spec_changed fence is pending", async () => {
     // The same fence as the `failed` case above, created by an immutable-spec
     // replacement instead: an orb carrying any discard intent is unauthorized
-    // whatever its lifecycle state says (docs/compute-replacement.md).
+    // whatever its lifecycle state says (docs/lifecycle.md).
     store.seedOrb(
       makeOrbRow(ORB, PROJECT, "starting", {
         runtimeTokenHash: sha256(TOKEN),

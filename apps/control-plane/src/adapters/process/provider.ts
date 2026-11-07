@@ -320,7 +320,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
 
   private childEnvironment(metadata: HostMetadata): NodeJS.ProcessEnv {
     const environment: NodeJS.ProcessEnv = { ...process.env };
-    // Boot writes git's XDG config file (docs/git-identity.md): never the developer's.
+    // Boot writes git's XDG config file (docs/agent-context.md): never the developer's.
     delete environment.XDG_CONFIG_HOME;
     Object.assign(environment, this.options.extraEnv ?? {}, {
       PI_ORB_ID: metadata.orbId,
@@ -851,7 +851,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
    * probing the leader alone would report absence while a group member
    * survives, and returning before the post-SIGKILL probe would report
    * absence on hope. Uncertainty is a retryable error
-   * (docs/compute-replacement.md). Linux goes through terminateSupervisor
+   * (docs/lifecycle.md). Linux goes through terminateSupervisor
    * instead, because SIGKILLing the subreaper would erase descendant evidence.
    */
   private async killProcessGroup(

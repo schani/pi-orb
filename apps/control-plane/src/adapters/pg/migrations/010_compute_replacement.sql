@@ -1,4 +1,4 @@
--- Immutable compute replacement (docs/compute-replacement.md).
+-- Immutable compute replacement (docs/lifecycle.md).
 -- Compute identity is incarnation-bounded; authoritative workspace identity remains fixed.
 
 ALTER TABLE orbs

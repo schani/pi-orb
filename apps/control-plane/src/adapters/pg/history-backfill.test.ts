@@ -9,7 +9,7 @@ import { PGliteClient } from "./pglite-client.ts";
 /**
  * Clients read typed record fields, so transcripts persisted before those
  * fields existed must gain them from the native blob they were mapped from
- * (docs/pi-adapter.md). The backfill must derive exactly what the Pi adapter
+ * (docs/pi.md). The backfill must derive exactly what the Pi adapter
  * derives, so both run over the same native entries here and must agree.
  */
 const BACKFILL = "022_typed_history_fields.sql";

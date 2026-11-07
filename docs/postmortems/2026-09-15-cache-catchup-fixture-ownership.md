@@ -2,7 +2,7 @@
 
 ## Status (2026-09-15)
 
-Found during tests-first cache implementation, before deployment. This is test/qualification evidence, not a production incident. The resulting cache contract is in `docs/transcript-cache.md`.
+Found during tests-first cache implementation, before deployment. This is test/qualification evidence, not a production incident. The resulting cache contract is in `docs/history.md`.
 
 ## Product defect exposed by the controlled scenario
 

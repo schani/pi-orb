@@ -16,7 +16,7 @@ import { snapshotPromptResources } from "../git-resources/prompt.ts";
 export interface ManagedResourceInstructions {
   personal: { content: string; revision: number };
   project: { content: string; revision: number };
-  /** Owner skills (docs/owner-skills-secrets.md), adopted fresh at every context open. */
+  /** Owner skills (docs/agent-context.md), adopted fresh at every context open. */
   skills: OwnerSkillsSnapshot["skills"];
 }
 /** Private native application document. Store implementation uses the fenced authority UOW. */
