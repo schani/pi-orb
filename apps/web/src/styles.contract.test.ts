@@ -599,7 +599,10 @@ describe("Signal / Boards system", () => {
   });
 
   it("flips the primary button to paper on focus and never bolds selection", () => {
-    expect(css).toContain(".new-project button:focus-visible");
+    expect(rule(":is(button, a, summary):focus-visible")).toContain(
+      "background: var(--k) !important",
+    );
+    expect(rule(".new-project button:focus-visible")).toContain("background: var(--w) !important");
     expect(rule(".ix-row-current,\n.ix-row-current:hover")).not.toContain("font-weight");
     expect(css).not.toContain(".subagent-message-notice > summary:focus-visible");
   });

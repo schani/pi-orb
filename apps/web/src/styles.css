@@ -312,6 +312,24 @@ textarea:focus {
   color: var(--w);
 }
 
+/* Focus inversion outranks every state hue and hover. */
+:is(button, a, summary):focus-visible {
+  color: var(--w) !important;
+  background: var(--k) !important;
+}
+
+:is(button, a, summary):focus-visible * {
+  color: inherit !important;
+}
+
+button.danger:focus-visible {
+  background: var(--bad) !important;
+}
+
+:focus-visible .chart-strip-spark {
+  background: var(--w);
+}
+
 .text-field-frame > input:focus-visible,
 .text-field-frame > textarea:focus-visible {
   background: var(--w);
@@ -606,10 +624,6 @@ button.text-action.error-text {
   color: var(--k);
   background: var(--g1);
 }
-.usage-orb-row:focus-visible {
-  color: var(--w);
-  background: var(--k);
-}
 .usage-orb-row:focus-visible .usage-orb-bar {
   background: var(--w);
 }
@@ -813,8 +827,7 @@ a.project-new-orb-icon {
   color: var(--g3);
 }
 
-a.project-new-orb-icon:hover,
-a.project-new-orb-icon:focus-visible {
+a.project-new-orb-icon:hover {
   background: var(--k);
   color: var(--w);
 }
@@ -1086,10 +1099,14 @@ a.project-new-orb-icon:focus-visible {
 }
 
 .new-project button:hover:not(:disabled),
-.new-project button:focus-visible,
 .new-project button:disabled {
   background: var(--w);
   color: var(--k);
+}
+
+.new-project button:focus-visible {
+  background: var(--w) !important;
+  color: var(--k) !important;
 }
 
 .new-project button:disabled {
@@ -1426,11 +1443,6 @@ button.modal-close {
   width: 32px;
   height: 32px;
   color: var(--k);
-}
-
-button.modal-close:focus-visible {
-  color: var(--w);
-  background: var(--k);
 }
 
 .project-secrets-lock {
@@ -2361,7 +2373,7 @@ pre,
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--k);
+  background: currentcolor;
   content: "";
 }
 
@@ -2389,6 +2401,7 @@ pre,
 
 .activity-strip-dot:hover:not(:disabled),
 .activity-strip-picked {
+  color: var(--k);
   background: var(--g1x);
 }
 
@@ -2521,9 +2534,6 @@ pre,
 .mcp-health-needs-auth {
   color: var(--bad);
 }
-.project-mcp-connection > summary:focus-visible .mcp-health {
-  color: inherit;
-}
 @media (max-width: 600px) {
   .mcp-health-toolbar .icon-button {
     width: 44px;
@@ -2535,19 +2545,6 @@ pre,
 .project-mcp-connection .reasoning-body {
   padding-top: 4px;
   padding-bottom: 8px;
-}
-.activity-rail-row > summary:focus-visible,
-.activity-strip-body > .activity-rail-row > summary:focus-visible,
-.tool-activity-call > summary:focus-visible,
-.project-archive > summary:focus-visible {
-  color: var(--w);
-  background: var(--k);
-}
-.activity-rail-row
-  > summary:focus-visible
-  :is(.activity-rail-marker, .activity-rail-headline, .activity-rail-metric),
-.tool-activity-call > summary:focus-visible > :is(.tool-call-marker, .tool-call-status) {
-  color: inherit;
 }
 
 .rec-orb > .rec-bd > .activity-rail-row > summary .activity-rail-marker {
@@ -2659,6 +2656,8 @@ pre,
 }
 
 .tool-image-trigger:focus-visible {
+  color: var(--k) !important;
+  background: var(--w) !important;
   outline: 2px solid var(--k);
   outline-offset: 2px;
 }
@@ -2816,6 +2815,8 @@ pre,
 .chart-series-action:focus-visible,
 .chart-key a:focus-visible,
 .chart-key button:focus-visible {
+  color: inherit !important;
+  background: none !important;
   outline: 2px solid var(--k);
   outline-offset: 2px;
 }
@@ -3208,8 +3209,8 @@ pre,
 
 .orb-terminal-resize:focus-visible {
   outline: 0;
-  background: transparent;
-  color: inherit;
+  background: transparent !important;
+  color: inherit !important;
 }
 
 .orb-terminal-window.orb-terminal-hidden {
@@ -3530,8 +3531,8 @@ button.orb-phone-menu {
   }
 
   button.composer-send:focus-visible {
-    color: var(--k);
-    background: var(--w);
+    color: var(--k) !important;
+    background: var(--w) !important;
   }
 
   button.composer-send:disabled {
