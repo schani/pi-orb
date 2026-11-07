@@ -32,6 +32,23 @@ describe("groupActivity", () => {
     expect(html).not.toContain("<p>row a</p>");
   });
 
+  it("draws a restart step as the refresh glyph inside its dot", () => {
+    const html = render([step("a", "success"), step("r", "restart"), step("b", "success")]);
+    expect(states(html)).toEqual(["success", "restart", "success"]);
+    const glyphs = [...html.matchAll(/<button[^>]*data-step="(\w+)"[^>]*>(.*?)<\/button>/g)].map(
+      (match) => [match[1], match[2]?.match(/<svg class="activity-strip-glyph"[^>]*>/)?.[0]],
+    );
+    expect(glyphs).toEqual([
+      ["success", undefined],
+      [
+        "restart",
+        '<svg class="activity-strip-glyph" viewBox="3.7 3.7 16.6 16.6" aria-hidden="true" focusable="false">',
+      ],
+      ["success", undefined],
+    ]);
+    expect(html).toContain('stroke-width="0.6" stroke-linejoin="round"');
+  });
+
   it("splits strips at items without a step", () => {
     const html = render([
       step("a", "thinking"),

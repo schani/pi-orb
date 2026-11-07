@@ -402,6 +402,25 @@ function isDisplayedCustomMessage(record: EventRecord): boolean {
   );
 }
 
+/** Restart notices are activity steps; their row stays the literal notice. */
+function restartHeadline(record: EventRecord): string | undefined {
+  switch (record.custom?.customType) {
+    case "pi-orb.harness-restarted":
+      return "harness restarted";
+    case "pi-orb.sleep-wake":
+      return "sleep finished";
+    case "pi-orb.host-restarted":
+    case "pi-orb.turn-resume":
+    case "pi-orb.turn-resume-declined":
+      // One boot marker type covers both causes; only its text says which.
+      return blockText(record.content ?? []).startsWith("The agent runtime was restarted")
+        ? "runtime restarted"
+        : "host restarted";
+    default:
+      return undefined;
+  }
+}
+
 function assistantFailure(record: MessageRecord): string | null {
   if (record.role !== "assistant" || record.finishReason !== "error") return null;
   const failure = record.failure;
@@ -511,13 +530,30 @@ function renderAgentRecords(
         push(<DeliveryRow key={record.id} record={record} />);
         continue;
       }
-      push(
+      const node = (
         <div className="record-custom" key={record.id}>
           <p className={record.compactionOutcome === "failed" ? "msg-text error-text" : "msg-text"}>
             <PlainChatText>{blockText(record.content ?? [])}</PlainChatText>
           </p>
-        </div>,
+        </div>
       );
+      const headline = restartHeadline(record);
+      items.push({
+        key: record.id,
+        node,
+        ...(headline === undefined
+          ? {}
+          : {
+              step: {
+                key: record.id,
+                identity: record.id,
+                node,
+                state: "restart",
+                label: "restart",
+                headline,
+              },
+            }),
+      });
       continue;
     }
 

@@ -311,6 +311,116 @@ describe("HistoryView turn structure", () => {
     expect(states(strips[1] ?? "")).toEqual(["thinking", "running"]);
     expect(html).not.toContain("Next plan");
   });
+  const HOST_TEXT = "The host was restarted. All processes running before the restart were killed.";
+  const RUNTIME_TEXT = "The agent runtime was restarted. Other processes may still be running.";
+  it.each([
+    [
+      "pi.custom_message",
+      "pi-orb.sleep-wake",
+      `${HOST_TEXT} Scheduled sleep finished.`,
+      "sleep finished",
+    ],
+    [
+      "pi-orb.sleep-wake",
+      "pi-orb.sleep-wake",
+      `${HOST_TEXT} Scheduled sleep finished.`,
+      "sleep finished",
+    ],
+    [
+      "pi.custom_message",
+      "pi-orb.harness-restarted",
+      "Agent harness restarted with unfinished work; recovery is resuming.",
+      "harness restarted",
+    ],
+    ["pi-orb.host-restarted", "pi-orb.host-restarted", HOST_TEXT, "host restarted"],
+    ["pi-orb.host-restarted", "pi-orb.host-restarted", RUNTIME_TEXT, "runtime restarted"],
+    ["pi-orb.turn-resume", "pi-orb.turn-resume", `${HOST_TEXT} Resuming.`, "host restarted"],
+    [
+      "pi-orb.turn-resume-declined",
+      "pi-orb.turn-resume-declined",
+      RUNTIME_TEXT,
+      "runtime restarted",
+    ],
+  ])(
+    "folds a %s %s notice into the surrounding strip and agent turn",
+    (eventType, customType, text, headline) => {
+      const records: HistoryRecord[] = [
+        { ...message("before", "assistant", ""), content: [{ type: "reasoning", text: "Plan" }] },
+        {
+          id: "restart",
+          parentId: null,
+          timestamp: "time-restart",
+          type: "event",
+          eventType,
+          content: [{ type: "text", text }],
+          custom: { customType, display: true },
+          overflow: {},
+        },
+        {
+          ...message("after", "assistant", ""),
+          content: [
+            { type: "tool_call", callId: "read-1", name: "read", arguments: { path: "a.ts" } },
+          ],
+        },
+      ];
+      const html = renderToStaticMarkup(
+        <HistoryView records={records} liveBlocks={[]} tools={[]} busy={false} />,
+      );
+      expect({
+        turns: html.match(/<article class="rec [^"]*"/g),
+        strips: html.match(/class="[^"]* activity-strip"/g)?.length,
+        steps: [...html.matchAll(/data-step="(\w+)"/g)].map((match) => match[1]),
+        restart: html.includes(`aria-label="restart · ${headline}"`),
+        collapsedNotice: html.includes("record-custom"),
+      }).toEqual({
+        turns: ['<article class="rec rec-orb"'],
+        strips: 1,
+        steps: ["thinking", "restart", "running"],
+        restart: true,
+        collapsedNotice: false,
+      });
+    },
+  );
+  const notice = (customType: string): HistoryRecord => ({
+    id: "notice",
+    parentId: null,
+    timestamp: "time-notice",
+    type: "event",
+    eventType: customType,
+    content: [{ type: "text", text: "Notice text." }],
+    custom: { customType, display: true },
+    overflow: {},
+  });
+  const reasoning = (id: string): HistoryRecord => ({
+    ...message(id, "assistant", ""),
+    content: [{ type: "reasoning", text: "Plan" }],
+  });
+  const noticeLayout = (records: HistoryRecord[]) => {
+    const html = renderToStaticMarkup(
+      <HistoryView records={records} liveBlocks={[]} tools={[]} busy={false} />,
+    );
+    return {
+      notice: html.includes('<div class="record-custom"><p class="msg-text">Notice text.'),
+      restartDots: html.includes('data-step="restart"'),
+      strips: html.match(/class="[^"]* activity-strip"/g)?.length ?? 0,
+    };
+  };
+  it("keeps a lone restart notice as its notice row", () => {
+    expect(
+      noticeLayout([message("prose", "assistant", "Prose."), notice("pi-orb.host-restarted")]),
+    ).toEqual({ notice: true, restartDots: false, strips: 0 });
+  });
+  it("keeps a failed restart notification as a strip boundary", () => {
+    expect(
+      noticeLayout([
+        reasoning("a"),
+        reasoning("b"),
+        notice("pi-orb.restart-notification-failed"),
+        reasoning("c"),
+        reasoning("d"),
+      ]),
+    ).toEqual({ notice: true, restartDots: false, strips: 2 });
+  });
   it.each([
     [
       "subagent-notification",

@@ -1,6 +1,7 @@
 import type { HistoryRecord } from "@pi-orb/protocol";
 
-type Step = ["t" | "c" | "f" | "n", string];
+/** Thinking, call, failed call, subagent receipt, sleep wake after a host restart, harness restart. */
+type Step = ["t" | "c" | "f" | "n" | "s" | "h", string];
 
 const RUN: Step[] = [
   [
@@ -52,6 +53,28 @@ const RUN: Step[] = [
   ["c", 'text(await tools.bash({command:"gh pr merge 267 --squash"}))'],
 ];
 
+const SLEEP = "text(await tools.sleep({seconds:1800}))";
+const RESTARTS: Step[] = [
+  ["t", "Starting the preview server"],
+  ["c", 'text(await tools.bash({command:"nohup npm run dev:frontend &"}))'],
+  ["t", "Scheduling the next deploy check"],
+  ["c", SLEEP],
+  ["s", ""],
+  ["t", "Restarting the killed preview server|Checking the deploy"],
+  ["c", 'text(await tools.bash({command:"gh run list --workflow deploy --limit 3"}))'],
+  ["c", SLEEP],
+  ["s", ""],
+  ["t", "Checking the deploy"],
+  ["h", ""],
+  ["t", "Recovering the interrupted check"],
+  ["c", 'text(await tools.bash({command:"gh run view --log-failed"}))'],
+  ["c", SLEEP],
+  ["s", ""],
+  ["s", ""],
+  ["t", "Confirming the deploy finished"],
+  ["c", 'text(await tools.bash({command:"gh run list --workflow deploy --limit 1"}))'],
+];
+
 function stepRecords(prefix: string, steps: readonly Step[], at: string): HistoryRecord[] {
   return steps.flatMap(([kind, text], index): HistoryRecord[] => {
     const id = `${prefix}-${index}`;
@@ -71,6 +94,33 @@ function stepRecords(prefix: string, steps: readonly Step[], at: string): Histor
                 .join("\n\n")}\n\nWorking through the next step.`,
             },
           ],
+        },
+      ];
+    if (kind === "s" || kind === "h")
+      return [
+        {
+          ...base,
+          type: "event",
+          eventType: "pi.custom_message",
+          content:
+            kind === "s"
+              ? [
+                  {
+                    type: "text",
+                    text: "The host was restarted. All processes running before the restart were killed, including servers, background jobs, and shell sessions. The agent session and its history were preserved.",
+                  },
+                  { type: "text", text: "Scheduled sleep finished." },
+                ]
+              : [
+                  {
+                    type: "text",
+                    text: "Agent harness restarted with unfinished work; recovery is resuming.",
+                  },
+                ],
+          custom: {
+            customType: kind === "s" ? "pi-orb.sleep-wake" : "pi-orb.harness-restarted",
+            display: true,
+          },
         },
       ];
     if (kind === "n")
@@ -132,7 +182,7 @@ function prose(id: string, role: "user" | "assistant", text: string, at: string)
   };
 }
 
-/** A babysitting turn whose interleaved activity exercises the strip, plus a 300-step overflow. */
+/** A babysitting turn whose interleaved activity exercises the strip, a 300-step overflow, and restarts. */
 export function activityFixtureRecords(createdAt: string): HistoryRecord[] {
   const long = Array.from({ length: 300 }, (_, index) => RUN[(index * 7) % RUN.length] as Step);
   const records = [
@@ -148,6 +198,9 @@ export function activityFixtureRecords(createdAt: string): HistoryRecord[] {
     prose("activity-ask-long", "user", "keep watching main", createdAt),
     ...stepRecords("activity-long", long, createdAt),
     prose("activity-long-done", "assistant", "Main stayed green.", createdAt),
+    prose("activity-ask-restarts", "user", "watch the deploy overnight", createdAt),
+    ...stepRecords("activity-restarts", RESTARTS, createdAt),
+    prose("activity-restarts-done", "assistant", "The deploy finished green.", createdAt),
   ];
   // Tool results pair with their calls through the parent chain.
   return records.map((record, index) => ({ ...record, parentId: records[index - 1]?.id ?? null }));
