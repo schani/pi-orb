@@ -114,7 +114,7 @@ Subsystem designs:
 - [docs/dashboard-find.md](docs/dashboard-find.md) — dashboard and orb-view Command-K Find architecture, selected Index card design, and presentation study
 - [docs/terminal.md](docs/terminal.md) — investigation and provider-neutral proposal for an interactive web terminal
 - [docs/credentials.md](docs/credentials.md) — the credential broker, Codex OAuth, GitHub tokens, security requirements
-- [docs/mcp.md](docs/mcp.md) — project-scoped remote MCP configuration, static secret-backed headers, connection-scoped OAuth broker, native Pi MCP/tool search/codemode, direct request-time transport, broker ownership, and provider qualification
+- [docs/mcp.md](docs/mcp.md) — project-scoped remote MCP configuration, static secret-backed headers, connection-scoped OAuth broker, official MCP client for Pi execution, native tool search/codemode, request-time credentials, broker ownership, and provider qualification
 - [docs/orb-setup-hook.md](docs/orb-setup-hook.md) — repository-owned `.agents/setup` / `.agents/resume` boot hooks, matched to Amp's convention: triggers per compute incarnation, identity-free setup, user-visible failure
 - [docs/workload-identity.md](docs/workload-identity.md) — requirements for orb-issued OIDC identity and keyless federation with cloud providers and private services
 - [docs/workload-identity-recipes.md](docs/workload-identity-recipes.md) — relying-party integration recipes for that identity: GCP workload identity federation, AWS web-identity roles, and generic OIDC verification
@@ -129,6 +129,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-11-06-posthog-project-selection.md](docs/postmortems/2026-11-06-posthog-project-selection.md) — cross-call project reset, legacy session mismatch and official modern MCP adapter decision
 - [docs/postmortems/2026-11-06-control-plane-blackouts.md](docs/postmortems/2026-11-06-control-plane-blackouts.md) — two unexplained Cloud Run service gaps; corrected uncaught `AbortError` crash from a cancelled wait.
 - [docs/postmortems/2026-11-05-native-capture-pending.md](docs/postmortems/2026-11-05-native-capture-pending.md) — successful PENDING capture rejected before validation; bounded same-ID recovery, fresh qualification pending
 - [docs/postmortems/2026-11-05-claude-query-rotation-93add73b.md](docs/postmortems/2026-11-05-claude-query-rotation-93add73b.md) — unowned zero-turn acknowledgment can prematurely drain an admitted human root; historical attribution incomplete

@@ -10,7 +10,7 @@ import {
   MemoryStorage,
   type ToolExecutionApi,
 } from "@earendil-works/pi-durable";
-import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
+import { InMemoryTransport } from "@modelcontextprotocol/client";
 import { okAsync } from "neverthrow";
 import { Type } from "typebox";
 import { expect, it } from "vitest";
@@ -32,9 +32,17 @@ it("keeps resources-only instructions in namespace discovery, not initial provid
               : connections === 2
                 ? "Use refreshed project guidance"
                 : "Latest project guidance";
-          const { client, server } = createInMemoryTransportPair();
-          server.onMessage((m) => {
+          const [client, server] = InMemoryTransport.createLinkedPair();
+          server.onmessage = (m) => {
             if (!("method" in m) || !("id" in m)) return;
+            if (m.method === "server/discover") {
+              void server.send({
+                jsonrpc: "2.0",
+                id: m.id,
+                error: { code: -32601, message: "Unsupported" },
+              });
+              return;
+            }
             void server.send({
               jsonrpc: "2.0",
               id: m.id,
@@ -48,7 +56,7 @@ it("keeps resources-only instructions in namespace discovery, not initial provid
                     }
                   : { resources: [], resourceTemplates: [] },
             });
-          });
+          };
           void server.start();
           return okAsync(client);
         },

@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import type { IncomingHttpHeaders } from "node:http";
 import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,7 +29,7 @@ const hasMcpAlert = (history: DisplayHistoryView, status: "needs-auth" | "connec
       record.alert?.message === `MCP fixture: ${status}.`,
   );
 
-it("initial auth recovery → two real Pi runtimes reuse the grant → rejection/refresh → reconnect → disconnect", async () => {
+it("initial auth recovery → two real Pi runtimes reuse the grant → rejection/refresh → reconnect → disconnect → modern sessionless call", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-oauth-e2e-"));
   onTestFinished(() => rmSync(root, { recursive: true, force: true }));
   const key = join(root, "key.pem");
@@ -60,6 +61,12 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
   let acceptedCalls = 0;
   let rejectAccess = false;
   let rejectRefresh = false;
+  const modernRequests: {
+    method: string;
+    headers: IncomingHttpHeaders;
+    params?: Record<string, unknown>;
+  }[] = [];
+  const modernCalls: { name: string; arguments: Record<string, unknown> }[] = [];
   const codes = new Map<string, { challenge: string; redirect: string }>();
   const server = createServer(
     { key: readFileSync(key), cert: readFileSync(cert) },
@@ -145,6 +152,59 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
         res.writeHead(405).end();
         return;
       }
+      if (url.pathname === "/modern") {
+        const message = JSON.parse(raw);
+        modernRequests.push({
+          method: message.method,
+          headers: req.headers,
+          params: message.params,
+        });
+        const reply = (result: Record<string, unknown>) =>
+          json({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              resultType: "complete",
+              _meta: {
+                "io.modelcontextprotocol/serverInfo": { name: "Modern fixture", version: "1" },
+              },
+              ...result,
+            },
+          });
+        if (message.params?._meta?.["io.modelcontextprotocol/protocolVersion"] !== "2026-07-28") {
+          json(
+            {
+              jsonrpc: "2.0",
+              id: message.id,
+              error: { code: -32600, message: "MCP 2026-07-28 required" },
+            },
+            400,
+          );
+        } else if (message.method === "server/discover") {
+          reply({
+            supportedVersions: ["2026-07-28"],
+            capabilities: { tools: {} },
+            ttlMs: 0,
+            cacheScope: "private",
+          });
+        } else if (message.method === "tools/list") {
+          reply({
+            ttlMs: 0,
+            cacheScope: "private",
+            tools: [{ name: "read", inputSchema: { type: "object" } }],
+          });
+        } else if (message.method === "tools/call") {
+          modernCalls.push({ name: message.params.name, arguments: message.params.arguments });
+          reply({ content: [{ type: "text", text: "MODERN_READ_OK" }] });
+        } else {
+          json({
+            jsonrpc: "2.0",
+            id: message.id,
+            error: { code: -32601, message: "Unsupported method" },
+          });
+        }
+        return;
+      }
       if (rejectAccess || req.headers.authorization !== `Bearer fixture-access-${grant}`) {
         res.writeHead(401).end();
         return;
@@ -202,15 +262,6 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
                   { type: "stop" as const, status: "completed" as const },
                 ],
               },
-              {
-                match: {
-                  userMessage: { regex: "^Write a single short desktop-notification sentence" },
-                },
-                steps: [
-                  { type: "text" as const, content: "Reconnected OAuth." },
-                  { type: "stop" as const, status: "completed" as const },
-                ],
-              },
             ]
           : []),
         {
@@ -223,27 +274,19 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
                 code:
                   index === 7
                     ? 'text(await describeNamespace("mcp__fixture"))'
-                    : "text(await tools.mcp__fixture__read({}))",
+                    : index === 6
+                      ? "text(await tools.mcp__fixture__read({})); text(await tools.mcp__modern__read({}));"
+                      : "text(await tools.mcp__fixture__read({}))",
               },
             },
             { type: "stop" as const, status: "completed" as const },
           ],
         },
         {
-          match: { default: true },
+          match:
+            index === 6 ? { toolResultContains: { regex: "MODERN_READ_OK" } } : { default: true },
           steps: [
             { type: "text" as const, content: `OAUTH_DONE_${index}` },
-            { type: "stop" as const, status: "completed" as const },
-          ],
-        },
-        {
-          match: {
-            userMessage: {
-              regex: "^Write a single short desktop-notification sentence",
-            },
-          },
-          steps: [
-            { type: "text" as const, content: "Checked OAuth." },
             { type: "stop" as const, status: "completed" as const },
           ],
         },
@@ -279,6 +322,7 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
       return await startControlPlane({
         port: 7179,
         fake,
+        localSummaries: true,
         nameFake: names,
         pglitePath: join(root, "db"),
         processStateDirectory: join(root, "hosts"),
@@ -328,15 +372,16 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
     });
   };
   const configUrl = `${cp.baseUrl}/projects/${project}/mcp`;
+  const oauthSummary = page
+    .locator(".project-mcp-connection > summary")
+    .filter({ hasText: "fixture" });
   const consent = async () => {
     await page.goto(configUrl);
-    await page.locator(".project-mcp-connection > summary").click();
+    await oauthSummary.click();
     await page.getByRole("button", { name: /^(connect|reconnect)$/ }).click();
     await page.getByRole("link", { name: "Authorize fixture" }).click();
     await expectPage(page).toHaveURL(configUrl);
-    await expectPage(page.locator(".project-mcp-connection > summary")).toContainText(
-      "grant stored",
-    );
+    await expectPage(oauthSummary).toContainText("grant stored");
   };
   const message = async (orb: string, index: number) => {
     expect(
@@ -347,19 +392,12 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
       ).status,
     ).toBe(202);
     await waitFor(
-      `OAuth turn ${index} and summary`,
+      `OAuth turn ${index}`,
       async () => {
         const history = JSON.stringify(
           (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`)).body,
         );
-        const requests = (await fakeControl(fake.sessionKey, "/requests")) as unknown as {
-          matchedRuleIndex: number;
-          status: number;
-        }[];
-        return history.includes(`OAUTH_DONE_${index}`) &&
-          requests.some((r) => r.matchedRuleIndex === (index + 1) * 3 + 5 && r.status === 200)
-          ? true
-          : null;
+        return history.includes(`OAUTH_DONE_${index}`) ? true : null;
       },
       { timeoutMs: 90_000 },
     );
@@ -375,22 +413,20 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
         })
       ).status,
     ).toBe(201);
-    expect(
-      (
-        await api(cp.baseUrl, "PUT", `/api/v1/projects/${project}/mcp`, {
-          revision: 0,
-          servers: [
-            {
-              name: "fixture",
-              url: `${origin}/mcp`,
-              description: "OAuth test",
-              headers: {},
-              oauth: { id: connection },
-            },
-          ],
-        })
-      ).status,
-    ).toBe(200);
+    const configured = await api(cp.baseUrl, "PUT", `/api/v1/projects/${project}/mcp`, {
+      revision: 0,
+      servers: [
+        {
+          name: "fixture",
+          url: `${origin}/mcp`,
+          description: "OAuth test",
+          headers: {},
+          oauth: { id: connection },
+        },
+        { name: "modern", url: `${origin}/modern`, description: "Modern test", headers: {} },
+      ],
+    });
+    expect(configured.status, JSON.stringify(configured.body)).toBe(200);
     for (const [index, orb] of orbs.entries()) {
       expect(
         (
@@ -491,7 +527,7 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
               requests.some(
                 (request) => request.matchedRuleIndex === 0 && request.status === 200,
               ) &&
-              requests.some((request) => request.matchedRuleIndex === 2 && request.status === 200)
+              JSON.stringify(history).includes("OAUTH_DONE_7")
               ? true
               : null;
           },
@@ -512,12 +548,8 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
           async () => {
             const history = (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`))
               .body as unknown as DisplayHistoryView;
-            const requests = (await fakeControl(fake.sessionKey, "/requests")) as unknown as {
-              matchedRuleIndex: number;
-              status: number;
-            }[];
             return hasMcpAlert(history, "connected") &&
-              requests.some((request) => request.matchedRuleIndex === 5 && request.status === 200)
+              JSON.stringify(history).includes("OAUTH_RETRY_DONE")
               ? true
               : null;
           },
@@ -594,11 +626,9 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
     await message(orbs[0], 6);
     expect(acceptedCalls).toBe(5);
     await page.goto(configUrl);
-    await page.locator(".project-mcp-connection > summary").click();
+    await oauthSummary.click();
     await page.getByRole("button", { name: "disconnect", exact: true }).click();
-    await expectPage(page.locator(".project-mcp-connection > summary")).toContainText(
-      "authorization required",
-    );
+    await expectPage(oauthSummary).toContainText("authorization required");
     expect((await runtimeTokenRequest(orbs[0])).status).toBe(401);
     const history = JSON.stringify(
       (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orbs[0]}/history`)).body,
@@ -613,9 +643,25 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
     expect(
       JSON.stringify((await api(cp.baseUrl, "GET", `/api/v1/projects/${project}/mcp`)).body),
     ).not.toContain("fixture-access-");
+    expect(modernCalls).toEqual([{ name: "read", arguments: {} }]);
+    expect(modernRequests.some((request) => request.method === "server/discover")).toBe(true);
+    expect(modernRequests.some((request) => request.method === "tools/list")).toBe(true);
+    for (const request of modernRequests) {
+      expect(["server/discover", "tools/list", "tools/call"]).toContain(request.method);
+      expect(request.headers["mcp-session-id"]).toBeUndefined();
+      expect(request.headers["mcp-protocol-version"]).toBe("2026-07-28");
+      expect(request.headers["mcp-method"]).toBe(request.method);
+      expect(request.params?.["_meta"]).toMatchObject({
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientInfo": { name: "pi-orb", version: "1" },
+        "io.modelcontextprotocol/clientCapabilities": {},
+      });
+    }
   } catch (error) {
     try {
       console.error("OAuth bootstrap evidence", bootstrapEvidence);
+      console.error("Modern MCP requests", modernRequests);
+      console.error("Modern MCP calls", modernCalls);
       console.error(cp.logs.join(""));
       console.error(await page.locator("body").innerText());
     } catch {
