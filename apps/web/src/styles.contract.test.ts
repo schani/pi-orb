@@ -76,8 +76,8 @@ describe("orb alerts", () => {
     const band = rule(".alert-band");
     expect(css).toMatch(/(?:^|\n)\.rec-alert \{\s*padding: 4px 0;/);
     expect(band).toContain("padding: 8px 12px");
-    expect(band).toContain("background: var(--bad)");
-    expect(band).toContain("color: var(--w)");
+    expect(band).toContain("background: var(--alert)");
+    expect(band).toContain("color: var(--on-alert)");
     expect(band).toContain("white-space: pre-wrap");
     expect(band).toContain("overflow-wrap: anywhere");
     expect(rule(".orb-entry-alert")).not.toContain("background");
@@ -298,8 +298,8 @@ describe("orb workspace layout contract", () => {
   it("uses gutter-free inverted user paper and plain white orb paper", () => {
     expect(rule(".rec-you,\n.rec-orb,\n.rec-alert")).toContain("display: block");
     const user = rule(".rec-you");
-    expect(user).toContain("background: var(--k)");
-    expect(user).toContain("color: var(--w)");
+    expect(user).toContain("background: var(--you)");
+    expect(user).toContain("color: var(--on-you)");
     expect(user).toContain("font-weight: 400");
     expect(rule(".rec-you .chat-markdown :not(pre) > code")).toContain("color: var(--k)");
     expect(rule(".rec-you .markdown-code-block")).toContain("background: var(--w)");
@@ -395,7 +395,7 @@ describe("orb workspace layout contract", () => {
     expect(rule(".rec")).toContain("grid-template-columns: 32px minmax(0, 1fr)");
     expect(rule(".rec-you,\n.rec-orb,\n.rec-alert")).toContain("display: block");
     expect(rule(".busy-indicator")).toContain("padding: 0 12px");
-    expect(rule(".rec-q")).toContain("border-left: 2px dotted var(--w)");
+    expect(rule(".rec-q")).toContain("border-left: 2px dotted var(--on-you)");
     expect(rule(".tag")).toContain("border: 1px solid currentcolor");
   });
 
@@ -528,8 +528,15 @@ it("reserves native keyboard chrome only for the focused phone editor", () => {
 
 describe("Signal / Boards system", () => {
   const rootBlock = /:root \{[^}]*\}/.exec(css)?.[0] ?? "";
-  const body = css.replace(rootBlock, "").replace(/\/\*[\s\S]*?\*\//g, "");
-  const declared = (name: string) => new RegExp(`${name}: ([^;]+);`).exec(rootBlock)?.[1]?.trim();
+  const darkBlock =
+    /@media \(prefers-color-scheme: dark\) \{\s*:root \{[^}]*\}\s*\}/.exec(css)?.[0] ?? "";
+  const body = css
+    .replace(rootBlock, "")
+    .replace(darkBlock, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+  const value = (block: string, name: string) =>
+    new RegExp(`${name}: ([^;]+);`).exec(block)?.[1]?.trim();
+  const declared = (name: string) => value(rootBlock, name);
 
   it("keeps color literals in :root", () => {
     expect(body.match(/#[0-9a-f]{3,8}\b|rgba?\(/gi)).toBeNull();
@@ -592,7 +599,7 @@ describe("Signal / Boards system", () => {
     expect(declared("--st-archived")).toBe("var(--g3)");
     expect(declared("--st-transitional")).toBe("var(--warn)");
     expect(declared("--ok-bg")).toBeUndefined();
-    expect(rule(".alert-band")).toContain("background: var(--bad)");
+    expect(rule(".alert-band")).toContain("background: var(--alert)");
     expect(rule(".activity-strip-tip")).toContain("background: var(--w)");
     expect(rule(".activity-strip-tip")).toContain("border: 1px solid var(--k)");
   });
@@ -622,14 +629,67 @@ describe("Signal / Boards system", () => {
     expect(css).not.toContain(".subagent-message-notice > summary:focus-visible");
   });
 
-  it("publishes renderer colors that match :root", () => {
-    expect(TOKENS.w).toBe(declared("--w"));
-    expect(TOKENS.k).toBe(declared("--k"));
-    expect(TOKENS.g1).toBe(declared("--g1"));
-    expect(TOKENS.g1x).toBe(declared("--g1x"));
-    expect(TOKENS.g2).toBe(declared("--g2"));
-    expect(TOKENS.g3).toBe(declared("--g3"));
-    expect(TOKENS.bad).toBe(declared("--bad"));
+  it("publishes renderer colors that match both themes", () => {
+    for (const name of ["w", "k", "g1", "g1x", "g2", "g3", "bad"] as const) {
+      expect(TOKENS.light[name]).toBe(declared(`--${name}`));
+      expect(TOKENS.dark[name]).toBe(value(darkBlock, `--${name}`));
+    }
+  });
+
+  describe("dark theme", () => {
+    const hex = (name: string) => value(darkBlock, name) ?? "";
+    const luminance = (color: string) => {
+      const digits = color.slice(1);
+      const full = digits.length === 3 ? digits.replace(/./g, "$&$&") : digits;
+      const [r = 0, g = 0, b = 0] = [0, 2, 4]
+        .map((at) => Number.parseInt(full.slice(at, at + 2), 16) / 255)
+        .map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const contrast = (a: string, b: string) => {
+      const [high = 0, low = 0] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+      return (high + 0.05) / (low + 0.05);
+    };
+
+    it("follows the desktop setting", () => {
+      expect(rootBlock).toContain("color-scheme: light dark");
+      expect(darkBlock).not.toBe("");
+    });
+
+    it("keeps text AA on every surface", () => {
+      for (const surface of ["--w", "--g1", "--g1x", "--you"]) {
+        for (const text of ["--k", "--g3"]) {
+          expect(contrast(hex(text), hex(surface)), `${text} on ${surface}`).toBeGreaterThan(4.5);
+        }
+      }
+      for (const surface of ["--w", "--g1", "--g1x"]) {
+        for (const text of ["--ok", "--warn", "--bad"]) {
+          expect(contrast(hex(text), hex(surface)), `${text} on ${surface}`).toBeGreaterThan(4.5);
+        }
+      }
+      expect(contrast(hex("--bad"), hex("--bad-bg"))).toBeGreaterThan(4.5);
+      for (const fill of ["--g3", "--ok", "--warn", "--bad"]) {
+        expect(contrast(hex("--w"), hex(fill)), `paper on ${fill}`).toBeGreaterThan(4.5);
+      }
+      for (const chart of [1, 2, 3, 4, 5, 6]) {
+        expect(contrast(hex(`--chart-${chart}`), hex("--w"))).toBeGreaterThan(3);
+      }
+    });
+
+    it("overrides only the surfaces that are not a plain flip", () => {
+      expect(hex("--you")).toBe("#2b2b2b");
+      expect(hex("--alert")).toBe(declared("--bad"));
+      expect(value(darkBlock, "--tile-gray")).toBeUndefined();
+      expect(value(darkBlock, "--image-backing")).toBeUndefined();
+      expect(declared("--tile-gray")).toBe("#555");
+      expect(declared("--image-backing")).toBe("#fff");
+      expect(rule(".rec-you")).toContain("background: var(--you)");
+      expect(rule(".alert-band")).toContain("background: var(--alert)");
+      expect(rule(".msg-image")).toContain("background: var(--image-backing)");
+      expect(rule(".tool-image-thumbnail")).toContain("background: var(--image-backing)");
+      expect(rule(".tool-image-full")).toContain("background: var(--image-backing)");
+      expect(rule(".composer-attachment img")).toContain("background: var(--image-backing)");
+    });
   });
 
   it("colors favicon tiles from the same tokens", () => {

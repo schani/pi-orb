@@ -17,7 +17,7 @@ export function HarnessIcon({ harness }: { harness: HarnessKind }) {
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      <rect x="1" y="1" width="14" height="14" rx="2" fill="var(--g3)" stroke="none" />
+      <rect x="1" y="1" width="14" height="14" rx="2" fill="var(--tile-gray)" stroke="none" />
       <path d="M4 5h8M6 5v3.5Q6 10 5 11M10 5v5q0 1 1 1" />
     </svg>
   ) : (

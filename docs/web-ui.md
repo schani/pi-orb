@@ -1,12 +1,22 @@
 # Web UI
 
-The browser app in `apps/web` serves one person who already knows the product. It is light-only, has no app header or brand line, and never explains itself. Feature-specific UI lives with its feature: terminal `docs/terminal.md`, uploads and drag-and-drop `docs/workspace-uploads.md`, alerts `docs/orb-alerts.md`, sleep `docs/lifecycle.md`, deletion/archival `docs/teardown.md`, secrets `docs/credentials.md`, MCP settings `docs/mcp.md`, Claude sign-in `docs/claude.md`, usage `docs/model-usage.md`, previews and hosted files `docs/http-exposure.md`.
+The browser app in `apps/web` serves one person who already knows the product. It follows the desktop's light or dark setting, has no app header or brand line, and never explains itself. Feature-specific UI lives with its feature: terminal `docs/terminal.md`, uploads and drag-and-drop `docs/workspace-uploads.md`, alerts `docs/orb-alerts.md`, sleep `docs/lifecycle.md`, deletion/archival `docs/teardown.md`, secrets `docs/credentials.md`, MCP settings `docs/mcp.md`, Claude sign-in `docs/claude.md`, usage `docs/model-usage.md`, previews and hosted files `docs/http-exposure.md`.
 
 ## Visual system
 
 The design language is **Signal / Boards**: white paper, black ink, rules instead of boxes. The dashboard says what every orb is doing at a glance; the transcript is for reading. Rejected: the earlier serif "Reading Room" design (warm palette, turn gutter, rounded panels), made for introducing a product to a stranger.
 
 The [pi-orb Design System](https://app.paper.design/file/01M6VFPKDT6AWJ8M92A517NQGH) in Paper is the reference: tokens, components, screens and every resolution, drawn as code against the system. `apps/web/src/styles.contract.test.ts` holds the code to its scales. One banner, one tag, one paper tooltip, one close button.
+
+**Dark mode (decided 2026-11-08).** The theme follows `prefers-color-scheme`, live, with no setting and nothing stored; a stored toggle was rejected. Dark redefines the `:root` tokens in one media block in `styles.css`, so paper `--w` is `#000` and ink `--k` is `#fff` (`#111`/`#f0f0f0` rejected: the system's paper and ink are absolutes, and it stays a two-token change if `#000` smears on a phone), with grays, signal hues and chart hues restated to keep AA. Five things are not a flip, drawn on the Paper file's Dark page against what was rejected:
+
+- The user turn fills `--you #2b2b2b` with `--on-you` text; a full-width white block outshone the transcript.
+- `--alert` keeps the light red `#b42318` with white text; the dark `--bad` is for text and small marks and glared at full width.
+- Status tiles are the favicon SVGs and the Pi tile uses the constant `--tile-gray`, so a mark means one thing in both themes. The gray tile is 2.8:1 on black; its white glyph carries it.
+- Screenshots and attachments keep the constant `--image-backing #fff`, since black marks on a transparent background vanish on black paper.
+- `--scrim` stays black, at 60%; an ink scrim lit the page up behind dialogs.
+
+Charts need no re-render: Vega writes `var(--…)` colors into SVG attributes. Mermaid derives colors from what it is given, so it takes resolved values from `apps/web/src/lib/design-tokens.ts` and re-renders on a scheme change (`useColorScheme`). The pre-paint `color-scheme` meta, per-scheme `theme-color` metas and a black status-bar band keep the browser chrome in step; `manifest.webmanifest` has no per-scheme colors, so an installed app's launch splash stays white. Presentation only: no new state, persistence or telemetry.
 
 **Space and size.** Page gutter 12, inner gutter 8; scale 2 4 6 8 12 16 20 24. Row 20, bar 24, dialog head 32, touch 44. Phone breakpoint 600.
 

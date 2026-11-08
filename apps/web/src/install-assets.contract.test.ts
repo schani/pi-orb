@@ -21,7 +21,13 @@ describe("home-screen install assets", () => {
     expect(html).toContain('name="apple-mobile-web-app-capable" content="yes"');
     expect(html).toContain('name="mobile-web-app-capable" content="yes"');
     expect(html).toContain('name="apple-mobile-web-app-title" content="pi-orb"');
-    expect(html).toContain('name="theme-color" content="#ffffff"');
+    expect(html).toContain('name="color-scheme" content="light dark"');
+    expect(html).toContain(
+      'name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff"',
+    );
+    expect(html).toContain(
+      'name="theme-color" media="(prefers-color-scheme: dark)" content="#000000"',
+    );
     expect(html).not.toContain("viewport-fit=");
     expect(html).not.toContain("apple-mobile-web-app-status-bar-style");
     expect(html).toContain(
@@ -54,6 +60,13 @@ describe("home-screen install assets", () => {
       "background-clip": "text",
       "pointer-events": "none",
     });
+  });
+
+  it("paints the status-bar band black in dark mode", () => {
+    const html = readFileSync(join(webRoot, "index.html"), "utf8");
+    expect(html).toMatch(
+      /@media \(prefers-color-scheme: dark\)\s*\{\s*\.status-bar-band\s*\{\s*background-color: #000000;/,
+    );
   });
 
   it("launches the dashboard under a stable app identity", () => {

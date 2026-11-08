@@ -47,11 +47,11 @@
 }
 
 /* Signal / Boards — reading and code faces, white paper, black rules, three signal
-   hues on paper only. Light only, by product decision. Prototype:
+   hues on paper only. Dark follows the desktop setting. Prototype:
    design-prototypes/signal-boards.html. */
 
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
   --w: #fff;
   --k: #000;
   --g1: #f2f2f2; /* fills, insets */
@@ -65,6 +65,18 @@
   --scrim: rgb(0 0 0 / 35%);
   --lightbox: rgb(0 0 0 / 72%);
   --veil: #ffffffbf;
+  --you: var(--k);
+  --on-you: var(--w);
+  --alert: var(--bad);
+  --on-alert: var(--w);
+  --tile-gray: #555; /* tiles are the favicon marks, in both themes */
+  --image-backing: #fff; /* transparent images assume white, in both themes */
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-3: #4a3aa7;
+  --chart-4: #1baf7a;
+  --chart-5: #c2418a;
+  --chart-6: #7a5c00;
   --st-busy: var(--ok);
   --st-running: var(--ok);
   --st-transitional: var(--warn);
@@ -79,6 +91,33 @@
   --text-size: 13px;
   --row: 20px;
   --bar: 24px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --w: #000;
+    --k: #fff;
+    --g1: #1a1a1a;
+    --g1x: #333;
+    --g2: #666;
+    --g3: #aaa;
+    --ok: #46bd68;
+    --warn: #e3a33b;
+    --bad: #ff7a6b;
+    --bad-bg: #3a1612;
+    --scrim: rgb(0 0 0 / 60%);
+    --veil: #000000bf;
+    --you: #2b2b2b;
+    --on-you: var(--k);
+    --alert: #b42318;
+    --on-alert: var(--k);
+    --chart-1: #5b9eea;
+    --chart-2: #f08050;
+    --chart-3: #a594f0;
+    --chart-4: #2fc08e;
+    --chart-5: #e06bab;
+    --chart-6: #c9a227;
+  }
 }
 
 * {
@@ -1918,8 +1957,8 @@ body:has(.orb-page) {
 
 .alert-band {
   padding: 8px 12px;
-  background: var(--bad);
-  color: var(--w);
+  background: var(--alert);
+  color: var(--on-alert);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -1936,10 +1975,10 @@ body:has(.orb-page) {
 
 .rec-you {
   padding: 8px 12px;
-  color: var(--w);
-  background: var(--k);
-  border-top: 1px solid var(--k);
-  border-bottom: 1px solid var(--k);
+  color: var(--on-you);
+  background: var(--you);
+  border-top: 1px solid var(--you);
+  border-bottom: 1px solid var(--you);
   font-weight: 400;
 }
 
@@ -1949,8 +1988,8 @@ body:has(.orb-page) {
 }
 
 .rec-q {
-  color: var(--w);
-  border-left: 2px dotted var(--w);
+  color: var(--on-you);
+  border-left: 2px dotted var(--on-you);
 }
 
 .peer-body {
@@ -1981,6 +2020,7 @@ body:has(.orb-page) {
 
 .msg-image {
   display: block;
+  background: var(--image-backing);
   max-width: min(100%, 24rem);
   max-height: 20rem;
   margin: 4px 0 0;
@@ -2263,16 +2303,16 @@ pre,
 
 .rec-you .chat-markdown blockquote,
 .rec-you .muted {
-  color: var(--w);
+  color: var(--on-you);
 }
 
 .rec-you .chat-markdown blockquote,
 .rec-you .markdown-table-scroll :is(th, td) {
-  border-color: var(--w);
+  border-color: var(--on-you);
 }
 
 .rec-you .msg-image {
-  border-color: var(--w);
+  border-color: var(--on-you);
 }
 
 .rec-you .error-text {
@@ -2716,6 +2756,7 @@ pre,
 
 .tool-image-thumbnail {
   display: block;
+  background: var(--image-backing);
   width: auto;
   max-width: min(100%, 32rem);
   max-height: 22rem;
@@ -2754,6 +2795,7 @@ pre,
 }
 
 .tool-image-full {
+  background: var(--image-backing);
   display: block;
   width: auto;
   height: auto;
@@ -3213,7 +3255,7 @@ pre,
 .composer-attachment img {
   max-width: 8rem;
   max-height: 4.5rem;
-  background: var(--w);
+  background: var(--image-backing);
   border: 1px solid var(--k);
 }
 
