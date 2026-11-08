@@ -201,7 +201,7 @@ Not every layer is a target: for two-store features (PostgreSQL + secret store),
 2. Full entropy trace and configuration saved on failure.
 3. The saved trace reproduces the same failure.
 4. Replay is one test command.
-5. Assertions are invariants, not happy-path outputs.
+5. Assertions are invariants, not happy-path outputs. Required activity has a positive oracle: an at-most-one bound, matching cleanup count or empty collection predicate cannot prove an open or publication occurred. Establish successful baseline activity before interference; retain unrestricted post-baseline races alongside forced open/publication-frontier schedules. Cancellation after revocation may legitimately produce no further activity, but its typed result must be asserted.
 
 Core invariants: no cursor advance without its commit; stable native record IDs across pulls; no omitted complete records and no incomplete ones; idempotent retries; no host stop after a retryably failed pre-stop pull; at most one authoritative host per orb; no transition from failed health straight to idle stop.
 
