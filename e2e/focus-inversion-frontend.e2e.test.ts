@@ -78,6 +78,11 @@ it.each(["chromium", "webkit"] as const)(
         );
         await expectFocus(page, head.locator("button.danger"), BAD, PAPER);
         await expectFocus(page, page.locator(".project-archive > summary").first(), INK, PAPER);
+        const stopped = page.locator(".orb-entry-stopped .orb-entry-link").first();
+        await stopped.hover();
+        await expect(stopped).toHaveCSS("background-color", INK);
+        await expect(stopped).toHaveCSS("color", PAPER);
+        await page.mouse.move(0, 0);
         const form = page.locator(".new-project");
         const inputs = form.locator("input");
         await inputs.nth(0).fill("Focus");

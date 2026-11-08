@@ -1046,6 +1046,11 @@ a.project-new-orb-icon:hover {
   color: var(--g3);
 }
 
+/* Link hover inverts past the state gray. */
+.orb-entry-title > .orb-entry-link:hover {
+  color: var(--w);
+}
+
 /* archive shelf: the column's footer */
 .project-archive {
   flex: none;
