@@ -37,7 +37,7 @@ it("folds interleaved activity into dots that preview, open and overflow", async
   try {
     await gotoFrontendHistory(page, `${origin}/orbs/frontend-activity`, "frontend-activity");
     const strips = page.locator(".activity-strip");
-    await expectPage(strips).toHaveCount(2);
+    await expectPage(strips).toHaveCount(3);
     const first = strips.first();
     const dots = first.locator(".activity-strip-dot");
     await expectPage(dots).toHaveCount(35);
@@ -73,6 +73,47 @@ it("folds interleaved activity into dots that preview, open and overflow", async
     const shown = await overflow.locator(".activity-strip-dot").count();
     expect(more + shown).toBe(300);
     expect(more).toBeGreaterThan(0);
+
+    const restarts = strips.nth(2);
+    const restartDots = restarts.locator(".activity-strip-dot");
+    expect(
+      await restartDots.evaluateAll((elements) =>
+        elements.map((element) => element.getAttribute("data-step")?.[0]),
+      ),
+    ).toEqual([..."tstsrtssrtrtssrrts"]);
+    // The glyph occupies the success dot's 6px box at the same center as every dot.
+    expect(
+      await restarts.evaluate((element) => {
+        const boxes = [...element.querySelectorAll(".activity-strip-dot")].map((dot) => {
+          const button = dot.getBoundingClientRect();
+          const glyph = dot.querySelector("svg")?.getBoundingClientRect();
+          const before = dot.ownerDocument.defaultView?.getComputedStyle(dot, "::before");
+          return {
+            width: glyph?.width ?? Number.parseFloat(before?.width ?? ""),
+            height: glyph?.height ?? Number.parseFloat(before?.height ?? ""),
+            dx:
+              glyph === undefined ? 0 : Math.round(glyph.left + glyph.width / 2 - button.left - 6),
+            dy:
+              glyph === undefined ? 0 : Math.round(glyph.top + glyph.height / 2 - button.top - 10),
+          };
+        });
+        return [...new Set(boxes.map((box) => JSON.stringify(box)))];
+      }),
+    ).toEqual([
+      JSON.stringify({ width: 3, height: 3, dx: 0, dy: 0 }),
+      JSON.stringify({ width: 6, height: 6, dx: 0, dy: 0 }),
+    ]);
+    const restart = restarts.locator('[data-step="restart"]').first();
+    await restart.hover();
+    await expectPage(page.getByRole("tooltip")).toHaveText("restart · sleep finished");
+    await expectPage(page.locator(".activity-strip-tip-label")).toHaveCSS(
+      "color",
+      "rgb(242, 181, 68)",
+    );
+    await restart.click();
+    await expectPage(restarts.locator(".activity-strip-body > .record-custom")).toContainText(
+      "Scheduled sleep finished.",
+    );
   } finally {
     await page.close();
   }
