@@ -7,7 +7,6 @@ import type {
   LineChart,
   TimelineChart,
 } from "@pi-orb/protocol";
-import { TOKENS } from "./design-tokens.ts";
 
 /** Pure Vega-Lite builders for transcript charts (docs/web-ui.md, transcript charts). */
 
@@ -21,18 +20,19 @@ export interface VegaSpec extends VegaLayer {
   params?: { name: string; value: unknown }[];
 }
 
-const PAPER = TOKENS.w;
-const INK = TOKENS.k;
-const MUTED = TOKENS.g3;
-const HAIRLINE = TOKENS.g2;
-const GRID = TOKENS.g1x;
-const FILL = TOKENS.g1;
-const PALE = TOKENS.g1x;
-const BAD = TOKENS.bad;
+/** Vega writes these into SVG attributes, where the page's theme resolves them live. */
+const PAPER = "var(--w)";
+const INK = "var(--k)";
+const MUTED = "var(--g3)";
+const HAIRLINE = "var(--g2)";
+const GRID = "var(--g1x)";
+const FILL = "var(--g1)";
+const PALE = "var(--g1x)";
+const BAD = "var(--bad)";
 const INK_COLORS = [INK, MUTED, MUTED];
 const INK_DASH = [[], [6, 3], [1.5, 3]];
 /** Validated against #fff for colour-blind and normal-vision separation across all pairs. */
-const HUES = ["#2a78d6", "#eb6834", "#4a3aa7", "#1baf7a", "#c2418a", "#7a5c00"];
+const HUES = [1, 2, 3, 4, 5, 6].map((index) => `var(--chart-${index})`);
 const LABEL_GAP = 13;
 /** Opacity of lines that are not the isolated series. */
 const DIMMED = 0.12;

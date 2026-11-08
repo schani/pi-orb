@@ -60,17 +60,17 @@ const line = (count: number, extra: Partial<LineChart> = {}): LineChart => ({
 
 describe("series styles", () => {
   it("draws up to three series in ink weights and dashes", () => {
-    expect(seriesStyles(1)).toEqual({ colors: ["#000"], dash: [[]] });
+    expect(seriesStyles(1)).toEqual({ colors: ["var(--k)"], dash: [[]] });
     expect(seriesStyles(3)).toEqual({
-      colors: ["#000", "#555", "#555"],
+      colors: ["var(--k)", "var(--g3)", "var(--g3)"],
       dash: [[], [6, 3], [1.5, 3]],
     });
   });
 
   it("switches four to six series to the validated hues in series order", () => {
-    expect(seriesStyles(4).colors).toEqual(["#2a78d6", "#eb6834", "#4a3aa7", "#1baf7a"]);
+    expect(seriesStyles(4).colors).toEqual([1, 2, 3, 4].map((n) => `var(--chart-${n})`));
     expect(seriesStyles(6)).toEqual({
-      colors: ["#2a78d6", "#eb6834", "#4a3aa7", "#1baf7a", "#c2418a", "#7a5c00"],
+      colors: [1, 2, 3, 4, 5, 6].map((n) => `var(--chart-${n})`),
       dash: [[], [], [], [], [], []],
     });
   });
@@ -502,7 +502,7 @@ describe("tooltip rows", () => {
       ["zone-0", "338 ms"],
       ["zone-2", "256 ms"],
     ]);
-    expect(rows[1]).toMatchObject({ color: "#555", dash: [6, 3] });
+    expect(rows[1]).toMatchObject({ color: "var(--g3)", dash: [6, 3] });
   });
 });
 

@@ -1,6 +1,7 @@
 import { ResultAsync } from "neverthrow";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { MermaidRenderError } from "../lib/mermaid-render.ts";
+import { useColorScheme } from "../lib/use-color-scheme.ts";
 import { Icon } from "./Icons.tsx";
 
 type Diagram =
@@ -26,6 +27,7 @@ function failureText(error: MermaidRenderError): string {
 
 /** A closed ```mermaid fence: the diagram on the code block's board, its source one toggle away. */
 export function MermaidDiagram({ source, copyButton }: { source: string; copyButton: ReactNode }) {
+  const scheme = useColorScheme();
   const [diagram, setDiagram] = useState<Diagram>({ type: "pending" });
   const [showSource, setShowSource] = useState(false);
   const [open, setOpen] = useState(false);
@@ -36,7 +38,7 @@ export function MermaidDiagram({ source, copyButton }: { source: string; copyBut
     let active = true;
     const started = performance.now();
     void loadRenderer()
-      .andThen((renderer) => renderer.renderMermaid(source))
+      .andThen((renderer) => renderer.renderMermaid(source, scheme))
       .match(
         (svg) => {
           if (!active) return;
@@ -58,7 +60,7 @@ export function MermaidDiagram({ source, copyButton }: { source: string; copyBut
     return () => {
       active = false;
     };
-  }, [source]);
+  }, [source, scheme]);
 
   useEffect(() => {
     if (open) dialog.current?.showModal();

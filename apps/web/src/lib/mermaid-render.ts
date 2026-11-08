@@ -1,6 +1,6 @@
-import mermaid from "mermaid";
+import mermaid, { type MermaidConfig } from "mermaid";
 import { ResultAsync } from "neverthrow";
-import { TOKENS } from "./design-tokens.ts";
+import { type ColorScheme, TOKENS } from "./design-tokens.ts";
 
 /** Browser-only adapter around Mermaid; loaded lazily so Mermaid stays out of the main bundle. */
 
@@ -10,7 +10,7 @@ export type MermaidRenderError =
 
 const MONO = '"JetBrains Mono", monospace';
 
-mermaid.initialize({
+const configFor = (tokens: (typeof TOKENS)[ColorScheme]): MermaidConfig => ({
   startOnLoad: false,
   securityLevel: "strict",
   theme: "base",
@@ -21,47 +21,47 @@ mermaid.initialize({
   themeVariables: {
     fontFamily: MONO,
     fontSize: "12px",
-    background: TOKENS.w,
-    primaryColor: TOKENS.w,
-    primaryTextColor: TOKENS.k,
-    primaryBorderColor: TOKENS.k,
-    secondaryColor: TOKENS.g1,
-    tertiaryColor: TOKENS.w,
-    lineColor: TOKENS.k,
-    textColor: TOKENS.k,
-    mainBkg: TOKENS.w,
-    nodeBorder: TOKENS.k,
-    clusterBkg: TOKENS.g1,
-    clusterBorder: TOKENS.g2,
-    edgeLabelBackground: TOKENS.w,
-    actorBkg: TOKENS.w,
-    actorBorder: TOKENS.k,
-    actorTextColor: TOKENS.k,
-    actorLineColor: TOKENS.g2,
-    signalColor: TOKENS.k,
-    signalTextColor: TOKENS.k,
-    labelBoxBkgColor: TOKENS.k,
-    labelBoxBorderColor: TOKENS.k,
-    labelTextColor: TOKENS.w,
-    loopTextColor: TOKENS.k,
-    noteBkgColor: TOKENS.g1,
-    noteBorderColor: TOKENS.g2,
-    noteTextColor: TOKENS.k,
-    activationBkgColor: TOKENS.g1,
-    activationBorderColor: TOKENS.k,
+    background: tokens.w,
+    primaryColor: tokens.w,
+    primaryTextColor: tokens.k,
+    primaryBorderColor: tokens.k,
+    secondaryColor: tokens.g1,
+    tertiaryColor: tokens.w,
+    lineColor: tokens.k,
+    textColor: tokens.k,
+    mainBkg: tokens.w,
+    nodeBorder: tokens.k,
+    clusterBkg: tokens.g1,
+    clusterBorder: tokens.g2,
+    edgeLabelBackground: tokens.w,
+    actorBkg: tokens.w,
+    actorBorder: tokens.k,
+    actorTextColor: tokens.k,
+    actorLineColor: tokens.g2,
+    signalColor: tokens.k,
+    signalTextColor: tokens.k,
+    labelBoxBkgColor: tokens.k,
+    labelBoxBorderColor: tokens.k,
+    labelTextColor: tokens.w,
+    loopTextColor: tokens.k,
+    noteBkgColor: tokens.g1,
+    noteBorderColor: tokens.g2,
+    noteTextColor: tokens.k,
+    activationBkgColor: tokens.g1,
+    activationBorderColor: tokens.k,
   },
   themeCSS: `
     rect, .node rect, .actor, .note, .labelBox { rx: 0 !important; ry: 0 !important; }
     .actor { stroke-width: 1px; }
-    .actor-you { fill: ${TOKENS.k}; stroke: ${TOKENS.k}; }
-    text.actor-you-text, text.actor-you-text > tspan { fill: ${TOKENS.w} !important; }
-    .actor-line { stroke: ${TOKENS.g2}; stroke-dasharray: 2 3; }
-    .loopLine { stroke: ${TOKENS.k}; stroke-width: 1px; stroke-dasharray: 3 3; }
-    .loopText, .loopText > tspan { fill: ${TOKENS.k}; font-weight: 700; }
-    .labelText, .labelText > tspan { fill: ${TOKENS.w}; font-weight: 700; letter-spacing: .08em; }
-    .edgeLabel, .edgeLabel p { background: ${TOKENS.w}; color: ${TOKENS.g3}; }
+    .actor-you { fill: ${tokens.k}; stroke: ${tokens.k}; }
+    text.actor-you-text, text.actor-you-text > tspan { fill: ${tokens.w} !important; }
+    .actor-line { stroke: ${tokens.g2}; stroke-dasharray: 2 3; }
+    .loopLine { stroke: ${tokens.k}; stroke-width: 1px; stroke-dasharray: 3 3; }
+    .loopText, .loopText > tspan { fill: ${tokens.k}; font-weight: 700; }
+    .labelText, .labelText > tspan { fill: ${tokens.w}; font-weight: 700; letter-spacing: .08em; }
+    .edgeLabel, .edgeLabel p { background: ${tokens.w}; color: ${tokens.g3}; }
     .flowchart-link { stroke-width: 1px; }
-    marker path { fill: ${TOKENS.k}; stroke: ${TOKENS.k}; }
+    marker path { fill: ${tokens.k}; stroke: ${tokens.k}; }
   `,
   flowchart: {
     useMaxWidth: false,
@@ -85,6 +85,14 @@ mermaid.initialize({
     diagramMarginY: 4,
   },
 });
+
+let configured: ColorScheme | null = null;
+
+function configure(scheme: ColorScheme): void {
+  if (configured === scheme) return;
+  mermaid.initialize(configFor(TOKENS[scheme]));
+  configured = scheme;
+}
 
 let sequence = 0;
 
@@ -115,8 +123,12 @@ function boxActors(svg: SVGSVGElement) {
 }
 
 /** Renders to SVG markup sized by `--mermaid-width`, its natural width. */
-export function renderMermaid(source: string): ResultAsync<string, MermaidRenderError> {
+export function renderMermaid(
+  source: string,
+  scheme: ColorScheme,
+): ResultAsync<string, MermaidRenderError> {
   const id = `pi-mermaid-${++sequence}`;
+  configure(scheme);
   return ResultAsync.fromPromise(mermaid.parse(source), (cause): MermaidRenderError => {
     const line = /line (\d+)/.exec(message(cause))?.[1];
     return { type: "mermaid_parse_failed", line: line === undefined ? null : Number(line) };
