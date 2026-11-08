@@ -1,4 +1,6 @@
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { defineTool, hook, ToolTask } from "@earendil-works/pi-durable";
+import { CodemodeRunDoc } from "@earendil-works/pi-durable/codemode";
 import { errAsync, okAsync } from "neverthrow";
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
@@ -40,7 +42,8 @@ describe("native Durable codemode integration", () => {
           description: "record",
           parameters: Type.Object({ secret: Type.String() }),
           replay: "safe",
-          execute: async (_args, api) => {
+          execute: async (args, api) => {
+            expect(args).toEqual({ secret: "CANARY_SECRET" });
             identities.push(api.callId);
             return { output: [{ type: "text", text: "recorded" }] };
           },
@@ -52,10 +55,89 @@ describe("native Durable codemode integration", () => {
       const result = await fixture.run('text(await tools.record({secret:"CANARY_SECRET"}));');
       expect(result.isError).toBe(false);
       expect(identities).toEqual([expect.stringMatching(/\/c1$/)]);
-      expect(result.details).toMatchObject({ calls: [{ args: '["secret"]', status: "ok" }] });
+      expect(result.output).toContainEqual({ type: "text", text: "recorded" });
+      expect(result.details).not.toHaveProperty("calls");
+      expect(result.details).not.toHaveProperty("omittedCalls");
       expect(JSON.stringify(result.details)).not.toContain("CANARY_SECRET");
       expect(await fixture.replay()).toEqual(result);
       expect(identities).toHaveLength(1);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("omits unlaunched call previews before outcome persistence and cached replay", async () => {
+    const secret = "PRIVATE_UNLAUNCHED_CANARY";
+    let effects = 0;
+    const committed: unknown[] = [];
+    const fixture = await openCodemodeHarness(
+      new CallableCatalog([
+        defineTool({
+          name: "seed",
+          description: "seed",
+          parameters: Type.Object({}),
+          execute: async () => ({ output: [{ type: "text", text: secret }] }),
+        }),
+        defineTool({
+          name: "unlaunched",
+          description: "must not launch",
+          parameters: Type.Object({ secret: Type.String() }),
+          execute: async () => {
+            effects++;
+            return { output: [] };
+          },
+        }),
+      ]),
+      {
+        holdForReplay: true,
+        beforeCommit: async (tx, api) => {
+          const result = (await tx.doc(CodemodeRunDoc, api.taskId)).result;
+          if (result !== undefined) committed.push(JSON.parse(JSON.stringify(result)));
+        },
+      },
+    );
+    try {
+      const source =
+        'const secret = await tools.seed({}); tools.unlaunched({secret}); throw new Error("public failure");';
+      const result = await fixture.run(source);
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.output)).toContain("public failure");
+      expect(effects).toBe(0);
+      expect(committed).not.toHaveLength(0);
+      for (const outcome of committed) expect(outcome).toEqual(result);
+      expect(await fixture.replay()).toEqual(result);
+      expect(result.details).not.toHaveProperty("calls");
+      expect(result.details).not.toHaveProperty("omittedCalls");
+      expect(JSON.stringify(result)).not.toMatch(/PRIVATE_UNLAUNCHED_CANARY|argumentKeys/);
+      await fixture.settle();
+      const entries = await fixture.storage.scanEntries(
+        { conversationId: fixture.root.id },
+        100,
+        undefined,
+        BACKGROUND_CONTEXT,
+      );
+      const messages = entries.items.flatMap((entry) => entry.model ?? []);
+      expect(messages).toContainEqual(
+        expect.objectContaining({
+          role: "toolResult",
+          toolName: "codemode",
+          details: result.details,
+          content: result.output,
+        }),
+      );
+      expect(messages).toContainEqual(
+        expect.objectContaining({
+          role: "assistant",
+          content: expect.arrayContaining([
+            expect.objectContaining({
+              type: "toolCall",
+              name: "codemode",
+              arguments: { code: source },
+            }),
+          ]),
+        }),
+      );
+      expect(effects).toBe(0);
     } finally {
       await fixture.close();
     }
@@ -163,7 +245,7 @@ describe("native Durable codemode integration", () => {
     }
   });
 
-  it("bounds public nested summaries without dropping native calls", async () => {
+  it("omits unused nested summaries without dropping native calls", async () => {
     let effects = 0;
     const fixture = await openCodemodeHarness(
       new CallableCatalog([
@@ -182,8 +264,8 @@ describe("native Durable codemode integration", () => {
       const result = await fixture.run("for(let i=0;i<70;i++) await tools.small({});");
       expect(result.isError).toBe(false);
       expect(effects).toBe(70);
-      expect(result.details).toMatchObject({ omittedCalls: 6 });
-      expect((result.details as { calls: unknown[] }).calls).toHaveLength(64);
+      expect(result.details).not.toHaveProperty("calls");
+      expect(result.details).not.toHaveProperty("omittedCalls");
     } finally {
       await fixture.close();
     }
