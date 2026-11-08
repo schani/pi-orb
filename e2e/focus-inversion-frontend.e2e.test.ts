@@ -156,7 +156,7 @@ it.each(["chromium", "webkit"] as const)(
             "beforebegin",
             `<div class="project-config-tabs" role="tablist"><button role="tab" aria-selected="true">A</button></div>
             <nav class="usage-periods"><button aria-pressed="true">7d</button></nav>
-            <article class="rec rec-you"><div class="chat-markdown"><p><a class="you-link" href="#you">you</a></p></div></article>
+            <article class="rec rec-you"><div class="chat-markdown"><p><a class="you-link" href="#you">you</a></p><section class="markdown-table-scroll" tabindex="0"><table><thead><tr><th>A</th></tr></thead><tbody><tr><td>1</td></tr></tbody></table></section></div></article>
             <a class="app-search-result active" href="#found"><span class="app-search-age">1h</span></a>
             <div class="command-picker" style="position: static"><button type="button" class="selected">/model</button></div>`,
           );
@@ -164,6 +164,7 @@ it.each(["chromium", "webkit"] as const)(
         await expectFocus(page, page.locator(".project-config-tabs > button"), GRAY, PAPER);
         await expectFocus(page, page.locator(".usage-periods > button"), GRAY, PAPER);
         await expectFocus(page, page.locator("a.you-link"), GRAY, PAPER);
+        await expectFocus(page, page.locator(".rec-you .markdown-table-scroll"), GRAY, PAPER);
         await expectFocus(page, page.locator(".app-search-result.active"), GRAY, PAPER);
         await expectFocus(page, page.locator(".command-picker > button"), GRAY, PAPER);
         await page.close();
