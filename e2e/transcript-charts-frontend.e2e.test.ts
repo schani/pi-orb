@@ -186,7 +186,7 @@ it.each(["chromium", "webkit"] as const)(
           labelWidth: text?.width ?? 0,
           plotWidth: rule?.width ?? 0,
           right: text?.right ?? 0,
-          viewport: innerWidth,
+          viewport: node.ownerDocument.defaultView?.innerWidth ?? 0,
         };
       });
       expect(phoneGeometry.labelWidth).toBeLessThanOrEqual(141);
