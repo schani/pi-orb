@@ -334,6 +334,23 @@ button.danger:focus-visible {
   background: var(--bad) !important;
 }
 
+/* Already inverted: focus steps the ink to gray. */
+:is(
+  .ix-row-current,
+  .orb-header-actions > .icon-button[aria-pressed="true"],
+  .project-config-tabs [aria-selected="true"],
+  .usage-periods button[aria-pressed="true"],
+  .rec-you :is(a, .markdown-table-scroll),
+  .app-search-result.active,
+  .command-picker button.selected
+):focus-visible {
+  background: var(--g3) !important;
+}
+
+.ix-row-current:focus-visible {
+  border-bottom-color: var(--g3);
+}
+
 :focus-visible .chart-strip-spark {
   background: var(--w);
 }
@@ -1029,6 +1046,11 @@ a.project-new-orb-icon:hover {
 .orb-entry-archiving .orb-entry-link,
 .orb-entry-deleting .orb-entry-link {
   color: var(--g3);
+}
+
+/* Link hover inverts past the state gray. */
+.orb-entry-title > .orb-entry-link:hover {
+  color: var(--w);
 }
 
 /* archive shelf: the column's footer */
@@ -2407,7 +2429,7 @@ pre,
   animation: activity-strip-blink 1s steps(2) infinite;
 }
 
-/* A restart is a gold refresh glyph in the success dot's 6px box, centered like the dots. */
+/* A restart is an amber refresh glyph in the success dot's 6px box, centered like the dots. */
 .activity-strip-dot.activity-strip-restart::before {
   content: none;
 }
@@ -2417,7 +2439,7 @@ pre,
   flex: none;
   width: 6px;
   height: 6px;
-  color: var(--st-start);
+  color: var(--warn);
 }
 
 .activity-strip-dot:hover > .activity-strip-glyph,
@@ -2505,7 +2527,7 @@ pre,
 }
 
 .activity-strip-tip-label.activity-strip-restart {
-  color: #f2b544;
+  color: var(--warn);
 }
 
 .activity-rail-headline,

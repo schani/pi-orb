@@ -9,6 +9,7 @@ import { gotoFrontendFixture } from "./testkit/frontend-fixture.ts";
 const INK = "rgb(0, 0, 0)";
 const PAPER = "rgb(255, 255, 255)";
 const BAD = "rgb(180, 35, 24)";
+const GRAY = "rgb(85, 85, 85)";
 
 const colors = (target: Locator) =>
   target.evaluate((element) => {
@@ -77,6 +78,11 @@ it.each(["chromium", "webkit"] as const)(
         );
         await expectFocus(page, head.locator("button.danger"), BAD, PAPER);
         await expectFocus(page, page.locator(".project-archive > summary").first(), INK, PAPER);
+        const stopped = page.locator(".orb-entry-stopped .orb-entry-link").first();
+        await stopped.hover();
+        await expect(stopped).toHaveCSS("background-color", INK);
+        await expect(stopped).toHaveCSS("color", PAPER);
+        await page.mouse.move(0, 0);
         const form = page.locator(".new-project");
         const inputs = form.locator("input");
         await inputs.nth(0).fill("Focus");
@@ -141,6 +147,26 @@ it.each(["chromium", "webkit"] as const)(
           }, state);
           await expectFocus(page, call, INK, PAPER);
         }
+        await expectFocus(page, page.locator(".ix-row-current"), GRAY, PAPER);
+        const terminal = page.getByRole("button", { name: "Open terminal" });
+        await terminal.evaluate((element) => element.setAttribute("aria-pressed", "true"));
+        await expectFocus(page, terminal, GRAY, PAPER);
+        await strip.evaluate((element) => {
+          element.insertAdjacentHTML(
+            "beforebegin",
+            `<div class="project-config-tabs" role="tablist"><button role="tab" aria-selected="true">A</button></div>
+            <nav class="usage-periods"><button aria-pressed="true">7d</button></nav>
+            <article class="rec rec-you"><div class="chat-markdown"><p><a class="you-link" href="#you">you</a></p><section class="markdown-table-scroll" tabindex="0"><table><thead><tr><th>A</th></tr></thead><tbody><tr><td>1</td></tr></tbody></table></section></div></article>
+            <a class="app-search-result active" href="#found"><span class="app-search-age">1h</span></a>
+            <div class="command-picker" style="position: static"><button type="button" class="selected">/model</button></div>`,
+          );
+        });
+        await expectFocus(page, page.locator(".project-config-tabs > button"), GRAY, PAPER);
+        await expectFocus(page, page.locator(".usage-periods > button"), GRAY, PAPER);
+        await expectFocus(page, page.locator("a.you-link"), GRAY, PAPER);
+        await expectFocus(page, page.locator(".rec-you .markdown-table-scroll"), GRAY, PAPER);
+        await expectFocus(page, page.locator(".app-search-result.active"), GRAY, PAPER);
+        await expectFocus(page, page.locator(".command-picker > button"), GRAY, PAPER);
         await page.close();
 
         const phone = await browser.newPage({ viewport: { width: 390, height: 844 } });

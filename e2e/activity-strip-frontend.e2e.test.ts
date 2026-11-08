@@ -108,7 +108,11 @@ it("folds interleaved activity into dots that preview, open and overflow", async
     await expectPage(page.getByRole("tooltip")).toHaveText("restart · sleep finished");
     await expectPage(page.locator(".activity-strip-tip-label")).toHaveCSS(
       "color",
-      "rgb(242, 181, 68)",
+      "rgb(150, 97, 0)",
+    );
+    await expectPage(restart.locator(".activity-strip-glyph")).toHaveCSS(
+      "color",
+      "rgb(150, 97, 0)",
     );
     await restart.click();
     await expectPage(restarts.locator(".activity-strip-body > .record-custom")).toContainText(
