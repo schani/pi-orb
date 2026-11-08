@@ -143,7 +143,7 @@ describe("line chart spec", () => {
     (narrow) => {
       const spec = lineChartSpec(CHART_FIXTURE_RECURRENCE, { narrow, height: 180 });
       const thresholdLayers = (spec.layer ?? []).filter((layer) =>
-        layer.layer?.some((child) => child.mark?.type === "text" && child.mark.color === "#b42318"),
+        layer.layer?.some((child) => child.mark?.type === "text" && child.mark.color === "var(--bad)"),
       );
       const thresholds = thresholdLayers.flatMap(
         (layer) => (layer.data as { values: { y: number; lv: number }[] }).values,
