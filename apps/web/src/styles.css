@@ -340,7 +340,9 @@ button.danger:focus-visible {
   .orb-header-actions > .icon-button[aria-pressed="true"],
   .project-config-tabs [aria-selected="true"],
   .usage-periods button[aria-pressed="true"],
-  .rec-you a
+  .rec-you a,
+  .app-search-result.active,
+  .command-picker button.selected
 ):focus-visible {
   background: var(--g3) !important;
 }
