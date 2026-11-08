@@ -36,10 +36,7 @@ export function pendingBootContext(records: readonly HistoryRecord[]): BootMarke
 export function claudeBootEntries(records: readonly HistoryRecord[]): unknown[] {
   const humanReceipts = new Map(
     records.flatMap((record) =>
-      record.type === "event" &&
-      record.eventType === "claude.input_receipt" &&
-      record.overflow.inputKind === "human" &&
-      typeof record.overflow.attachmentId === "string"
+      record.overflow.inputKind === "human" && typeof record.overflow.attachmentId === "string"
         ? [[record.overflow.attachmentId, record.id] as const]
         : [],
     ),
@@ -50,6 +47,8 @@ export function claudeBootEntries(records: readonly HistoryRecord[]): unknown[] 
     if (inputUuid !== undefined)
       return [{ type: "message", id: inputUuid, message: { role: "user", content: [] } }];
     if (record.type === "message") {
+      if (record.overflow.inputKind === "human" && record.overflow.attachmentId !== undefined)
+        return [];
       const native = record.overflow.native;
       if (
         native !== null &&

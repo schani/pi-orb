@@ -2160,7 +2160,12 @@ export class ClaudeOrbAgent implements OrbAgent {
     if (this.history === null) return ok(undefined);
     const nativePath = this.nativePath();
     if (nativePath.isErr()) return err(nativePath.error);
-    const scanned = this.history.scan(nativePath.value);
+    const scanned = this.history.scan(
+      nativePath.value,
+      (uuid) =>
+        Object.values(this.state?.deliveries ?? {}).find((delivery) => delivery.uuid === uuid)
+          ?.content,
+    );
     if (scanned.isErr()) return err(scanned.error);
     const assistantUuids = new Set(
       scanned.value

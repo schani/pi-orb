@@ -1,7 +1,7 @@
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClaudeHistory, nativeHistoryFiles, type Provenance } from "./history.ts";
 import { qualifyClaudeRestart } from "./restore.ts";
 
@@ -516,6 +516,7 @@ it.each([
 });
 
 describe("consumed queued input", () => {
+  const acceptedContent = () => [{ type: "text" as const, text: "accepted body" }];
   const attachment = {
     type: "attachment",
     uuid: "attachment",
@@ -566,10 +567,11 @@ describe("consumed queued input", () => {
     );
     const history = new ClaudeHistory(f.dir, session, "later");
     history.correlate(uuid, { messageIds: ["steer"], operationId: "op" })._unsafeUnwrap();
-    expect(history.scan(f.path)._unsafeUnwrap().at(-1)).toMatchObject({
+    expect(history.scan(f.path, acceptedContent)._unsafeUnwrap().at(-1)).toMatchObject({
       id: uuid,
-      type: "event",
-      eventType: "claude.input_receipt",
+      type: "message",
+      role: "user",
+      content: acceptedContent(),
       inboxMessageIds: ["steer"],
       overflow: {
         operationId: "op",
@@ -586,20 +588,22 @@ describe("consumed queued input", () => {
   it.each([false, true])("waits for both durable counterparts (removal first=%s)", (reverse) => {
     const rows = reverse ? [consumed, attachment] : [attachment, consumed];
     const f = setup([rows[0]]);
-    const before = [...f.history.scan(f.path)._unsafeUnwrap()];
+    const before = [...f.history.scan(f.path, acceptedContent)._unsafeUnwrap()];
     expect(before.some((record) => record.id === "input")).toBe(false);
     expect(qualifyClaudeRestart(state, before, "host").isErr()).toBe(true);
     const prefix = JSON.parse(readFileSync(f.indexPath, "utf8")).fingerprints;
     const history = new ClaudeHistory(f.dir, "session", "later");
-    expect(history.scan(f.path)._unsafeUnwrap()).toEqual(before);
+    expect(history.scan(f.path, acceptedContent)._unsafeUnwrap()).toEqual(before);
     appendFileSync(f.path, `${JSON.stringify(rows[1])}\n`);
     const source = readFileSync(f.path, "utf8");
-    const view = history.scan(f.path)._unsafeUnwrap();
+    const view = history.scan(f.path, acceptedContent)._unsafeUnwrap();
     expect(view.slice(0, before.length)).toEqual(before);
     expect(view.filter((record) => record.id === "input")).toEqual([
       expect.objectContaining({
         parentId: view.at(-2)?.id,
-        eventType: "claude.input_receipt",
+        type: "message",
+        role: "user",
+        content: acceptedContent(),
         inboxMessageIds: ["inbox"],
         overflow: expect.objectContaining({
           attachmentLine: reverse ? 2 : 1,
@@ -615,52 +619,64 @@ describe("consumed queued input", () => {
     );
     const saved = readFileSync(f.indexPath, "utf8");
     expect(JSON.parse(saved).fingerprints.slice(0, prefix.length)).toEqual(prefix);
-    expect(history.scan(f.path)._unsafeUnwrap()).toEqual(view);
-    expect(new ClaudeHistory(f.dir, "session", "later still").scan(f.path)._unsafeUnwrap()).toEqual(
-      view,
-    );
+    expect(history.scan(f.path, acceptedContent)._unsafeUnwrap()).toEqual(view);
+    expect(
+      new ClaudeHistory(f.dir, "session", "later still")
+        .scan(f.path, acceptedContent)
+        ._unsafeUnwrap(),
+    ).toEqual(view);
     expect(readFileSync(f.indexPath, "utf8")).toBe(saved);
     expect(readFileSync(f.path, "utf8")).toBe(source);
   });
 
-  it.each([false, true])(
-    "backfills an indexed root without rewriting it (removal first=%s)",
-    (reverse) => {
-      const f = setup([
-        ...(reverse ? [consumed, attachment] : [attachment, consumed]),
-        { type: "assistant", uuid: "final", message: { content: "done" } },
-      ]);
-      f.history.scan(f.path)._unsafeUnwrap();
+  it("leaves indexed contentless receipts unchanged without consulting accepted bodies", () => {
+    const f = setup([attachment, consumed]);
+    f.history.scan(f.path, acceptedContent)._unsafeUnwrap();
+    const index = JSON.parse(readFileSync(f.indexPath, "utf8"));
+    index.records = index.records.map(
+      (record: { id: string; content?: unknown; role?: string }) => {
+        if (record.id !== "input") return record;
+        const { content: _content, role: _role, ...base } = record;
+        return { ...base, type: "event", eventType: "claude.input_receipt" };
+      },
+    );
+    const saved = JSON.stringify(index);
+    writeFileSync(f.indexPath, saved);
+    const history = new ClaudeHistory(f.dir, "session", "later");
+    const lookup = vi.fn(acceptedContent);
+    expect(history.scan(f.path, lookup)._unsafeUnwrap()).toEqual(index.records);
+    expect(lookup).not.toHaveBeenCalled();
+    expect(readFileSync(f.indexPath, "utf8")).toBe(saved);
+    expect(readFileSync(f.path, "utf8")).toBe(f.source);
+  });
+
+  it.each([undefined, []])("rejects a new consumed input without its accepted body: %j", (body) => {
+    const f = setup([attachment]);
+    const before = f.history.scan(f.path)._unsafeUnwrap();
+    const saved = readFileSync(f.indexPath, "utf8");
+    appendFileSync(f.path, `${JSON.stringify(consumed)}\n`);
+    const result = f.history.scan(f.path, () => body);
+    expect(result.isErr() && result.error.message).toBe(
+      "Consumed Claude input receipt proof conflicts: accepted input content unavailable.",
+    );
+    expect(f.history.view).toEqual(before);
+    expect(readFileSync(f.indexPath, "utf8")).toBe(saved);
+  });
+
+  it.each(["attachmentLine", "operationId"])(
+    "checks committed canonical proof metadata: %s",
+    (key) => {
+      const f = setup([attachment, consumed]);
+      f.history.scan(f.path, acceptedContent)._unsafeUnwrap();
       const index = JSON.parse(readFileSync(f.indexPath, "utf8"));
-      const records = index.records.filter((record: { id: string }) => record.id !== "input");
-      writeFileSync(f.indexPath, JSON.stringify({ ...index, records }));
-      const history = new ClaudeHistory(f.dir, "session", "later");
-      const view = history.scan(f.path)._unsafeUnwrap();
-      expect(view.slice(0, records.length)).toEqual(records);
-      expect(view).toHaveLength(records.length + 1);
-      const receipt = view.at(-1);
-      expect(receipt).toMatchObject({
-        id: "input",
-        parentId: "final",
-        type: "event",
-        eventType: "claude.input_receipt",
-        inboxMessageIds: ["inbox"],
-        overflow: {
-          sessionId: "session",
-          operationId: "op",
-          deliveryId: "delivery",
-          attachmentId: "attachment",
-          inputKind: "human",
-        },
-      });
-      expect(receipt).not.toHaveProperty("content");
-      expect(JSON.stringify(receipt)).not.toContain("PRIVATE");
-      expect(
-        qualifyClaudeRestart(state, view, "host")._unsafeUnwrap().interruptedOperations,
-      ).toEqual(["op"]);
-      const reopened = new ClaudeHistory(f.dir, "session", "later still");
-      expect(reopened.scan(f.path)._unsafeUnwrap()).toEqual(view);
-      expect(readFileSync(f.path, "utf8")).toBe(f.source);
+      index.records.find((record: { id: string }) => record.id === "input").overflow[key] = "wrong";
+      const saved = JSON.stringify(index);
+      writeFileSync(f.indexPath, saved);
+      const result = new ClaudeHistory(f.dir, "session", "later").scan(f.path);
+      expect(result.isErr() && result.error.message).toBe(
+        "Consumed Claude input receipt proof conflicts: committed receipt differs.",
+      );
+      expect(readFileSync(f.indexPath, "utf8")).toBe(saved);
     },
   );
 
@@ -676,7 +692,7 @@ describe("consumed queued input", () => {
       f.history
         .correlate("input", { messageIds: [], operationId: "host-marker", boot: true })
         ._unsafeUnwrap();
-      const before = [...f.history.scan(f.path)._unsafeUnwrap()];
+      const before = [...f.history.scan(f.path, acceptedContent)._unsafeUnwrap()];
       const payload = reordered
         ? Object.fromEntries(Object.entries(first.attachment).reverse())
         : first.attachment;
@@ -688,7 +704,7 @@ describe("consumed queued input", () => {
       ];
       appendFileSync(f.path, `${tail.map((row) => JSON.stringify(row)).join("\n")}\n`);
       const native = readFileSync(f.path, "utf8");
-      const view = f.history.scan(f.path)._unsafeUnwrap();
+      const view = f.history.scan(f.path, acceptedContent)._unsafeUnwrap();
       expect(view.slice(0, before.length)).toEqual(before);
       expect(view.find((record) => record.id === "final")?.parentId).toBe("copy");
       expect(view.at(-1)).toMatchObject({
@@ -705,9 +721,9 @@ describe("consumed queued input", () => {
       });
       expect(JSON.stringify(view.at(-1))).not.toContain("PRIVATE");
       const saved = readFileSync(f.indexPath, "utf8");
-      expect(new ClaudeHistory(f.dir, "session", "later").scan(f.path)._unsafeUnwrap()).toEqual(
-        view,
-      );
+      expect(
+        new ClaudeHistory(f.dir, "session", "later").scan(f.path, acceptedContent)._unsafeUnwrap(),
+      ).toEqual(view);
       expect(readFileSync(f.indexPath, "utf8")).toBe(saved);
       expect(readFileSync(f.path, "utf8")).toBe(native);
     },
@@ -738,7 +754,7 @@ describe("consumed queued input", () => {
     ]),
   )("requires root proof and saved provenance: %j", ({ rows, provenance }) => {
     const f = setup(rows, provenance);
-    const view = f.history.scan(f.path)._unsafeUnwrap();
+    const view = f.history.scan(f.path, acceptedContent)._unsafeUnwrap();
     expect(view.some((record) => record.id === "input")).toBe(false);
     expect(qualifyClaudeRestart(state, view, "host").isErr()).toBe(true);
   });
@@ -748,12 +764,12 @@ describe("consumed queued input", () => {
     f.history
       .correlate("other-input", { messageIds: ["wrong-inbox"], operationId: "wrong-op" })
       ._unsafeUnwrap();
-    const before = [...f.history.scan(f.path)._unsafeUnwrap()];
+    const before = [...f.history.scan(f.path, acceptedContent)._unsafeUnwrap()];
     expect(before.some((record) => record.id === "input")).toBe(false);
     expect(qualifyClaudeRestart(state, before, "host").isErr()).toBe(true);
     f.history.correlate("input", { messageIds: ["inbox"], operationId: "op" })._unsafeUnwrap();
     const reopened = new ClaudeHistory(f.dir, "session", "later");
-    const view = reopened.scan(f.path)._unsafeUnwrap();
+    const view = reopened.scan(f.path, acceptedContent)._unsafeUnwrap();
     expect(view.slice(0, before.length)).toEqual(before);
     expect(view.at(-1)).toMatchObject({
       id: "input",
@@ -761,7 +777,7 @@ describe("consumed queued input", () => {
       overflow: { operationId: "op" },
     });
     expect(JSON.stringify(view.at(-1))).not.toContain("wrong-");
-    expect(reopened.scan(f.path)._unsafeUnwrap()).toEqual(view);
+    expect(reopened.scan(f.path, acceptedContent)._unsafeUnwrap()).toEqual(view);
   });
 
   it.each([
@@ -772,11 +788,11 @@ describe("consumed queued input", () => {
     { ...attachment.attachment, origin: { kind: "human" } },
   ])("rejects conflicting delivery-copy payload atomically: %j", (payload) => {
     const f = setup([attachment]);
-    const before = [...f.history.scan(f.path)._unsafeUnwrap()];
+    const before = [...f.history.scan(f.path, acceptedContent)._unsafeUnwrap()];
     const saved = readFileSync(f.indexPath, "utf8");
     const tail = [{ ...attachment, uuid: "copy", attachment: payload }, consumed];
     appendFileSync(f.path, `${tail.map((row) => JSON.stringify(row)).join("\n")}\n`);
-    expect(f.history.scan(f.path).isErr()).toBe(true);
+    expect(f.history.scan(f.path, acceptedContent).isErr()).toBe(true);
     expect(f.history.view).toEqual(before);
     expect(readFileSync(f.indexPath, "utf8")).toBe(saved);
   });
@@ -790,19 +806,19 @@ describe("consumed queued input", () => {
     [{ type: "assistant", uuid: "input", message: { content: "unrelated" } }, attachment, consumed],
   ])("rejects duplicate proof or unrelated UUID collisions: %j", (...rows) => {
     const f = setup(rows);
-    expect(f.history.scan(f.path).isErr()).toBe(true);
+    expect(f.history.scan(f.path, acceptedContent).isErr()).toBe(true);
     expect(f.history.view).toEqual([]);
   });
 
   it.each([false, true])("rejects unconsumed UUID collisions (indexed=%s)", (indexed) => {
     const f = setup([{ ...attachment, uuid: "input" }], !indexed);
     if (indexed) {
-      f.history.scan(f.path)._unsafeUnwrap();
+      f.history.scan(f.path, acceptedContent)._unsafeUnwrap();
       f.history.correlate("input", { messageIds: ["inbox"], operationId: "op" })._unsafeUnwrap();
     }
     const before = [...f.history.view];
     const saved = nativeHistoryFiles.read(f.indexPath);
-    expect(f.history.scan(f.path).isErr()).toBe(true);
+    expect(f.history.scan(f.path, acceptedContent).isErr()).toBe(true);
     expect(f.history.view).toEqual(before);
     expect(nativeHistoryFiles.read(f.indexPath)).toBe(saved);
   });
@@ -811,11 +827,11 @@ describe("consumed queued input", () => {
     "never rewrites committed proof for a later copy (removal first=%s)",
     (reverse) => {
       const f = setup(reverse ? [consumed, attachment] : [attachment, consumed]);
-      const before = [...f.history.scan(f.path)._unsafeUnwrap()];
+      const before = [...f.history.scan(f.path, acceptedContent)._unsafeUnwrap()];
       const saved = readFileSync(f.indexPath, "utf8");
       appendFileSync(f.path, `${JSON.stringify({ ...attachment, uuid: "later-copy" })}\n`);
       const reopened = new ClaudeHistory(f.dir, "session", "later");
-      const result = reopened.scan(f.path);
+      const result = reopened.scan(f.path, acceptedContent);
       expect(result.isErr() && result.error.message).toBe(
         "Consumed Claude input receipt proof conflicts: delivery copy follows consumption.",
       );
@@ -830,7 +846,7 @@ describe("consumed queued input", () => {
       { ...attachment, sessionId: "child", uuid: "child-copy" },
       consumed,
     ]);
-    expect(f.history.scan(f.path)._unsafeUnwrap().at(-1)).toMatchObject({
+    expect(f.history.scan(f.path, acceptedContent)._unsafeUnwrap().at(-1)).toMatchObject({
       id: "input",
       overflow: { attachmentId: "attachment", attachmentLine: 1, consumptionLine: 3 },
     });
@@ -838,7 +854,7 @@ describe("consumed queued input", () => {
 
   it.each([false, true])("publishes no receipt on failed commit (removal first=%s)", (reverse) => {
     const f = setup([reverse ? consumed : attachment]);
-    const before = f.history.scan(f.path)._unsafeUnwrap();
+    const before = f.history.scan(f.path, acceptedContent)._unsafeUnwrap();
     const saved = readFileSync(f.indexPath, "utf8");
     appendFileSync(f.path, `${JSON.stringify(reverse ? attachment : consumed)}\n`);
     const failed = new ClaudeHistory(f.dir, "session", "later", {
@@ -847,7 +863,7 @@ describe("consumed queued input", () => {
         throw new Error("injected");
       },
     });
-    expect(failed.scan(f.path).isErr()).toBe(true);
+    expect(failed.scan(f.path, acceptedContent).isErr()).toBe(true);
     expect(failed.view).toEqual(before);
     expect(readFileSync(f.indexPath, "utf8")).toBe(saved);
   });

@@ -150,34 +150,44 @@ describe("Claude uses Pi's boot decision", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
-  it("projects consumed human authority at its attachment, never at the appended tail", () => {
-    const attachment: HistoryRecord = {
-      ...base,
-      id: "attachment",
-      type: "event",
-      eventType: "claude.attachment",
-    };
-    const receipt: HistoryRecord = {
-      ...base,
-      id: "input",
-      type: "event",
-      eventType: "claude.input_receipt",
-      overflow: { attachmentId: attachment.id, inputKind: "human" },
-    };
-    expect(claudeBootEntries([attachment, assistant, receipt])).toMatchObject([
-      { id: "input", message: { role: "user" } },
-      { id: "assistant" },
-    ]);
-    expect(plan([attachment, assistant, boot("a"), boot("b"), boot("c"), receipt])).toMatchObject({
-      triggerTurn: false,
-      marker: { customType: "pi-orb.turn-resume-declined" },
-    });
-    expect(
-      plan([attachment, { ...assistant, content: [], finishReason: "end_turn" }, receipt]),
-    ).toMatchObject({
-      marker: { customType: "pi-orb.host-restarted" },
-    });
-  });
+  it.each([false, true])(
+    "projects consumed human authority at its attachment, never at the appended tail (canonical=%s)",
+    (canonical) => {
+      const attachment: HistoryRecord = {
+        ...base,
+        id: "attachment",
+        type: "event",
+        eventType: "claude.attachment",
+      };
+      const receipt: HistoryRecord = {
+        ...base,
+        id: "input",
+        ...(canonical
+          ? {
+              type: "message" as const,
+              role: "user" as const,
+              content: [{ type: "text" as const, text: "accepted" }],
+            }
+          : { type: "event" as const, eventType: "claude.input_receipt" }),
+        overflow: { attachmentId: attachment.id, inputKind: "human" },
+      };
+      expect(claudeBootEntries([attachment, assistant, receipt])).toMatchObject([
+        { id: "input", message: { role: "user" } },
+        { id: "assistant" },
+      ]);
+      expect(plan([attachment, assistant, boot("a"), boot("b"), boot("c"), receipt])).toMatchObject(
+        {
+          triggerTurn: false,
+          marker: { customType: "pi-orb.turn-resume-declined" },
+        },
+      );
+      expect(
+        plan([attachment, { ...assistant, content: [], finishReason: "end_turn" }, receipt]),
+      ).toMatchObject({
+        marker: { customType: "pi-orb.host-restarted" },
+      });
+    },
+  );
   it.each(["human", "system", "peer", "boot", "compaction"] as const)(
     "reversed durable proof grants only %s authority at its attachment, not its removal",
     (kind) => {
@@ -214,9 +224,15 @@ describe("Claude uses Pi's boot decision", () => {
           sessionId: f.state.id,
           attachment: { type: "queued_command", source_uuid: "input", delivery_id: "delivery" },
         });
-        const records = [...f.history.scan(f.nativePath)._unsafeUnwrap()];
+        const records = [
+          ...f.history
+            .scan(f.nativePath, () => [{ type: "text", text: "accepted" }])
+            ._unsafeUnwrap(),
+        ];
         expect(records.at(-1)).toMatchObject({
-          eventType: "claude.input_receipt",
+          ...(kind === "human"
+            ? { type: "message", role: "user" }
+            : { eventType: kind === "peer" ? "orb.message" : "claude.input_receipt" }),
           overflow: { inputKind: kind, attachmentLine: 2, consumptionLine: 1 },
         });
         const entries = claudeBootEntries(records) as { id?: string }[];

@@ -388,7 +388,6 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
 
 type Turn =
   | { kind: "user"; record: MessageRecord }
-  | { kind: "inbox-receipt"; record: EventRecord; messages: OrbMessageView[] }
   | { kind: "agent"; key: string; records: Array<MessageRecord | EventRecord> }
   | { kind: "alert"; record: EventRecord; message: string }
   | { kind: "compaction"; record: CompactionRecord | EventRecord };
@@ -694,11 +693,7 @@ function turnKey(turn: Turn): string {
 
 function groupTurns(records: readonly DisplayRecord[], queuedMessages: readonly OrbMessageView[]) {
   const represented = representedInboxMessageIds(records);
-  const pending = new Map(
-    queuedMessages
-      .filter((message) => !represented.has(message.id))
-      .map((message) => [message.id, message]),
-  );
+  const pendingMessages = queuedMessages.filter((message) => !represented.has(message.id));
   const turns: Turn[] = [];
   const appendAgentPart = (record: MessageRecord | EventRecord) => {
     const last = turns[turns.length - 1];
@@ -718,15 +713,7 @@ function groupTurns(records: readonly DisplayRecord[], queuedMessages: readonly 
         turns.push({ kind: "compaction", record });
         break;
       case "event":
-        if (record.eventType === "claude.input_receipt") {
-          const messages = (record.inboxMessageIds ?? []).flatMap((id) => {
-            const message = pending.get(id);
-            if (message === undefined) return [];
-            pending.delete(id);
-            return [message];
-          });
-          if (messages.length > 0) turns.push({ kind: "inbox-receipt", record, messages });
-        } else if (record.eventType === "orb.message" && record.sender !== undefined) {
+        if (record.eventType === "orb.message" && record.sender !== undefined) {
           appendAgentPart(record);
         } else if (record.alert !== undefined) {
           turns.push({ kind: "alert", record, message: record.alert.message });
@@ -738,7 +725,7 @@ function groupTurns(records: readonly DisplayRecord[], queuedMessages: readonly 
         break;
     }
   }
-  return { turns, pendingMessages: [...pending.values()] };
+  return { turns, pendingMessages };
 }
 
 function OwnedSubagent({ record }: { record: EventRecord }) {
@@ -892,15 +879,8 @@ function renderTurn(
   live?: LiveAgentContent,
   busy = false,
   compactionIdentity?: string,
-  orbState?: OrbView["state"],
 ): ReactNode {
   switch (turn.kind) {
-    case "inbox-receipt":
-      return (
-        <div key={turn.record.id} data-history-row={turn.record.id}>
-          {turn.messages.map((message) => renderInboxMessage(message, orbState, senderNames))}
-        </div>
-      );
     case "user":
       return (
         <article className="rec rec-you" key={turn.record.id} data-history-row={turn.record.id}>
@@ -1072,7 +1052,6 @@ export const HistoryView = memo(function HistoryView({
                     turn.kind === "compaction" && turn.record.id === compactionResult?.id
                       ? compaction?.operationId
                       : undefined,
-                    orbState,
                   ),
             )}
           {pendingMessages.map((message) => renderInboxMessage(message, orbState, senderNames))}

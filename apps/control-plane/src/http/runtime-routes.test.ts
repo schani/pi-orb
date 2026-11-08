@@ -16,6 +16,7 @@ import {
   PROJECT_SECRETS_RUNTIME_PATH,
   ProjectSecretSnapshotSchema,
   runtimeTokenPath,
+  systemInputEvent,
   type TokenName,
 } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
@@ -1869,16 +1870,29 @@ describe("runtime broker routes", () => {
         timestamp: "2026-08-27T00:00:00.000Z",
         type: "message" as const,
         role: "user" as const,
-        content: [{ type: "text" as const, text: "x".repeat(33 * 1024 * 1024) }],
+        content: [
+          { type: "text" as const, text: "x".repeat(33 * 1024 * 1024) },
+          { type: "image" as const, mediaType: "image/png", data: "YWJj" },
+        ],
+        inboxMessageIds: ["queued-human"],
         overflow: { native: { preserved: true } },
       };
+      const peer = systemInputEvent({
+        id: "queued-peer",
+        parentId: record.id,
+        timestamp: record.timestamp,
+        overflow: {},
+        sender: { orbId: "11111111-1111-4111-8111-111111111111" },
+        content: [{ type: "text", text: "peer body" }],
+        inboxMessageIds: ["peer-inbox"],
+      });
       const committed = await store.commitPullBatch(task, {
         orbId: OTHER_ORB,
         expectedCursor: null,
         session,
-        records: [record],
-        nextCursor: record.id,
-        nextHeadId: record.id,
+        records: [record, peer],
+        nextCursor: peer.id,
+        nextHeadId: peer.id,
       });
       expect(committed.isOk()).toBe(true);
 
@@ -1893,9 +1907,9 @@ describe("runtime broker routes", () => {
         v: 1,
         orb: { id: OTHER_ORB, project: { id: OTHER_PROJECT } },
         session,
-        cursor: record.id,
-        headId: record.id,
-        records: [record],
+        cursor: peer.id,
+        headId: peer.id,
+        records: [record, peer],
       });
     });
 

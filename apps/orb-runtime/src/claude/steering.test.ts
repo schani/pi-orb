@@ -1,6 +1,8 @@
 import { join } from "node:path";
 import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { HistoryRecordSchema, orbMessageContext, projectDisplayRecord } from "@pi-orb/protocol";
 import { ok } from "neverthrow";
+import { Check } from "typebox/value";
 import { expect, it } from "vitest";
 import {
   ComposedClaudeFixture,
@@ -96,16 +98,39 @@ it("sends human input with now priority and steers the active operation without 
   }
 });
 
-it.each([false, true])(
-  "queued steering reconciles drain and reopen once (removal first=%s)",
-  async (reverse) => {
+it.each(
+  [false, true].flatMap((reverse) => ["text", "image", "peer"].map((kind) => ({ reverse, kind }))),
+)(
+  "queued steering retains canonical content through drain and reopen: %j",
+  async ({ reverse, kind }) => {
+    const senderOrbId = "11111111-1111-4111-8111-111111111111";
+    const system = kind === "peer" ? { kind: "orb_message" as const, senderOrbId } : undefined;
+    const body =
+      kind === "text"
+        ? content("change")
+        : [
+            ...content(kind === "peer" ? orbMessageContext(senderOrbId) : "change"),
+            { type: "image" as const, mediaType: "image/png", data: "YWJj" },
+          ];
     const f = new ComposedClaudeFixture();
     try {
       const first = await start(f);
       const accepted = (
-        await f.agent.deliverInboxMessage("steer", ["steer"], content("change"))
+        await f.agent.deliverInboxMessage("steer", ["steer"], body, system)
       )._unsafeUnwrap();
       const input = await nextInput(f.query);
+      expect(input.origin).toEqual(system ? undefined : { kind: "human" });
+      expect(input.message.content).toEqual([
+        ...(system ? content(orbMessageContext(senderOrbId)) : []),
+        ...body.map((block) =>
+          block.type === "text"
+            ? block
+            : {
+                type: "image",
+                source: { type: "base64", media_type: block.mediaType, data: block.data },
+              },
+        ),
+      ]);
       const attachment = {
         type: "attachment",
         uuid: "steer-attachment",
@@ -122,12 +147,12 @@ it.each([false, true])(
       };
       f.append(reverse ? consumed : attachment);
       expect(
-        (await f.agent.deliverInboxMessage("steer", ["steer"], content("change")))._unsafeUnwrap(),
+        (await f.agent.deliverInboxMessage("steer", ["steer"], body, system))._unsafeUnwrap(),
       ).toMatchObject({ status: "queued", duplicate: true });
       expect(qualifyClaudeRestart(f.journal(), f.history.view, "host").isErr()).toBe(true);
       f.append(reverse ? attachment : consumed);
       expect(
-        (await f.agent.deliverInboxMessage("steer", ["steer"], content("change")))._unsafeUnwrap(),
+        (await f.agent.deliverInboxMessage("steer", ["steer"], body, system))._unsafeUnwrap(),
       ).toMatchObject({ ...accepted, status: "persisted", duplicate: true });
       expect(
         qualifyClaudeRestart(f.journal(), f.history.view, "host")._unsafeUnwrap()
@@ -147,13 +172,38 @@ it.each([false, true])(
       );
       const records = reopened.scan(f.nativePath)._unsafeUnwrap();
       expect(records.filter((record) => record.id === input.uuid)).toEqual([
-        expect.objectContaining({ eventType: "claude.input_receipt", inboxMessageIds: ["steer"] }),
+        expect.objectContaining({
+          ...(system
+            ? { type: "event", eventType: "orb.message", sender: { orbId: senderOrbId } }
+            : { type: "message", role: "user" }),
+          content: body,
+          inboxMessageIds: ["steer"],
+        }),
       ]);
+      const canonical = records.find((record) => record.id === input.uuid);
+      if (canonical === undefined) throw new Error("Missing consumed input.");
+      expect(Check(HistoryRecordSchema, canonical)).toBe(true);
+      expect(f.journal().deliveries.steer?.content).toBeUndefined();
+      expect(
+        f.agent
+          .replicationSnapshot()
+          ._unsafeUnwrap()
+          .records.find((record) => record.id === input.uuid),
+      ).toEqual(canonical);
+      expect(
+        f.agent
+          .snapshot()
+          ._unsafeUnwrap()
+          .records.find((record) => record.id === input.uuid),
+      ).toEqual(canonical);
+      expect(
+        f.frames.find((frame) => frame.type === "history.record" && frame.record.id === input.uuid),
+      ).toMatchObject({ record: projectDisplayRecord(canonical) });
       expect(
         qualifyClaudeRestart(f.journal(), records, "host")._unsafeUnwrap().interruptedOperations,
       ).toEqual([]);
       expect(
-        (await f.agent.deliverInboxMessage("steer", ["steer"], content("change")))._unsafeUnwrap(),
+        (await f.agent.deliverInboxMessage("steer", ["steer"], body, system))._unsafeUnwrap(),
       ).toMatchObject({ status: "persisted", duplicate: true });
       expect(f.queries).toHaveLength(2);
       expect(reopened.scan(f.nativePath)._unsafeUnwrap()).toEqual(records);
@@ -183,9 +233,7 @@ it.each([false, true])(
         )._unsafeUnwrap();
         expect(restarted.getHealth()).toMatchObject({ status: "ready", activity: "idle" });
         expect(
-          (
-            await restarted.deliverInboxMessage("steer", ["steer"], content("change"))
-          )._unsafeUnwrap(),
+          (await restarted.deliverInboxMessage("steer", ["steer"], body, system))._unsafeUnwrap(),
         ).toMatchObject({ ...accepted, status: "persisted", duplicate: true });
         expect(queries).toHaveLength(1);
         expect(reopened.view.filter((record) => record.id === input.uuid)).toHaveLength(1);
