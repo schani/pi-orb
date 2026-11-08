@@ -535,6 +535,21 @@ describe("Signal / Boards system", () => {
     expect(body.match(/#[0-9a-f]{3,8}\b|rgba?\(/gi)).toBeNull();
   });
 
+  it("uses only custom properties that the CSS declares or the app sets", () => {
+    const sources = readdirSync(new URL(".", import.meta.url), {
+      recursive: true,
+      encoding: "utf8",
+    })
+      .filter((path) => /\.tsx?$/.test(path) && !/\.test\.tsx?$/.test(path))
+      .map((path) => readFileSync(new URL(path, import.meta.url), "utf8"))
+      .join("\n");
+    const used = new Set([...css.matchAll(/var\((--[\w-]+)/g)].map((match) => match[1]));
+    const undeclared = [...used].filter(
+      (name) => !css.includes(`${name}:`) && !new RegExp(`["'\`]${name}["':]`).test(sources),
+    );
+    expect(undeclared).toEqual([]);
+  });
+
   it("stays on the spacing scale", () => {
     const scale = new Set(["0", "1", "2", "4", "6", "8", "12", "16", "20", "24"]);
     const offScale = [

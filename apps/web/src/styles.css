@@ -2429,7 +2429,7 @@ pre,
   animation: activity-strip-blink 1s steps(2) infinite;
 }
 
-/* A restart is a gold refresh glyph in the success dot's 6px box, centered like the dots. */
+/* A restart is an amber refresh glyph in the success dot's 6px box, centered like the dots. */
 .activity-strip-dot.activity-strip-restart::before {
   content: none;
 }
@@ -2439,7 +2439,7 @@ pre,
   flex: none;
   width: 6px;
   height: 6px;
-  color: var(--st-start);
+  color: var(--warn);
 }
 
 .activity-strip-dot:hover > .activity-strip-glyph,
@@ -2527,7 +2527,7 @@ pre,
 }
 
 .activity-strip-tip-label.activity-strip-restart {
-  color: #f2b544;
+  color: var(--warn);
 }
 
 .activity-rail-headline,
