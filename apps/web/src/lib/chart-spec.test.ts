@@ -8,6 +8,7 @@ import type {
 } from "@pi-orb/protocol";
 import { compile } from "vega-lite";
 import { describe, expect, it } from "vitest";
+import { CHART_FIXTURE_RECURRENCE } from "../../dev/chart-fixtures.ts";
 import {
   barChartSpec,
   CHART_CONFIG,
@@ -114,6 +115,95 @@ describe("end-label spreading", () => {
 });
 
 describe("line chart spec", () => {
+  it.each([false, true])(
+    "caps threshold text and keeps full labels and values on hover (narrow=%s)",
+    (narrow) => {
+      const label = "x".repeat(80);
+      const input = line(2, { thresholds: [{ value: 210, label }] });
+      const spec = lineChartSpec(input, { narrow, height: 180 });
+      const text = marks(spec, "text").find(
+        (layer) => (layer as { name?: string }).name === "threshold_label_0",
+      );
+      expect(text?.mark).toMatchObject({ limit: narrow ? 140 : 240 });
+      expect(text?.encoding?.["tooltip"]).toEqual([
+        { field: "label", type: "nominal", title: "threshold" },
+        { field: "y", type: "quantitative", title: "value" },
+      ]);
+      expect(tooltipRows(input, { threshold: label, value: 210 })).toEqual([
+        { label, value: "210 ms" },
+      ]);
+      expect(marks(spec, "line")[0]?.encoding?.["x"]).toMatchObject({
+        axis: { labelOverlap: "greedy", labelSeparation: 6 },
+      });
+    },
+  );
+
+  it.each([false, true])(
+    "spreads nearby thresholds and visible end labels together (narrow=%s)",
+    (narrow) => {
+      const spec = lineChartSpec(CHART_FIXTURE_RECURRENCE, { narrow, height: 180 });
+      const thresholdLayers = (spec.layer ?? []).filter((layer) =>
+        layer.layer?.some((child) => child.mark?.type === "text" && child.mark.color === "#b42318"),
+      );
+      const thresholds = thresholdLayers.flatMap(
+        (layer) => (layer.data as { values: { y: number; lv: number }[] }).values,
+      );
+      expect(thresholds.map((item) => item.y)).toEqual(
+        CHART_FIXTURE_RECURRENCE.thresholds?.map((item) => item.value),
+      );
+      const endLayer = (spec.layer ?? []).find((layer) =>
+        layer.layer?.some((child) => (child as { name?: string }).name === "end_labels"),
+      );
+      const ends = narrow
+        ? []
+        : ((
+            endLayer?.data as
+              | { values: { t: number; lt: number; v: number; lv: number }[] }
+              | undefined
+          )?.values ?? []);
+      const ys = [...thresholds, ...ends]
+        .map((item) => 180 * (1 - item.lv / 0.8))
+        .sort((a, b) => a - b);
+      for (let i = 0; i < ys.length; i++) {
+        expect(ys[i]).toBeGreaterThanOrEqual(6);
+        expect(ys[i]).toBeLessThanOrEqual(174);
+        if (i > 0) expect((ys[i] ?? 0) - (ys[i - 1] ?? 0)).toBeGreaterThanOrEqual(15.99);
+      }
+      if (!narrow) {
+        expect(ends.map((item) => item.lt)).toEqual([1794153600000, 1794153600000]);
+        expect(ends.map((item) => [item.t, item.v])).toEqual(
+          CHART_FIXTURE_RECURRENCE.series.map((series) => series.points.at(-1)),
+        );
+      }
+      expect(() => compile(spec as Parameters<typeof compile>[0])).not.toThrow();
+    },
+  );
+
+  it("keeps four coincident thresholds and six endpoints legible at both y boundaries", () => {
+    for (const value of [-1, 0, 1]) {
+      const input = line(6, {
+        series: line(6).series.map((series) => ({ ...series, points: [[1000, value]] })),
+        thresholds: Array.from({ length: 4 }, (_, i) => ({ value, label: `limit ${i}` })),
+      });
+      const spec = lineChartSpec(input, { narrow: false, height: 180 });
+      const rows = (spec.layer ?? []).flatMap((layer) =>
+        ((layer.data as { values?: { lv?: number }[] } | undefined)?.values ?? []).filter(
+          (item) => item.lv !== undefined,
+        ),
+      );
+      expect(rows).toHaveLength(10);
+      const lo = value < 0 ? -1.2 : 0;
+      const hi = value > 0 ? 1.2 : value < 0 ? 0 : 1;
+      const ys = rows
+        .map((item) => 180 * (1 - ((item.lv ?? 0) - lo) / (hi - lo)))
+        .sort((a, b) => a - b);
+      expect(ys[0]).toBeGreaterThanOrEqual(5.99);
+      expect(ys.at(-1)).toBeLessThanOrEqual(174.01);
+      for (let i = 1; i < ys.length; i++)
+        expect((ys[i] ?? 0) - (ys[i - 1] ?? 0)).toBeGreaterThanOrEqual(15.99);
+    }
+  });
+
   it("opts into compact unit-free y labels without changing default labels or exact tooltips", () => {
     const input = line(1, {
       unit: "tokens",
