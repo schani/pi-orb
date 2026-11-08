@@ -558,7 +558,7 @@ describe("orb boot hook races (DST)", () => {
               );
               // The launch specification changes under a boot whose hook is
               // still working: that compute is stale, so its unfinished boot is
-              // discarded rather than completed (docs/compute-replacement.md).
+              // discarded rather than completed (docs/lifecycle.md).
               harness.world.setDesiredSpec("spec-updated");
               await waitForRunning(task, harness);
               stop.abort();

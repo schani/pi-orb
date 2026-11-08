@@ -436,7 +436,7 @@ describe("GceOrbHostProvider", () => {
       expect(items.some((item) => item.key === "pi-orb-script-sha256")).toBe(false);
       // The deploy generation is not stamped on the instance: it returns as
       // specGeneration for lifecycle to commit as host_spec_generation
-      // (docs/compute-replacement.md).
+      // (docs/lifecycle.md).
     },
   );
 
@@ -1042,7 +1042,7 @@ describe("GceOrbHostProvider host specification", () => {
     // The data disk is zonal, so replacement cannot move an orb: a "replacement"
     // in another zone would come up on a fresh, empty workspace. A zone or
     // project move is an explicit operator migration, outside this mechanism
-    // (docs/compute-replacement.md).
+    // (docs/lifecycle.md).
     expect(fingerprintWith({ zone: "europe-west4-a" })).toBe(currentSpecFingerprint);
     expect(fingerprintWith({ projectId: "other-proj" })).toBe(currentSpecFingerprint);
     // The generation is a rollover fence, not part of the specification.

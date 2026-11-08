@@ -31,4 +31,4 @@ The execution gate captures the conversation's adopted revision when `envFor` cr
 
 Compare native task counts by kind/status and conversation ownership, especially `orb.child` anchors, before/after reopen. Distinguish stable recovered IDs from newly allocated anchors, submissions and generations. Use `durable_pg_tasks`, `durable_pg_conversations`, `durable_pg_submissions`, private `orb.children` document revisions, and `durable_pg_owner_events` (schema: migration `036_durable_authority.sql`). Correlate acquisition/release fences and platform instance IDs with root notices and adoption edges. Attribution of memory requires per-instance heap/RSS/worker and active-task measurements, not recovery-notice counts alone.
 
-The governing rule and follow-up are in `docs/pi-durable-evaluation.md` and `TODO.md`.
+The governing rule and follow-up are in `docs/pi.md` and `TODO.md`.

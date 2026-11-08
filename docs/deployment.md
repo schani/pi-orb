@@ -1,1001 +1,150 @@
-# Cloud deployment direction
+# Cloud deployment
 
-## Startup diagnostics (2026-10-30, PDT; proposed, not deployed)
+Decisions and rationale for where pi-orb runs and how releases are made safe. Operator procedure, topology and gotchas: `infra/README.md`. Foundation bootstrap and grants: `infra/foundation/README.md`. Native image build: `infra/native-vm/README.md`.
 
-The candidate image's default command adds Node `--import` for a builtin-only bootstrap before linking/evaluating `main.ts`. It emits `control-plane-startup` JSON edges with an enumerated `phase` and monotonic `elapsed_ms`, sharing the clock with main. No environment values, URLs, error details or bodies enter these breadcrumbs. Main records boundaries for module/main entry, platform skills, auth-directory creation, database open/local migration, secret/host/hosting construction, HTTP/central-agent/auth composition, browser/WebSocket registration, static assets, hosting routes and listen. `complete` means the call returned, not that its Result succeeded; existing failure handling is unchanged. Browser initialization executes when Fastify loads its registered plugin, which can occur inside static/hosting registration or listen.
+## Platform
 
-These finite stdout edges are intended for platform log retention/querying: filter `jsonPayload.event="control-plane-startup"` on the exact revision/instance, then inspect the final phase and elapsed intervals. No heartbeat, state, startup barrier, listener reordering, changed timeout or new cloud resource is introduced. Diagnostic write failures are best-effort and cannot fail application startup. The explicit migration-job `node .../migrate.ts` command remains unchanged and does not preload the bootstrap.
+- One Cloud Run service, **`pi-orb-issuer`**, serves browser/API, runtime broker, files, discovery/JWKS and all background work. It runs as `pi-orb-control-plane`. Rejected: moving the app to a service named `pi-orb`; it would need a federation trust cutover (issuer, origins, callbacks, release targeting) with no product requirement.
+- At least one instance stays provisioned with always-allocated CPU so active-orb history polling runs continuously; request-only CPU on a minimum instance is insufficient. Scaling is min = max = 1.
+- Size is 2 vCPU / 4 GiB. Ingress 429s appeared at one vCPU under background CPU pressure: Cloud Run adaptive concurrency lowers admission, so configured concurrency is not serving capacity. Capacity reviews include CPU and ingress 429s, not only memory and instance counts (`docs/postmortems/2026-10-09-control-plane-cpu-429.md`).
+- Request timeout is 3600 s; Cloud Run WebSockets behave as the architecture assumes at that timeout. No VM fallback.
+- Polling state and cursors live in PostgreSQL because Cloud Run may restart even the minimum instance; the loop recovers entirely from the database. Concurrent pollers are safe through an optimistic cursor compare-and-swap in the commit transaction; there is no polling lock or leader.
+- Ingress is public with IAM invocation disabled; Google login and machine-token verification happen in the application (`docs/auth.md`). Sharing one service means public issuer handlers share control-plane privileges: reduced infrastructure isolation is intentional, not reduced authentication. Runtime bearers still fence each incarnation. Compute SSH stays behind IAP.
+- Egress is private-ranges-only through the foundation-owned VPC.
+- The control plane, runtime, protocol and web UI are TypeScript on Node.js 26.13.0 LTS (`docs/stack.md`).
 
-Motivation: [Deploy 41110874347](https://github.com/schani/pi-orb/actions/runs/41110874347) committed schemas 052/053, but revision 80 failed TCP startup on port 8080 after four minutes; revision 79 retained traffic without search. Only platform logs were observed for the failed revision. The same exact image boots locally with fake modes, and constructors pass; the field blocker remains unknown. This proposal provides future localization, not a root-cause fix. The new default-command CI smoke closes a separate coverage gap; it does not establish that it would have caught this field failure. Coverage and qualification limits: `docs/testing.md`.
+## Origins and issuer
 
-**PostgreSQL 17 release validated; rollout monitor failed (2026-10-29, PDT):** [Deploy 40928556779](https://github.com/schani/pi-orb/actions/runs/40928556779) deployed exact-main `05feb52b` as `r-1793298872-f7f0988e-06a2-4d7a-b074-ee6ae72a1d8f`; all ten qualification jobs and 12 release gates passed. Cloud SQL is `POSTGRES_17`, `RUNNABLE`; upgrade and pre/post backups succeeded, protected baseline checks are unchanged, and all 41 application tables were analyzed and independently stats-verified. Four fixtures have independent 404s; owned VM/disk cleanup is verified, images are `READY`, release lock is absent and no Compute operations were pending. Release is **validated**, but the rollout monitor reported **regression** and workflow **failed**; the blocker is unwaived. Focused headline correction was approved on 2026-10-29 and locally qualified; fresh exact-head PR CI remains pending (`docs/testing.md`). Details: `docs/postmortems/2026-10-29-pg17-production.md`.
+- The issuer is exactly `https://pi-orb-issuer-<project-number>.<region>.run.app`. App, API and broker use that origin; files use the `files` traffic-tag origin `https://files---pi-orb-issuer-<project-number>.<region>.run.app`. No aliases for earlier URLs.
+- `PI_ORB_OIDC_ISSUER_URL` is computed by OpenTofu (`local.oidc_issuer_url` in `infra/oidc.tf`) from the deterministic Cloud Run URL, never supplied by an operator. A service cannot reference its own `.uri`, and one apply must not ship a minting image without its issuer identity.
+- Cloud Run reports a hashed address in `.uri`; `.urls` holds both. The invariant is membership of the computed anchor in `.urls` plus the live discovery/JWKS gate, never equality with `.uri`. A postcondition fails the apply otherwise; changing the origin is a trust migration. Rejected: an operator-supplied variable (silent trust drift) and a two-phase apply (`docs/postmortems/2026-08-26-workload-identity-cloud-release-gates.md`).
 
-**PostgreSQL upgrade interruption (2026-10-29, investigation at 12:10 PM PDT):** [Deploy 40928556779](https://github.com/schani/pi-orb/actions/runs/40928556779) requested `POSTGRES_17` through the GitHub deployment identity at 11:56 AM. Database shutdown at 12:03:27 triggered an unhandled PostgreSQL Client `ECONNRESET` and crashed the sole serving application instance; Cloud Run then refused requests with ingress 429s. The replacement served 503s while PostgreSQL was unavailable, including another restart at 12:08:42. Sampled API/JWKS reads recovered by 12:09–12:10. The SQL operation remained running in maintenance and the new application had not cut over: unchanged revision `00076-26g` still served 100%. **Invariant:** an in-place database upgrade can interrupt the serving application before application rollout; unchanged application revision does not establish unchanged production. No successful-release or crash-fix claim. Evidence: `docs/postmortems/2026-10-29-pg17-production-interruption.md`.
+## Infrastructure as code
 
-**Agent recovery remained blocked (12:14 PM PDT):** the second restart failed agent drain/release. The serving agent caches the failed close result, and its manager refuses replacement until close succeeds. The screenshot orb's new message is confirmed persisted as `delivering` with no operation ID; logs report `Agent drain ownership unavailable`. HTTP 200s therefore do not establish agent/inbox recovery. The old revision and SQL update remain active; no resend, restart or fix was performed. Exact message/lifecycle and serving-source evidence: `docs/postmortems/2026-10-29-pg17-production-interruption.md`.
+- All infrastructure is code, managed with OpenTofu. Per-orb VMs and disks are runtime resources created by `GceOrbHostProvider`, never IaC.
+- State lives in the versioned GCS bucket `pi-orb-tfstate-<project>`: prefix `static-plane` (application) and `foundation`. Never keep state in an ephemeral checkout, where it can be lost; `infra/imports.tf` records the adoption of resources that were created without remote state.
+- **Foundation root** (`infra/foundation/`, grants: `infra/foundation/README.md`): project APIs, state bucket, Artifact Registry, service accounts, build/deploy/control-plane grants, workload-identity pools/providers, both VPCs, subnets and the private-services connection, and (where in scope) folder and billing. Applied only by a separate administrator: the recurring deployer must not control the trust policy that grants its own authority. Networks belong here because Compute IAM Conditions cannot isolate network, subnet or address names.
+- **Application root** (`infra/`): the two application firewall rules, Cloud SQL, Secret Manager parents and runtime grants, hosting bucket, Cloud Run and other serving resources. It consumes explicit foundation outputs (the Cloud Run egress subnet is the project-qualified `projects/PROJECT/regions/REGION/subnetworks/NAME`). Releases refuse an unapplied or mismatched foundation.
+- A new project needs variables, one audited foundation apply and the normal release. Irreducible external inputs: organization/folder/billing authority, a unique project ID and externally owned values (OAuth clients, secret payloads).
+- Trust boundaries that the recurring plan uses are bootstrapped outside it and are never created, mutated or destroyed by that plan: `infra/bootstrap-pi-orb-oidc.sh` (federation tier for pi-orb's own issuer) and `infra/bootstrap-amp-oidc.sh` (the `pi-orb-debug` account and the deployer's Token Creator binding on it). Both are idempotent and delete nothing.
+- Dependency updates may apply Google-provider state upgrades and Docker/containerd retained-configuration normalization through upstream conversions; no custom migrations. Reviewed plans and retained-store qualification remain required.
 
-**Earlier attempt failed before apply (2026-10-24, PDT):** [Deploy 40101258304](https://github.com/schani/pi-orb/actions/runs/40101258304) selected `378f3a63` after #174/#163 merged; all ten first-attempt push/main qualification jobs passed. Default Deploy inputs included migration override false. Native image insert succeeded server-side, but gcloud failed with Google's HTML 502; the exact failing request and underlying cause remain unknown. Owned temporary instances/disks/images and release lock were absent. Around 07:49, original revision `00072-zbf` remained Ready at 100%, generation `1792802558`, active release unchanged and health `ok`. No migration/apply/activation, retry, waiver or root fix. **Rule:** client mutation failure does not prove server failure; inspect exact operations/resources and verify owned cleanup before another attempt. Evidence and limits: `docs/postmortems/2026-10-24-native-image-capture-502.md`.
+## Deployment identity
 
-**Validation-only recovery passed (2026-10-19, PDT):** [Deploy 39283648895](https://github.com/schani/pi-orb/actions/runs/39283648895) completed at 9:25:19 AM. New record `r-1792426427-3aa0fdaf-a846-4ebc-b42d-819d0f3507e7` is **validated**, explicitly validating original `r-1792421403-e3052fc2-613a-4009-b597-8ae96ba77713`. All seven recovery gates passed; four fixtures are recorded deleted. Product commit `5b9653bd`, generation `1792422251`, revision `00065-p5z` and deployed artifacts are unchanged. Runner `27bad6ec` supplies qualified smoke diagnostics/classified retry, not a new product deployment. Its CI/E2E/Durable qualification all passed on attempt 1 (`docs/testing.md`). The original failed record remains unchanged; its historical mint cause alone is waived, not gates or new failures. Evidence: `/workspace/validation-recovery-evidence/release-39283648895-1/release.json`, `docs/postmortems/2026-10-19-lifecycle-smoke-auth.md`.
+- Releases and project orbs share the scoped `pi-orb-amp-deployer` service account (historical name). No Owner/Editor: functional roles for application resources, conditioned `static-plane/` object access, read-only `foundation/` access, Token Creator only on `pi-orb-debug`.
+- **GitHub Actions** authenticate keylessly via the foundation's GitHub provider, admitting only this repository's manually dispatched `main` Deploy workflow by numeric repository and owner IDs (`infra/foundation/README.md`). Name-only trust is rejected: names can be reused.
+- **Project orbs** authenticate through pool `pi-orb-orbs`, provider `pi-orb-oidc`: issuer, audience `urn:pi-orb:gcp:<project>`, `token_use=exchanged` and the immutable pi-orb project ID; the binding is a `principalSet` on that project. `.pi-orb/gcp-external-account.json` is a non-secret executable-source config for `/usr/local/bin/pi-orb-gcp-identity`, registered by `.agents/resume` on every start (`docs/workload-identity.md`).
+- This removes stored keys and renewable human logins, not privilege: any code in an admitted orb can obtain the deployer's short-lived authority, which can change application code and application-resource access policies. Re-review the role set when managed resource types change. Extra deployment permissions go on the shared service account in the foundation; never distribute personal logins or refresh tokens to make access persist (`docs/postmortems/2026-09-09-release-hosting-bucket-iam.md`).
+- The Amp trust path (`amp-orbs` / `amp-oidc`) is an independently scoped access path; repository hooks do not configure it.
 
-**Separate isolated observation passed:** the 9:58:56–10:17:51 AM PDT window recorded **observed** (16 samples; recorded duration 1,134 seconds), with health, placement, fleet and required metrics covered throughout; ERROR, HTTP 429/5xx and lifecycle regression counters were zero. Central inference remains unobserved. This later window is not the original rollout window. The first 9:37:29–9:55:35 AM window remains **regression** with 123 observed HTTP 429s; subsequent typed correlation attributes the queried 429s to this operator orb's mint floor, without individual-caller attribution. Only operator credential acquisition was isolated; no monitor assertions, thresholds, filters or original evidence changed. Global 429 classification remains unresolved in `TODO.md`. Receipt: `/workspace/validation-recovery-evidence/rollout-monitor-isolated.json`; mechanism, hashes and limits: `docs/postmortems/2026-10-19-observer-mint-floor.md`.
+## Control-plane image
 
-**Applied, lifecycle failed (2026-10-16, PDT):** [Deploy 38961777202](https://github.com/schani/pi-orb/actions/runs/38961777202) remains **applied-but-unvalidated** after a restart-poll HTTP 500 attributed to deleted revision `00060-kfk`; cause unknown. Authorized API cleanup confirmed the exact smoke fixtures and attached Compute resources absent. The failed release record is unchanged; no gate retry or bypass. Evidence: `docs/postmortems/2026-10-16-lifecycle-smoke-http500.md`.
+- The image builds from the repository-root context. PTY: after dependency install and patching, remove `node-pty` prebuilds and rebuild with `npm_config_nodedir=/usr/local` in a separate `RUN --network=none`; the official Node image supplies matching headers. Dependency-stage and final-image PTY spawn smokes are mandatory (`docs/postmortems/2026-10-15-control-plane-node-headers.md`).
+- The image installs only control-plane dependency patches; runtime-only patches stay out (`docs/postmortems/2026-10-02-control-plane-patch-image-build.md`).
+- **Startup diagnostics.** The default command preloads a builtin-only bootstrap with `--import`. Startup emits finite `control-plane-startup` JSON edges with an enumerated `phase` and monotonic `elapsed_ms` from module entry through migration, composition, route registration and listen. `complete` means the call returned, not that its Result succeeded. No environment values, URLs, error details or bodies; write failures are best-effort. Query: `jsonPayload.event="control-plane-startup"` on the exact revision. The migration job's command does not preload it. Motivation: a revision failed its TCP startup probe with an unknown blocker.
 
-**Redirect deletion confirmed; release unvalidated (2026-10-14, PDT):** [PR 92](https://github.com/schani/pi-orb/pull/92) merged as `53d72dc`. [Deploy 38596107385](https://github.com/schani/pi-orb/actions/runs/38596107385) applied source `310def9`; Cloud Audit Logs confirm `pi-orb` deletion at 09:37:18 by the normal deployer. Independent 10:33 reads found only `callout` and `pi-orb-issuer`, issuer `pi-orb-issuer-00056-qmd` Ready at 100%, healthy, with discovery/JWKS preserved. First-attempt exact-source CI/E2E/Durable and all gates through lifecycle passed. Identity assertions passed, but fixture cleanup failed: authoritative release `r-1791994953-bf23941b-9113-42c7-851d-a9f60281de8f` remains **applied-but-unvalidated**, identity **failed**; monitor **skipped**. Historical cleanup cause remains unknown. Explicitly authorized API cleanup subsequently returned 202→404 for both owned fixtures; their instances/disks and the release lock are absent. The original record is unchanged; no rerun, validation bypass or root-fix claim. Evidence and limits: `docs/postmortems/2026-10-14-identity-smoke-cleanup.md`.
+## Native runtime image
 
-**PR 92 scoped release exception (2026-10-14, PDT):** the user waived historical investigation of the first CI process-discard failure and authorized merge/deploy. Evidence and the unproven cause remain in `docs/postmortems/2026-10-13-process-discard-deadline.md`; no historical root-cause fix is claimed. Fresh first-attempt exact-head CI/E2E/Durable qualification, new-failure handling and DST replay remain mandatory. The exception neither bypasses the global release lock nor authorizes manual cloud mutation.
+- Orbs boot a custom Debian GCE image (`docs/host-provider.md`); the control plane stays an OCI image. Releases carry the exact uniquely named VM and workspace image resources and numeric IDs plus the control-plane digest, alongside the host-spec generation.
+- One repository command rebuilds, validates and reports an image with no manual SSH or remembered stages, independently of deployment (`docs/host-provider.md`, `infra/native-vm/README.md`).
+- Builder/publishing permissions belong to the foundation; orb VMs never get publishing authority. The control plane only reads private images.
+- Release image versions use `v-<short-commit>` so every hash is a valid GCE name segment.
+- The remote native build and the local control-plane build run concurrently; nothing is pushed until both succeed and the native manifest passes provenance and acceptance. Failure or a handled signal terminates every owned child and waits for cleanup. Short npm children are not parallelized: killing npm does not kill its tool subprocess.
 
-**Validated transaction, monitor flagged (2026-10-13, PDT):** [Deploy 38484755289](https://github.com/schani/pi-orb/actions/runs/38484755289) completed with workflow **failure** from the rollout monitor. The authoritative transaction deployed `66479dffe6da964b5b2e50094a7d9852949ba213` as `r-1791935519-4b99cc0b-7365-4fc7-a485-2a795ca6d660`, **validated**, exit 0, all twelve gates passed at 17:41:28. Exact-head [CI](https://github.com/schani/pi-orb/actions/runs/38484734030), [E2E](https://github.com/schani/pi-orb/actions/runs/38484734139) and [Durable qualification](https://github.com/schani/pi-orb/actions/runs/38484734033) passed on attempt 1; no gate bypass. Migration 044 applied at 17:05:57; production catalog/ledger were not independently queried. This establishes deployment, not recovery of the original blocked orb.
+## Hosted-file storage
 
-Read-only verification confirmed Ready, 100%-traffic issuer `pi-orb-issuer-00055-dr2` and redirect `pi-orb-00012-sw8`, both matching `sha256:f65e69ae35cd812e7be51d08d39eb49d1152749591d9deb8f7972593591f6b2b`; serving and active-pointer generation `1791936168` agree. Health passed; lock, migration jobs, four fixtures and temporary native instances/disks were absent; both production images were Ready.
+Storage belongs to the control plane, independent of `PI_ORB_HOST_PROVIDER`:
 
-The monitor artifact records **`regression`**, 17:41:33–17:59:57: fifteen observed samples, health `ok` throughout, central inference `unobserved`. Final cumulative counts: seven HTTP 429s, one HTTP 5xx overlapping one ERROR, zero `legacyBackend`; `compute-discard` and `compute-discard-requested` each one, neither a regression trigger. Diagnostic credential refresh hit the application mint floor; the monitor treats every 429 as a regression. The in-window 500 was the diagnostic agent's synthetic invalid-ID reproduction, separate from the historical 17:31:58 transcript 500 before the window. The malformed-ID path predates this release; historical root SQLSTATE remains inferred. No clean-monitor or root-fix claim. Policy and forensics: `docs/postmortems/2026-10-13-rollout-monitor-anomalies.md`.
+- `PI_ORB_HOSTING_STORE=filesystem` uses `PI_ORB_HOSTING_ROOT` (default `~/.pi-orb/hosting`). Preserve it alongside the database, outside orb workspaces. Multiple control planes need shared storage.
+- `PI_ORB_HOSTING_STORE=gcs` uses `PI_ORB_HOSTING_BUCKET` with application-default credentials (bucket policy: `docs/http-exposure.md`).
 
-Evidence: authoritative `gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/releases/r-1791935519-4b99cc0b-7365-4fc7-a485-2a795ca6d660.json`; retained GitHub artifacts `.context/deploy-38484755289/artifacts/{release-38484755289-1/release.json,rollout-monitor-38484755289-1/rollout-monitor.json}`; independent `.context/deploy-38484755289/{qualification,verification,warnings,transcript-500,final-doc-evidence}/`. Earlier evidence retains its collection-time limits. This docs-only finalization performed no product change, live probe, deployment or rerun.
+`PI_ORB_HOSTING_ORIGIN` is the files origin; `PI_ORB_APP_ORIGIN` supplies dashboard links. Local defaults: `http://files.localhost:7100` and `http://127.0.0.1:7100` (`PORT` when set). `HOST` sets the listen address (default `0.0.0.0`). `PI_ORB_AUTH_MODE=local` supplies these defaults, the filesystem store and trust for Vite on 5173; Google mode requires the store kind and both origins, and GCS requires the bucket. Uploads use runtime bearers; private downloads use the files origin's session. Hosting contract: `docs/http-exposure.md`.
 
-**Failed schema release and cleanup (2026-10-13, PDT):** [Deploy 38478055943](https://github.com/schani/pi-orb/actions/runs/38478055943) failed before apply on migration 044's deadlock. Authorized cleanup completed at 16:18:31: the exact terminal migration job was etag-deleted, then the original lock was removed with generation guard `1791931755981435`. Old serving, active pointer and failed release record remained unchanged. Production catalog/ledger were not queried. At cleanup, the reviewed NOWAIT correction was local and unqualified; its subsequent deployment is recorded above. Evidence and limits: `docs/postmortems/2026-10-13-history-migration-deadlock.md`, `.context/deploy-38478055943/failure/safety/cleanup/`.
+## Database
 
-**Scoped user release exception (2026-10-13, PDT):** the user authorized deployment while waiving historical explanation of the overlapping local image/OAuth/PGlite timeouts, PR 90 `1a68b06` Docker-build deadline and WebKit readiness failure in Durable qualification `38468937890`. Evidence and unknown causes are preserved in `docs/postmortems/2026-10-13-claude-history-nul.md`; no fix is claimed. Normal exact-head qualification, new-failure handling and DST replay remain mandatory. This docs-only record dispatches no deployment.
+- Cloud SQL for PostgreSQL 17, chosen over AlloyDB because small configurations suffice and cost less. Private IP only, deletion protection, and automated backups with point-in-time recovery: the replica is the durable product history. Major upgrades are in place through the normal release and need pre/post backups and a maintenance outage; recovery to the old major restores the pre-upgrade backup to a **new** instance. An in-place upgrade can interrupt the serving application before rollout: an unchanged revision does not mean unchanged production (`docs/postmortems/2026-10-29-pg17-production-interruption.md`).
+- The saved-plan guard rejects database and credential changes. Its only permitted instance change is `cloudsql.enable_pg_textsearch` absent/off → on, which must ship in a release before any migration that creates the extension (schema migration precedes apply).
+- Destructive credential targets are explicit validated identifiers, never ambient SQL role expressions. Experiments use disposable owner roles. A production credential mutation needs independently armed recovery that does not depend on pi-orb's issuer, executing the exact tested procedure (`docs/postmortems/2026-09-09-credential-probe-role-reset.md`).
+- The database password was exposed in tracked plan archives; the user chose not to rotate it. Rotation is not a deployment prerequisite (`docs/postmortems/2026-09-09-tracked-deployment-credentials.md`). Planned recovery authority, if rotation is ever done: a separate GitHub Actions job using Cloud SQL Admin API with explicit identifiers and the Secret Manager credential, inside the release-lock transaction; prepare a new login and retire the old only after all consumers move. Not implemented.
 
-**Default-branch fix release (2026-10-11):** [Deploy 38099575437](https://github.com/schani/pi-orb/actions/runs/38099575437) on `630e29ce9c15dc2c67c1d2e6c5a22285dae5045d` validated (`r-1791680828-132c88c0-4f72-46c0-8770-b17364fbc557`); all twelve gates passed and `pi-orb-issuer-00050-nn4` serves 100%. The two prior releases were `applied-but-unvalidated` on the same smoke defect (`docs/postmortems/2026-10-09-resource-fetch-main-branch.md`); their retained fixtures were deleted through the project API on 2026-10-11. The rollout monitor then reported `incomplete`: ten clean samples, then five `invalid` samples from `error log inventory truncated`. One stale Firefox tab polled with an expired session at ~2.3 requests/s; each 401 logged `lifecycle: auth-admission outcome=unauthenticated` (1,728 rows in 12 minutes), exceeding the 1,000-row query cap. Corrections: unauthenticated admission is no longer a lifecycle outcome, the web client stops non-probe API calls while sign-in is required, and unavailable monitor samples retain their fixed failure message.
+## Release transaction
 
-**Control-plane sizing decision (2026-10-09):** user-requested `pi-orb-issuer` sizing is 2 vCPU / 4 GiB (`4Gi`), with always-allocated CPU and min=max=1 preserved. This is a capacity mitigation; the memory-growth driver remains unknown. The capacity-only resize preserved the image and host generation under the global release lock; no harness change or root-cause fix is implied. At 3:18 PM PDT, revision `pi-orb-issuer-00048-zb9` was Ready at 100% traffic, `/health` returned `ok`, the previous revision was removed and its shutdown observed. Source sizing has a RED-before-change/GREEN regression test; all 168 infrastructure tests passed. Sanitized operation evidence: `gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/maintenance/capacity-2cpu-4gi-20261009.json`. The lock was released with its acquired object-generation guard.
+`infra/release.sh` is the only release implementation; the Deploy workflow calls it rather than duplicating it. Stages: `checks`, `build`, `plan`, `schema`, `apply`, `repair`, `retire`, `activate`, `lifecycle`, `identity`, `complete` (plus `maintenance` before `schema` only with the one-time `--first-consolidation`).
 
-**Runtime-image APT (2026-10-08):** authenticated index update, at most two verified download-only acquisitions, then one offline installation; never repeat dpkg writes. Unexpected-size rejection is not retried by `Acquire::Retries` in the tested Debian client. Attempt/failure/install edges persist in Docker/Actions logs; signature/hash checks and existing job/transport budgets remain intact. This Debian path is independent of Ubuntu runner source selection. Local acquisition contracts are not image/release qualification. Incident and evidence: `docs/postmortems/2026-10-08-runtime-apt-size-mismatch.md`.
+- **Serialization.** A generation-matched GCS object `static-plane/release.lock` serializes the transaction across workstations and runners; a same-host lock fails earlier. OpenTofu's state lock covers only state mutation. Holding the lock, the release clamps the next generation above the serving revision, the active generation and any recorded retirement cutoff, including after failures. GitHub concurrency is defense in depth.
+- **Early failure.** Tools, Docker, scoped cloud authority (including `python3 -m infra.release_preflight`), a read-only application plan, machine API access and retirement inventory are checked before expensive builds. A successful plan does not prove create permission (`docs/postmortems/2026-09-11-release-logging-exclusion-iam.md`).
+- **Saved plan.** Exact temporary plan; database and credentials must be preserved. Plans and unsanitized JSON embed state secrets: `umask 077`, mode-0700 directory, deleted on exit, never uploaded. CI rejects tracked state/plan/credential artifacts and Docker excludes them.
+- **Migrations** run once from the accepted image in a one-task, no-retry Cloud Run job before any new revision consumes schema. Default task deadline 600 s; `--migration-timeout-30m` (Deploy input `migration_timeout_30m`) allows 1800 s for one release and is refused with validation-only recovery. A longer task can block history writes longer. Production startup never migrates; local development does. Filenames, outcomes and validated SQLSTATE are logged, never raw errors. An uncertain execution retains the lock and job identity. Committed schema is never rolled back automatically.
+- Migrations that lock several tables use NOWAIT attempts with bounded backoff and durable contention edges; blocking ordered exclusive locks still deadlock with inverse-order readers (`docs/postmortems/2026-10-13-history-migration-deadlock.md`).
+- Deployment-only migration inputs (`PI_ORB_USER_ID`, `PI_ORB_ORIGINAL_*`) reach only the migration job, never check/build children (`docs/postmortems/2026-09-17-release-owner-environment-leak.md`).
+- **Runtime/schema compatibility.** Supported old runtimes keep running briefly after a migration. Each changed write contract either accepts their writes with behavior-preserving defaults, or rejects incompatible writes at the boundary with a typed, durable, user-visible outcome before incomplete state is stored. The protection takes effect atomically with its migration. This covers behavior, not just decoding (`docs/postmortems/2026-09-17-typed-history-runtime-fence.md`). A global runtime stop is not a deployment requirement.
+- **Apply and repair.** Apply the saved plan, then `infra/deploy.sh` reads fresh Cloud Run status, verifies the `files` tag routes 100% to the latest ready revision and deletes all other revisions. A resource postcondition cannot enforce the tag during first adoption, because the plan evaluates old `traffic_statuses`. Rollout readiness may fall back to a distinct, owned, Ready prior revision serving exactly 100% files traffic with matching image/env identity and active generation when the desired rollout is Ready=False with ConfigurationsReady=False/HealthCheckContainerError; post-apply readiness, retirement and activation stay strict.
 
-**Hosted runner APT (2026-10-07; IPv4 decision 2026-10-14, PDT):** Ubuntu 24.04 checks, E2E, Durable qualification process shards (coverage added 2026-10-22) and release jobs use `infra/runner_apt.py` before their first APT operation to replace only the mirror-list URI with the official HTTPS Ubuntu archive and write `Acquire::ForceIPv4 "true";` to `/etc/apt/apt.conf.d/99pi-orb-force-ipv4`. The ephemeral system drop-in covers Playwright's privileged APT child; per-command flags would not. Signatures, hashes, other source/configuration fields and retry/timeout budgets remain unchanged; production state, Debian images and native GCE provisioning are unaffected. Public IPv4/URI/keyring diagnostics persist in Actions logs. Exact-main `adc9cc6` E2E 38579888332 shard 2 completed the signed index update, then failed package acquisition with IPv6-only connect-101 diagnostics; no underlying outage cause or hosted recovery is claimed. Offline tests do not qualify recovery: fresh attempt-1 exact-head CI, all four E2E shards and Durable qualification remain mandatory. Incidents: `docs/postmortems/2026-10-07-runner-apt-timeout.md`, `docs/postmortems/2026-10-14-runner-apt-ipv6-unreachable.md`, `docs/postmortems/2026-10-22-durable-browser-apt-stall.md`.
+### Activation and retirement
 
-**Control-plane PTY build (decided 2026-10-15, PDT):** after dependency installation and patching, remove PTY prebuilds and rebuild with `npm_config_nodedir=/usr/local` in a separate `RUN --network=none`. The official Node image supplies matching headers and binary; header acquisition must not depend on the network. Dependency-stage and final-image PTY spawn smokes remain mandatory; build failures persist in Actions logs. Evidence and proof limits: `docs/postmortems/2026-10-15-control-plane-node-headers.md`.
+**Revision deletion is cleanup, not a fence.** Deleted revisions have kept making lifecycle decisions for minutes after deletion (`docs/postmortems/2026-08-11-release-smoke-restart-registry-timeout.md`, `docs/postmortems/2026-09-09-deleted-browser-reconciler.md`). Deletion, log silence and elapsed time never prove old-process retirement.
 
-**Nondeploy image qualification (2026-10-07):** CI independently builds `apps/control-plane/Dockerfile` from the repository-root context on Ubuntu 24.04, after the tracked-artifact guard and a 15 GiB free-disk check. The job runs the network-disabled packaged-worker/Git/skills proof and reports final Docker/disk usage, uses only `contents: read`, and neither publishes images nor obtains cloud credentials. This checks the web/dependency/runtime image closure; it does not alone qualify a release or replace Docker/PostgreSQL E2E and native acceptance. Release qualification requires the exact CI inventory `checks` and `control-plane-image`, both successful on the first exact-SHA push/main attempt, plus all four E2E shards. Workflow job changes must update the qualifier inventory; missing, duplicate, foreign or unsuccessful jobs fail closed.
+- **Activation barrier.** The application starts HTTP but holds autonomous loops until it reads its exact generation in `static-plane/releases/active.json` (the control-plane account can read only that object). Missing, malformed or unavailable authority fails closed; a process that saw a later generation never reopens after regression. Pending/unavailable/superseded activation shows in the dashboard footer, with edge-only `lifecycle:` events. The barrier does not stop HTTP writers.
+- **Cooperative retirement.** After repair, the release writes `retireThroughGeneration` = new generation − 1 into `active.json` (generation-match precondition, preserving `generation`, `releaseId`, `activatedAt`). Writes refuse a cutoff that would retire the successor or regress authority. Every process checks the cutoff at startup and every 5 s after activation; at or below it, it exits the barrier without loops or runs the SIGTERM shutdown path, never reopening. Unavailable reads block initial activation but do not stop an active controller; edges `release-retirement-unavailable` / `release-retirement-recovered`.
+- **Shutdown** stops HTTP admission and scheduling, terminates browser/terminal WebSockets without waiting for close acknowledgements, and closes streaming responses (tracked until the response closes, not the source stream). In-flight handlers, admitted reconciliations and signing-key repair join; agents drain through their close protocol; provider/database close last. Durable logs: `release-retirement-observed`, `control-plane-shutdown`, per-agent drain outcomes, `control-plane-drained`.
+- **Independent proof** still gates activation. Before apply, inventory revision resources separately from observed processes. Process targets are revisions with unresolved positive Monitoring active/idle samples in a 15-minute lookback, including deleted revisions; queries filter on exact service **and** region (`docs/postmortems/2026-09-27-monitoring-retirement-filter.md`). A positive resolves only when the latest explicit active **and** idle samples are both zero; a missing state is unknown, and positives win ties.
+- After apply and pruning, every inventoried resource must be absent; only the new serving revisions may survive, disjoint from the old inventory. Then observe at least 180 s (the instance metric samples every 60 s and can lag 120 s), rereading from 15 minutes before the boundary on every poll. Admitted targets need explicit zeros at or after the pre-apply boundary. Saved qualified zeros stay reusable when series disappear; newer positives invalidate them. Requiring fresh post-deletion emission from already-retired revisions is rejected: it can stall forever (`docs/postmortems/2026-10-06-consolidation-retirement-timeout.md`).
+- Pending pi-orb instance/disk/image operations also block activation. Operational cap: 75 minutes; time never resolves a positive. Failure leaves loops gated and HTTP available.
+- The record's `retirement` object holds `after`, `resources`, `resourcesRetired` (required for activation), `revisions`, `zeroes`, `excluded` (resolved candidates → latest active/idle zero timestamps, disjoint from `revisions`) and `operations`. A positive at or after a saved exclusion zero readmits the target. An empty process inventory is accepted only with completed resource-retirement checks.
+- A deliberate maintenance pause requires a verified restoration watchdog independent of the agent and web UI, restoring scaling, files routing and access even when maintenance fails; refuse to pause without it. Not implemented; prefer proven natural shutdown.
+- Rejected faster handovers: early activation and shorter arbitrary retirement timeouts (neither proves effects stopped); a lower request timeout (needs reconnect qualification, not a handover protocol).
 
-**Blocked qualification (2026-10-07):** [Deploy 37642849345](https://github.com/schani/pi-orb/actions/runs/37642849345) rejected `a41359b`: [CI 37636936479](https://github.com/schani/pi-orb/actions/runs/37636936479) passed both jobs, but the qualifier still expected only `checks`; [E2E 37636936502](https://github.com/schani/pi-orb/actions/runs/37636936502) passed all four shards. Release was skipped before cloud credentials, lock, build, migration, apply or activation. The inventory correction adds an independent two-job fixture and a workflow/qualifier contract test; fresh exact-main qualification remains required. The preceding GitHub API HTTP 500 during the public partial outage was separate from this deterministic rejection. Evidence: `.context/deploy-pr61-20261007/qualified-report.md` and `first-run-full.log`.
+### Records and recovery
 
-**Historical browser redirect release (2026-10-06, 14:06:13 UTC):** [Deploy 37469707425](https://github.com/schani/pi-orb/actions/runs/37469707425) deployed [PR 55](https://github.com/schani/pi-orb/pull/55), source `404cf7b1d54fff65ca09844e6cd9b2a1af8ff1ca`, release `r-1791293815-5a3707b5-c19c-4a34-b515-b8b2b3285a46`. All release gates passed, including exact-source [CI](https://github.com/schani/pi-orb/actions/runs/37469689426) (3,218 unit/DST tests plus 186 infrastructure checks) and [E2E](https://github.com/schani/pi-orb/actions/runs/37469689480) (470 tests, zero skips), on their first attempts. Apply added the redirect and updated the issuer; no resources were destroyed. [Release artifact](https://github.com/schani/pi-orb/actions/runs/37469707425/artifacts/11418743296) matches the authoritative GCS record.
+- `infra/release_state.py` builds token-free, allowlist-validated records at `static-plane/releases/RELEASE_ID.json` with a `latest.json` pointer: source and runner commits, accepted artifacts, serving image/revision and generation, stage verdicts, retirement evidence, `qualification` and fixture outcomes. Outcomes: `failed-before-apply`, `applied-but-unvalidated` (apply is marked so before invocation), `validated`.
+- `--validate RELEASE_ID|latest` creates a new record referencing the original after verifying the serving identity, and runs only revision pruning, retirement, activation and smokes; it never builds, migrates or applies, and never rewrites the original. It cannot supply missing infrastructure. Do not validate merely to obtain green.
+- A client mutation failure does not prove server failure; a command timeout does not establish resource state. Reconcile by exact operation and resource identity and verify owned cleanup before another attempt (`docs/postmortems/2026-09-16-validator-cleanup-timeout.md`, `docs/postmortems/2026-10-24-native-image-capture-502.md`).
 
-Independent verification confirmed Ready revisions `pi-orb-00001-67g` and `pi-orb-issuer-00043-2k5`, matching digest `sha256:c32ae03d2a22f728506d5d98b9ea131225df714c5fa8369a6665287dc58fe6d9`, 100% traffic and active application generation `1791294503`. Both `https://pi-orb-1077475695242.us-central1.run.app` and `https://pi-orb-a56ms4dwcq-uc.a.run.app` passed root/deep-link/HEAD redirects and API/auth/discovery/mutation refusal probes. Chromium confirmed path/query/fragment preservation and the sign-in button; interactive login was not completed. Federation still trusts the exact issuer origin. Public health/discovery/JWKS and machine API passed; both production images are Ready, all four fixtures and temporary Compute resources are absent, and the release lock/migration jobs are gone. The bounded post-activation ERROR query returned zero. Evidence: `.context/incident-20261006/redirect-verification/`. The browser verifier now waits for the sign-in button and checks its accessible name; initial label/readiness/CSS text-matching failures and their corrections are retained. Local evidence-watcher generation conflicts did not change the successful release outcome.
+### Smokes and fixtures
 
-**Application URL decision (2026-10-13; applied 2026-10-14):** `pi-orb-issuer` is the sole configured Cloud Run service and canonical browser address. Issuer trust, app/files/broker origins, OAuth callbacks and controller retirement remain unchanged. The normal Actions release deleted `google_cloud_run_v2_service.browser_redirect` under the database/credential guard; protected resources remained no-op. Foundation identities stay shared with image building. Rationale: `docs/control-plane-consolidation.md`; release outcome and limits above.
+- `infra/smoke.sh` (lifecycle, including its load-bearing stop/start) and `infra/smoke-workload-identity.sh` (identity, preview and federation; procedure: `infra/README.md`). Smokes create and delete their own orbs, never the shared project.
+- Fixture IDs are recorded immediately. Success deletes and polls to 404 (accepted only from completed HTTP responses). Failure retains fixtures and reports IDs, cleanup commands and cost. Proven absence is never relabeled retained when record publication fails.
+- Smoke operations (API calls, debug-token minting, GCE reads, IAP SSH, preview readiness, discovery/JWKS, STS, impersonation, fixture publication IO) share one bounded policy: ≤5 attempts, 1/2/4/8 s backoff, 30 s per attempt, 60 s per operation including auth, clipped by phase deadlines; `Retry-After` cannot extend it. Transient transport and HTTP 408/429/500/502/503/504 retry; `retryable:false`, credential, certificate, host-key, permanent DNS, malformed JSON and assertion failures never do; unknown DNS/proxy/TLS fails closed. Reads, fixed-UUID creates and fixture deletes may replay; Start/Stop and other mutations are single-shot. Fixture publication is one generation-fenced CAS under one 60 s deadline; 412 after a lost acknowledgement is a conflict. Logs keep operation, attempt, status class, delay, budget and decision; never tokens, URLs, bodies or raw errors. Auth failures record exit, elapsed and allowlisted stderr categories (`docs/postmortems/2026-10-19-lifecycle-smoke-auth.md`). Ordinary `infra/api.sh` calls do not retry.
 
-**Consolidation recovery validated (2026-10-06, 12:49:14 UTC):** [Deploy 37459759444](https://github.com/schani/pi-orb/actions/runs/37459759444) deployed `7ab8cafc5317d92eb46d5b3e48d2aa473eb15fb9` as `r-1791288814-421b2d8d-5826-4918-ad19-edf8900e5000`, outcome `validated`, exit 0. All gates passed on the first attempt, including exact-source [CI](https://github.com/schani/pi-orb/actions/runs/37459718952) (3,218 tests; 13 conditional skips), [E2E](https://github.com/schani/pi-orb/actions/runs/37459718950) (470 tests; zero skips), native acceptance, guarded maintenance/migration/apply, retirement, activation and lifecycle/identity smokes. Migration applied `029_orb_harness.sql` and `031_google_identities.sql`, mapping six identities.
+## Qualification
 
-The application is now **https://pi-orb-issuer-1077475695242.us-central1.run.app**. Independent reads at 12:53 UTC confirmed Ready revision `pi-orb-issuer-00042-twk`, 100% traffic, digest `sha256:5897101dc3b229bb40011cef62979c39fcb602224a5b56433cd36b45516ab1cb`, active generation `1791289502`, health/API/discovery/JWKS responses, absent legacy services/lock/migration jobs, four deleted fixtures and absent fixture/builder/validator Compute resources. Both production images remain Ready. Browser rendering and navigation to Google's `pi-orb-production` sign-in page passed; interactive user login was not completed. Existing guests adopt changed contracts through ordinary Stop/Start.
+- Releases need trusted same-repository `push`/`main` runs at the exact dispatched SHA: CI jobs `checks` and `control-plane-image`, E2E `E2E (1/4)`–`(4/4)`, and Durable qualification `Central process (1/4)`–`(4/4)` (`infra/ci_qualification.py`). One matching run per workflow, successful on its **first attempt**; a green rerun is refused — diagnose the first attempt and qualify a new commit. Missing, duplicate, foreign or unsuccessful jobs fail closed. Workflow job changes must update this inventory.
+- The `qualify` job waits up to 60 minutes (65-minute job) before the lock; failed or cancelled runs block. `release.sh` re-verifies evidence and checkout before locking, then drops the token. Run/job identities go into the record's `qualification`. Local releases run checks and E2E themselves. Validation-only recovery skips new-source qualification.
+- Reuse removes duplicate checks, not coverage: native acceptance and live gates stay mandatory. CI and test details: `docs/testing.md`.
+- Open release-speed options: `docs/open-questions.md` (question 94).
 
-[Release artifact](https://github.com/schani/pi-orb/actions/runs/37459759444/artifacts/11414434781) matches `gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/releases/r-1791288814-421b2d8d-5826-4918-ad19-edf8900e5000.json`. Independent evidence: `.context/incident-20261006/recovery-verification/`. The bounded new-revision ERROR query after activation returned zero; this is not ongoing error-free attestation. A post-validation start operation followed Spot preemption of an existing orb, completed successfully, and its API returned `running` without error.
+## Rollout monitor
 
-**Earlier consolidation failure (2026-10-06):** [Deploy 37431686576](https://github.com/schani/pi-orb/actions/runs/37431686576) deleted the three application services, then timed out before migration/apply. Retirement required fresh metrics from 158 revision metadata names; only two emitted postboundary metrics and reached explicit active/idle zeros. The retained lock was cleared with generation `1791272809671687` only after verifying its failed runner, owner and cloud operations. Retirement must distinguish resource fencing from process evidence and preserve its observation boundary. Incident: `docs/postmortems/2026-10-06-consolidation-retirement-timeout.md`.
+After a validated transaction, `infra/rollout_monitor.py` observes a fixed 900 s throttle window while watching other faults throughout, and starts its final query no earlier than 1090 s (900 + 10 s identity retry + 180 s ingestion), within a 25-minute step. It first verifies owner inventory and persists a partial artifact.
 
-**Production release validated (2026-10-05, 8:33:32 AM America/Denver):** [Deploy 37316402844](https://github.com/schani/pi-orb/actions/runs/37316402844) deployed exact source `d67de4c6d1b4019b229e75f66610df395ef2256f` as `r-1791206669-915ce6b9-44e7-4470-ad6b-18487064d3bf`, outcome `validated`, exit 0. All twelve gates passed: 2,691 unit/DST tests in 340 files (twelve conditional skips), 407 full Docker/PostgreSQL/Chromium/WebKit E2Es in 42 files (zero skips), fresh native acceptance, migration, rollout, retirement, activation and lifecycle/identity smokes. The same external run continued across the monitoring host restart; no redispatch, retry or separate validation was invoked.
+- Artifact `rollout-monitor-<run>-<attempt>` (always uploaded, 30 days) is separate from the authoritative record. It retains release/SHA/generation, health, revision/image/traffic/active-pointer checks, lock absence, owner fleet placement/state counts, SQL state and CPU/memory/disk/connections, and revision/region-scoped Run instances, memory and startup distributions. Instance count is not restart count.
+- Logs are revision/region-scoped and export only classified counts: integrity/authority/drain/delivery failures, raw ERROR/HTTP 429 counts, independent ERRORs, recovered/unrecovered 429s, HTTP 5xx.
+- A 429 is recovered only by native request logs from the same project/service/region/revision showing the same valid project-qualified trace and exact HTTPS id-token POST URL returning HTTP 200 within 10 s of the earliest throttle (`X-Cloud-Trace-Context`). A later same-orb success is insufficient. Unrecovered or uncorrelated 429s are regressions (`docs/postmortems/2026-10-19-observer-mint-floor.md`, `docs/postmortems/2026-10-13-rollout-monitor-anomalies.md`).
+- Missing or nonnumeric required metrics, read failures, truncated or decreasing inventories are `incomplete`, never invented zeros. Unavailable samples keep their category and fixed message. No prompts, tokens, payloads or free-form errors.
+- A regression requires review, not automatic rollback. A monitor failure leaves the validated record intact.
 
-Independent reads verified fresh Ready status and 100% traffic on `pi-orb-00079-2k7`, `pi-orb-ops-00076-4zv`, `pi-orb-runtime-api-00081-kbt` and `pi-orb-issuer-00041-zcl`, all matching control-plane digest `sha256:2bcd07a4cf4bf2dca850ee649ad3fe152db353b33a878e5510524a6fb0f42a07`. Browser/ops/runtime generation is `1791209714` (issuer has none); the active pointer matches that generation and release ID, and the release lock is absent. Browser IAP is enabled with exactly `domain:heyglide.com` as accessor; these verification artifacts do not independently establish the invoker policy or interactive browser login. All four smoke fixtures returned ops GET 404s; temporary native builder/validator instances and disks are absent. Production native image `6210056885185155358` and workspace image `7547658826719039822` remain retained and Ready. The bounded new-revision ERROR-or-higher query since activation returned zero at 8:38:43 AM America/Denver (limit 100), not a global or ongoing error-free guarantee.
+## Rollback and recovery
 
-This releases lazy activity headlines and the thinking Markdown/inline-heading rendering from `af06b87`; qualification limits remain in `docs/activity-headlines.md`. Existing running guests were not forcibly restarted: new runtime adoption uses ordinary Stop/Start. Later `main` commits, including this documentation, are not the deployed source.
+- Rollback is a new forward release of retained last-known-good image digests with a newer generation, through the same repair, retirement and smoke gates. Traffic cannot shift to old revisions: they are deleted. Artifact Registry and image retention must keep referenced digests.
+- Prefer a qualified forward fix. Rollback needs a qualified CP/native/config/schema combination. No automatic SQL DOWN, database restore, history overwrite, user archival or old-controller revival. Backup/PITR readiness is not a rehearsed restore.
+- Releases with migrations or static-plane changes never roll back automatically; they need explicit approval, a verified recovery point and a forward-fix or migration-specific runbook.
+- Preserve failed release, lock and migration evidence.
 
-Durable evidence: [authoritative GCS release record](https://storage.googleapis.com/pi-orb-tfstate-playground-dev-6ae7/static-plane/releases/r-1791206669-915ce6b9-44e7-4470-ad6b-18487064d3bf.json) (`gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/releases/r-1791206669-915ce6b9-44e7-4470-ad6b-18487064d3bf.json`), byte-identical GitHub release artifact in the linked run. Local read-only evidence: `.context/deploy-monitor/release-37316402844/{final-summary.json,independent-verification.json,artifact/release.json,test-counts.txt}`. No new production mutation was made during verification.
+## Central Pi
 
-**Font release validated (2026-10-04, 9:50 AM PDT):** [Deploy 37214097909](https://github.com/schani/pi-orb/actions/runs/37214097909) deployed `7e407d168537bc8040ac3bcfe46a709d978536dc` as `r-1791128700-f88fe8ed-fd6f-41be-ac98-39178ef34067`. Its [release artifact](https://github.com/schani/pi-orb/actions/runs/37214097909/artifacts/11309490184) records `validated`, exit 0 and all twelve gates passed, including 2,587 unit/DST tests (eight conditional skips), 315 Docker/PostgreSQL/browser E2Es, native acceptance, migration and lifecycle/identity smokes. SHA-matched [CI 37214097528](https://github.com/schani/pi-orb/actions/runs/37214097528) and [E2E 37214097523](https://github.com/schani/pi-orb/actions/runs/37214097523) passed. Independent reads confirmed all four ready services serving digest `sha256:be614e9dad1b233b7b739326e63cae19efbde9367e15fb4c44133a9a8b67316b` at 100%, generation `1791131747` on browser/ops/runtime (none on issuer), matching active pointer, absent release lock, exact native IAP policy, four fixture API 404s and absent temporary native instances/disks. All six font assets extracted from the deployed digest match the source SHA-256 manifest; licenses are included. Production ops health responded successfully. Interactive browser IAP login and physical Safari focus zoom were not independently tested. Durable record: `gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/releases/r-1791128700-f88fe8ed-fd6f-41be-ac98-39178ef34067.json`; local proofs: `.context/font-release-37214097909/verification/`.
+- Code-mode workers share one CPU budget (`docs/pi.md`). The managed Cloud Profiler agent cannot attribute worker CPU.
+- Share the Actions run URL before cutover: a deploying Pi conversation may lose publication or compute.
 
-**Font release checks blocked before apply (2026-10-04):** [Deploy 37211353362](https://github.com/schani/pi-orb/actions/runs/37211353362) and [E2E 37211353118](https://github.com/schani/pi-orb/actions/runs/37211353118) for `8a80bc7b097ba587ea3d635d0b7f494fad5a7e3d` each passed 313 of 315 E2Es. Both tablet-touch cases in `e2e/frontend-session.e2e.test.ts` still expected 16px rather than the selected 13px composer size. Targeted local reproduction confirmed the same deterministic assertion mismatch; the correction changes only that obsolete expectation. Unit/DST checks passed 2,587 tests (eight conditional skips). No build, migration or apply occurred; the original failed runs remain unchanged.
+## Workflow security
 
-**Preview prerequisite satisfied (2026-10-06):** architecture orb
-`e67b1120-393c-41c6-94ed-b354d82c526d` / [PR #51](https://github.com/schani/pi-orb/pull/51)
-merged October 5, 10:30 PM PDT as `3c03e4200b8220fa097b97b379cc20c851527103`.
-The validated release above, [Deploy 37469707425](https://github.com/schani/pi-orb/actions/runs/37469707425),
-deployed descendant `404cf7b1d54fff65ca09844e6cd9b2a1af8ff1ca` on October 6,
-7:06 AM PDT. Its [release artifact](https://github.com/schani/pi-orb/actions/runs/37469707425/artifacts/11418743296)
-records `pi-orb-issuer-00043-2k5`, exit 0 and all twelve gates passed, including
-activation, lifecycle and identity. Consolidation preserves the exact issuer URL,
-signing keys, relying-party trust and private VPC connectivity; app-managed Google
-login and an encrypted host-only 12-hour session cookie replace browser IAP. No load
-balancer was added. Historical browser-IAP evidence is not the current preview auth
-contract; preview ingress must not reintroduce IAP.
+- Manual `workflow_dispatch` on `main` only; automatic deploy on push is open question 40. Empty `validate_release` releases; a release ID or `latest` validates. Inputs pass through quoted environment variables, never interpolated shell.
+- The workflow checks out the immutable dispatched SHA, verifies it, creates local `main` at it before authentication, and `exec`s `release.sh` for signal delivery. Hard cancellation still requires evidence-backed inspection of remote work and the lock.
+- Pinned: every action by commit SHA, `ubuntu-24.04`, Node 26.13.0, Cloud SDK 592.0.0 with its beta component (checksum-verified), OpenTofu 1.13.2 (checksum-verified). Provider lock files are read-only. Job budget 240 minutes.
+- Checks do not inherit the release's result-directory or fixture-recorder variables; only smoke gets the real recorder (`docs/postmortems/2026-09-09-release-test-environment.md`).
+- `infra/release_report.py` exports exactly one allowlisted `release.json`; no diagnostics, state, plans, credentials or source. A successful step without a completed validated record fails the reporter.
+- The release job uses concurrency group `pi-orb-production-release` without in-progress cancellation. GitHub coalesces pending runs and does not guarantee commit order; a strict every-push policy would need its own ordering check.
+- Preserve `.dockerignore` exclusions for `.git`, credentials, state, plans and unrelated files.
 
-HTTP preview implementation is authorized, not deployment (2026-10-06); contracts are in
-`docs/ports.md`. Optional Terraform `preview_origin` injects `PI_ORB_PREVIEW_ORIGIN` into this
-same application; empty disables registration. No domain/DNS/TLS/LB is selected or provisioned.
-`run.app` cannot provide user-controlled wildcard DNS/TLS. Operator Host-preserving TLS routing
-configuration is in `infra/README.md`. The optional project `_Default` exclusion removes
-preview-host Cloud Run request-URL logs. The fixed files origin has its own unconditional request-URL exclusion (`infra/hosting.tf`), covering hosted and live reads. These exclusions do not cover audit logs; custom/ancestor sinks and edge logs
-must also be checked before exposure. Existing lifecycle/identity gates remain mandatory.
-Pending deployed acceptance covers DNS/TLS, consolidated login/stateless preview handoff,
-registered-port admission, HMR/streaming, activity versus idle stop and Stop/replacement fencing.
-Local service success or a generated URL is insufficient.
+## Local control-plane service
 
-**Tailscale removal:** owner-managed admin cleanup after retirement is accepted, not a
-pre-apply product-cleanup/live-inventory/evidence gate. Removing `infra/tailscale.tf`
-destroys the GCP OAuth-client-secret container `pi-orb-tailscale-oauth-client-secret`
-and accessor binding during apply; it is not a per-orb join-key store. That removal does
-not revoke upstream OAuth credentials, join keys or devices. After old provisioning stops,
-the owner can independently revoke/delete them in Tailscale admin; no migration orchestration
-or retained product cleaner is required. No live inventory, cleanup, revocation or apply
-was performed by this docs update.
-
-**Production release (2026-10-04, 6:01 AM PDT):** [Deploy 37200573956](https://github.com/schani/pi-orb/actions/runs/37200573956) validated cached-navigation source `303201799f035b7551e765841cf92f152bd9183d` (`r-1791115229-2dc08e1f-f8fa-4a3c-8c48-cee665552b3e`). All twelve gates passed on the first attempt: 2,585 unit/DST tests (eight conditional skips), 112 infrastructure checks, 307 full Docker/PostgreSQL/Chromium/WebKit E2Es, native acceptance, protected plan/migration/apply, repair, retirement, activation and lifecycle/identity smokes. CI and standalone E2E also passed. The monitoring host restarted; the external release continued without redispatch.
-
-Independent reads verified all four serving revisions on digest `sha256:1185b60ff7c83c312c8d9ab92d63203a6d12202853cd118f254e8e451c0699ae`, generation `1791117944` on browser/ops/runtime (none on issuer), exact native browser IAP/accessor and sole IAP-service-agent invoker, matching active pointer, absent release lock, four fixture API 404s and absent temporary native instances/disks. All four services had zero ERROR-or-higher entries during the bounded 5:51:53–6:04:58 AM PDT post-activation log window; later errors and ingestion delay remain possible. Interactive IAP login and field first-paint latency were not independently measured.
-
-Durable evidence: [release record](https://files---pi-orb-1077475695242.us-central1.run.app/s/c3fe1a3c-c335-4b89-8298-1046528e7f52/evidence/cached-navigation-release.json), [independent proof](https://files---pi-orb-1077475695242.us-central1.run.app/s/c3fe1a3c-c335-4b89-8298-1046528e7f52/evidence/cached-navigation-verification.json), [verification report](https://files---pi-orb-1077475695242.us-central1.run.app/s/c3fe1a3c-c335-4b89-8298-1046528e7f52/evidence/cached-navigation-verification.md), [GitHub artifact](https://github.com/schani/pi-orb/actions/runs/37200573956/artifacts/11303777581). Local red/green test evidence was exported before archive (`docs/testing.md`); no raw cloud logs, state or plans were published.
-
-**Production release (2026-10-03, 3:58 PM PDT):** [Deploy 37156313989](https://github.com/schani/pi-orb/actions/runs/37156313989) validated `32df1b55a819c7f944e34310faf30b7f7465fec0` (`r-1791064143-b8407a42-3f29-425a-8e9b-943d23cc3d76`): all twelve gates passed, including 2,538 unit/DST tests (eight conditional skips), 299 Docker/PostgreSQL/browser E2Es, fresh native acceptance, migration, apply, retirement, activation and lifecycle/identity smokes. The stale MCP E2E selector was corrected before dispatch (`docs/postmortems/2026-10-02-nested-mcp-live-rows.md`). Independent reads verified all four serving revisions on digest `sha256:cc27d10ec8660a324e7b6a57ba37c059a0136d1641a05c3e5ed02a445a26e8be`, generation `1791066954` on browser/ops/runtime (none on issuer), exact native IAP access, matching active pointer, absent release lock, four fixture API 404s and absent temporary native instances/disks. Evidence: [release artifact](https://github.com/schani/pi-orb/actions/runs/37156313989/artifacts/11286783916), `.context/deploy-monitor/release-37156313989/release.json`, `.context/deploy-monitor/verification/`, `/tmp/deploy-37156313989-full.log`. Interactive browser IAP login was not independently re-tested.
-
-**Failed pre-apply release (2026-10-02):** [run 37079397373](https://github.com/schani/pi-orb/actions/runs/37079397373) of `fd37eff` passed checks but the control-plane Docker build failed on a runtime-only dependency patch. No apply occurred; native temporary resources were cleaned, and the previous `19d3025` serving release was not displaced. Cause, reproduction and image-scope correction: `docs/postmortems/2026-10-02-control-plane-patch-image-build.md`. The corrected image build and deployment passed in [run 37083045085](https://github.com/schani/pi-orb/actions/runs/37083045085).
-
-**Production release (2026-10-02, 6:59 PM PDT):** [Deploy 37083045085](https://github.com/schani/pi-orb/actions/runs/37083045085) validated source `6bd5d0ada3941f371e5e06e86a546b9f94b6ca61` (`r-1790988081-9040e899-8ebc-4c70-ad9e-d0cde1908d52`), with all twelve gates passed, including 2,490 unit/DST tests (eight conditional skips), 266/266 full Docker/PostgreSQL/Chromium/WebKit E2Es, a successful control-plane Docker build, fresh native-image acceptance, migration, apply, IAP repair, retirement, activation, lifecycle and workload-identity smokes. The release record reports four deleted fixtures and successful cleanup of both temporary native instances and disks; the identity smoke reports STS, impersonation and a read-only API call succeeded. All four serving revisions in the record use `us-central1-docker.pkg.dev/playground-dev-6ae7/pi-orb/control-plane@sha256:1b0c82d293df229b3e92f20d92330d55d75f32f4ca5dd552ffd2eb1b1766e83c`; browser, ops and runtime generation is `1790990659` (issuer has none). Retained native image `projects/playground-dev-6ae7/global/images/pi-orb-image-v-6bd5d0a-48bb6f776e764cb0` has ID `9129237180071143083`; workspace image `projects/playground-dev-6ae7/global/images/pi-orb-image-workspace-v-6bd5d0a-48bb6f776e764cb0` has ID `5919669383183853833`. Evidence: [release artifact](https://github.com/schani/pi-orb/actions/runs/37083045085/artifacts/11261023577), `.context/release-37083045085/release.json`, `/tmp/deploy-37083045085-full.log`. These are transaction results, not separate read-only serving or cleanup proofs. The original WebKit CI equivalence and transient compositor mechanism remain unproved (`docs/postmortems/2026-10-02-webkit-lazy-return-gate.md`).
-## Historical central candidate qualification (2026-10-05)
-
-The source rebased onto `7971fe1` passed unit/DST/infrastructure/PostgreSQL and scoped process acceptance, not a full post-rebase E2E gate; earlier frozen gates below do not qualify the integration. Current validation: `docs/testing.md`.
-
-The PostgreSQL/Git/codemode/backend-independent candidate's 2026-10-05 process/Docker qualification is historical. Latest-main integration (`e8e16ea`, 2026-10-06) is undergoing fresh validation and remains undeployed. Frozen13 passed full process E2E, unit/DST/infrastructure, mandatory real-PostgreSQL, types and lint. Its runtime image built on private overlay2; that source's Docker gate stopped at a diagnosed argv failure. Repaired source14 passed actual whole-file Docker full-slice and central-Docker cross acceptance. The first control-plane image build exposed an orphan runtime-only subagent patch: its CP-only install now copies only installed Earendil patches plus code-mode license/provenance, retaining `--error-on-fail`. Frozen15's actual CP image build and packaged-worker proof passed; its full Docker gate finished249 passed/one failed/eleven skipped because the SDK crash fixture targeted the supervisor rather than its runtime child. Frozen16 passed that repaired case and the complete Docker gate (250 passed/eleven expected process-only skips); source17 passed final unit/DST/infrastructure, all140 real-PostgreSQL tests, types and lint. Local process/Docker qualification is complete; the candidate remains undeployed, with no cutover. Exact source scopes and limits: `docs/testing.md`. Live GCP and production host-loss/database-failover qualification remain outstanding; question 72 (Pi Durable) stays open. Earlier release records below retain their immutable-source scopes. Remaining qualification lives in `TODO.md`; only the parent authorizes service changes.
-
-Decisions about where the control plane runs and how infrastructure is managed. The operational workflow (build, apply, deploy, gotchas) lives in `infra/README.md`.
-
-**Local built-UI publication (reconfirmed 2026-10-04):** `PI_ORB_WEB_DIST` is immutable for a process lifetime; static file routes are enumerated at startup. Build into a separate, nonserved root, check active runtimes and authorization helpers, then drain and refresh the control plane against the completed root while retaining database/authentication directories. Index replacement alone is not publication. Verify referenced entry JS/CSS status and MIME types plus real browser rendering. Incident: `docs/postmortems/2026-10-04-claude-management-assets.md`. This is local-service operation, not authorization for production deployment.
-
-## Nested MCP live-row production release (2026-10-02)
-
-[Deploy 36971331677](https://github.com/schani/pi-orb/actions/runs/36971331677) validated source `19d30253e0404c93a583897dc2ddb15623d8e0d1` with all twelve gates passed. Independent serving, IAP, active-pointer and cleanup proofs confirmed all four services on digest `sha256:660dfa645b7fcf83cacd500c3748b605170ff34ef0edd3f58a3e997f780c6e7b`, generation `1790923341` on browser/ops/runtime (none on issuer), exact browser access policy, absent release lock and deleted fixtures/temporary native resources. Running guests require ordinary stop/start to adopt the runtime fix; none were forcibly stopped. Evidence: `.context/nested-activity-release-20261002/verification/` and `.context/nested-activity-release-20261002/artifact/release.json`. Provider business-level success remains unproved (`docs/postmortems/2026-10-02-nested-mcp-live-rows.md`).
-
-## Native MCP and Sol 6.1 production release (2026-10-02)
-
-[Deploy 36960393737](https://github.com/schani/pi-orb/actions/runs/36960393737) deployed `2db52257237d397a60a8344f6091e8883907a92d`, including the intervening self-identity and transcript-cache changes. The authoritative transaction ran 03:30:29–04:32:21 UTC and finished `validated` with all twelve gates passed: checks, fresh native acceptance, protected plan, migrations, apply, IAP repair, retirement, activation and both production smokes. The monitoring orb restarted during checks; the external workflow continued without redispatch.
-
-At that release, all four services served digest `sha256:e7072cab114e6645098c5f5c12f19a28742341742078f6f7839dfa52e466e0e1`; browser, ops and runtime used generation `1790914594`, while issuer had none. Runtime image `2734879604808520138` and workspace image `840177167547666492` were accepted. Independent reads confirmed serving identities, the active release pointer, absent release lock, native browser IAP, sole `heyglide.com` accessor domain and sole IAP-service-agent browser invoker. Old-controller active/idle zeroes were verified with no pending operations. All four smoke fixtures and temporary native build resources were cleaned up; production images remain retained.
-
-The release includes general-purpose child MCP access without relaxing explicit tool lists. Existing active orbs are not forcibly replaced; they adopt the new image through ordinary stopped-compute replacement. Earlier authenticated provider/context probes retain their own artifact and profile scopes, rather than becoming new production-provider tests by implication.
-
-Durable record: `gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/releases/r-1790911822-2476db9d-8aac-4088-b16f-95140a78c10f.json`; local independent proofs: `.context/actions-release-20261002/verification/`.
-
-## Single application service (implemented 2026-09-19; not deployed)
-
-Candidate `0158472` passed isolated sandbox qualification (2026-09-27). Production deployment is authorized only through the existing GitHub Actions Deploy workflow (2026-10-05); current-source qualification and Actions-owned old-service retirement remain prerequisites. Qualify the actual checkout and CI merge tree, distinguishing byte-identical production code/dependencies/deployment configuration from a changed whole Git tree (including any whole-tree native archive). Preserve sanitized migration-execution JSON before deleting exact-owned jobs; job deletion can cascade to execution records, while Cloud Logging entries can remain observable afterward (`docs/control-plane-consolidation.md`). Implementation is not deployment evidence. `docs/control-plane-consolidation.md` records the decision, acceptance gates and maintenance cutover; `docs/testing.md` records qualification. Current composition is in `apps/control-plane/src/{main,identity-composition}.ts` and `infra/{run,auth,hosting,oidc}.tf`.
-
-One Cloud Run application, **`pi-orb-issuer`**, serves browser/API, runtime broker, files, discovery/JWKS and background work. It retains the exact configured issuer `https://pi-orb-issuer-<project-number>.<region>.run.app`, signing keys and relying-party trust. The app/API/broker use that origin; files use `https://files---pi-orb-issuer-<project-number>.<region>.run.app`. These are new app/files/broker URLs, without aliases. The deterministic issuer must belong to Cloud Run's `.urls`; `.uri` is not an interchangeable trust anchor.
-
-The application runs as `pi-orb-control-plane` with public ingress, IAM invocation disabled, always-allocated CPU, min/max one instance, 3600-second request timeout and private-ranges-only VPC egress. Runtime bearers still fence each incarnation. Public issuer handlers now share control-plane privileges and runtime ingress is public: reduced infrastructure isolation is intentional, not reduced authentication. Compute SSH IAP remains separate.
-
-`PI_ORB_AUTH_MODE` is explicitly `local` or `google`; missing/unknown values fail startup, and `local` is forbidden in Cloud Run. Google mode requires `PI_ORB_GOOGLE_CLIENT_ID`, `PI_ORB_GOOGLE_CLIENT_SECRET`, `PI_ORB_COOKIE_SECRET`, `PI_ORB_MACHINE_SUBJECT`, `PI_ORB_APP_ORIGIN` and `PI_ORB_HOSTING_ORIGIN`. Origins must be exact HTTPS origins on different hostnames. The release derives the numeric `uniqueId` from a verified IAM metadata read of the existing `pi-orb-debug` account, not its email. Tooling sends Google ID tokens to the ordinary API with the exact app-origin audience (`infra/api.sh`). Register `/auth/callback` on both origins and update MCP callbacks/provider allowlists. Secret Manager supplies the restart-stable cookie sealing key and Google client secret; before public exposure, verify Google and MCP callback URL/query protection across all applicable log routing, including ancestor aggregated sinks and their destinations. Project `_Default` exclusions alone do not establish this guarantee; denied ancestor inspection leaves it unverified. Authentication/session and migration-031 contracts: `docs/credentials.md`, `docs/multi-user.md`.
-
-**Decision, 2026-10-05:** the first cutover uses fresh normal Actions qualification/builds through the existing Deploy workflow. Ordinary backups remain enabled; no new backup, restore drill or recovery attestation is required. Existing Google client/cookie GSM version 1 references supply payloads directly to Cloud Run, outside Terraform state/plan and Actions. The six verified identity mappings use `pi-orb-google-identity-mappings:1` only on the one-shot migration job; retain its private original tuples for explicit undo. Retire the three old services and prove old identity-writer/controller retirement before migration 031, then use the normal saved-plan apply, issuer retirement, activation and smokes. Downtime, backend API breaks and lost queued messages are accepted; existing conversation history and persistent workspace data remain. Users can stop/restart old orbs; automatic fleet resumption is not required. Preserve activation/generation fences. Never automatically restore the database or reactivate old controllers. Deploy input `first_consolidation: true` performs exact UID/ETag-bound retirement after qualification/build/saved-plan checks. Partial absence fails closed; complete absence still requires the existing process/Compute-operation fence. Retirement/migration uncertainty retains the global lock and recorded stage. Sequencing: `docs/control-plane-consolidation.md`.
-
-## Historical deployment record (before consolidation)
-
-The following dated evidence describes the deployed split-service system, not instructions for the implemented single-service release.
-## Claude POC packaging (2026-10-04; undeployed)
-
-`infra/claude-auth.tf` stages the `pi-orb-credential-claude-subscription` Secret Manager parent and control-plane-only accessor/version-manager grants. It creates no credential version; the owner connection flow supplies one. Cloud provisioning and IAM remain unvalidated; no apply or deployment occurred.
-
-The control-plane image compiles pinned `node-pty` 1.1.0 in a disposable dependency stage, then smoke-tests a PTY in the slim final stage. The auth helper uses Claude Code's `cli-wrapper.cjs`, so its npm postinstall is unnecessary. The 2026-10-04 source contracts and local image build passed both executable PTY gates (`pi-orb-claude-poc-control-plane:test`, evidence `/tmp/claude-poc-docker-build.log`); that image predates the current hardening. This is packaging qualification, not deployment or real subscription qualification. Native installation separately checks the pinned SDK executable without authentication or inference (`infra/native-vm/README.md`).
-
-**Hardening status (2026-10-05; undeployed):** frozen clean-install, unit/infra, typecheck/lint, all 453 configured E2Es, control-plane image build and source closure passed; supplemental real PostgreSQL contracts passed 94/94. Image: `sha256:b7e3ce44f02537de757606c6c2ad62f92cc4382035ee02545ff97200908a9dee`. Production source remains unchanged; the subsequent two-line test correction, unit confirmation and documentation delta are distinct from the qualified snapshot (`docs/testing.md`). Historical failures, attribution limits and explicit exceptions remain recorded there. Source is undeployed; port 7100 has not adopted this hardening. **Decision (2026-10-05):** the user authorized committing, pushing to `main`, deploying through the release workflow and monitoring. Reconcile upstream first; deployment requires successful exact-commit CI and all four E2E shards. No separate Claude cloud canary will run.
-
-The synthetic native workload executes the genuine SDK with kernel-isolated fake services and retained files, not a captured native-image/cloud run. Control-plane image-build acceptance passed; physical VM reboot/retained-disk recovery and synthetic-secret cloud IAM/cleanup remain unqualified. **Decision (2026-10-05):** the user rejected a cloud canary; none will run for this personal Claude rollout. Automated gates passed with disk monitoring (`docs/testing.md`). Real cloud/IAM, reboot/retained-disk recovery and billing/organization policy remain unverified risks, not scheduled hard release gates. Synthetic subscription metadata is not real accounting; no broader accounting-policy acceptance or commercial rollout is authorized. No real model call or owner token is authorized by this workload (`scripts/claude-production-qualification/README.md`).
-
-## Deployment decisions
-
-- The cloud control plane is expected to run on Cloud Run.
-- At least one Cloud Run instance must remain provisioned so active-orb history polling can run continuously.
-- The polling process must use always-allocated CPU/instance-based billing; a minimum instance with request-only CPU allocation is insufficient for reliable background work.
-- Polling state and cursors remain in PostgreSQL because Cloud Run may restart even a minimum instance at any time.
-- Multiple control-plane instances may poll the same orb concurrently. Correctness uses an optimistic cursor compare-and-swap in the commit transaction rather than a distributed polling lock or leader.
-- Cloud Run WebSocket configuration is validated (open question 2): the platform behaves exactly as the architecture assumes once the request timeout is raised to 3600 s, and no VM fallback is needed.
-- The cloud control plane sits behind Identity-Aware Proxy restricted to the `heyglide.com` Google Workspace domain (`domain:heyglide.com` as the sole `iap.httpsResourceAccessor`; hardcoded for now). The control plane must never be directly reachable from the public internet. Validated interactively: browser WebSockets pass through IAP after sign-in.
-- **Application identity stage 1 (deployed 2026-09-16 from `1fcc261`):** the browser service verifies IAP's JWT as ES256 with issuer `https://cloud.google.com/iap` and exact direct Cloud Run audience `/projects/PROJECT_NUMBER/locations/REGION/services/SERVICE_NAME`, supplied as `PI_ORB_IAP_AUDIENCE`. Verification uses `google-auth-library` behind a narrow typed-error adapter and a provider-directed key cache: coalesced fetches, provider `max-age` capped at one hour, five-minute fallback, five-second HTTP timeout, and one unknown-key refresh per cache-wide 30-second cooldown. Missing or invalid assertions are 401; verification-key or database availability failures are 503; identity-store invariants are 500. Every browser API, hosted-file, callback and browser WebSocket route receives the serving role's principal: user on `browser`/`all`, ops on `ops`; static assets do not resolve one. Runtime bearer and public issuer routes remain separate. This stage adds authentication, not project authorization. Cloud request logs observed 100 guarded browser API calls returning 200 under the new revision; this was neither a dedicated session-response nor a two-user test. Full contract: `docs/multi-user.md`.
-- Local `PI_ORB_ROLE=all` explicitly uses fixed identity `pi-orb:local/developer`; tests inject Alice/Bob. The `ops` role requires `PI_ORB_OPS_PRINCIPAL=serviceAccount:pi-orb-debug@<project>.iam.gserviceaccount.com` and retains Cloud Run invoker IAM. It authenticates as that machine and never infers a human. Stage-2 default project list/create and personal-instructions GET/PUT therefore require an explicit `X-Pi-Orb-User-Id` resolving to a known UUID; resource-specific ops derive owner from the addressed project. User requests cannot override their principal with that header. No Google login is added locally and no application cookie/login system is introduced.
-- **Ownership migrations 023–024:** migration 023 was deployed and data-verified on 2026-09-17; migration 024 is on `main`, qualified, and authorized for the requested GitHub Actions production release. Migration 023 retains the all-or-none trusted bootstrap tuple `PI_ORB_ORIGINAL_USER_ID`, `PI_ORB_ORIGINAL_IDENTITY_ISSUER`, and `PI_ORB_ORIGINAL_IDENTITY_SUBJECT`; it needs no input only when projects and legacy personal instructions are initial-empty. Migration 024 instead uses `PI_ORB_USER_ID` as the explicit credential owner UUID and transactionally reads that exact user's verified issuer/subject from `users`; an unknown UUID fails and rolls back, while an empty `credential_pointers` migration can run without selection outside the release path. Partial bootstrap tuples, invalid UUIDs, and conflicting selected/bootstrap UUIDs fail before migration. Migration 023 assigns non-null project owners, installs per-owner project-name uniqueness, and copies personal content/revision/timestamp. Its production cutover used independently verified owner UUID `53da7ad4-6c53-4223-868e-0641bb4bcdd9`: all three projects received that owner with other metadata unchanged, and the one personal-instructions row retained content hash, revision, and timestamp. Migration 024 preserves every pointer field while assigning `user_id`, then replaces the original `provider` primary key with `(user_id, provider)`. Neither guesses email, projects, row order, or a first user; creates a placeholder/null owner; retargets identity; or adds a compatibility phase. The migration job logs only the resolution source and outcome, never issuer or subject. The release parent validates and retains these deployment-only inputs, removes all four owner variables from every check/preparation child, and passes them only to the migration job's explicit environment; smoke continues to use the selected user from the parent. Incident: `docs/postmortems/2026-09-17-release-owner-environment-leak.md`. The scoped release decision is below.
-- **Field finding resolved (2026-08-09):** independent verification after deploying `7918170` found IAP enabled and Cloud Run invocation correctly limited to the IAP service agent, but the IAP policy itself also granted `roles/iap.httpsResourceAccessor` to `pi-orb-debug@…`, violating the sole-accessor rule above. `infra/deploy.sh` now preserves unrelated roles while replacing all accessor bindings with the sole domain member and verifies the resulting policy. Deployment `959c0f6` removed the drift; independent post-deploy inspection returned exactly `domain:heyglide.com`, while the release smoke continued to use the separate `pi-orb-ops` Cloud Run invoker path successfully.
-- **Field finding (2026-08-11): deleting a drained Cloud Run revision is cleanup, not a generation fence.** Revision `pi-orb-00029-6hd` continued making background lifecycle decisions for 7 minutes 42 seconds after its successful deletion audit event, overlapping the new revision and contributing to a failed restart smoke. Autonomous lifecycle authority needs its own durable generation exclusion; revision deletion remains useful cleanup but cannot carry correctness. Incident: `docs/postmortems/2026-08-11-release-smoke-restart-registry-timeout.md`; remediation is tracked in `TODO.md`.
-- Infrastructure must be managed as code.
-- The IaC tool is OpenTofu. It manages only the static plane: VPC, firewall rules, Cloud Run, Cloud SQL, Artifact Registry, IAM. Per-orb VMs are dynamic resources created by `GceOrbHostProvider` through the GCE API at runtime and are never IaC resources.
-- OpenTofu state lives in GCS (versioned bucket `pi-orb-tfstate-playground-dev-6ae7`, prefix `static-plane`), decided 2026-08-01 after the original local state was lost with its working directory. The live deployment was adopted into the fresh remote state via import blocks (`infra/imports.tf`) — 17 imports, zero destroys — rather than torn down; the import blocks stay in the repo as the adoption record. Lesson encoded: local IaC state in an ephemeral checkout is how you lose it.
-- The control plane, orb runtime, shared protocol, and web UI will be written in TypeScript on Node.js 26.13.0 LTS.
-- **Manual-release entry point (decided and implemented 2026-08-09):** operators deploy only through `infra/release.sh`, a single command that requires a clean selected commit on local branch `main` and composes the existing build/boot-gate/push, exact temporary OpenTofu plan/apply, mandatory exact-IAP reconciliation, drained-revision cleanup, and live smoke stages. Ordinary apply errors and interruption signals repair IAP with `infra/deploy.sh --iap-only` before returning failure. `umask 077` plus a mode-0700 temporary directory protects generated variables and the binary plan until they are deleted on exit. A generation-matched object in the static-plane state bucket serializes the whole transaction across workstations/runners; while holding it, the script clamps the next generation above the currently serving revision. A same-host lock fails earlier. A trap-bypassing process death can leave a stale GCS lock that requires operator verification before removal.
-- **Release cancellation waits for owned cleanup (corrected 2026-09-07):** each shell layer tracks its direct child, handles one termination signal, ignores duplicates, terminates the child and waits. The native build wrapper invokes the Node builder directly rather than adding an npm process that can exit before the builder's abort cleanup. A process-group SIGINT regression requires builder cleanup to finish before either wrapper exits (`docs/postmortems/2026-09-07-native-build-cancellation-cleanup.md`).
-- **Former maintenance drain (introduced 2026-09-06, retired 2026-09-09):** `--quiesce` disabled the browser and required explicit zero-instance metrics, with shell-trap restoration. It rejected the required `files` tag and had no restoration independent of the caller. The option, helper and tests are removed rather than promoted into unattended deployment. The retained rule is that deletion, log silence and elapsed time never prove old-process retirement; any future deliberate pause requires a verified independent restoration watchdog.
-- **Project-secret storage (implemented 2026-08-28; live cloud validation pending):** OpenTofu creates the shared `pi-orb-credential-project-secrets` Secret Manager parent and grants the control-plane service account secret accessor plus version manager. Browser/ops roles write immutable project bundles, the runtime role reads exact versions for boot snapshots, and the browser role's project finalizer enumerates/destroys project-owned versions. No new Cloud Run environment variable or orb-host provider input exists; all roles derive the parent through the existing secret-prefix contract (`docs/credentials.md`). The live GSM/GCE validation is tracked in `TODO.md`.
-- **Public OIDC issuer service (implemented 2026-08-21; live-validated 2026-08-26):** a fourth Cloud Run service `pi-orb-issuer` runs the `PI_ORB_ROLE=issuer` branch of the same image with `INGRESS_TRAFFIC_ALL` and `invoker_iam_disabled = true` — the deployment's first and only deliberately public, unauthenticated surface. This is not an exception to the IAP rule above. That rule protects the *browser control plane*: the browser API exposes and mutates orb state, so it must never be directly reachable. The issuer serves exactly two documents — an OIDC discovery document and a JWKS — whose entire purpose is to be fetched anonymously by strangers, because a relying party verifying a pi-orb token holds no pi-orb credential to present. Both are public by construction, cacheable, and secret-free. Three properties bound it: the role env var is a hard route allowlist, so no orb data or mutation route is even registered; the service runs as its own `pi-orb-issuer` service account whose only secret access is the database URL (the public JWKs live in `oidc_signing_keys`), so "unauthenticated" and "can read private keys" are different identities; and its environment is trimmed to the three variables the role reads. Private signing keys live in the Secret Manager parent secret `pi-orb-credential-oidc-signing-key` — the id is fixed by `GsmSecretStore`'s `<prefix>-<provider>` addressing — readable only by the control-plane account that mints. **Where that boundary stops (POC limitation, recorded 2026-08-22):** it is a Secret Manager boundary, not a database one. The database URL the issuer reads *is* the deployment's single full read/write application credential, so at the PostgreSQL layer this internet-facing service holds the same rights as every other service — it could read `orbs.runtime_token_hash` or write `oidc_signing_keys` if its code asked; what prevents that today is the route allowlist and the trimmed environment, not the credential. Provisioning a read-only PostgreSQL role for the issuer (`SELECT` on `oidc_signing_keys` only) is tracked in `TODO.md` before the separately bootstrapped GCP federation tier is enabled. Commit `f36914e` passed the provider-neutral live cloud smoke, including mint, public verification, stopped-orb denial, and unknown-bearer denial; see `docs/postmortems/2026-08-26-workload-identity-cloud-release-gates.md`. `docs/workload-identity.md`, `docs/workload-identity-recipes.md`.
-- **`PI_ORB_OIDC_ISSUER_URL` is computed by OpenTofu, never supplied (decided 2026-08-21; corrected and live-validated 2026-08-26):** since stage 2B the `runtime` and `issuer` roles refuse to boot without a valid issuer URL, which made "the deploy that ships this image must also set it" a live deployment hazard. A Cloud Run service cannot reference its own `.uri`, so `local.oidc_issuer_url` in `infra/oidc.tf` builds the deterministic URL Cloud Run v2 assigns a new service — `https://<service>-<project-number>.<region>.run.app`, from `data.google_project` — and both services read that one local. One apply therefore cannot ship a minting image without the matching issuer identity, and no release step has to remember anything: the hazard is removed structurally rather than documented. Live evidence showed that Cloud Run reports the hashed canonical address in `.uri` while `.urls` contains both that address and the working deterministic address. The invariant is therefore membership of the computed trust anchor in `.urls`, plus the live discovery/JWKS gate — never equality with `.uri`. The implementation asserts membership and exports the same deterministic local as `issuer_url`; commit `f36914e` passed that postcondition and verified a minted token against discovery and JWKS at the deterministic origin. Rejected: an operator-supplied variable (a hand-copied trust anchor whose drift is a silent trust migration) and a two-phase apply. `tofu output -raw issuer_url` is the operator-facing form. Incident: `docs/postmortems/2026-08-26-workload-identity-cloud-release-gates.md`.
-- **Workload-identity federation bootstrap (implemented 2026-08-21, not yet run):** the GCP pool, OIDC provider, and read-only test grant that trust pi-orb's *own* issuer live in the separately invoked `infra/bootstrap-pi-orb-oidc.sh`, outside the recurring OpenTofu root, for the same reason `bootstrap-amp-oidc.sh` does: a trust boundary must not be creatable, mutable, or destroyable by the routine plan that runs using it. The script is idempotent and never deletes anything; it refuses to run with no identity scope unless `ALLOW_ANY_ORB=1` is passed deliberately, because the audience is not an authorization boundary. It also refuses to repoint an existing provider at a different issuer, which would move every existing grant. `infra/smoke-workload-identity.sh` runs from `release.sh` beside `smoke.sh`: it always mints in a disposable real orb and verifies against the deployed issuer, and additionally exchanges through STS and calls a read-only API when `PI_ORB_SMOKE_WIF_*` name a bootstrapped tier.
-- **Amp-orb deployment identity (decided and implemented 2026-08-12; superseded for this repository's current orbs 2026-08-27):** project orbs authenticated keylessly through the separately bootstrapped GCP Workload Identity pool `amp-orbs`, provider `amp-oidc`, and impersonated `pi-orb-amp-deployer` service account. Provider admission requires Amp's immutable project ID `cad0f81a-f72a-40be-ba23-4238ce350328`, user ID `user_01JYNTQK807VHERYA25EAND4SM`, `token_use=exchanged`, and audience `urn:amp:gcp:playground-dev-6ae7`; `thread_id` is the Google subject. The deployer deliberately has no Owner/Editor binding: it has functional roles for the current static-plane root and diagnostics, object access scoped to the one state bucket, and token creation scoped to `pi-orb-debug` for smoke. The separately invoked `infra/bootstrap-amp-oidc.sh` remains the adoption record for that trust path. It is retained as an independently scoped access path, but repository boot hooks no longer configure Amp credentials.
-- **pi-orb deployment identity (decided, bootstrapped, and live-validated 2026-08-27):** future orbs of this repository authenticate without a browser login through GCP pool `pi-orb-orbs`, provider `pi-orb-oidc`, and the existing `pi-orb-amp-deployer` service account (the historical name is retained because its reviewed deployment role set is still the desired authority). Provider admission requires this deployment's issuer, audience `urn:pi-orb:gcp:playground-dev-6ae7`, `token_use=exchanged`, and immutable pi-orb project ID `eacd1d25-2825-4c3a-a26b-3923baa86801`; the service-account binding is a `principalSet` on that project attribute, so every orb in this repository project receives the same deployment authority. `.pi-orb/gcp-external-account.json` is a non-secret executable-source configuration using the image's reviewed `/usr/local/bin/pi-orb-gcp-identity`; `.agents/setup` installs only the client and `.agents/resume` registers the federated credential and writes the four required process variables to the hook environment file on every start. An isolated empty-configuration verification passed project describe, Cloud Run listing, Artifact Registry listing, and access to the static-plane state prefix before the temporary human bootstrap login was revoked. This removes renewable human credentials and service-account keys, not deployment privilege: arbitrary code in any admitted project orb can obtain the deployer's short-lived authority. The foundation split subsequently removed project-IAM administration and ownership of admission/state-bucket policy from the recurring deployer. Deployment remains high trust: it can change application code and application-resource access policies. Re-review the role set whenever its managed resource types change.
-- **Scoped release SSH (decided 2026-09-06; corrected, deployed, and live-validated 2026-09-21):** builder, validator, and native orb instances block project SSH keys. The installed `gcloud compute ssh` therefore publishes a fresh caller key to instance metadata. The recurring deployer can set metadata only on `pi-orb-*` workload instances; its IAP tunnel grant admits port 22 only in the image-build subnet and exact orb `/20`, and release smokes always request IAP tunneling. Google is the sole first-boot host-key producer for the pinned guest-agent package. SSH remains closed until the instance ID matches and every ECDSA, ED25519, and RSA private/public/published key agrees. Package or effective-unit drift fails sealing. Readiness and acceptance record and compare the local fingerprint while strict checking authenticates each connection; a confirmed mismatch is terminal. Production release `ae4bfc5` passed this contract and every release gate. Incident history, evidence limits, qualification, and production validation are in `docs/postmortems/2026-09-20-validator-host-key-change.md`. The debug service account and its service-account-level Token Creator binding for the deployer remain external bootstrap prerequisites owned by `infra/bootstrap-amp-oidc.sh`, not foundation resources.
-
-**Scoped production release finding and correction (2026-09-09):** release `b36c160` passed native image acceptance and container publication, but the application plan failed because the deployer lacked `storage.buckets.get` on `pi-orb-hosting-playground-dev-6ae7`. No application apply occurred. A separate administrator subsequently applied four foundation resources: two custom roles and their shared-deployer memberships. Bucket metadata/IAM management is conditioned on the exact hosting-bucket name and type; bucket creation is a separate project-scoped permission because GCS checks creation on the project. That create-only grant cannot be restricted to a future bucket name and does not grant management of other existing buckets. No direct object permission or foundation-administration permission was added, though hosting-bucket IAM management can of course change who can access hosted files. Empty-HOME/gcloud verification through the real, idempotent `.agents/resume` passed the full application plan using federation alone, all hosting-bucket permissions, and negative checks for state-bucket mutation and project-IAM changes. The personal administrator login was then revoked. These durable shared-account grants cover every admitted orb in this repository project; do not distribute personal refresh tokens to make access persist. Source and evidence: `infra/foundation/README.md`, `docs/postmortems/2026-09-09-release-hosting-bucket-iam.md`.
-
-**Scoped application apply (2026-09-09):** `a02638e` passed native acceptance, updated only the four Cloud Run services through the federated deployer, and completed IAP reconciliation/drained-revision cleanup. The lifecycle smoke then exposed an orb-local userspace-Tailscale assumption: host curl could not resolve a healthy peer. The corrected probe dials through the daemon without changing readiness assertions or timeouts. The first failed release and the harness correction are recorded in `docs/postmortems/2026-09-09-orb-local-tailnet-smoke.md`; the corrected lifecycle gate subsequently passed in 221 seconds, but the identity gate failed during a fixture boot with competing old/new generations. Deleted browser revision `pi-orb-00048-tnf` was still reconciling more than thirty minutes after deletion. Revision-resource deletion is not proof of process quiescence. The current `--quiesce` path refuses the required `files` tag and cannot inventory an already-deleted active revision, so it needs a reviewed maintenance correction rather than bypassed guards. At 04:28, independent observation established the old revision's shutdown at 03:50 and explicit zero active/idle instance counts afterward. With the release lock held, only the remaining identity gate was then run; it passed in 193 seconds with the same deployed image, revisions and generation. No UI pause or additional apply was needed. All configured live gates have now passed for `a02638e`; the optional separately bootstrapped STS test tier remained disabled. This is evidence for the isolated deployed generation, not a fix for the earlier rollover/checkout failure. Evidence: `docs/postmortems/2026-09-09-deleted-browser-reconciler.md`; follow-up is tracked in `TODO.md`.
-
-**Maintenance restoration requirement (decided 2026-09-09; scoped 2026-10-05):** a temporary browser pause must first arm and verify an automatic restoration watchdog independent of the agent process and web UI. Exit/signal cleanup is required as well, but is not sufficient by itself. Restore the prior scaling, exact files routing and IAP even when maintenance fails; refuse to begin if that safeguard is unavailable. The current helper does not yet satisfy this requirement; implementation is tracked in `TODO.md`. In this incident, observed natural shutdown removed the need to pause, so no restoration watchdog or downtime was introduced. The accepted first-consolidation maintenance window is not a temporary pause: retired services must not be automatically reactivated.
-
-## Hosted-file storage (decided 2026-09-07)
-
-Storage belongs to the control plane, independently of `PI_ORB_HOST_PROVIDER`:
-
-- `PI_ORB_HOSTING_STORE=filesystem` uses `PI_ORB_HOSTING_ROOT`, defaulting to
-  `~/.pi-orb/hosting`. Preserve that directory alongside the PostgreSQL/PGlite database. It must
-  live outside orb workspaces so compute removal cannot delete hosted documents. Multiple control
-  planes need shared storage; independent local roots cannot serve the same catalog.
-- `PI_ORB_HOSTING_STORE=gcs` uses `PI_ORB_HOSTING_BUCKET` and application-default credentials.
-  OpenTofu creates a private bucket with object access for the control-plane identity and disables
-  soft delete and versioning so permanent deletion removes the bytes.
-
-`PI_ORB_HOSTING_ORIGIN` is the separate files origin; `PI_ORB_APP_ORIGIN` supplies dashboard links.
-Local defaults are `http://files.localhost:7100` and `http://127.0.0.1:7100` (using `PORT` when set).
-`HOST` controls the control-plane listen address (default `0.0.0.0`); set `HOST=127.0.0.1` for a loopback-only local service.
-`PI_ORB_AUTH_MODE=local` supplies those origin defaults, the filesystem default and trust for
-Vite on port 5173. Google mode requires the store kind and both origins; GCS requires the bucket.
-The single application exposes its latest revision with traffic tag `files`. Uploads use runtime
-bearers; private downloads use the files origin's Google session. The post-apply step verifies
-fresh Cloud Run traffic status before revision pruning. See `docs/hosting.md`.
-
-## Decision: split portable foundation and application roots before remote builds
-
-**Decided 2026-08-31; implemented 2026-09-05; adopted and first deployed 2026-09-07.** Portability to a fresh GCP project must come before replacing the local image build or automating releases. The foundation and application roots separate long-lived authority from recurring application deployment. The adoption and release order is:
-
-1. Create a separately-stateful **foundation root** for project services, the state bucket, Artifact Registry, deployment/build identities, workload-identity pools and providers, and their IAM. Where project creation is in scope, its folder and billing attachment belong here too. This root is applied by an organization/bootstrap authority; the recurring deployer must not control the trust policy that grants its own authority.
-2. Leave the recurring **application root** responsible for the two application firewall rules, Cloud SQL, Secret Manager parents and runtime grants, Cloud Run, and the other serving resources. The foundation owns both VPCs, their subnets, and the private-services connection because Compute IAM Conditions cannot isolate network, subnet, or address names. The application consumes their explicit foundation outputs. The Cloud Run egress subnet output is the project-qualified `projects/PROJECT/regions/REGION/subnetworks/NAME` resource name required by the Cloud Run API.
-3. Adopt the current live resources into the two states under the existing global release lock, using an offline, generation-checked state projection that preserves the complete resource-identity inventory without applying cloud changes. Review the subsequent foundation and application plans separately; the application plan intentionally includes the native runtime change. The state bucket's own bootstrap uses an organization-owned state location or an explicit one-time state migration; it cannot recursively create the backend in which its first plan is already stored.
-4. After foundation adoption and its reviewed permission changes, the manual release builds and validates a native image on disposable GCE VMs, then publishes the control-plane container. Its handoff carries the exact VM image resource/ID and container digest. Automatic deployment and remote control-plane container builds remain separate proposals; the release lock, exact-plan apply, retirement/activation, and smoke gates remain mandatory.
-
-A new project should require variables plus one audited foundation apply and the normal release command, not console-created resources. Irreducible external inputs remain: an initial organization/folder/billing authority, a globally unique project ID, and credentials or values owned by external systems such as GitHub OAuth. OpenTofu manages their GCP containers and grants, but cannot safely invent those external authorities or secret values. Implementation is tracked in `TODO.md`.
-
-**Orb-local release finding and correction (2026-09-08):** builder administration uses explicit `pi-orb-build` SSH/SCP identity, separate from runtime `orb` and independent of the invoking workstation username. Releasing `770b6a3` from an orb created `orb` through SSH before image installation, which then failed creating its UID-2000 account. Production was not changed. Preflight now creates a private operation-owned SSH key noninteractively; connections use batch mode, and cleanup removes the key after remote cleanup on success, failure and handled cancellation. Sealing retains the password-locked administrator but stops guest-account reconciliation before scrubbing credentials; image acceptance checks the distinct identities and required runtime home. Reusing an arbitrary existing runtime account is rejected rather than normalizing ownership under a live administrative session. Evidence: `docs/postmortems/2026-09-08-orb-local-release-builder-user.md`.
-
-**Credential-refresh diagnosis resolved (2026-09-08; corrected locally, not deployed):** original Cloud Run logs and a controlled cold-ingress relay identified premature client cancellation, not a need for shared credential coordination. Each original three-second HTTP cap abandoned a request behind an 8–9-second runtime API cold start; the abandoned request still minted and throttled the queued retries. The CLI now allocates the remaining part of its unchanged ten-second budget to each request, including the body, and offers opt-in token-free stderr diagnostics. Sequential and concurrent warm refreshes recovered normally; real gcloud and OpenTofu failed with the original CLI and passed with the corrected CLI behind the same controlled 8.5-second ingress delay. No token cache, shared lock, access-token override or issuer-limit change was implemented. Evidence: `docs/postmortems/2026-09-08-identity-cold-start.md`.
-
-**Earlier credential-refresh coordination proposal (2026-09-08; not selected after diagnosis):** preserve the issuer's per-orb mint floor and the rule that OIDC tokens are never cached on disk. Independent executable-credential consumers lack a shared mint schedule. The existing CLI already honors `Retry-After` within ten seconds, so a sustained refusal requires reconstructing the actual competing requests before claiming that two adjacent refreshes explain it. The broader proposed correction is process-shared admission around the credential helper: one private per-orb/incarnation lock, bounded queue admission, and a non-secret next-eligible timestamp; serialize mint requests across audiences, respect the server's floor, and retain explicit denial/cancellation rather than unbounded retries. Store no JWT in the lock or timestamp file. Release the lock on process death and conservatively handle death before publishing the timestamp. This avoids introducing a token-caching service or weakening lifecycle authorization. Coordination cannot cover direct mint callers that bypass it, so ordinary CLI throttling remains necessary. A single exported OAuth access token is only a bounded diagnostic workaround, not the solution for hour-long releases. **Smaller alternatives considered (2026-09-08):** first diagnose the existing bounded retry behavior; a bad retry hint or redundant refresh might need only a focused fix. Sharing one exported Google access token with OpenTofu demonstrated a bounded workaround, but cannot refresh an already-running child. A narrower release-wrapper proposal obtains sufficiently fresh credentials just before each OpenTofu stage, scopes them to that child, and checks that remaining validity covers the stage; this avoids requiring one token to survive the native build plus deployment, but cannot serve an arbitrarily long apply or unrelated callers. Prefer the smallest sufficient correction after reconstructing the schedule; shared admission is not yet selected. Fixed sleeps between shell commands, indefinite retries and blindly weakening the issuer limit are rejected as unproven responses. The later diagnosis above selected a smaller correction to the existing HTTP retry budget instead. The normal runtime release/E2E gates still apply before shipping it.
-
-**Native capture recovery (decided 2026-10-24, PDT):** submit create once. Explicit transient create failures permit read-only reconciliation: at most 12 describes within 60 seconds, five-second waits and ten-second reads, clipped to the remaining budget. One injected deadline bounds reads, waits and log persistence; cancellation and late results cannot succeed or trigger another read. Retry transient reads, exact-resource absence and owned `PENDING` images. Both ordinary and recovered captures require exact project/name/selfLink, operation/version labels, source disk/zone, numeric ID and `READY`; pin an observed ID. Other errors fail closed. Actions retain fixed decisions/errors and allowlisted HTTP statuses; raw recovery output stays private. Boot acceptance and cleanup are unchanged. Blind create replay is rejected: reconciliation recovers an ambiguously successful mutation, not an uncommitted one. Google's underlying cause remains unknown. Evidence: `docs/postmortems/2026-10-24-native-image-capture-502.md`.
-
-**Native acceptance finding and simplification (2026-09-08):** the orb-local SSH correction passed real GCE installation/sealing and validator identity checks, but workspace growth blocked that candidate's acceptance. A successful read-only `e2fsck` does not necessarily establish the persistent check state `resize2fs` requires. Validate the captured template's actual mount/check history; do not bypass the damaged-workspace repair refusal. A local real-loop-device reproduction confirmed the same failure after template mount/unmount and confirmed that a final writable check of the fresh empty template before capture lets the unchanged read-only boot gate and growth succeed. That writable-check workaround was subsequently rejected in favor of removing growth entirely: the template, validation disk and production workspace are now all 50 GiB, with no configurable workspace capacity. Admission only reads metadata and rejects mismatches; retained disks are never reformatted or resized. The builder retains a read-only integrity gate on the empty template. Production capacity cost is unchanged because it already provisioned 50 GiB. Disposable build `v-fixed-workspace-20260908-a28c6fb5b1e24029` subsequently passed the full GCE image/guest/Cloud Logging acceptance gate in 7m34s; the 50 GiB workspace template occupied only 160,256 compressed bytes. All test resources were removed. This validates the standalone image, not a production application deployment. Evidence: `docs/postmortems/2026-09-08-workspace-image-readonly-check.md`.
-
-**Smoke auth diagnostics (2026-10-19; local, undeployed):** failures record exit code, elapsed time and fixed allowlisted stderr categories; unknown/conflicting markers remain `unknown`. Never print raw auth output. Diagnostic qualification does not clear the failed release gate. This diagnostic-only correction added no auth retries or caching; the requested telemetry/retry feature remains incomplete. The narrow historical-cause waiver does not replace ordinary validation. Evidence: `docs/postmortems/2026-10-19-lifecycle-smoke-auth.md`.
-
-## Measured release latency (2026-09-18)
-
-[Deploy 35290276292](https://github.com/schani/pi-orb/actions/runs/35290276292)
-took 62m15s. Timestamped logs attribute 33m14s to checks (including 27m40s
-of E2E), 9m51s to image build/acceptance/publication, 3m30s to the migration
-job, 1m08s to application apply, 1m33s to retirement, and 10m36s to lifecycle
-and identity smokes including fixture cleanup. Setup, preflight, planning,
-repair, activation and finalization account for the remainder. Migration time
-was mostly Cloud Run job provisioning/startup, not SQL execution. The preceding
-successful release took 63m56s, including 24m48s of E2E. These measurements
-identify checks and image/smoke qualification—not application apply or runner
-queueing—as the dominant costs; they do not authorize bypassing release gates.
-
-**Release build concurrency (decided 2026-09-18):** the remote native image
-build and local control-plane container build run together, but no container is
-pushed until both builds succeed and the native manifest passes provenance and
-acceptance validation. A failure or handled signal terminates every remaining
-owned child and waits for cleanup, preserving native remote-resource cleanup.
-Typecheck, lint, database migration, apply, retirement, activation, and
-post-deploy smokes remain serial; short npm children are not parallelized because
-terminating npm does not guarantee termination of its tool subprocess. E2E owns its one runtime image
-build rather than release wrappers rebuilding it. Deploy and E2E cache npm data;
-E2E caches Playwright browser binaries by OS and exact lockfile, plus trusted
-runtime Docker build layers as decided below. Host npm caches do not enter Docker.
-Release records, test output, credentials, and other mutable state are not cached.
-
-## Deployment-speed decisions and proposals (2026-10-05)
-
-**Items 1, 2 and 5 approved and implemented; four-runner E2E is hosted-qualified; release reuse and trusted-main Docker cache reuse remain unvalidated. Not deployed. Other items remain unapproved.** The
-September 18 example above took 62m15s: checks 33m14s, build/acceptance/publication
-9m51s, smokes 10m36s, and all remaining stages 8m34s (roughly nine minutes).
-These historical timings identify candidates, not measured savings.
-
-**Latest measured evidence:** October 5 [Deploy 37316402844](https://github.com/schani/pi-orb/actions/runs/37316402844)
-(`d67de4c`; [release artifact](https://github.com/schani/pi-orb/actions/runs/37316402844/artifacts/11352071718))
-took 70m25s from dispatch to workflow completion, including six seconds queued;
-the release artifact spans 68m56s. Successive timestamped `release:<stage>`
-markers give rounded durations: checks 40m16s (E2E 35m12s for 407 tests; units
-4m15s), image build/acceptance/publication 9m41s, plan 8s, migration 4m36s,
-apply 1m28s, repair 18s, retirement 1m05s, activation 10s, lifecycle smoke
-4m59s and identity smoke 5m29s. Compared with September 18's 62m15s total
-and 27m40s E2E, total elapsed grew 8m10s and E2E grew 7m32s. This comparison
-does not isolate causes or measure any proposed optimization's savings.
-
-In priority order:
-
-1. **Approved: four isolated E2E runner shards.** Keep `maxWorkers: 1` and
-   serial files within each runner, with `fail-fast: false` across runners.
-   Earlier same-host parallelism failed; separate runners isolate Docker,
-   databases and ports without weakening assertions. Require complete, disjoint
-   file coverage, execution-owned mock sessions and shard-specific failure
-   evidence. Local inventory contracts prove all 44 files appear exactly once
-   across four 11-file shards. A live fake-service probe isolated eight requests
-   across four concurrent, equally named sessions. First-attempt hosted
-   [run 37381944028](https://github.com/schani/pi-orb/actions/runs/37381944028)
-   qualified immutable source `9e52d1287904a52cfb9aa522103abf5677846250`:
-   417 tests, 44 unique files (11 per shard), no failures or skips, four distinct
-   GitHub runners, 16m32s workflow elapsed. The historical serial 35m12s / 407-test
-   run is not a controlled same-source benchmark; no isolated speedup is claimed.
-   Evidence and shard timings are in `docs/testing.md`.
-2. **Decision (2026-10-23): isolated E2E runtime builds.**
-   Each runner builds its checkout with pinned Buildx actions and loads
-   `pi-orb-runtime:dev` locally. Setup requires the exact build-action image ID,
-   without fallback; local runs rebuild the current tree. Ten-minute builds,
-   isolated serial shards and all qualification gates remain. Build progress
-   retains phase timings; summaries retain source SHA and image ID. Build-record
-   artifacts are disabled; no registry publication or cloud credentials.
-
-   The October 15 GHA layer-cache decision was rejected after
-   [E2E 40029487129, shard 4](https://github.com/schani/pi-orb/actions/runs/40029487129/job/120673891989)
-   exhausted 600s materializing lazy remote layers for the Docker exporter:
-   all twenty Dockerfile steps were cached, but a 631.51 MB blob took 308.4s
-   and a 633.25 MB blob reached only 460.32 MB after 596.4s. The same blobs
-   took 7.3–26.9s on two successful shards. Captured disk/memory diagnostics
-   show no pressure. Removing optional E2E runtime cache import/export removes
-   that acquisition path, not a proven lower-level backend/routing defect.
-   Other caches are unchanged. First-failure evidence:
-   `.context/deploy-override-evidence/pr182/failure-40029487129/investigation.md`;
-   cold-build qualification: `docs/testing.md`.
-3. **Overlap the remote native build with checks.** Native and control-plane
-   builds already run together; the additional overlap is with qualification.
-   No publication or deployment before all required checks and acceptance pass.
-   Failure/cancellation must terminate owned work, await remote cleanup and retain
-   cleanup uncertainty; speculative builds may increase cost.
-4. **Reuse an exact-input accepted runtime image for frontend/control-only
-   changes.** Current exact-commit provenance prevents this. Propose artifact-input
-   identity covering runtime source, shared dependencies/lockfile, patches, build
-   recipe and OS/tool inputs, linked to prior acceptance and exact image IDs—not
-   permission to select an arbitrary older image. Uncertain or changed inputs
-   require rebuilding and acceptance; host-spec generation fencing remains intact.
-5. **Approved: reuse trusted exact-SHA CI and E2E qualification.** Keep manual
-   Deploy. Before acquiring the release lock, wait for both workflows' successful
-   same-repository `push`/`main` runs at the exact dispatched SHA; record run IDs
-   and attempts. Accept only one matching push run per workflow, on its first
-   attempt; reruns cannot mask an earlier failure. CI, E2E and Deploy are aligned
-   on `ubuntu-24.04` and Node `26.13.0`.
-   This removes duplicate checks, not coverage. Failed or cancelled runs block;
-   pending or missing runs must succeed within 60 minutes (65-minute job limit).
-   Require the CI checks job and all four E2E jobs. Before the release lock,
-   `release.sh` re-verifies the exact evidence and checkout at the immutable
-   selected SHA, then removes the qualification token from its
-   environment. Run/job identities are retained in the optional `qualification`
-   release-record field and preserved by recovery. Refusal reasons appear in
-   the job summary; a rerun is refused even if green—diagnose the first attempt
-   and qualify a new commit.
-   Concurrency applies only to the release job, so qualification waits cannot
-   block validation-only recovery. Recovery bypasses new-source qualification; local releases
-   still run their normal checks/E2E. Reuse neither clears unexplained failures
-   nor replaces native acceptance or deployment-specific live gates.
-6. **Later, separate immutable frontend publication.** Preserve the authenticated
-   browser origin and atomic index/assets publication, including referenced-asset
-   and real-browser validation. Never rebuild a live static root in place
-   (`docs/postmortems/2026-09-09-live-web-rebuild.md`).
-
-Full local typecheck, lint and tests passed; focused review-fix checks also passed.
-Counts and logs are recorded in `docs/testing.md`. The hosted E2E run was a
-feature-branch dispatch, not eligible `push`/`main` production qualification.
-Live release reuse and deployment gates remain unvalidated; no deployment was performed.
-
-**Proposed instrumentation:** extend the token-free release record with per-stage
-start/end/duration, shard coverage, cache hits/misses, artifact-input identities,
-qualification provenance and explicit reuse/rebuild decisions. Measure critical
-path and resource cost before claiming improvement. Serialized deployment,
-migration, IAP, retirement, activation and applicable production smoke gates remain
-required; none of these proposals authorizes skipping them or retrying failures
-until green.
-
-## Native runtime VM image release (implemented 2026-09-05; first deployed 2026-09-07)
-
-The native Debian direction selected on 2026-09-05 in `docs/host-provider.md` adds a custom VM image build and an actual-VM boot gate to the release path. The control plane remains an OCI image; local Docker runtime builds remain useful for development and E2E. The release manifest and application configuration carry the exact uniquely named VM image resource and recorded image identity instead of the GCE runtime container digest, alongside the monotonic host-spec generation. Retain previous images for rollback, performed as a new forward-generation release through ordinary stopped-compute replacement. Builder/image-publishing permissions and the control plane’s read-only use of private images belong to the foundation; orb VMs must not receive image-publishing authority. The builder must remove build credentials and instance-specific state before image capture. VM and container builds share runtime source and the npm lockfile; the native OS/tool recipe is in `infra/native-vm/`.
-
-**Image regeneration requirement (decided 2026-09-05).** One documented repository command must rebuild a ready-to-use image from declared inputs. It must check prerequisites, create its builder, wait for installation, seal/capture and validate the image, clean up owned temporary resources, and report the exact image identity and build manifest. No manual SSH, console edits, or remembered sequence of experiment stages is acceptable. Document prerequisites/permissions, arguments and defaults, a copy-paste example, outputs, logs and failure cleanup. Image regeneration must also work independently of deploying it. Build/release behavior is subject to the unit and DST requirements in `docs/testing.md`.
-
-**Native cleanup operation ownership (decided, deployed and live-validated 2026-09-16).** Cleanup durably records the exact target before checking predecessor operations. A matching in-flight create is recorded and observed for at most 60 seconds before ownership is rechecked; its terminal error still permits cleanup of the owned partial resource. For deletion, a dedicated non-logging `gcloud auth print-access-token` process has a 30-second timeout, follows caller cancellation, and is killed with `SIGKILL` on timeout. Only after it succeeds, the adapter makes one plain Compute REST `DELETE` with a separate 30-second abort deadline, rejected redirects, and no replay or generic retry, validates the HTTP status and JSON body, then validates and persists the returned operation's exact target and zonal/global scope before polling only that operation for at most 12 minutes. `DONE` succeeds only without an error payload; a reported error is terminal failure and malformed, lost-receipt, cancelled, or interrupted evidence is uncertainty. The token-free release record allowlists intent and operation evidence, including `submitted`, `failed`, and `uncertain`, beside any primary build failure. No automatic recovery or blind resubmission is attempted, and cleanup never retains the global pre-apply release lock indefinitely.
-
-The pinned gcloud 583 contract was checked before implementation. Contrary to the initial proposal, `gcloud compute instances|disks|images delete` rejects `--async`; exact v583 source tag `9b659d8b1efff08d32974041fd4b96d0988333e6` calls synchronous `MakeRequests` for all three commands. Direct Compute REST submission is therefore used rather than relying on an unsupported CLI flag. The accepted response is validated against Compute's Operation resource and the observed operation shape preserved in `docs/postmortems/2026-09-16-validator-cleanup-timeout.md`.
-
-The release command requires the matching foundation state before building. Apply the separately reviewed foundation adoption and permission changes before deploying the native application configuration. Bake-and-boot duration, image storage retention, and OS patch rebuild cadence are part of the evaluation; no new deployment mechanism is selected here. The image packaging decision is recorded in `docs/open-questions.md`, question 48.
-
-The first foundation-backed native rollout exposed three boundary-contract
-failures before live validation: the IAM condition operator limit, a
-digit-leading image version, and a Cloud Run subnet self-link. Their fixes and
-recovery evidence are in
-`docs/postmortems/2026-09-07-native-foundation-release-contracts.md`.
-
-All existing orbs were confirmed archived before transition. The pre-release snapshot covered two projects and 51 archived orbs, with exact metadata, history and message hashes retained under mode 0600. Foundation adoption and the first native application deployment completed on 2026-09-07. Post-deployment verification confirmed all 51 archived orbs retained exact metadata, history and message hashes. Final API inventory contained only the two original projects and 51 archived orbs; release and validation fixtures were removed. An orphaned builder from an earlier interrupted release was identified by exact ownership and deleted with its disk.
-
-The deployed image `pi-orb-image-v-db8cb5d-ebd0a574514547e9` occupies 1,369,020,352 bytes (1.275 GiB compressed) and provisions a 20 GiB `pd-standard` boot disk plus a retained 50 GiB `pd-balanced` workspace per orb. At the published Iowa rates, that is about $0.064/month for the retained image, $0.80/month for a provisioned boot disk and $5.00/month for a workspace, before VM compute and other services. Google bills provisioned disk capacity rather than used bytes and prorates disk charges by the second ([disk and image pricing](https://cloud.google.com/compute/disks-image-pricing)). The final `db8cb5d` release log spans 20:49:37–21:17:59 UTC (28 minutes 22 seconds). Native image build and fresh-VM acceptance ran from 20:49:44 to 20:57:48 UTC (8 minutes 4 seconds). The lifecycle smoke passed in 528 seconds, including a 419-second first boot and 50-second restart; the identity smoke passed mint, verification, denial and revocation in 483 seconds. Its optional GCP STS federation legs were not configured. Every release fixture was deleted. A separate retained-disk replacement then passed the exact image, workspace, home, Docker-volume, history, model/tool, immediate-terminal and same-incarnation restart checks described in `docs/native-vm-prototype.md`.
-
-## Automation priorities after the orb-local release
-
-**Implementation authorized (2026-09-09):** the user requested the complete one-button deployment path, requiring only necessary authentication. Use a manually triggered external workflow; do not enable deployment on every push or automatic rollback. The scope below is accepted; GitHub admission and live deployment/recovery validation are complete; the failed initial attempts remain preserved. Harden the existing release command before adding unattended deployment. Most of the happy path is already scripted; this release's manual work was failure diagnosis, environment recovery and proving old-controller retirement, not typing deployment commands.
-
-1. **Remove rollout interference first.** Stale revisions must lose autonomous lifecycle authority, not merely disappear from revision inventory. The existing lifecycle-fencing and tagged-maintenance work in `TODO.md` remains the safety prerequisite. Where maintenance is necessary, the independently verified restoration watchdog is mandatory; prefer avoiding downtime when quiescence is already proven.
-2. **Make prerequisites reproducible and fail early.** Provision pinned deployment tools through repository setup; check tool availability, Docker readiness and scoped cloud access before an expensive build. The missing hosting-bucket permission and missing OpenTofu executable should be actionable preflight failures, not late surprises. Foundation permission changes stay separately administered.
-3. **Make the release outcome durable and explicit.** Record the commit, accepted image identities/digest, generation, per-gate verdicts and fixture IDs in a token-free release artifact outside the agent workspace. Distinguish failed-before-apply, applied-but-unvalidated and validated. An explicit validation-only operation can reuse that record after verifying the serving deployment still matches; it must not rebuild/reapply or silently retry unexplained failures.
-4. **Finish fixture ownership automation.** Successful lifecycle and identity fixtures should both be deleted and verified absent. Failed fixtures retain diagnostic evidence, with their IDs, cleanup failures and potential cost visible in the release result. Do not restore unconditional deletion on failure.
-5. **Then provide one manually triggered external workflow.** A GitHub Actions entry point should call the same release command, require checks/E2E for the selected commit, use scoped OIDC, hold the existing global lock and publish the final result. It should not depend on this orb, its agent process or the web UI remaining alive. Keep one release implementation rather than a second YAML deployment algorithm. Automatic deployment on push remains a later policy choice in `docs/open-questions.md`, question 40.
-
-The first useful milestone is “start one release and receive one trustworthy result,” not automatic production changes on every push. Do not add blind retries, a custom deployment service, another generation allocator alongside the current lock/clamp, or automatic migration rollback merely to label the process automated.
-
-### Bootstrap checkpoint (2026-09-09)
-
-The GitHub provider admits only the numeric repository/owner and manual `main`
-workflow specified in `infra/foundation/github.tf`. The initial `Deploy`
-workflow was deliberately authentication-only while application release safety
-was implemented; the full transaction and explicit recovery have now been exercised live as recorded below. Run `34359863108` passed real keyless project and hosting-bucket
-reads at commit `0502c53`; the same commit passed CI and E2E. The temporary
-administrator login was then revoked and orb federation rechecked successfully.
-Existing orb federation remains unchanged.
-
-Tracked plan archives were confirmed to contain the live database credential;
-see `docs/postmortems/2026-09-09-tracked-deployment-credentials.md`. CI rejects
-tracked state/plan/credential artifacts, and Docker excludes them from build
-contexts. Only structurally constructed token-free release records may be
-uploaded. Deleting archives does not substitute for credential rotation.
-
-**User decision (2026-09-09):** leave the exposed database password unchanged and
-proceed with deployment work. Rotation and its independent recovery machinery are
-not deployment prerequisites. This accepts the existing exposure; it does not
-assert that the password was rotated or that historical copies are safe. Credential
-redaction, artifact guards, protected database-plan checks and the other release
-safety gates remain required. No credential probes or mutations are part of this
-release work.
-
-### Credential mutation safety (2026-09-09)
-
-A disposable credential probe inherited the production ownership role and used
-`RESET ROLE; ALTER ROLE CURRENT_USER PASSWORD NULL`, inadvertently clearing the
-production password. Fifty browser authentication errors were observed; the
-canonical secret restored connectivity, and the temporary login was removed.
-Incident and exact times: `docs/postmortems/2026-09-09-credential-probe-role-reset.md`.
-
-Destructive credential targets must be explicit, validated identifiers, never
-ambient SQL role expressions. Experiments use disposable owner roles, not
-production ownership. Any production credential mutation requires independently
-armed recovery whose authority does not depend on this application's issuer,
-and must execute the exact tested procedure. The original credential remains
-exposed despite restoration. No rotation completion is claimed.
-
-### Deferred credential-recovery proposal (2026-09-09; not implemented)
-
-The proposed recovery authority is a separate GitHub Actions job using the
-already-admitted GitHub identity, not an orb token or a database session. It must
-remain usable when pi-orb's issuer or database authentication fails. The controller
-and recovery job belong to one generation-checked release-lock transaction;
-readiness and terminal outcomes are durable, token-free records, not shell traps.
-A stale guard must not act on a later transaction.
-
-Password changes use the Cloud SQL Admin API with explicit project, instance and
-user identifiers. SQL password statements and ambient-role selectors are excluded.
-Recovery reads the authoritative current credential from Secret Manager rather
-than reviving a captured, subsequently retired password. The restore target and
-secret identity require independent validation before any write.
-
-The proposed cutover prepares a distinct login with the stable owner's privileges,
-proves a fresh connection with the exact intended ownership identity before
-publishing its URL, and retains the old working credential until all four service
-roles have moved and old consumers have retired. Revocation is a separate explicit
-final step; successful preparation is not successful rotation. The exact ownership
-configuration, recovery handshake, cancellation behavior and retirement proof are
-not yet qualified for production. Isolated tests must use disposable owner roles.
-Acceptance and implementation work remain in `TODO.md`; this proposal does not
-authorize another ad hoc production probe.
-
-### Live deployment and recovery outcome (2026-09-09)
-
-Application source `32d82e5`, including MCP and workspace uploads, serves on all
-four roles at generation `1788991246` (the issuer deliberately has none).
-Run `34407362332` passed checks/E2E, native acceptance, the protected saved plan,
-and migrations, then updated all four services. Its missing-beta-component
-reconciliation failure remains `applied-but-unvalidated` in the original record.
-
-After the tooling/preflight and shared repair-phase correction, validation-only
-run `34411745647` at runner commit `95118b4` completed successfully at
-`2026-09-09T23:10:45Z`. It did not rebuild, migrate or reapply infrastructure.
-IAP remained native-enabled with exactly `domain:heyglide.com`; old revision
-`pi-orb-00049-dpj` was pruned at 22:22:11 but still had one active instance at
-22:57. Explicit zero active and idle counts at 23:00 permitted activation.
-No UI pause or time-only retirement assumption was used.
-
-Lifecycle assertions passed in 200 seconds; identity assertions passed in 152
-seconds, including real STS/deployer federation, a read-only GCP request and
-peer-preview HTTP 200/`ready` through the owned orb's daemon. Successful cleanup
-was then verified: one disposable project and all three smoke orbs were deleted.
-The release lock is absent, serving identities match the validated record, and
-the original failure is unchanged. The sole uploaded artifact is the validated,
-allowlisted release JSON. CI/E2E passed on `95118b4`; local unit count was 1,598.
-
-Evidence: `static-plane/releases/r-1788992497-4fabfbfe-b386-4272-96f6-1af9b21d8a09.json`
-and `https://github.com/schani/pi-orb/actions/runs/34411745647`, with private
-snapshots/logs under `.context/workflow-release/`. This establishes the normal
-build/migration/apply stages and explicit recovery through final gates; it does
-not relabel the original full run green or claim a second fresh full deployment.
-Dedicated hosted-file and upload streaming/memory qualification remains separate
-in `TODO.md`. The database password was left unchanged per user decision.
-
-### Release safety design (single-service update implemented 2026-09-19; not deployed)
-
-The external entry point reuses `infra/release.sh`. A read-only application plan,
-machine API access and retirement inventory precede expensive image builds.
-The application starts HTTP but waits before starting its autonomous loops.
-Its one-object GCS reader accepts only its exact generation from
-`static-plane/releases/active.json`. Missing, malformed or unavailable authority
-fails closed, and a process that observes a later generation never opens after a
-subsequent regression. Pending/unavailable/superseded activation is visible in the
-dashboard footer, with edge-only `lifecycle:` events. Activation is a startup barrier,
-not a per-mutation lease; cooperative retirement keeps watching after activation.
-The supported release must establish retirement before
-publishing authority; out-of-band deployments and late-side-effect compensation
-remain distinct from this operational boundary.
-
-**Faster handover alternatives (2026-10-29):** the production PostgreSQL-upgrade incident demonstrated that a deleted old revision can keep polling while the new revision waits for activation (`docs/postmortems/2026-10-29-pg17-production-interruption.md`). Closing browser/PWA/terminal connections is a reversible diagnostic mitigation if an old WebSocket is keeping the instance active; the particular live connection remains unidentified, so success is not guaranteed. Reducing the service's 3,600-second request timeout, for example to 300 seconds, was considered but not selected: it needs reconnect/terminal/file/runtime qualification, affects only future immutable revisions, and is not a controller handover protocol. Early publication of the successor's active generation or a shorter arbitrary retirement timeout is rejected because neither proves outstanding effects have stopped. A separate persisted acknowledgement is unnecessary while the existing independent process proof remains mandatory.
-
-**Cooperative retirement decision (2026-10-29; user approved implementation and a PR, not deployment):** extend the existing GCS `static-plane/releases/active.json` object with `retireThroughGeneration` (absent means no retirement request). After repair verifies the new serving deployment and removes old revision resources, `infra/release.sh` requests retirement through the new generation minus one, under the existing global release lock and GCS generation-match precondition. This preserves the previous `generation`, `releaseId` and `activatedAt`; only the existing independent active/idle-zero and Compute-operation proof permits activation. Activation retains the cutoff. Both writes refuse a cutoff that would retire the successor or regress recorded authority. Generation selection stays above the active generation, previous serving generation and any recorded retirement cutoff, including after a failed release. A missing activation object has admitted no workers, so no retirement command is needed until initial activation writes the cutoff.
-
-Every process checks the cutoff at startup and polls the same object every five seconds after activation. At or below the cutoff, it exits the startup barrier without starting loops, or invokes the same one-way shutdown path as SIGTERM; it never reopens on a later object regression. The successor remains above the cutoff and behind the activation barrier. Missing/unavailable reads block initial activation but do not stop an already active controller; edge-only `release-retirement-unavailable` / `release-retirement-recovered` lifecycle logs diagnose delayed signaling. An unavailable watcher cannot silently authorize the successor because independent retirement proof still blocks it.
-
-Shutdown stops HTTP admissions and autonomous scheduling, terminates browser/terminal WebSockets without waiting for peer close acknowledgements, and closes streaming responses, including history downloads. Tracking follows the HTTP response until it closes, not the source stream: source EOF/close can precede completion of a backpressured response. Streams finishing admission after shutdown are also closed; slow readers cannot keep the process alive indefinitely. Ordinary in-flight HTTP handlers and admitted reconciliations still join before resources close, rather than being force-killed mid-mutation. Agent ownership remains maintained until the existing agent close protocol suspends work and releases resources; provider/database boundaries close last. Signing-key repair also joins before database close. Durable Cloud Logging records `release-retirement-observed`, `control-plane-shutdown`, per-agent drain outcomes and `control-plane-drained` with explicit agent/database close results; the GCS cutoff and release record retain the request. No acknowledgement store, per-mutation lease, request-timeout change, or early activation is added. Monitoring's visibility delay remains. The already-serving binary has no watcher, so this cannot accelerate its retirement retroactively.
-
-**Prior-serving baseline (decided 2026-10-15):** an observed desired rollout with Ready=False and ConfigurationsReady=False/HealthCheckContainerError may use its distinct, immutable, owned Ready revision serving exactly 100% files traffic, with verified image/env identity and matching active-pointer generation; postapply readiness, retirement and activation remain strict.
-
-**Retirement sample rule (revised 2026-10-06; local, undeployed):** before apply,
-inventory records revision resources separately from observed processes. Process
-targets are revisions with unresolved positive Monitoring samples in the existing
-15-minute lookback, including deleted revisions. All pages use exact service AND
-region filters. A revision's positive is resolved only
-when its latest explicit active AND idle samples are both zero; missing either
-state is unknown, not zero, and positives win timestamp ties. Complete latest
-zeros can exclude an observed process even if its series stops before inventory.
-After apply and pruning, newly discovered revisions follow the same distinction.
-Every admitted target needs explicit active and idle zeros **at or after the
-recorded pre-apply inventory boundary** (`>=`, whole-second timestamps and an
-instantaneous gauge). Saved qualified zeros remain reusable when series disappear;
-newer positives invalidate the corresponding state. Neither deletion nor missing
-samples prove retirement. Requiring new postboundary emission from an already
-retired, excluded revision is rejected: it adds no unresolved-writer protection
-and can stall permanently when Monitoring stops emitting that deleted series.
-The pre-deletion observation boundary remains fixed, so zeros emitted during
-service deletion qualify. No post-deletion sample condition applies.
-
-Before retirement completes, every inventoried revision resource must be absent;
-the only surviving revision resources allowed are the newly serving revisions,
-which must be disjoint from the old resource inventory. A new or surviving old
-resource fails closed. Resource removal prevents future activation; explicit
-metrics resolve observed processes. Retained metadata with no process observations
-does not create a requirement for hypothetical future zeros. The gate retains
-the existing bounded Monitoring-observation assumption, also used to discover
-deleted-but-live processes; it does not establish process absence during an
-unreported prolonged telemetry outage.
-
-After first confirming resource absence, observe for at least 180 seconds: the
-[instance-count metric](https://docs.cloud.google.com/monitoring/api/metrics_gcp_p_z)
-samples every 60 seconds and can take 120 seconds to appear. This closes the
-visibility gap for a cold start just before deletion. Every poll rereads from
-15 minutes before the original boundary, so delayed preboundary positives are
-included. Elapsed time establishes observation coverage, never resolves an
-observed positive. API failures, missing zero states, newer positives and pending
-Compute operations still block retirement. Cause and rejected fresh-zero-per-metadata
-requirement: `docs/postmortems/2026-10-06-consolidation-retirement-timeout.md`.
-
-The durable release report's `retirement` object contains `after`, `resources`,
-`resourcesRetired`, `revisions`, `zeroes`, `excluded` and `operations`.
-`resources` preserves the resource inventory; `resourcesRetired` records successful
-absence and visibility checks and is required for activation. `excluded` maps previously-positive,
-resolved candidates to their latest active/idle zero timestamps (counts are
-implicitly zero). Zero-only series add no evidence noise. Excluded and admitted
-revisions are disjoint. Saved exclusions survive absent observations, but a
-positive at or after either state's saved zero removes the exclusion and admits
-the target. Saved preboundary exclusion zeros alone cannot resolve that new
-positive. Delayed observations that include complete fresh zeros after every
-observed positive can establish a resolved preboundary process in `excluded`;
-otherwise both zero states must independently qualify against `after`. UTC timestamps and
-conflicting evidence are validated before publication. Cutover verification accepts
-an empty process inventory only with completed resource-retirement checks;
-pending operations and positive rechecks
-still block it. Deterministic local
-missing-state regressions do not establish a historical unsafe activation;
-evidence and the rejected broader any-positive rule are retained in
-`.context/consolidation/retirement-invariant-20261004/`.
-
-Pending pi-orb instance/disk/image operations also block activation. The 75-minute operational cap permits natural Cloud Run
-retirement without a UI pause (the observed incident took roughly 44 minutes);
-time passing is never the proof. Failure leaves new loops gated and HTTP available.
-The per-service Monitoring filter correction and sandbox API evidence are in
-`docs/postmortems/2026-09-27-monitoring-retirement-filter.md`.
-
-A one-task, no-retry Cloud Run job runs migrations from the accepted image before
-any new service consumes schema. Production application startup does not migrate;
-local development still does. Migration filenames, outcomes and optional validated
-SQLSTATE are logged without raw database errors. An uncertain job execution retains the global release lock
-and job identity for inspection. Successful jobs are removed. There is no
-automatic rollback of committed schema changes, nor a promise of compatibility
-for arbitrary breaking runtime/schema changes.
-
-**PostgreSQL 17 (decision, 2026-10-28; applied 2026-10-29):** Cloud SQL was upgraded in place from 16 to 17 through the manual Deploy. The [major-version upgrade](https://cloud.google.com/sql/docs/postgres/upgrade-major-db-version-inplace) required a maintenance outage and pre/post-upgrade backups; application tables were analyzed afterward. Recovery to 16 requires restoring the pre-upgrade backup to a **new PostgreSQL 16 instance**, not downgrading the upgraded instance. Execution: `docs/postmortems/2026-10-29-pg17-production.md`.
-
-**pg_textsearch preload prerequisite (decision, 2026-10-29; not deployed):** enable `cloudsql.enable_pg_textsearch=on` on PostgreSQL 17 before installing the extension. [Cloud SQL documents `on`/`off` and a required restart](https://cloud.google.com/sql/docs/postgres/flags#cloudsql.enable_pg_textsearch). Deploy this flag-only prerequisite with the existing search migrations before the separate extension/index PR: schema migration precedes full infrastructure apply, so one release cannot both preload and create the extension. No deployment is authorized by this PR. The saved-plan guard permits only absent/off → on for this flag; all other instance attributes, flags, database and credentials remain unchanged. Accepted changes appear in release logs and the Actions summary without raw plan data; the durable apply stage and Cloud SQL operations record execution. Failed or cancelled infrastructure apply retains the release lock: inspect exact cloud operations before any explicit unlock.
-
-**Migration timeout override (historical decision and default, 2026-10-23):** the migration task defaulted to 300 seconds. For the authorized release following [failed retry 40015993413](https://github.com/schani/pi-orb/actions/runs/40015993413), select Deploy input `migration_timeout_30m: true` (release CLI `--migration-timeout-30m`) to allow 1800 seconds for that invocation only. No arbitrary durations, concurrent index build, migration retries, or automatic unlock are introduced. The selected timeout and reason (`default` or `explicit 30-minute override`) appear in Actions logs and the job summary, not new release-record fields. Validation-only runs reject the override. A longer ordinary index build can block history writes for longer, potentially throughout the 30-minute task window; termination does not prove rollback or lock release. Zero retries and uncertain-execution lock retention remain unchanged. The failed release `r-1792785778-ec4492a1-df47-419a-9544-d352b88031d9` retains its lock; inspect its job/execution before any explicit unlock or new deployment. Merge and exact-SHA qualification must precede the manual deployment with this override.
-
-**Migration task deadline (user-approved decision, 2026-10-30):** extend the default from 300 to 600 seconds (10 minutes) and retry the native-search/skill-import deployment after qualification, following [Deploy 41078004710](https://github.com/schani/pi-orb/actions/runs/41078004710)'s migration-052 timeout. This is the Cloud Run migration task deadline, not a SQL statement or lock timeout. The explicit 1800-second override is unchanged; validation-only runs accept the default and still reject that override. A longer task can stall readers and writes for longer; it does not identify or fix the unknown slow phase behind the 300-second failure. Selected timeout diagnostics, zero retries and uncertain-execution lock retention remain unchanged. This change does not itself retry or deploy anything.
-
-**Migration locking (decided and deployed 2026-10-13):** [Deploy 38478055943](https://github.com/schani/pi-orb/actions/runs/38478055943) failed before apply with 044 as the deadlock victim. Transaction semantics rule out a commit from that attempt, but production catalog/ledger were not queried. Blocking ordered exclusive locks are rejected: they still deadlock with inverse-order record readers in a proven three-session schedule. Migration 044 attempts the pair NOWAIT inside an exception subtransaction catching only 55P03 and releasing partial locks before backoff: 120 attempts, 119 quarter-second backoffs (29.75 seconds scheduled sleep, not a wall-clock guarantee). Exhaustion rethrows 55P03 before DDL; existing ALTERs run once in the same transaction. Durable SQL contention/acquisition/exhaustion edges diagnose this phase. The 300-second request deadline is unchanged. No whole-migration retries or automatic unlock. Retain failed release/job/lock evidence. Incident, tests-first proof and qualification limits: `docs/postmortems/2026-10-13-history-migration-deadlock.md`.
-
-**Runtime/migration compatibility (decided 2026-09-17):** migrations must let
-supported old runtimes continue temporarily. Every changed write contract must
-either accept their writes through optional/defaulted fields with behavior-preserving
-handling, or reject incompatible writes at the boundary with a typed, durable, and
-user-visible outcome before incomplete state is stored. This applies to behavior,
-not only decoding: promoted fields such as `inboxMessageIds` affect delivery
-correctness, while an absent optional edit `patch` only removes UI diff counts.
-The selected protection must take effect atomically with its migration/backfill so
-there is no unsafe write window. This supersedes the manual stop-before-022 rule;
-a global runtime stop is not a standing deployment requirement. No generic
-migration framework, dual-write scheme, or specific guard is selected or implemented.
-
-**Scoped migration 024 release decision (2026-09-17):** the requested GitHub
-Actions production deployment of stage 3 is authorized without migration-024
-old-process-write protection. Credential writes from old processes may fail during
-overlap; the user accepted that risk for this release. This is not a general
-compatibility-policy repeal, coworker-onboarding authorization, or E2E waiver.
-
-Deploy `35168145109` missed the former manual rule. A later cutoff found five
-repairable missing edit-patch projections written by the old runtime. The raw diffs
-remain in `overflow.native.message.details.patch`; the missing optional field affects
-only `+`/`-` display statistics, with the UI falling back to call status. It did not
-break conversations, lose native data, or corrupt SQL schema. The incident also
-exposed the behavior-sensitive inbox case that future compatibility or rejection
-must cover. Incident and follow-up:
-`docs/postmortems/2026-09-17-typed-history-runtime-fence.md`.
-
-`release_state.py` constructs and validates token-free records, including nested
-allowlists, before publishing. It records source and runner commits, accepted
-artifacts, the serving application image/revision identity and lifecycle generation, stage verdicts, retirement evidence and
-fixture outcomes. Apply is conservatively marked unvalidated before invocation.
-`--validate RELEASE_ID|latest` creates a new record referencing the original,
-checks deployment identity, and runs only post-apply revision pruning,
-retirement/activation/validation—not build, migrations or infrastructure apply. The original failure is never rewritten into success.
-
-Successful smoke fixtures are deleted and verified absent; failed fixtures remain
-for diagnosis and cost accounting. An accepted cloud cleanup operation can outlive
-its CLI: a command timeout alone does not establish resource state. Reconciliation
-must use the exact operation and resource identities
-(`docs/postmortems/2026-09-16-validator-cleanup-timeout.md`).
-The release's federation leg uses this repository's existing admitted project and
-shared deployer, exercising only read-only APIs. It creates/deletes its own two
-orbs, never that shared project. This does not bootstrap the separate experimental
-STS tier or add identity authority.
-
-**Native acceptance is one-shot (2026-10-22):** poll validator SSH, HTTP health and the runtime-ready guest attribute within the existing 60-attempt readiness budget, then run guest/Claude acceptance once. Any acceptance failure, including ambiguous transport loss, rejects the candidate; never replay assertions until green. Preserve the failed validation outcome, private command logs and cleanup evidence; do not publish an accepted manifest.
-
-**Native entry acceptance invariant (2026-10-09):** native acceptance must identify the supervisor's declared runtime entry argv, not a dynamically imported role module. The owned-child regression keeps this cross-file contract synchronized; a missing child emits `native_runtime_entry_missing`, and other failed assertions export only `native_acceptance_failed` plus their source line. The first central activation release failed before apply; this stale gate was reproduced afterward. Production was unchanged. Evidence and limits: `docs/postmortems/2026-10-09-native-runtime-entry-acceptance.md`.
-
-## Central Pi activation (approved 2026-10-09)
-
-**Capacity finding (2026-10-09):** the one-vCPU, one-instance application reached 94–100% CPU and rejected browser/runtime/identity requests at Cloud Run ingress with 429, despite recorded request concurrency below 80. Cloud Run adaptive concurrency can lower admission under background CPU pressure; configured concurrency is not guaranteed serving capacity. Central-agent capacity assessment must include control-plane CPU and ingress 429s, alongside memory and instance counts. CPU attribution remains unmeasured. Evidence: `docs/postmortems/2026-10-09-control-plane-cpu-429.md`; work: `TODO.md`.
-
-**Observability finding (2026-10-09):** Cloud Monitoring/Datadog expose container metrics, but the inspected serving control-plane configuration had no CPU profiler or per-code-mode-worker CPU accounting. That rollout monitor omitted Run CPU and ingress 429 warnings. The local CPU limiter now records worker accounting in durable tool results, and the monitor collects Run CPU and rejects unrecovered HTTP 429s. The audited waiting paths showed no tight idle loop; repeated full-history projection and fresh code-mode VM initialization remain unprofiled CPU candidates. Details and local waiting experiment: `docs/postmortems/2026-10-09-control-plane-cpu-429.md`.
-
-**Profiling evaluation (2026-10-09; not deployed):** Google Cloud Profiler 8.1.0 / pprof 5.0.0 built and collected main-thread/heap profiles on the exact serving Linux image (Node 24.21.0). It missed a CPU-heavy code-mode worker, reporting 99.59% idle samples; loading its native sampler inside a worker failed. The unchanged managed agent is insufficient for complete central-agent CPU attribution. Separate worker counters/profiles remain necessary. The GCP API is disabled and runtime project bindings lack Profiler Agent; managed uploads and production overhead are unqualified. Details: `docs/postmortems/2026-10-09-control-plane-cpu-429.md`.
-
-**Capacity decision (user-selected 2026-10-09; implemented locally, not deployed):** the user is independently changing Cloud Run to two vCPUs. All code-mode workers together may consume one core: CPU credit is 100% of elapsed wall time (1 CPU-ms per wall-ms), equivalent to 50% of the two-vCPU allocation. This supersedes the initial one-vCPU constraint and 60% worker-budget proposal. The shared budget must bound idle credit accumulation and retain overshoot debt; increasing worker count must not multiply the allowance. Accounting must cover initialization or explicitly account for CPU outside the guest interpreter. Pausing a worker must preserve script state, cancellation and callback semantics; admission limits alone cannot contain one spinning script. The user accepts code mode as the working CPU hypothesis without requiring historical hotspot attribution first. Validate total CPU, HTTP latency and ingress refusals under sustained/adversarial multi-worker load. This task did not alter live Cloud Run configuration. The implemented cooperative worker budget, observability and coverage limits are specified in `docs/pi-adapter.md`; remaining release qualification is in `TODO.md`.
-
-**Throttle experiment (2026-10-09):** blocking waits inside QuickJS interrupt checks preserved calculation state in an isolated exact-image prototype. Shared CPU accounting across two workers reduced aggregate process CPU to approximately 59% under a nominal 60% worker budget. This is cooperative throttling; initialization/compiler/host CPU and production callback/cancellation/admission qualification remain outside that proof. Evidence and limits: `docs/postmortems/2026-10-09-control-plane-cpu-429.md`.
-
-Pi runs centrally for every host provider; Claude remains host-native. Ordinary compute replacement deletes the disposable instance, not its `autoDelete:false` workspace; existing repository checkout is not reset. Existing owned drain still obeys its original fences. Adoption decision: `docs/pi-durable-evaluation.md`, question 72 (Pi Durable) in `docs/open-questions.md`.
-
-Deployment requires fresh exact-source CI (both control-plane images), all four Docker shards and all four central-process shards, followed by the normal manual main-only transaction (`first_consolidation=false` for the already-consolidated production). Existing lifecycle/identity smoke fixtures remain required; monitoring adds no prompts or orbs. Share the external Actions run URL before cutover: the deploying legacy Pi conversation may lose publication or compute.
-
-The external release job verifies its owner metadata inventory before rollout, then runs `infra/rollout_monitor.py` after a validated transaction. It persists an initial partial artifact before probing and observes a fixed 900-second throttle window while monitoring other faults throughout, then starts its final query no earlier than 1,090 seconds (900 + ten-second identity retry budget + 180-second ingestion allowance), with a 25-minute step budget. A query started earlier cannot finalize even if later checks cross the deadline. The always-uploaded, 30-day `rollout-monitor-<run>-<attempt>` JSON is separate from the authoritative release record. It retains exact release/SHA/generation, timestamps, health, revision/image/traffic/active-pointer checks, lock absence, owner fleet placement/state counts, SQL RUNNABLE, timestamped SQL CPU/memory/disk/connections and revision/region-scoped Run instances/memory/startup distributions. Instance count is not restart count; startup distributions retain their observed count or unknown. Required missing/nonnumeric metrics or read failures are `incomplete`, never invented zero. Logs are revision/region-scoped and export only classified counts: integrity/authority/drain/delivery failures, raw ERROR/HTTP429 counts, independent ERRORs, recovered/unrecovered HTTP429s and HTTP5xx. HTTP 200 recovery establishes server completion, not CLI body consumption. A detected regression requires review, not automatic rollback. Unavailable samples retain the category and the monitor's fixed failure message (2026-10-11). No prompts, tokens, payloads or free-form errors enter the artifact. No natural central turn means central inference remains unobserved; Native ownership/drain detail is not independently queried from SQL.
-
-**Recovered identity throttles (decided 2026-11-06, PST; not deployed):** [Deploy 42256493690](https://github.com/schani/pi-orb/actions/runs/42256493690) reported two mint-floor 429s; their retry outcomes remain unknown. Recovery requires native request logs from the selected project/service/region/revision: the same valid project-qualified invocation trace and exact HTTPS id-token POST URL, then HTTP 200 within ten seconds of the earliest throttle. Success queries extend through cutoff + ten seconds. Any later same-orb success is insufficient: concurrent invocations are independent. Intermediate throttles, including native ERROR severity, remain provisional; final uncorrelated/unrecovered 429s fail. Other faults stay sticky. Raw/recovered/unrecovered counts remain; read failures, truncated or decreasing inventories are incomplete.
-
-[Cloud Run logging](https://cloud.google.com/run/docs/logging#correlate-logs) documents `X-Cloud-Trace-Context` correlation; [trace context](https://cloud.google.com/trace/docs/trace-context#legacy-x-cloud-trace-context-header) defines its format. Live propagation is unqualified (`TODO.md`). Missing/rewritten traces or absent actual HTTP 200 fail closed; client/platform span equality is unnecessary.
-
-**Recovery:** prefer a qualified forward fix retaining central placement, private authority, public history and workspaces. A retained-image rollback requires a qualified central-capable CP/native/config/schema combination and a new forward generation with the normal release fences/gates. Preserve failed release/lock/migration evidence; no automatic SQL DOWN, DB restore, history overwrite, user archival/deletion or old-controller revival. Backup/PITR readiness is not a rehearsed restore. Monitoring failure leaves a validated release record intact and reports incomplete observation.
-
-## Manual GitHub Actions deployment
-
-**Latest failed release attempt (2026-09-17, stage 2 authorized):** GitHub
-[run 35166896875](https://github.com/schani/pi-orb/actions/runs/35166896875)
-for `7d5e534ed59c3287b609f3170d1b1f7686a92203` failed at `00:32:07Z` before
-release initialization, lock acquisition, build, migration or apply because
-`PI_ORB_USER_ID` was empty. The log showed all four owner variables empty.
-Production remains at `1fcc261`. The current integration receives 403 from
-GitHub variable settings, so it cannot inspect or configure them. No verified
-owner tuple was supplied; it must not be guessed from row order or email. That
-historical stage-2 retry required the full tuple. Migration 024 now requires only
-the existing, independently verified `PI_ORB_USER_ID`; production's value is
-`53da7ad4-6c53-4223-868e-0641bb4bcdd9`, and the runner resolves its verified
-identity from `users`. Stage 3 was not part of this failed release.
-
-**Latest deployed release (2026-09-17, automated gates validated; migration compatibility enforcement remains a follow-up):**
-GitHub [run 35168145109](https://github.com/schani/pi-orb/actions/runs/35168145109)
-deployed `ec81e80d76541305c1c05578b89348ffca763a68`. GitHub completed successfully at
-`01:53:59Z`; durable record `r-1789606261-438efafc-cfc6-4137-81bd-881e5d3a2a03`
-finished `validated` at `01:53:47Z`. All encoded gates passed: 1,934 unit tests,
-eight conditional skips, 159 E2Es, four native cleanups, fixture deletion with
-four confirming `404`s, and absent release lock. Serving revisions
-`pi-orb-00060-mk7`, `pi-orb-ops-00057-kxt`, `pi-orb-runtime-api-00062-djj`, and
-`pi-orb-issuer-00022-btv` match digest
-`sha256:622da99b0825b380aa3f7d2e35d46e4e505dbec0190d8f02532ba5898d0156a2`;
-the three lifecycle roles use generation `1789608844`. Native image
-`pi-orb-image-v-ec81e80-0d871be33fdc4dba` has ID `1174324845786627241`;
-workspace image `pi-orb-image-workspace-v-ec81e80-0d871be33fdc4dba` has ID
-`8085093375860473631`. Durable record:
-`gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/releases/r-1789606261-438efafc-cfc6-4137-81bd-881e5d3a2a03.json`.
-
-Migrations 022 and 023 applied at `01:38:06.336Z` and `01:38:25.184Z`.
-Stage-2 ownership and personal-instructions preservation checks passed. However,
-the then-required stop-before-022 step was omitted. The `01:57Z` inventory found
-one running `1fcc261` runtime and three `d110990` VMs in `archiving`; its bounded
-predicates found zero missing typed projections. After five parent-orb edit-tool
-calls, a fresh read-only cutoff at `02:19:49.331Z` found five missing patch
-projections among that orb's 117 post-022 rows; all other projection counts, all
-three archiving-orb post-022 row counts, and normalized-history-proven non-delivered
-message counts were zero. Their raw diffs remain in native overflow. The observable
-impact is five missing UI `+`/`-` statistics, not broken conversation, native-data
-loss, or SQL schema corruption. No legacy runtime was stopped or row repaired by
-that cutoff. A bounded read-only recheck at `13:48:32Z` verified this orb's new
-image/incarnation, the same five missing patch projections, and zero other missing
-projections or proven-undelivered messages; the three other inspected orbs remained
-archiving. No repair was performed. This is the latest deployed release with automated
-validation; migration compatibility enforcement remains a follow-up. The manual-stop
-requirement has since been superseded by the compatibility or typed-rejection decision
-above.
-See `docs/postmortems/2026-09-17-typed-history-runtime-fence.md`.
-
-**Previous validated production release (2026-09-16, stage-1 identity and native cleanup):**
-GitHub [run 35148741056](https://github.com/schani/pi-orb/actions/runs/35148741056)
-deployed `1fcc26135807499382d7d5638bb4cb690b5e81f4` and completed durably at
-`2026-09-16T21:49:16Z` (GitHub completed at `21:49:25Z`). All gates passed,
-including 149 E2E tests and 1,886 unit tests with six conditional skips. The four
-new exact REST cleanup operations succeeded. The smoke project and three orbs
-independently returned `404`; the release lock is absent. Serving identities match
-the record: `pi-orb-00059-r9g`, `pi-orb-ops-00056-2q5`,
-`pi-orb-runtime-api-00061-kf5`, and `pi-orb-issuer-00021-9dv`, all at digest
-`sha256:d3f5f2a8b6aa946b13bb549862c713f72d93afb2921088dfeabc76b907b55606`;
-the three lifecycle roles use generation `1789594045`. Native image
-`pi-orb-image-v-1fcc261-482b3e6237364d58` has ID `1993273971243923072`;
-workspace image `pi-orb-image-workspace-v-1fcc261-482b3e6237364d58` has ID
-`1871883940462507765`. Durable record:
-`gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/releases/r-1789591757-ba6c7400-95d4-471e-8a2f-351306869718.json`.
-Cloud request logs sampled 100 browser API calls under `pi-orb-00059-r9g` at
-21:35, all HTTP 200. This is observed guarded API traffic, not a dedicated
-session-response or two-user test. Stage 2 and later `main` changes are not in
-this deployment.
-
-**Previous validated production release (2026-09-16, project instructions):**
-GitHub [run 35104816962](https://github.com/schani/pi-orb/actions/runs/35104816962)
-deployed `7d53024a1f3d52932bb2bd192dea06166f10946a` and completed at
-`2026-09-16T14:52:20Z`. Every release gate passed on the first attempt: checks/E2E,
-native acceptance/build, plan, schema, apply, IAP repair, retirement, activation,
-lifecycle and identity. Independent CI and Docker E2E passed as well (140 E2Es,
-no skips). All four smoke fixtures were deleted and the release lock was verified
-absent. The four roles serve digest
-`sha256:a1bc1e20f7e7473f3e1d4a16d97b4950e465d0149e0035454c79532e4829bcb6`;
-the three lifecycle roles use generation `1789569278`. Native image
-`pi-orb-image-v-7d53024-298c9b01d6b54a91` has ID `916365974662748416`; its
-workspace image `pi-orb-image-workspace-v-7d53024-298c9b01d6b54a91` has ID
-`957467935512140103`. Durable validated record:
-`gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/releases/r-1789566852-c25aeedd-dbe1-4076-89c6-88c589d90072.json`.
-An authenticated production GET additionally verified the project-instructions
-snapshot against the migrated database. Feature and local-service archival evidence:
-`docs/project-instructions.md`. This passing release does not establish a fix for
-the historical WebKit issue below.
-
-**Earlier failed release attempt (2026-09-16):** GitHub
-[run 35137220634](https://github.com/schani/pi-orb/actions/runs/35137220634)
-for `56078c0` passed checks, 149 E2E tests and native acceptance, then the validator
-cleanup CLI hit its five-minute command deadline. GCE completed the already-admitted
-delete three minutes later. The durable outcome is `failed-before-apply`; no retry
-or apply occurred. Read-only reconciliation found every operation-owned build
-resource and the release lock absent. All four serving revision/image identities
-remain those of the validated `7d53024` release above. Evidence and the operation
-tracking gap: `docs/postmortems/2026-09-16-validator-cleanup-timeout.md`.
-
-**Earlier validated production release (2026-09-16):** GitHub run
-[35035428234](https://github.com/schani/pi-orb/actions/runs/35035428234)
-deployed `f1a0f6e` and completed successfully at `2026-09-16T00:53:12Z`
-after the explicit user exception below. Every automated gate passed: checks/E2E,
-native build acceptance, plan, migrations, apply, IAP repair, retirement,
-activation, lifecycle and identity. Old browser revision `pi-orb-00056-b8n`
-had explicit active/idle zeroes at `00:42:00Z` before activation. All four smoke
-fixtures (one project and three orbs) were deleted. The four serving roles use
-container digest `sha256:6cc59af8b88b0232a1e8358e0709bd71e665250369d2ef9b82039907ddd47e03`;
-the three lifecycle roles use generation `1789516995` (issuer has none).
-The durable record is
-`gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/releases/r-1789514649-9b39aa25-687c-4183-91a2-9ff028b4b723.json`
-with outcome `validated`. This successful release does not establish the cause
-of the historically waived WebKit crash.
-
-**Explicit user release exception (2026-09-15):** after adding the explicit-user-exception clause to `AGENTS.md`, the user explicitly overrode the no-flake rule and requested a new production deployment through GitHub Actions. The unresolved historical WebKit compositor crash is accepted for this deployment, not claimed fixed. The normal release transaction, including checks/E2E and all native and live gates, remains unchanged. Evidence is preserved in `docs/postmortems/2026-09-14-webkit-compositor-validation-crash.md`; earlier release-blocking statements below describe the status before this exception.
-
-**Native acceptance blocked before apply (2026-09-15):** GitHub run
-[35004543252](https://github.com/schani/pi-orb/actions/runs/35004543252) for
-`ff0614c` passed checks and all 117 E2E tests, then failed native acceptance with
-`personal_instructions_unavailable`. The strict loopback validation broker lacks
-the runtime's new mandatory personal-instructions GET. Mandatory boot reads must
-update that broker and its contract coverage together; preserve unknown-route
-rejection and fail-closed readiness rather than retrying or weakening the gate.
-The durable outcome is `failed-before-apply`, production revisions are unchanged,
-and build cleanup and release-lock removal completed. Evidence and the
-runner-local diagnostic limitation are recorded in
-`docs/postmortems/2026-09-15-native-personal-instructions-fixture.md`. The exact
-fixture route is corrected in `995f7df` with a demonstrated failing regression,
-65 passing native-image tests, and successful fresh GCE guest/Cloud Logging
-acceptance (operation `32790f16ad424b5f`). Diagnostic resources were cleaned up.
-No new production apply was attempted: the separately recorded WebKit crash
-remains release-blocking under the no-flake rule; the user subsequently requested
-removal of its dedicated `TODO.md` item on 2026-09-15, without establishing a fix.
-The same corrected commit's automatic E2E run `35013933184` then finished
-116 passed / 1 failed on fleet Find keyboard navigation. A controlled delayed
-orb-list response subsequently reproduced that test synchronization defect; the
-corrected scenario waits for the intended result/selection and passes all 34
-frontend-session cases. The original failure and correction are preserved in
-`docs/postmortems/2026-09-15-find-keyboard-navigation.md`. This does not clear the
-unrelated WebKit crash.
-
-**Action runtime update (2026-09-13):** CI, E2E and Deploy artifact-upload steps
-pin `actions/upload-artifact` v7.0.2 at
-`cf430e030ddbb5b0abf93d22962f4752f3646cd9`, whose action manifest declares
-`runs.using: node24`. This removes the v4 action's Node 20 deprecation warning;
-it is separate from the Node version selected for application builds. Artifact
-paths, retention, hidden-file exclusion and default ZIP packaging remain unchanged.
-The shared Chromium/WebKit installation is already merged to `main` (`7fdbc9b`).
-
-**Diagnostics release validated (2026-09-26):** [GitHub run 36246258567](https://github.com/schani/pi-orb/actions/runs/36246258567) deployed exact commit `3c5e7bc99494907933f7883fd81fe742f7ec2eb0` as release `r-1790430438-cbab5c3a-43a4-4fcb-8a0d-64cf4411de27`. The release artifact records `validated`, exit 0 and every gate passed; migration 026 ran. Independent serving verification found browser, ops, runtime and issuer on digest `sha256:f8c032542eb5219d4314b0c6fe807347e381a4d98cffc4f7fc793621b95ab972`, generation `1790432946` (issuer has no generation). Native image ID `4610591126911085428`; workspace image ID `5860208004801653688`. All four fixtures were deleted, native cleanup succeeded, and the release lock was absent. The Codex and MCP diagnostics change evidence, not recovery or provider-auth root-cause conclusions (`docs/postmortems/2026-09-26-provider-auth-failures.md`). The earlier unit-gate incident remains historical (`docs/postmortems/2026-09-26-unit-worker-rpc-timeout.md`).
-
-**Composer and fixture release validated (2026-09-27):** [GitHub run 36306373668](https://github.com/schani/pi-orb/actions/runs/36306373668) deployed exact commit `0706ea5c6792a51b3134062a6f13f012110c45f3` as `r-1790497853-9b21b1ff-4834-4c25-bcdc-10a983f18476`. Its [allowlisted artifact](https://github.com/schani/pi-orb/actions/runs/36306373668/artifacts/10928159395) records `validated`, exit 0, and every preflight/checks/build/plan/schema/apply/repair/retire/activate/lifecycle/identity/complete gate passed. Checks included 2,255 passing unit tests (eight conditional skips) and 227 Docker-backed E2E tests in 25 files, with no E2E skips. Migration job completed; all four fixtures were deleted; native cleanup succeeded. Container digest `sha256:dceae2e1a10008728dd243f47cb4628667fd89ef49e1ed552f8c2438762f0144`, native image ID `4863726835660579388`, workspace image ID `8296527576392098410`, generation `1790500310` (issuer has no generation). Read-only Cloud Run inspection independently found browser `pi-orb-00068-qmt`, ops `pi-orb-ops-00065-z8w`, runtime API `pi-orb-runtime-api-00070-stx`, and issuer `pi-orb-issuer-00030-h72`, each 100% serving that digest. Earlier runs [36299905272](https://github.com/schani/pi-orb/actions/runs/36299905272) and [36301922542](https://github.com/schani/pi-orb/actions/runs/36301922542) failed before apply; their fixture defects and first evidence remain in `docs/postmortems/2026-09-27-restart-notice-e2e-rule.md` and `docs/postmortems/2026-09-27-webkit-image-fixture-sync.md`.
-
-**Streamed-history release validated (2026-09-28):** [Deploy 36375754356](https://github.com/schani/pi-orb/actions/runs/36375754356) shipped exact source `4e5e42a488ba65c3dec30a59bab873629536cd8d`, release `r-1790567936-f8419126-2537-4338-9026-c008b06a2083`. Its [allowlisted release artifact](https://github.com/schani/pi-orb/actions/runs/36375754356/artifacts/10952440987) records `validated`, exit 0, and all 12 gates passed; [CI 36375733475](https://github.com/schani/pi-orb/actions/runs/36375733475) passed 2,270 unit tests, [E2E 36375733487](https://github.com/schani/pi-orb/actions/runs/36375733487) passed 227 cases. Native cleanup succeeded; all four fixtures were deleted and the release lock returned 404. Browser revision `pi-orb-00069-qbv` serves container digest `sha256:cf28dbea94e869b3e25c6d89786cff7aedb336f1b58e79465df57d9de4183241`; ops `pi-orb-ops-00066-x4k` and runtime API `pi-orb-runtime-api-00071-8xl` emitted `history-streamed` on the original stopped orb's successful 34,493,218-byte ops response and matching CLI transcript. This field check covers Cloud Run ops and the CLI, **not direct browser IAP** (`docs/postmortems/2026-09-27-history-response-size.md`).
-
-**Continuous activity rail release validated (2026-09-28):** [Deploy 36469079200](https://github.com/schani/pi-orb/actions/runs/36469079200) deployed `8bf33dd6d2869b0ff5362571941d154738e1c911`. Its allowlisted `release-36469079200-1` artifact records release `r-1790622030-807e33a8-59e0-4562-b2d6-31ddf4890b6f` as `validated`, exit 0, with all 12 gates passed, including lifecycle and identity smokes. SHA-matched CI and E2E passed. All four fixtures were deleted and all four native cleanup operations succeeded. Browser revision `pi-orb-00071-s7f`, ops `pi-orb-ops-00068-v7b`, runtime API `pi-orb-runtime-api-00073-h6v`, and issuer `pi-orb-issuer-00033-cp8` serve digest `sha256:9c4bb739b85e912e45087b575fc75cf667637bf22e0abe5dc14dc53dc6bde150`; lifecycle generation is `1790624525`. The release completed at 20:03 UTC. The orb host restart interrupted local monitoring, not the external GitHub release; the retained artifact establishes the outcome.
-
-**Three-attempt resume release validated (2026-09-28):** [Deploy 36427761001](https://github.com/schani/pi-orb/actions/runs/36427761001) deployed `f5f4b6c3961fbdae332c942c0c0e533748d44aa6`; [release artifact](https://github.com/schani/pi-orb/actions/runs/36427761001/artifacts/10974718293) records `r-1790601614-e1dcdace-4d80-4d80-a063-36161a7577d3` as validated. All 12 gates passed, including 2,273 unit tests (eight conditional skips), 227 E2Es, native acceptance, migration, apply, retirement, lifecycle and identity smokes. All four fixtures and native build resources were deleted; the release lock was removed. Browser `pi-orb-00070-g2z`, ops `pi-orb-ops-00067-7b4`, runtime API `pi-orb-runtime-api-00072-zcc`, and issuer `pi-orb-issuer-00032-cg5` serve digest `sha256:d16a65e69337f2c0b7c08ed049010d67eb32aa6c4caf0c0308e0a7f6014993ba`; lifecycle generation is `1790604032` (issuer has none). This validates the release gates, not a live three-crash production scenario.
-
-**Mobile release validated through explicit recovery (2026-09-13):** full run
-[34730567562](https://github.com/schani/pi-orb/actions/runs/34730567562) deployed
-`7fdbc9b` after passing checks including both mobile browser engines, build,
-schema, apply and IAP repair. Retirement observation stopped on a classified
-Cloud Monitoring transport failure (`http: cloud request unavailable`), not a
-failed application gate or retirement timeout. Read-only inspection then found
-explicit active/idle zeroes for `pi-orb-00053-rtt` at 02:40 UTC and no pending
-compute operations. Validation-only run
-[34733669858](https://github.com/schani/pi-orb/actions/runs/34733669858) verified
-the exact serving deployment, completed repair/retirement/activation/lifecycle/
-identity gates, and recorded `validated`. All four recorded fixtures were deleted.
-Generation `1789264785` serves container digest
-`sha256:0da5970772506a1f4c7f2bfc15ba038f55a5da40b75d3ed434ab8666e3b66f97`.
-The recovery record is
-`gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/releases/r-1789267344-ee20f4b1-31fb-404c-91d7-c5619fb6f4e2.json`,
-referencing `r-1789262891-21e10879-7a36-4586-89ff-4df9609e0d76`.
-The original full run remains failed; recovery neither rebuilt nor reapplied.
-Evidence: `docs/postmortems/2026-09-13-release-webkit-prerequisite.md`.
-
-**Browser prerequisite correction (2026-09-13):** run `34729281559` for `301c543`
-stopped before apply because the new mobile WebKit suite lacked its executable.
-The authoritative release now installs both managed engines and system libraries
-via `npm run test:e2e:install` after `npm ci`, as does the standalone E2E workflow.
-Both engines remain mandatory. Evidence:
-`docs/postmortems/2026-09-13-release-webkit-prerequisite.md`.
-
-**Validated release (2026-09-13):** GitHub run
-[34726749434](https://github.com/schani/pi-orb/actions/runs/34726749434) deployed
-`858301d24a3cc25b5e0dd99328363fd849654b1e`, including the atomic output handoff
-and deletion/discard DST invariant correction. The full transaction completed
-at 00:47:18 UTC with `validated`, exit code 0, and every gate passed. Generation
-`1789259399` serves container digest
-`sha256:76fc88af44f126ccccc5ca4ef4445247ce510717aa4fefc10b905670222af036`.
-The prior browser revision had explicit active/idle zeroes at 00:36 before
-activation; all four recorded release fixtures were deleted. Durable evidence:
-`gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/releases/r-1789257530-814003a4-972c-47b3-a777-08e6c827394e.json`.
-The previous failed run remains preserved; this was a fresh full deployment,
-not a validation-only relabeling. Older orb runtimes require restart for the
-direct protocol change (`docs/runtime-protocol.md`).
-
-**Release gate finding (2026-09-12):** run `34711432756` stopped in checks before
-build/migration/apply; production was unchanged. MCP E2E's strict completion
-selector exposed the transient history-before-output-retirement duplicate DOM.
-The initial overlap-tolerant assertion was insufficient and is superseded by an
-atomic history-frame handoff carrying explicit retired block IDs. Strict MCP
-assertions are restored with deterministic adapter/writer/reducer schedules and
-renderer/replica-repair regressions. This changes the runtime protocol directly;
-no new production deployment is implied. Evidence:
-`docs/postmortems/2026-09-12-mcp-completion-selector.md`.
-
-**Production finding (2026-09-11; corrected and deployed):** `72fb304` passed checks/E2E,
-image acceptance and migration, then partially applied because the shared deployer
-lacks `logging.exclusions.create` for the MCP OAuth callback exclusion. All four
-services updated and the exit path repaired IAP, but retirement, activation and
-live gates did not run. A successful plan is not proof of resource-create
-permission; validation-only recovery cannot supply missing infrastructure.
-The correction adds a foundation-owned custom exclusion CRUD role for the shared
-GitHub/orb deployer, a read-only authority preflight before expensive work or
-mutation, and a browser dependency on the callback exclusion and OAuth secret
-IAM. This avoids recurring personal logins without allowing the deployer to
-expand its own authority. The role is project-wide exclusion management, not
-Logging Admin or an unsupported exact-name claim. Local infrastructure tests and
-OpenTofu foundation validation passed; live preflight reproduced the missing
-create/update/delete permissions. The one-time administrator apply installed exactly the two additive IAM
-resources under the release lock. Isolated federation passed the authority
-preflight and negative project-IAM/custom-role administration checks; the
-administrator login was then revoked and ordinary federation passed again.
-GitHub run `34562396846` subsequently deployed `f7e5641` with every gate passed,
-including retirement of both older browser revisions, activation, lifecycle
-smoke and live STS/deployer federation. Its durable outcome is `validated`, all
-release fixtures were deleted, and independent Logging API inspection verified
-the enabled callback exclusion with the exact expected filter. This was a full
-keyless GitHub release after revoking the administrator login, not validation-only
-or relabeling the original failed run. Preserve the callback-log protection and
-the separate foundation-administrator boundary rather than bypassing either. Evidence:
-`docs/postmortems/2026-09-11-release-logging-exclusion-iam.md`.
-
-**Implemented and live-exercised 2026-09-09 through normal apply plus successful explicit recovery.**
-`.github/workflows/deploy.yml` calls the authoritative `infra/release.sh`; it does
-not duplicate the deployment algorithm. The first-release policy is recorded in
-`docs/open-questions.md` (question 40).
-
-**Selected-source contract (decided 2026-10-14):** the workflow checks out the
-immutable dispatched SHA, verifies checkout equality, and creates local branch
-`main` at that exact SHA before authentication. The shared command requires a
-clean checkout and re-verifies trusted same-repository `push`/`main` qualification
-for the selected SHA before acquiring the release lock. Node 26.13.0, SDK 592.0.0 with its explicit beta component and checksum-verified
-OpenTofu 1.13.2 are pinned; actions use immutable SHAs, the runner is Ubuntu 24.04,
-and provider lock files are read-only. The 240-minute job budget accommodates
-checks, fresh native acceptance, migration/apply and up to 75 minutes of retirement.
-The shared checks stage builds its own Docker E2E runtime image rather than relying
-on a pre-existing runner cache. Checks do not inherit the release's result-directory
-or fixture-recorder variables; only smoke receives the real fixture recorder.
-The workflow `exec`s the release command for signal delivery, but hard cancellation
-still requires evidence-backed inspection of remote work and lock ownership.
-The first full run was cancelled in checks after discovering inherited test context
-could corrupt local evidence; no application change occurred. The reproduction,
-fix and exact-generation cleanup are in
-`docs/postmortems/2026-09-09-release-test-environment.md`.
-Registry access uses the same refreshing keyless
-identity as deployment. The pre-consolidation preflight also read the browser IAP policy to verify
-beta command availability and scoped access before mutation. The first successful
-infrastructure apply exposed this missing component during reconciliation;
-`docs/postmortems/2026-09-09-release-iap-sdk-component.md` preserves the failed run.
-That release added a separate `repair` phase. Current `infra/deploy.sh` verifies the
-single application's files routing and prunes drained revisions; Monitoring evidence,
-not deletion, establishes retirement.
-
-**CI SDK qualification (2026-11-04):** Google's [592.0.0 release notes](https://docs.cloud.google.com/sdk/docs/release-notes#59200_2026-11-03), [archive checksums](https://docs.cloud.google.com/sdk/docs/downloads-versioned-archives) and [component manifest](https://dl.google.com/dl/cloudsdk/channels/rapid/components-2.json) were verified live. Checksum-verified Linux x86_64 SDK and beta installation plus credential-disabled command-loading smokes passed. The Docker-image and Java-emulator breaking changes do not affect this Ubuntu archive installation. Evidence: `.context/ci-gcloud-592/`; no cloud release was exercised.
-
-An empty `validate_release` input performs a release. An explicit release ID or
-`latest` invokes validation-only recovery. Inputs enter through quoted environment
-variables, never interpolated shell programs. `release_report.py` validates nested
-record fields and the runner commit before exporting exactly `release.json`.
-No diagnostic directory, state, plan, credential file or source bundle is uploaded.
-The job summary distinguishes transaction failure from recorded gate success,
-links durable evidence, and lists retained fixtures/costs. Failure before record
-creation is explicit and never fabricates a successful deployment. A successful
-transaction step without completed, validated release evidence fails the reporter
-rather than producing a green workflow with a missing or unfinished record.
-
-The shared command runs checks and full-slice E2E for the exact dispatched commit,
-then preserves the release sequence as one serialized critical section:
-
-1. build/seal the native Debian runtime and fixed-size workspace images on disposable GCE compute, and pass fresh-VM acceptance; build the `linux/amd64` control-plane container;
-2. publish to the existing GCE image inventory and Artifact Registry repository, carrying exact VM/workspace image resources and numeric identities plus the immutable control-plane digest into the release;
-3. hold the existing global release lock and clamp the generation, require the exact saved plan to preserve the database and its credentials, run migrations in a same-image no-retry job, then apply the saved plan against the GCS backend; retain only allowlisted evidence — binary plans and unsanitized JSON contain state secrets and must never be uploaded;
-4. after apply, verify the serving revision and establish old-controller isolation before smoke. Revision deletion remains cleanup, not proof of quiescence. Any deliberate maintenance pause requires the independent restoration safeguard;
-5. run `infra/smoke.sh`, including its load-bearing stop/start leg, and `infra/smoke-workload-identity.sh`. Record fixture IDs immediately; delete successful fixtures and poll to `404`. Retain failed fixtures for diagnosis and surface their ownership/cost and cleanup commands, rather than erase evidence.
-
-`infra/api.sh` keeps its Google ID token out of argv and uses the app-origin audience on the ordinary API. Successful smoke cleanup is verified; failure retains fixtures and reports their IDs rather than erasing diagnostic evidence.
-
-**Decision (2026-10-16):** lifecycle/identity smoke application API calls share one bounded curl adapter: at most five attempts, 1/2/4/8-second backoff, 30-second attempts and 60 seconds including authentication, clipped by overall, poll and cleanup deadlines. Transient transport errors and HTTP 408/429/500/502/503/504 retry; explicit `retryable:false`, auth and certificate failures are terminal. `Retry-After` cannot extend the deadline. Reads, fixed-UUID project/orb creates and fixture deletes may replay; Start/Stop and other mutations are single-shot. Cleanup accepts 404 only from completed HTTP responses. Retained CI logs record attempt, status, content-type class, delay, remaining budget and outcome, never tokens, URLs, bodies or raw transport errors. Ordinary `api.sh` calls are unchanged. These retries do not explain or clear the historical failure (`docs/postmortems/2026-10-16-lifecycle-smoke-http500.md`).
-
-**Decision (2026-10-19, PDT):** extend that smoke-only policy to debug-token minting, GCE reads, IAP SSH, preview readiness, discovery/JWKS, STS, impersonation, read-only federation calls and fixture-publication IO. Each operation has at most five attempts with 1/2/4/8-second backoff and 30-second attempts within a 60-second operation budget, clipped by existing phase/overall deadlines. Authentication, response bodies and sleeps consume the same budget. Remote preview/probe deadlines are absolute and clipped before SSH connects. Known transient RPC/transport/HTTP failures may replay only these safe operations; credential, certificate, host-key, permanent DNS, malformed JSON and assertion failures never retry. Unknown DNS/proxy/TLS failures fail closed. Terminal headers or typed terminal bodies override interrupted body reads and transient-looking diagnostics. SSH owns and joins its local descendant group; remote CLI exits, including unavailable exit 6, are not an outer retry signal. The in-orb CLI keeps its existing typed retry budget and enables token-free diagnostics.
-
-Fixture publication remains a single transaction: its smoke-only adapter retries access-token minting, GETs and the identical generation-fenced CAS request under one fixed 60-second deadline. A lost acknowledgement followed by 412 is a conflict, not recovery; neither publication nor generation discovery restarts. Other release actions retain their existing adapters. No release fields or fixture states change. Logs retain fixed operation/phase, attempt, exit/status, allowlisted category, elapsed/remaining budget, delay and decision; never raw errors, bodies, URLs, metadata, claims or credentials. Successful cleanup is announced only after deletion and absence verification; failures distinguish delete/confirm/record and report remaining owned IDs and cost. Shared projects are never deleted. Proven absence is never relabeled retained when record publication fails; the cleanup gate still fails. This feature does not explain the waived historical mint failure or validate the applied release (`docs/postmortems/2026-10-19-lifecycle-smoke-auth.md`).
-
-Apply, old-revision deletion, and smoke must share one GitHub Actions concurrency group with in-progress cancellation disabled and the workflow must acquire the same GCS release lock used by `infra/release.sh`. OpenTofu's state lock covers only state mutation; the release lock serializes the shell-side retirement and smoke work and makes the live-generation clamp safe across CI, manual releases, clock skew, and same-second runs. GitHub's concurrency group remains defense in depth and controls pending-run behavior: by default it coalesces older pending runs, not a literal durable FIFO for every selected release. The current `queue: max` option can retain up to 100 pending runs, but GitHub orders them by when they begin waiting rather than by commit chronology and does not guarantee dispatch order; a strict chronological every-push policy therefore still needs an explicit ordering check/queue rather than an inaccurate workflow comment.
-
-Authentication must be keyless: GitHub OIDC to a Google Workload Identity Federation provider, then short-lived service-account impersonation. Admission must be restricted by the repository's numeric GitHub IDs (repository `1307054237`, owner `61363`), `refs/heads/main`, the chosen workflow event (`workflow_dispatch` for the proposed manual entry point; `push` only if that policy is approved), and preferably the protected deployment environment subject; name-only trust is vulnerable to repository or owner-name reuse. The pool/provider and CI identities need a separately bootstrapped trust boundary so the recurring deploy does not depend on creating the identity it is currently using.
-
-The initial proposal separated publisher, deployer and smoke identities. The implemented POC instead reuses the existing scoped deployer and admitted repository project, avoiding new authority or another identity bootstrap for recurring deployment. State access is high trust, not clerical: the current state contains the generated database password and complete connection URL. The foundation split now separately owns project APIs, stable IAM/admission and networking. The application root retains Cloud SQL, Secret Manager, Cloud Run and application-resource access policies, so its authority is still high trust. Generic Owner/Editor remains rejected; validate new permissions against real plans and Cloud Audit Logs.
-
-Supply-chain requirements for the workflow: pin every third-party action by immutable commit SHA; pin the OpenTofu CLI and runner versions; use the committed OpenTofu lock files read-only during ordinary deploys; preserve the root `.dockerignore` exclusions for `.git`, generated credentials, state, plans, and unrelated workspace files; and retain digest/generation release metadata.
-
-**State-conversion approval (2026-11-05, PST):** The user approved Google-provider-managed OpenTofu state upgrades and native Docker/containerd retained-configuration normalization for dependency-update PRs. Use automatic upstream conversions, without custom migrations or compatibility machinery. Reviewed infrastructure plans, retained-store qualification and normal checks remain required. No resource redesign, secret rotation, production apply or deployment is authorized. This supersedes the earlier hold for preparation and qualification only.
-
-**Historical rationale (2026-10-24):** The user deferred Google provider majors and paired Docker/containerd refresh because [Google 8](https://github.com/opentofu/terraform-provider-google/blob/v8.8.1/website/docs/guides/version_8_upgrade.html.markdown) converts resource state and [Docker 29.9](https://github.com/moby/moby/blob/docker-v29.9.2/daemon/daemon.go#L419) normalizes retained container configuration. Random 3.9.1 leaves password schema version 3, Read and planning unchanged.
-
-Rollback cannot mean shifting traffic to an old Cloud Run revision because `infra/deploy.sh` deliberately deletes drained revisions. It is another forward deployment of retained last-known-good image digests with a newer generation, followed by the same repair and smoke sequence. Artifact Registry retention must guarantee those referenced digests survive. Automatic rollback is not proposed for releases containing database migrations or static-plane changes: migrations commit before any new service is applied, but old revisions can overlap the changed schema and a prior image may not understand it. Such a release needs explicit detection and approval/maintenance policy, a verified Cloud SQL recovery point, and a rehearsed forward-fix or migration-specific rollback runbook; the POC deliberately has no backwards-compatibility choreography.
+`PI_ORB_WEB_DIST` is immutable for a process lifetime; static routes are enumerated at startup. Build into a separate unserved root, then drain and restart the control plane against it, keeping database and auth directories. Replacing `index.html` is not publication; verify referenced JS/CSS status, MIME types and real browser rendering. Never rebuild a live static root in place (`docs/postmortems/2026-10-04-claude-management-assets.md`, `docs/postmortems/2026-09-09-live-web-rebuild.md`).

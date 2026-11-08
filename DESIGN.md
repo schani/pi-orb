@@ -1,347 +1,91 @@
-# pi-orb Design
+# pi-orb design
 
-> **Status:** Living design documentation. This file is the entry point — purpose, scope, product decisions, and the architecture overview — plus an index of the topical design docs under `docs/`. Each doc records decisions, current proposals, rejected approaches, evidence, and open questions for its subsystem.
+Entry point to the design docs. Topical docs under `docs/` own their facts; this file holds purpose, scope, cross-cutting product decisions, the architecture overview and the doc map.
 
 ## Purpose
 
-pi-orb runs an AI coding agent in an isolated, remotely managed environment called an **orb**. A user should eventually be able to invoke `pi-orb` from a project, get a web-based agent experience backed by an orb, disconnect, and later reconnect from another machine without tying the orb's lifetime to a local process.
+pi-orb runs an AI coding agent in an isolated, remotely managed environment called an **orb**. The user works with it through a web UI, can disconnect, and later reconnect from another machine; the orb's lifetime is independent of any browser or local process.
 
-Pi is the default harness, running centrally through Durable with PostgreSQL authority. Claude Agent SDK runs natively on its execution host; qualification scope is in `docs/testing.md`. Host lifecycle, runtime protocol and replica storage use the shared `OrbAgent` boundary; each orb's harness is immutable. Claude's exact uncertain-worker guard has one episode-fenced automatic whole-compute recovery (2026-10-06; local, undeployed), without inference replay; `docs/lifecycle.md` defines disposal proof, attempt and command fences.
+## Scope
 
-## Current vertical-slice scope
+- Projects have a name and an optional Git repository; each orb starts from a fresh checkout or an empty workspace.
+- Each orb runs one harness, chosen at creation and immutable: central Pi (default) or host-native Claude. Spawned orbs inherit the caller's harness.
+- One root conversation per orb: linear, with compaction. No branching, session switching, cloning or forking.
+- A fixed runtime image and prescribed base environment, extended per project by secrets, boot hooks, instructions, skills and MCP servers.
+- Process (trusted local testing), Docker and GCE hosts behind one host-provider abstraction.
+- An in-orb `pi-orb` CLI lets the agent inspect and search sibling transcripts, spawn and message orbs, alert the user, sleep, expose ports, publish files, mint workload-identity tokens, and archive or delete itself when the user asks.
+- Trusted coworkers at one company; no collaboration, presence, transfer or permissions framework (`docs/auth.md`).
+- Deterministic simulation testing with [`determined`](https://www.npmjs.com/package/determined) is built into concurrency-critical code from the start (`docs/testing.md`).
+- Not a generic VM configurator or remote development platform.
 
-The first target is deliberately narrow:
+## Product decisions
 
-- Run locally using Docker; container-restricted trusted test environments may use the unsandboxed process-host + embedded PGlite composition.
-- Drive lifecycle and conversation input through the web UI; a local checkout is not required. The in-orb `pi-orb` CLI may read sibling-orb metadata and replicated transcripts, launch independent same-project orbs with prompts, issue transcript alerts (`docs/orb-alerts.md`), and request self-archival or self-deletion when the user asks.
-- Let users register a project with a name and public Git repository URL.
-- Clone the repository into a fresh orb without caching or synchronization optimizations.
-- Use a fixed orb runtime image and prescribed base environment; projects may add write-only environment secrets fetched by each orb runtime at boot (`docs/credentials.md`).
-- Select central Pi or host-native Claude at orb creation; spawned orbs inherit the caller's harness.
-- Provide a web UI; no terminal TUI and no tmux-based interaction.
-- Run exactly one native root conversation per orb.
-- Support a linear conversation and compaction. Do not expose branching, session switching, cloning, or forking initially. Durable send-anytime input is implemented: a message steers when delivered to a busy agent and otherwise starts a turn, while submission to a stopped or failed orb durably queues the message and requests startup (`docs/runtime-protocol.md`). Scheduled self-sleep is approved and under DST-first implementation: graceful stop/start with a durable deadline and combined first-wake notification (`docs/orb-sleep.md`).
-- Keep workspace files on retained host storage, private Pi authority in PostgreSQL and native Claude authority on its retained filesystem.
-- Retain complete normalized public conversation history in PostgreSQL.
-- Show browser history through a compact display projection with on-demand HTTP details; retain complete records for replication and the in-orb CLI (`docs/history-replication.md`, `docs/web-ui.md`).
-- Make stopped-orb history viewable immediately from the database without starting the orb.
-- Use the host-provider abstraction for process, Docker and GCP execution.
-- Build deterministic simulation testing into concurrency-critical code from the start using [`determined`](https://www.npmjs.com/package/determined).
-- Support trusted-company ownership without collaboration features: own-user defaults, company-wide direct resource access, and no presence, transfer, coworker-switcher or permissions framework.
+- The user interface is the web app. There is no terminal TUI, and tmux is never the interaction or persistence mechanism.
+- The browser talks only to the control plane, never directly to an orb runtime.
+- Multiple browser connections to one orb may all issue requests. Live mutations serialize in the agent; inputs serialize in the durable inbox (`docs/inbox.md`).
+- Live WebSocket traffic is never persistence authority (`docs/history.md`).
+- Complete normalized public history is retained in PostgreSQL; stopped and archived orbs are readable without starting compute.
 
-The first version is not intended to be a generic VM configurator or a generic remote development platform.
-
-## Product and interaction decisions
-
-- The user-facing interface is web-based. The runtime image also provides a narrow `pi-orb` CLI for agents to discover sibling orbs, inspect replicated transcripts, launch independent same-project work (`docs/orb-spawning.md`), mint workload-identity tokens, alert the user (`docs/orb-alerts.md`), and archive or delete themselves on user request (`docs/orb-archival.md`, `docs/orb-deletion.md`).
-- The browser communicates only with the control plane, never directly with an orb runtime.
-- HTTP/WS/SSE preview implementation is authorized (2026-10-06), not deployment. Explicit registrations survive stop/start and replacement; only registered loopback targets in isolated compute are authorized. A separate registrable origin uses consolidated app-managed login, stateless encrypted POST handoff and fixed app-session expiry. Private runtime HMAC admission fences exact compute identity; expiring activity leases prevent idle stop without agent busy, implicit wake or overriding explicit Stop. Normal HTTP has no body rewriting/retries. [PR #51](https://github.com/schani/pi-orb/pull/51) and its validated deployment satisfy the unchanged-issuer prerequisite. Domain/DNS/TLS selection and live ingress acceptance remain pending (`docs/ports.md`). Advanced networking may later be skill-only; no skill work now.
-- The original first slice has no application authentication or authorization: anybody who can reach it can perform every operation. It is local/trusted-development software and must not be exposed publicly.
-- Stages 1–2 application identity, owned projects, and per-user personal instructions are deployed from `ec81e80` for existing single-user use. Stage 2's schema/data cutover is verified; typed-history migration compatibility enforcement remains a follow-up (`docs/postmortems/2026-09-17-typed-history-runtime-fence.md`). Stage 3 per-user credentials is on `main`, qualified, and undeployed; coworker onboarding remains unauthorized. The single-application Google login/stateless sealed-session implementation was deployed and release-validated 2026-10-06 (`docs/deployment.md`). Local development explicitly selects `PI_ORB_AUTH_MODE=local`. `docs/multi-user.md`.
-- Central Pi attaches conversation WebSockets directly to the agent plane; native Claude uses a content-agnostic proxy to its runtime.
-- That WebSocket carries browser commands, visible transient streaming events, compact committed display-record notifications, runtime status, acknowledgements, and errors. Open private-detail disclosures poll control-plane HTTP; the backend is implemented locally, frontend work and validation remain underway (`docs/runtime-protocol.md`).
-- WebSocket traffic is not persistence authority. Central Pi commits native/public history transactionally; Claude history reaches PostgreSQL through separate runtime HTTP pulls.
-- We will not use tmux as the user interaction or session-persistence mechanism.
-- The orb's lifetime is independent of the browser or local CLI session.
-- There is one agent/conversation per orb in the first version.
-- Pi compaction is supported; Pi tree navigation and multiple sessions are not exposed initially.
-- Multiple browser connections to one orb are allowed and may all issue requests; the runtime serializes live mutations and broadcasts state. The send-anytime message inbox serializes messages durably at the control plane before runtime delivery.
-- Multiplayer product features such as presence, attribution, and per-user permissions are out of scope for the first slice.
-- Multi-user scope is trusted coworkers at one small company (clarified 2026-09-16): default lists are own-user, while existing direct project/orb/file/transcript/settings/lifecycle access stays company-wide. A project and its children have one owner; its Codex/GitHub credentials, login cohort, runtime token grants, naming, and auxiliary inference follow that owner, never the viewer. No coworker switcher, transfers, quotas, security-boundary or roles framework. Stages 1–2 are deployed; stage 3 is on `main`, qualified, and undeployed. Coworker onboarding remains unauthorized. `docs/multi-user.md`.
-
-## High-level architecture
-
-**Production validated 2026-10-06:** one `pi-orb-issuer` application serves app/API/broker, public discovery/JWKS and an isolated files hostname. Its exact workload issuer and trust remain unchanged; app/files/broker URLs changed. Google login uses stateless sealed cookies; logout cannot revoke copied cookies. Exact-Origin checks protect cookie mutations/WebSockets. Google machine ID tokens authorize the ordinary API; runtime incarnation bearers retain separate authority. Migration 031 preserved all six user UUIDs while changing their identity mappings. Public runtime ingress and shared issuer/application privileges deliberately reduce infrastructure isolation. Configuration and live evidence: `docs/deployment.md`; authentication: `docs/credentials.md`; cutover/gates: `docs/control-plane-consolidation.md`.
+## Architecture
 
 ```text
-Browser -- HTTPS / WebSocket --> Control plane
-                                 |-- Web/API, lifecycle, brokers
-                                 |-- central Pi Durable + PostgreSQL authority
+Browser -- HTTPS / WebSocket --> Control plane (one Cloud Run service)
+                                 |-- web/API, auth, lifecycle, brokers
+                                 |-- central Pi (Durable) + PostgreSQL authority
                                  |-- normalized public history and live fan-out
-                                 `-- OrbHostProvider (process / Docker / GCP)
+                                 `-- OrbHostProvider (process / Docker / GCE)
                                        |-- execution services and workspace
                                        `-- native Claude + filesystem history
 ```
 
-**Placement decision (2026-10-18):** Pi runs centrally; Claude runs host-native. Host choice never changes agent placement. Central inference, MCP, inbox and conversation attachment do not require execution readiness. Host-backed tools acquire an incarnation-fenced guest binding only when invoked. Passive history/detail reads use product storage without loading a Harness or waking compute. Native Claude history uses the pull-only replica and content-agnostic live proxy.
+- **Placement.** Pi runs centrally; Claude runs on its host. Host choice never changes placement (`docs/host-provider.md`).
+- **Central Pi** commits private agent state and public history in one PostgreSQL transaction. Inference, MCP, inbox and conversation attachment do not need execution readiness; host-backed tools bind to the current compute incarnation only when invoked (`docs/pi.md`, `docs/lifecycle.md`).
+- **Native Claude** keeps authority on its retained filesystem; history reaches PostgreSQL by pull replication and the browser attaches through a content-agnostic proxy (`docs/claude.md`, `docs/history.md`).
+- **Passive reads** (history, details, search) use product storage without loading a harness or waking compute.
+- **Workspaces** live on retained host storage and survive compute replacement (`docs/lifecycle.md`).
 
-Central private agent state and separate public history commit causally in PostgreSQL. Required pinned Git resources precede the first model turn while execution warms concurrently. Stable metadata handles preserve subscriptions; stopped-and-quiescent unloading never interrupts work. Archive seals public history before deleting private state; retained workspaces follow ordinary compute replacement. Source-specific qualification and recovery limits: `docs/pi-durable-evaluation.md`, `docs/lifecycle.md`, `docs/testing.md`.
+## Doc map
 
-## In-orb spawning and deferred suborbs
+Compute:
+- [docs/host-provider.md](docs/host-provider.md) — `OrbHostProvider` port, incarnations, runtime image, process/Docker/GCE providers
+- [docs/lifecycle.md](docs/lifecycle.md) — orb states, reconciliation, wake, idle stop, sleep, compute replacement, Claude recovery, event log
+- [docs/teardown.md](docs/teardown.md) — orb archive and delete, project delete, cleanup engine
+- [docs/orb-setup-hook.md](docs/orb-setup-hook.md) — `.agents/setup` and `.agents/resume` boot hooks
 
-An orb can launch another orb with a prompt through `pi-orb spawn` and receive its browser URL (implemented 2026-09-08). This creates independent same-project work with atomic durable prompt acceptance; see `docs/orb-spawning.md`.
+Agents:
+- [docs/pi.md](docs/pi.md) — central Pi on Durable: placement, persistence, tools and code-mode, subagents, recovery, patches
+- [docs/claude.md](docs/claude.md) — host-native Claude Agent SDK: auth, query lifecycle, steering, history, recovery
+- [docs/agent-context.md](docs/agent-context.md) — instructions, skills, owner secrets, git identity, model/thinking settings
+- [docs/mcp.md](docs/mcp.md) — project remote MCP servers, OAuth broker, central Pi client
+- [docs/model-usage.md](docs/model-usage.md) — per-call model usage ledger and usage page
+- [docs/activity-headlines.md](docs/activity-headlines.md) — Luna activity headlines
 
-Orb-to-orb messaging is approved (2026-10-14, America/Los_Angeles), independent of ancestry: same-owner trusted non-human input across projects (expanded 2026-10-20) through the existing inbox, shown in a Correspondence band, waking stopped/sleeping targets. The approved minimal contract is implemented locally; scoped actual-process checks pass, full qualification remains pending. A PR and a process-host preview are authorized, not production deployment (`docs/orb-messaging.md`, `TODO.md`).
+Protocol and history:
+- [docs/runtime-protocol.md](docs/runtime-protocol.md) — browser↔agent live WebSocket and runtime HTTP contract
+- [docs/control-plane-api.md](docs/control-plane-api.md) — browser and runtime HTTP API, project and orb model
+- [docs/history.md](docs/history.md) — record model, storage authority, Claude replication, browser loading and cache, search
+- [docs/inbox.md](docs/inbox.md) — durable per-orb input FIFO, peer messages, spawning
 
-Local Pi children use native Durable task ownership and inherited authorized tools, with named model selection and no profiles or nested delegation. Root receipts and activity are public; private child transcripts are not (`docs/subagents.md`). Independent spawned orbs have separate lifetimes and workspaces: fresh checkouts when a repository is configured, empty directories otherwise (`docs/orb-spawning.md`).
+Access:
+- [docs/auth.md](docs/auth.md) — application login, sessions, machine callers, ownership
+- [docs/credentials.md](docs/credentials.md) — runtime bearer, credential broker, device logins, project secrets
+- [docs/workload-identity.md](docs/workload-identity.md) — orb-issued OIDC tokens and keyless federation
+- [docs/http-exposure.md](docs/http-exposure.md) — HTTP previews, hosted files, live file links
 
-## Design doc index
+UI:
+- [docs/web-ui.md](docs/web-ui.md) — visual system, navigation, missing resources, dashboard, orb workspace, Find, mobile
+- [docs/terminal.md](docs/terminal.md) — interactive orb terminal
+- [docs/workspace-uploads.md](docs/workspace-uploads.md) — browser uploads into orb workspaces
+- [docs/orb-alerts.md](docs/orb-alerts.md) — CLI-issued transcript alerts and unread flags
 
-Subsystem designs:
-
-- [docs/host-provider.md](docs/host-provider.md) — the `OrbHostProvider` port, runtime readiness, Docker/GCE specifics, the exe.dev and AWS Lambda MicroVMs evaluations, rejected host alternatives
-- [docs/native-vm-prototype.md](docs/native-vm-prototype.md) — native Debian VM experiment, retention/failure evidence, image inventory, and limits
-- [docs/compute-replacement.md](docs/compute-replacement.md) — immutable-compute plan: dispose failed incarnations, replace stale host specifications on next Start, and retain the workspace throughout
-- [docs/lifecycle.md](docs/lifecycle.md) — orb states, reconciliation rules, idle auto-stop, the orphan-host sweep
-- [docs/orb-sleep.md](docs/orb-sleep.md) — approved, DST-first implementation contract for CLI-requested graceful stop/start and combined first-wake notice
-- [docs/orb-alerts.md](docs/orb-alerts.md) — CLI-issued transcript alerts, unread flag icon, guarded acknowledgement, visual study, and qualification
-- [docs/orb-deletion.md](docs/orb-deletion.md) — permanent orb deletion, resource inventory, cleanup protocol, and verification plan
-- [docs/project-deletion.md](docs/project-deletion.md) — permanent project deletion by atomic fan-out through deletion-grade cleanup for every child orb
-- [docs/orb-archival.md](docs/orb-archival.md) — read-only transcript retention after shared deletion-grade resource cleanup
-- [docs/orb-spawning.md](docs/orb-spawning.md) — in-orb CLI creation with an atomically queued prompt and browser URL
-- [docs/orb-messaging.md](docs/orb-messaging.md) — locally implemented same-owner cross-project peer input, Correspondence band, wake policy and minimal persistence; qualification pending
-- [docs/runtime-protocol.md](docs/runtime-protocol.md) — the browser↔runtime wire protocol: handshake, display frames, detail HTTP, ordering, backpressure
-- [docs/history-search.md](docs/history-search.md) — owner-scoped committed public history search with native pg_textsearch BM25 and a PostgreSQL-maintained expression index
-- [docs/history-replication.md](docs/history-replication.md) — the harness-agnostic history model, pull-only replication, PostgreSQL schema, and implemented explicit offline recovery (2026-10-05, America/Cancun)
-- [docs/pi-adapter.md](docs/pi-adapter.md) — central Pi execution, admission, resource policy and product history
-- [docs/claude-code-ui-research.md](docs/claude-code-ui-research.md) — research on Claude Code custom UIs, SDK integration, and authentication caveats; no adoption decision
-- [docs/claude-agent-sdk.md](docs/claude-agent-sdk.md) — approved co-located POC, owner-central subscription auth, accepted long-lived guest bearer, native history/idle contracts and qualification
-- [docs/claude-sdk-capabilities.md](docs/claude-sdk-capabilities.md) — remote-tool, hook, skill and restart-history API audit; research only
-- [docs/model-usage.md](docs/model-usage.md) — per-call model usage ledger: coverage, use classification, schema, write path
-- [docs/pi-durable-evaluation.md](docs/pi-durable-evaluation.md) — Pi Durable research, historical POC and locally qualified PostgreSQL candidate
-- [docs/subagents.md](docs/subagents.md) — native Durable children, aggregate activity, cancellation and completion waits
-- [docs/control-plane-api.md](docs/control-plane-api.md) — the project model and the browser-facing HTTP API
-- [docs/multi-user.md](docs/multi-user.md) — trusted-company identity, owned projects/settings, and per-user credentials
-- [docs/web-ui.md](docs/web-ui.md) — UI behavior and visual design
-- [docs/activity-headlines.md](docs/activity-headlines.md) — locally implemented request-owned Luna activity headlines, durable metadata and bounded local qualification
-- [docs/transcript-cache.md](docs/transcript-cache.md) — bounded browser transcript caching, ownership/freshness rules, compact transport measurements and qualification
-- [docs/agent-settings.md](docs/agent-settings.md) — implemented lifecycle-cluster header, model/thinking authority, persistence, mutation and DST qualification
-- [docs/personal-instructions.md](docs/personal-instructions.md) — account-wide `AGENTS.md`, Home gear editor, next-start adoption and test-first qualification
-- [docs/owner-skills-secrets.md](docs/owner-skills-secrets.md) — owner-level skills and secrets applying to all projects; five configuration proposals
-- [docs/git-identity.md](docs/git-identity.md) — account-wide git `user.name`/`user.email`: selected Settings Git tab, user-keyed store and boot delivery to git's XDG config
-- [docs/project-instructions.md](docs/project-instructions.md) — additional per-project instructions, Config tab, additive virtual context and next-start adoption
-- [docs/workspace-uploads.md](docs/workspace-uploads.md) — streaming browser uploads into orb-local files, inbox notifications, idle protection, and recovery
-- [docs/dashboard-find.md](docs/dashboard-find.md) — dashboard and orb-view Command-K Find architecture, selected Index card design, and presentation study
-- [docs/terminal.md](docs/terminal.md) — investigation and provider-neutral proposal for an interactive web terminal
-- [docs/credentials.md](docs/credentials.md) — the credential broker, Codex OAuth, GitHub tokens, security requirements
-- [docs/mcp.md](docs/mcp.md) — project-scoped remote MCP configuration, static secret-backed headers, connection-scoped OAuth broker, official MCP client for Pi execution, native tool search/codemode, request-time credentials, broker ownership, and provider qualification
-- [docs/orb-setup-hook.md](docs/orb-setup-hook.md) — repository-owned `.agents/setup` / `.agents/resume` boot hooks, matched to Amp's convention: triggers per compute incarnation, identity-free setup, user-visible failure
-- [docs/workload-identity.md](docs/workload-identity.md) — requirements for orb-issued OIDC identity and keyless federation with cloud providers and private services
-- [docs/workload-identity-recipes.md](docs/workload-identity-recipes.md) — relying-party integration recipes for that identity: GCP workload identity federation, AWS web-identity roles, and generic OIDC verification
-- [docs/ports.md](docs/ports.md) — HTTP preview contracts: isolated origins, authentication, runtime proxy, DST and pending ingress acceptance
-- [docs/orb-files.md](docs/orb-files.md) — live guest-file links, owner-only access, fixed files origin and runtime streaming
-- [docs/hosting.md](docs/hosting.md) — system-hosted orb files: durable namespaces, object storage, publication, serving, and lifecycle ownership
-- [docs/deployment.md](docs/deployment.md) — Cloud Run/OpenTofu deployment direction (operational workflow: `infra/README.md`)
-- [docs/control-plane-consolidation.md](docs/control-plane-consolidation.md) — single-service application authentication, implementation record and cutover/qualification gates
-- [docs/testing.md](docs/testing.md) — DST strategy, the E2E slice, testing decisions
-- [docs/stack.md](docs/stack.md) — language, repository layout, dependency, and error-handling choices
-- [docs/dependency-audit.md](docs/dependency-audit.md) — dated dependency inventory, replacement estimates, upgrade constraints, and security limits
+Operations:
+- [docs/deployment.md](docs/deployment.md) — Cloud Run/GCE deployment, release transaction, rollout monitor (procedures: `infra/README.md`)
+- [docs/testing.md](docs/testing.md) — test commands, rules, DST strategy, E2E layout, approved exceptions
+- [docs/stack.md](docs/stack.md) — toolchain, repository layout, dependencies, database access
+- [docs/dependency-audit.md](docs/dependency-audit.md) — audit method, external pins, open findings
 
 Tracking:
-
-- [docs/postmortems/2026-11-06-claude-mcp-authorization-report.md](docs/postmortems/2026-11-06-claude-mcp-authorization-report.md) — unsupported public authorization claims, current project grant and missing native MCP status/source evidence
-- [docs/postmortems/2026-11-06-posthog-project-selection.md](docs/postmortems/2026-11-06-posthog-project-selection.md) — cross-call project reset, legacy session mismatch and official modern MCP adapter decision
-- [docs/postmortems/2026-11-06-control-plane-blackouts.md](docs/postmortems/2026-11-06-control-plane-blackouts.md) — two unexplained Cloud Run service gaps; corrected uncaught `AbortError` crash from a cancelled wait.
-- [docs/postmortems/2026-11-05-native-capture-pending.md](docs/postmortems/2026-11-05-native-capture-pending.md) — successful PENDING capture rejected before validation; bounded same-ID recovery, fresh qualification pending
-- [docs/postmortems/2026-11-05-claude-query-rotation-93add73b.md](docs/postmortems/2026-11-05-claude-query-rotation-93add73b.md) — unowned zero-turn acknowledgment can prematurely drain an admitted human root; historical attribution incomplete
-- [docs/postmortems/2026-11-04-claude-query-rotation-1f315657.md](docs/postmortems/2026-11-04-claude-query-rotation-1f315657.md) — retained late root/task shutdown edges; initial close trigger and task classification unproven
-- [docs/postmortems/2026-11-04-npm12-bundled-sqlite.md](docs/postmortems/2026-11-04-npm12-bundled-sqlite.md) — npm 12 bundled-script denial, explicit pinned SQLite installation and qualification limits
-
-- [docs/postmortems/2026-10-29-pg17-production.md](docs/postmortems/2026-10-29-pg17-production.md) — production upgrade and ANALYZE guard; release validated, rollout monitor failed on headline/deletion overlap
-- [docs/postmortems/2026-10-29-pg17-ci-qualification.md](docs/postmortems/2026-10-29-pg17-ci-qualification.md) — stale release contracts, ambiguous status locator and unmanaged Chromium CHECK; PR and exact-main qualification passed
-- [docs/postmortems/2026-10-28-github-skills-ci-qualification.md](docs/postmortems/2026-10-28-github-skills-ci-qualification.md) — managed-config recovery fixture and Chromium native crash; CI browser pinning
-- [docs/postmortems/2026-10-25-claude-input-receipt-conflict.md](docs/postmortems/2026-10-25-claude-input-receipt-conflict.md) — queued-copy receipt conflict
-- [docs/postmortems/2026-10-25-codex-fixture-grant-expiry.md](docs/postmortems/2026-10-25-codex-fixture-grant-expiry.md) — changing fixture expiry suppressed ambiguous broker diagnostics
-- [docs/postmortems/2026-10-24-native-image-capture-502.md](docs/postmortems/2026-10-24-native-image-capture-502.md) — native image insert succeeded while gcloud failed with 502; cleanup and unchanged production verified
-- [docs/postmortems/2026-10-23-google-signed-out-login-500.md](docs/postmortems/2026-10-23-google-signed-out-login-500.md) — Google signed-out login 500; optional domain hint removed
-- [docs/postmortems/2026-10-22-mcp-startup-deadline.md](docs/postmortems/2026-10-22-mcp-startup-deadline.md) — healthy compute blocked by central discovery; explicit MCP isolation and failure telemetry
-
-- [docs/postmortems/2026-10-22-claude-steering-hidden-message.md](docs/postmortems/2026-10-22-claude-steering-hidden-message.md) — consumed Claude image input hidden by a contentless receipt; frontend inbox/receipt presentation handoff
-- [docs/postmortems/2026-10-22-replacement-smoke-fixture-budget.md](docs/postmortems/2026-10-22-replacement-smoke-fixture-budget.md) — controlled fixture CPU/startup amplification, bounded failure evidence; historical attribution unresolved
-- [docs/postmortems/2026-10-22-local-fake-npm-preparation.md](docs/postmortems/2026-10-22-local-fake-npm-preparation.md) — provider install exited 152 before tests; safe diagnostics, historical attribution waived
-- [docs/postmortems/2026-10-22-durable-browser-apt-stall.md](docs/postmortems/2026-10-22-durable-browser-apt-stall.md) — browser dependency acquisition stalled before tests; runner helper coverage corrected, historical cause unproven
-- [docs/postmortems/2026-10-22-no-repository-e2e-preemption.md](docs/postmortems/2026-10-22-no-repository-e2e-preemption.md) — confirmed Spot preemption interrupted E2E; full qualification pending
-- [docs/postmortems/2026-10-21-posthog-exec-required-context.md](docs/postmortems/2026-10-21-posthog-exec-required-context.md) — live exec requires context/model fields; corrected help succeeds, historical cached schema unverified
-- [docs/postmortems/2026-10-19-observer-mint-floor.md](docs/postmortems/2026-10-19-observer-mint-floor.md) — operator credential refresh hits the mint floor; separate isolated observation passed
-- [docs/postmortems/2026-10-19-image-test-cpu-contention.md](docs/postmortems/2026-10-19-image-test-cpu-contention.md) — controlled CPU contention reproduces image deadlines; original attribution unresolved
-- [docs/postmortems/2026-10-16-codemode-worker-exit-liveness.md](docs/postmortems/2026-10-16-codemode-worker-exit-liveness.md) — terminating Worker unref strands required physical-exit drain; source correction, qualification pending
-- [docs/postmortems/2026-10-16-usage-mock-idle-connection.md](docs/postmortems/2026-10-16-usage-mock-idle-connection.md) — usage mock HTTP ownership; controlled stale-lease class, historical close owner unknown
-- [docs/postmortems/2026-10-16-lifecycle-smoke-http500.md](docs/postmortems/2026-10-16-lifecycle-smoke-http500.md) — lifecycle restart poll HTTP 500 attributed to deleted revision; applied release remains unvalidated
-- [docs/postmortems/2026-10-16-e2e-relay-upgrade-socket-ownership.md](docs/postmortems/2026-10-16-e2e-relay-upgrade-socket-ownership.md) — rejected-upgrade raw socket ownership, real-peer reset evidence and joined fixture shutdown
-- [docs/postmortems/2026-10-16-image-validation-buffer-comparator-oom.md](docs/postmortems/2026-10-16-image-validation-buffer-comparator-oom.md) — full-buffer equality allocation crashes image validation; exact-byte correction and separate decoder controls
-- [docs/postmortems/2026-10-16-claude-compaction-scrollback.md](docs/postmortems/2026-10-16-claude-compaction-scrollback.md) — Claude compaction scrollback loss and read-only correction
-- [docs/postmortems/2026-10-16-c9a30a6d-restart-loop.md](docs/postmortems/2026-10-16-c9a30a6d-restart-loop.md) — unreachable recovery and separate Spot preemptions; restart-budget precheck, silence unexplained
-- [docs/postmortems/2026-10-16-dependency-audit-validation-collision.md](docs/postmortems/2026-10-16-dependency-audit-validation-collision.md) — shared install/check ownership collision during dependency cleanup validation
-
-- [docs/postmortems/2026-10-15-runtime-dependency-qualification.md](docs/postmortems/2026-10-15-runtime-dependency-qualification.md) — runtime cache cold-build evidence; local setup blocker, fixed-port collision and unvalidated main reuse
-- [docs/postmortems/2026-10-15-claude-delivery-uncertain-c9a30a6d.md](docs/postmortems/2026-10-15-claude-delivery-uncertain-c9a30a6d.md) — consumed mid-turn steering loses receipt identity during normalization; read-only disk proof
-- [docs/postmortems/2026-10-15-control-plane-node-headers.md](docs/postmortems/2026-10-15-control-plane-node-headers.md) — offline PTY rebuild avoids npm-bundled Undici header-download assertion
-- [docs/postmortems/2026-10-15-claude-stream-failed-4647.md](docs/postmortems/2026-10-15-claude-stream-failed-4647.md) — stream-consumption exception discarded; native inspection IAM-blocked, initiating cause unknown
-- [docs/postmortems/2026-10-15-claude-success-failed-operation.md](docs/postmortems/2026-10-15-claude-success-failed-operation.md) — sticky operation failure despite final SDK success; triggering error unidentified
-- [docs/postmortems/2026-10-15-claude-stale-subagent-ownership.md](docs/postmortems/2026-10-15-claude-stale-subagent-ownership.md) — confirmed Workflow child retirement gap: admission hooks lack per-child task notifications; genuine native RED reproduction
-- [docs/postmortems/2026-10-13-rollout-monitor-anomalies.md](docs/postmortems/2026-10-13-rollout-monitor-anomalies.md) — validated deployment, diagnostic mint-floor denials and preexisting malformed transcript-ID failure; monitor regression preserved
-- [docs/postmortems/2026-10-13-claude-history-nul.md](docs/postmortems/2026-10-13-claude-history-nul.md) — JSONB NUL rejection blocked replication, receipts and FIFO delivery; lossless storage required
-- [docs/postmortems/2026-10-13-claude-query-rotation.md](docs/postmortems/2026-10-13-claude-query-rotation.md) — native handoff-completion defect, requesting/result fence and durable diagnostics; historical attribution incomplete
-- [docs/postmortems/2026-10-12-claude-charts-orb-failure.md](docs/postmortems/2026-10-12-claude-charts-orb-failure.md) — initialization cause discarded before VM disposal
-- [docs/postmortems/2026-10-12-durable-orb-prompt-tail.md](docs/postmortems/2026-10-12-durable-orb-prompt-tail.md) — the orb prompt rode unpersisted at the tail of every durable request, defeating prefix caching; it is now a persisted section
-- [docs/postmortems/2026-10-12-durable-codex-prompt-cache.md](docs/postmortems/2026-10-12-durable-codex-prompt-cache.md) — pi-durable 1.0.0 sent Codex no `prompt_cache_key`; a request-body regression test guards the 1.1.0 fix
-- [docs/postmortems/2026-10-11-phone-tail-pointer-race.md](docs/postmortems/2026-10-11-phone-tail-pointer-race.md) — pointer press discarded the pending tail write's offset; its delayed scroll event released following
-- [docs/postmortems/2026-10-10-bootstrap-metadata-network-race.md](docs/postmortems/2026-10-10-bootstrap-metadata-network-race.md) — single metadata read lost a boot-time guest-agent network reload; bootstrap now retries transient failures
-- [docs/postmortems/2026-10-10-starting-deadline-restarts.md](docs/postmortems/2026-10-10-starting-deadline-restarts.md) — restarting control plane renewed the create/start deadline hold
-- [docs/postmortems/2026-10-09-glideos-delivery-blocked.md](docs/postmortems/2026-10-09-glideos-delivery-blocked.md) — failed-resource retry poisoning and misleading delivery status; malformed YAML candidate, exact attribution pending
-- [docs/postmortems/2026-10-08-subagent-post-tool-missing-request.md](docs/postmortems/2026-10-08-subagent-post-tool-missing-request.md) — unresolved hosted post-tool stalls; bounded stream/audit evidence only
-- [docs/postmortems/2026-10-08-mcp-summary-missing-request.md](docs/postmortems/2026-10-08-mcp-summary-missing-request.md) — unresolved hosted summary failure; sanitized artifact retention only
-- [docs/postmortems/2026-10-08-webkit-reload-internal-error.md](docs/postmortems/2026-10-08-webkit-reload-internal-error.md) — unresolved Ubuntu WebKit reload failure; browser/socket/native evidence retention only
-- [docs/postmortems/2026-10-08-headline-spa-cancellation-fixture.md](docs/postmortems/2026-10-08-headline-spa-cancellation-fixture.md) — hard navigation bypassed same-document stale-reply cancellation; SPA ownership gates qualify the correction
-- [docs/postmortems/2026-10-08-e2e-device-approval-timeout.md](docs/postmortems/2026-10-08-e2e-device-approval-timeout.md) — bounded mock approval recovery now uses a verified replay-safe write contract
-- [docs/postmortems/2026-10-07-sleep-notice-user-turn.md](docs/postmortems/2026-10-07-sleep-notice-user-turn.md) — wake retries lacked pending inbox dedup; HTTP delivery dropped notice provenance
-- [docs/postmortems/2026-10-06-spot-preemption-burst.md](docs/postmortems/2026-10-06-spot-preemption-burst.md) — zone-wide Spot burst preempted one orb six times in 72 minutes; restart attribution requires the GCE operation log
-- [docs/postmortems/2026-10-06-claude-nested-owner-continuation.md](docs/postmortems/2026-10-06-claude-nested-owner-continuation.md) — root-only delegation excludes unsupported headless nested-owner continuation
-- [docs/postmortems/2026-10-05-inbox-abort-wedge.md](docs/postmortems/2026-10-05-inbox-abort-wedge.md) — real-SDK reproduction of an idle runtime retaining an unpersisted steer and blocking FIFO retries
-- [docs/postmortems/2026-10-05-busy-orb-stall.md](docs/postmortems/2026-10-05-busy-orb-stall.md) — aborted response exposed 389,502-character unexecuted tool prompt; orphaned steer suspected, provider/transport cause unproved
-- [docs/postmortems/2026-10-05-offline-online-transcript.md](docs/postmortems/2026-10-05-offline-online-transcript.md) — reported missing transcript after connectivity recovery; reproduced half-open client gap, field cause unproved
-- [docs/postmortems/2026-10-05-e2e-docker-inventory-isolation.md](docs/postmortems/2026-10-05-e2e-docker-inventory-isolation.md) — fresh fixture inventory crossed the shared daemon's ownership boundary; scoped gate preserves foreign resources
-- [docs/postmortems/2026-10-04-workspace-full-history-desync.md](docs/postmortems/2026-10-04-workspace-full-history-desync.md) — full workspace followed by cursor-not-found; offline repair and normal replication verified 2026-10-05 (America/Cancun), with all original SQL rows unchanged
-- [docs/postmortems/2026-10-04-webkit-read-drawer-hit-test.md](docs/postmortems/2026-10-04-webkit-read-drawer-hit-test.md) — visible read summary blocked by markdown pointer interception; root cause unproved
-- [docs/postmortems/2026-10-04-ipad-sidebar-overdraw.md](docs/postmortems/2026-10-04-ipad-sidebar-overdraw.md) — missing/deleted orb view auto-placed beneath the fixed index; confirmed layout fix and superseded paint hypothesis
-
-- [docs/postmortems/2026-10-03-cached-orb-navigation.md](docs/postmortems/2026-10-03-cached-orb-navigation.md) — cached switching still pays metadata, remount, accessibility and 1Password focus costs; investigation only
-- [docs/postmortems/2026-10-04-spot-preemption-loadout.md](docs/postmortems/2026-10-04-spot-preemption-loadout.md) — two audited Spot preemptions preceded secondary loadout errors; bounded frozen-source qualification and missing sanitized exception evidence
-- [docs/postmortems/2026-10-04-claude-management-assets.md](docs/postmortems/2026-10-04-claude-management-assets.md) — atomic index replacement left new assets unregistered; completed immutable build plus process refresh restored the dashboard
-- [docs/postmortems/2026-10-04-claude-poc-validation-source-changes.md](docs/postmortems/2026-10-04-claude-poc-validation-source-changes.md) — protocol formatting triggered Vite reload during qualification; freeze imported source and manifests before browser acceptance
-- [docs/postmortems/2026-10-04-claude-auth-completion-input.md](docs/postmortems/2026-10-04-claude-auth-completion-input.md) — native PTY completion requires paste acknowledgment followed by a separate Enter; distinguish admission from exchange
-- [docs/postmortems/2026-10-02-control-plane-patch-image-build.md](docs/postmortems/2026-10-02-control-plane-patch-image-build.md) — runtime-only patch broke the control-plane image build before apply; restrict its patch set
-- [docs/postmortems/2026-10-02-webkit-lazy-return-gate.md](docs/postmortems/2026-10-02-webkit-lazy-return-gate.md) — captured split-target sidebar click, fixed rail/scroll ownership and diagnostic callback race
-- [docs/postmortems/2026-10-02-expired-metadata-route.md](docs/postmortems/2026-10-02-expired-metadata-route.md) — frontend metadata interception parsed expired-session HTML 401 as JSON; response preservation and owned route drain
-- [docs/postmortems/2026-10-02-frontend-session-fixture-isolation.md](docs/postmortems/2026-10-02-frontend-session-fixture-isolation.md) — frontend session fixture ownership and built-shell probe prerequisites; tree-specific qualification
-- [docs/postmortems/2026-10-02-docker-daemon-umask.md](docs/postmortems/2026-10-02-docker-daemon-umask.md) — private harness umask made fresh-store PostgreSQL entrypoint inaccessible after UID drop
-- [docs/postmortems/2026-10-04-central-reconcile-task-sharing.md](docs/postmortems/2026-10-04-central-reconcile-task-sharing.md) — shared simulation-task violation, demand races and independent polling/compute repair
-- [docs/postmortems/2026-10-03-durable-process-qualification.md](docs/postmortems/2026-10-03-durable-process-qualification.md) — fixture admission, ordered inference and source ownership failures
-- [docs/postmortems/2026-10-03-codemode-prepare-loadout.md](docs/postmortems/2026-10-03-codemode-prepare-loadout.md) — codemode hook failure; discarded exception and unproved restart relationship
-- [docs/postmortems/2026-10-02-nested-mcp-live-rows.md](docs/postmortems/2026-10-02-nested-mcp-live-rows.md) — nested SDK events created phantom live MCP rows; parent codemode disclosure retains bounded child details
-- [docs/postmortems/2026-10-01-mcp-measurement-fixtures.md](docs/postmortems/2026-10-01-mcp-measurement-fixtures.md) — scope bounds, discarded diagnostics and child-profile measurement assumptions
-- [docs/postmortems/2026-10-01-native-ssh-startup-dependency.md](docs/postmortems/2026-10-01-native-ssh-startup-dependency.md) — first Google manager exit canceled the host-key gate and latched SSH off; corrected dependency and accepted fresh validator
-- [docs/postmortems/2026-09-30-preemption-boot-context.md](docs/postmortems/2026-09-30-preemption-boot-context.md) — confirmed GCE preemption followed by failed boot-context fetch; underlying transport cause unproved
-- [docs/postmortems/2026-09-30-native-mcp-qualification.md](docs/postmortems/2026-09-30-native-mcp-qualification.md) — dirty-source deletion snapshot regression and diagnosed native-builder capacity failure
-- [docs/postmortems/2026-09-29-native-mcp-validation-install-race.md](docs/postmortems/2026-09-29-native-mcp-validation-install-race.md) — concurrent install and unguarded `npx` fetched Vitest 5 instead of pinned 3.2.7; local gate invalid
-- [docs/postmortems/2026-09-27-mcp-isolation-stream-abort.md](docs/postmortems/2026-09-27-mcp-isolation-stream-abort.md) — incomplete mock SSE response; termination cause erased by mock diagnostics
-- [docs/postmortems/2026-10-02-inbox-poll-payload.md](docs/postmortems/2026-10-02-inbox-poll-payload.md) — repeated delivered inbox/image transfers; insertion deltas with explicit provisional tracking
-- [docs/postmortems/2026-10-02-initial-history-latency.md](docs/postmortems/2026-10-02-initial-history-latency.md) — compact history still reads full source records; ops timing and pruning-query caveats
-- [docs/postmortems/2026-09-27-history-response-size.md](docs/postmortems/2026-09-27-history-response-size.md) — unbounded history response rejected by Cloud Run; browser history has no pagination
-- [docs/postmortems/2026-09-27-sandbox-qualification-harness.md](docs/postmortems/2026-09-27-sandbox-qualification-harness.md) — sandbox artifact, retirement, credential and presence evidence boundaries
-- [docs/postmortems/2026-09-27-webkit-image-fixture-sync.md](docs/postmortems/2026-09-27-webkit-image-fixture-sync.md) — HTTP-only image records raced a running orb's full live sync
-- [docs/postmortems/2026-09-27-restart-notice-e2e-rule.md](docs/postmortems/2026-09-27-restart-notice-e2e-rule.md) — Docker release blocked by a scripted model matcher predating the host notice wording
-- [docs/postmortems/2026-09-27-preemption-delegated-cancellation.md](docs/postmortems/2026-09-27-preemption-delegated-cancellation.md) — graceful Spot preemption persisted delegated cancellation through the shared shutdown/user-abort path; initiator remains unproved
-- [docs/postmortems/2026-09-26-unit-worker-rpc-timeout.md](docs/postmortems/2026-09-26-unit-worker-rpc-timeout.md) — worker RPC starvation reproduced with sanitized traces; historical stalled task unverified
-- [docs/postmortems/2026-09-26-provider-auth-failures.md](docs/postmortems/2026-09-26-provider-auth-failures.md) — Codex failure after wake and Datadog grant invalidation; causes unproved, production Datadog refresh observed
-- [docs/postmortems/2026-09-23-pi-system-history-replication.md](docs/postmortems/2026-09-23-pi-system-history-replication.md) — Pi 0.87.1 persisted prompt/tool state; the history adapter now retains its identity without replicating execution configuration
-- [docs/postmortems/2026-09-21-workspace-upload-remote-only.md](docs/postmortems/2026-09-21-workspace-upload-remote-only.md) — six upload chunks completed; the later UI had no local file ownership, but the browser cause remains unproved
-- [docs/postmortems/2026-09-20-composer-typing-stalls.md](docs/postmortems/2026-09-20-composer-typing-stalls.md) — browser-parent cycle collection and independent unchanged-transcript rerenders stalled composer input
-- [docs/postmortems/2026-09-27-mcp-audit-generation-driver.md](docs/postmortems/2026-09-27-mcp-audit-generation-driver.md) — explicit audit-query bigint representation across PostgreSQL and PGlite
-- [docs/postmortems/2026-09-27-monitoring-retirement-filter.md](docs/postmortems/2026-09-27-monitoring-retirement-filter.md) — exact per-service Monitoring queries with fail-closed pagination and retirement proof
-- [docs/postmortems/2026-09-27-vitest4-e2e-ordering.md](docs/postmortems/2026-09-27-vitest4-e2e-ordering.md) — preserve E2E resource ownership across the security-driven runner upgrade
-- [docs/postmortems/2026-09-19-composer-caret-ordering.md](docs/postmortems/2026-09-19-composer-caret-ordering.md) — native caret measurement before React normalization; deterministic selection gate and document-bubble ordering
-- [docs/postmortems/2026-10-06-central-docker-checkout-host.md](docs/postmortems/2026-10-06-central-docker-checkout-host.md) — exact runtime-authority checkout/alert paths and preserved admission fences
-- [docs/postmortems/2026-09-19-consolidation-docker-broker-host.md](docs/postmortems/2026-09-19-consolidation-docker-broker-host.md) — Docker callback authority omitted by the consolidated HTTP host guard; runtime-only broker authority and provider-specific E2E
-
-- [docs/postmortems/2026-10-06-consolidation-retirement-timeout.md](docs/postmortems/2026-10-06-consolidation-retirement-timeout.md) — application deletion preceded a retirement timeout on retained, silent revision metadata
-- [docs/postmortems/2026-09-18-image-preview-validation.md](docs/postmortems/2026-09-18-image-preview-validation.md) — mutable-source qualification, subpixel geometry inference, and undrained browser-route teardown failures
-- [docs/postmortems/2026-09-18-hosted-frontend-bootstrap-readiness.md](docs/postmortems/2026-09-18-hosted-frontend-bootstrap-readiness.md) — hosted blank-shell cause remains unresolved; browser assertions now own their fixture-response readiness
-- [docs/postmortems/2026-09-18-boot-context-cold-start.md](docs/postmortems/2026-09-18-boot-context-cold-start.md) — two runtime-API cold starts exhausted a mandatory boot read; bounded retry is implemented locally
-- [docs/postmortems/2026-09-18-webkit-missing-resource-race.md](docs/postmortems/2026-09-18-webkit-missing-resource-race.md) — stale metadata polling resurrected an orb after a definitive history 404
-- [docs/postmortems/2026-09-18-e2e-concurrency-readiness.md](docs/postmortems/2026-09-18-e2e-concurrency-readiness.md) — frontend assertions raced their dependent fixture responses under suite load
-- [docs/postmortems/2026-09-17-broker-refresh-publication-retry.md](docs/postmortems/2026-09-17-broker-refresh-publication-retry.md) — refresh publication stopped after a proved pre-commit pointer failure
-- [docs/postmortems/2026-09-17-release-owner-environment-leak.md](docs/postmortems/2026-09-17-release-owner-environment-leak.md) — deployment owner input leaked into fresh-database release E2E migrations
-- [docs/postmortems/2026-09-17-e2e-job-budget.md](docs/postmortems/2026-09-17-e2e-job-budget.md) — serial E2E growth exceeded the GitHub job's whole-path timeout
-- [docs/postmortems/2026-09-17-typed-history-runtime-fence.md](docs/postmortems/2026-09-17-typed-history-runtime-fence.md) — typed-history backfill ran while a legacy runtime writer remained active
-- [docs/postmortems/2026-09-17-delivered-message-order.md](docs/postmortems/2026-09-17-delivered-message-order.md) — delivered inbox prompt rendered after its assistant turn when the browser lacked the matching user history record
-- [docs/postmortems/2026-09-16-validator-cleanup-timeout.md](docs/postmortems/2026-09-16-validator-cleanup-timeout.md) — five-minute cleanup CLI timeout while the accepted GCE delete completed asynchronously
-- [docs/postmortems/2026-09-16-release-validation-blockers.md](docs/postmortems/2026-09-16-release-validation-blockers.md) — boot-hook DST, Find source-lifecycle and project-instructions activation-race corrections
-- [docs/postmortems/2026-09-16-codex-websocket-closures.md](docs/postmortems/2026-09-16-codex-websocket-closures.md) — persisted OpenAI Codex response-stream closures, automatic retry evidence, and limits of the production diagnosis
-- [docs/postmortems/2026-09-14-subagent-notification-transcript.md](docs/postmortems/2026-09-14-subagent-notification-transcript.md) — raw model-facing XML shown in the browser; delayed uncollected child failures caused extra parent replies
-- [docs/postmortems/2026-09-14-local-subagent-routing-and-disclosure.md](docs/postmortems/2026-09-14-local-subagent-routing-and-disclosure.md) — stale delegation guidance created an independent orb; nested tool folds hid existing input/output
-- [docs/postmortems/2026-09-15-cache-catchup-fixture-ownership.md](docs/postmortems/2026-09-15-cache-catchup-fixture-ownership.md) — cache catch-up repair race; socket-owned fixture work and durable completion barriers
-
-- [docs/postmortems/2026-09-15-long-transcript-navigation.md](docs/postmortems/2026-09-15-long-transcript-navigation.md) — slow orb switching profile: large JSON response and 1Password-amplified composer mount
-
-- [docs/postmortems/2026-09-14-terminal-retry-pre-ready.md](docs/postmortems/2026-09-14-terminal-retry-pre-ready.md) — terminal retry E2E counted transient StrictMode opens instead of current transport ownership
-
-- [docs/postmortems/2026-09-13-release-webkit-prerequisite.md](docs/postmortems/2026-09-13-release-webkit-prerequisite.md) — missing managed browser dependency in unattended release checks
-
-- [docs/postmortems/2026-09-12-delete-discard-dst-ordering.md](docs/postmortems/2026-09-12-delete-discard-dst-ordering.md) — preserved DST failure from an unforced discard/deletion intermediate-state assumption
-
-- [docs/postmortems/2026-09-12-mcp-completion-selector.md](docs/postmortems/2026-09-12-mcp-completion-selector.md) — test synchronization across history publication and live-output retirement
-
-- [docs/postmortems/2026-09-11-release-logging-exclusion-iam.md](docs/postmortems/2026-09-11-release-logging-exclusion-iam.md) — partially applied release blocked by missing callback-log exclusion authority
-
-- [TODO.md](TODO.md) — the actionable backlog: bugs, hardening, agreed follow-ups
-- [docs/open-questions.md](docs/open-questions.md) — undecided design questions (frozen numbering)
-- [docs/postmortems/2026-09-09-live-web-rebuild.md](docs/postmortems/2026-09-09-live-web-rebuild.md) — blank dashboard from rebuilding a live static root; immutable build and asset/browser validation rules
-- [docs/postmortems/2026-09-09-posthog-template-discovery.md](docs/postmortems/2026-09-09-posthog-template-discovery.md) — authenticated PostHog discovery blocked by an optional method's HTTP-404 error envelope
-- [docs/postmortems/2026-09-12-terminal-focus-and-scroll-padding.md](docs/postmortems/2026-09-12-terminal-focus-and-scroll-padding.md) — resize hit-target focus and scrolling padding caused a thick edge and partial terminal rows
-- [docs/postmortems/2026-09-12-mobile-safari-scroll-ownership.md](docs/postmortems/2026-09-12-mobile-safari-scroll-ownership.md) — phone momentum/keyboard drift; one visual viewport owner and an internal transcript scroller
-- [docs/postmortems/2026-09-16-e2e-fake-inference-tls-reset.md](docs/postmortems/2026-09-16-e2e-fake-inference-tls-reset.md) — transient TLS reset from the hosted mock inference service hung an undeadlined diagnostic dump until the job timeout erased the run's evidence
-- [docs/postmortems/2026-09-16-terminal-shade-stale-scrollend.md](docs/postmortems/2026-09-16-terminal-shade-stale-scrollend.md) — terminal shade E2E latched a stale `scrollend` from an earlier write instead of the wheel's own scroll
-- [docs/postmortems/2026-09-15-postgres-e2e-port-collision.md](docs/postmortems/2026-09-15-postgres-e2e-port-collision.md) — fixed PostgreSQL host-port collision prevented 55 store contracts from running
-- [docs/postmortems/2026-09-15-find-keyboard-navigation.md](docs/postmortems/2026-09-15-find-keyboard-navigation.md) — fleet Find selected a project instead of the expected orb in keyboard-navigation E2E
-- [docs/postmortems/2026-09-15-native-personal-instructions-fixture.md](docs/postmortems/2026-09-15-native-personal-instructions-fixture.md) — mandatory boot read missing from the native validator's strict broker; release stopped before apply
-- [docs/postmortems/2026-10-06-claude-orb-preemption.md](docs/postmortems/2026-10-06-claude-orb-preemption.md) — two Spot preemptions; Claude recovery restores context without automatic continuation
-- [docs/postmortems/2026-10-06-claude-publication-order.md](docs/postmortems/2026-10-06-claude-publication-order.md) — late native-only prefixes blocked exact-identity stream retirement; durable ownership lookahead and attribution limits
-- [docs/postmortems/2026-10-06-empty-live-thinking.md](docs/postmortems/2026-10-06-empty-live-thinking.md) — empty live reasoning visibility gap; committed suppression verified, screenshot mechanism unproved
-- [docs/postmortems/2026-10-08-runtime-apt-size-mismatch.md](docs/postmortems/2026-10-08-runtime-apt-size-mismatch.md) — Debian package size rejection is not covered by APT retries; bounded verified acquisition precedes one offline install
-- [docs/postmortems/2026-10-14-identity-smoke-cleanup.md](docs/postmortems/2026-10-14-identity-smoke-cleanup.md) — redirect deletion confirmed; identity assertions passed but cleanup failed; authorized fixture cleanup preserves the unvalidated release
-- [docs/postmortems/2026-10-14-runner-apt-ipv6-unreachable.md](docs/postmortems/2026-10-14-runner-apt-ipv6-unreachable.md) — signed index success followed by IPv6-only package-fetch failure; ephemeral runner APT IPv4 policy, outage cause unproven
-- [docs/postmortems/2026-10-07-runner-apt-timeout.md](docs/postmortems/2026-10-07-runner-apt-timeout.md) — hosted dependency installation exhausted the E2E budget; signed HTTPS Ubuntu archive before APT
-- [docs/postmortems/2026-10-09-central-durable-oom-recovery.md](docs/postmortems/2026-10-09-central-durable-oom-recovery.md) — shared control-plane OOM and repeated task recovery; memory driver unproven
-- [docs/postmortems/2026-10-13-history-migration-deadlock.md](docs/postmortems/2026-10-13-history-migration-deadlock.md) — migration/reader lock inversion; three-session rejection proof, bounded NOWAIT acquisition and catalog limits
-- [docs/postmortems/2026-10-18-peer-inbox-stall.md](docs/postmortems/2026-10-18-peer-inbox-stall.md) — pending Native input after model failure; local FIFO snapshot admission, queued-input recovery and attribution limits
-- [docs/postmortems/2026-10-18-false-idle-during-release.md](docs/postmortems/2026-10-18-false-idle-during-release.md) — cross-revision activity observation gap; metadata and unloaded WS snapshots can report false idle
-- [docs/postmortems/2026-10-19-lifecycle-smoke-auth.md](docs/postmortems/2026-10-19-lifecycle-smoke-auth.md) — pre-request impersonation failure; sanitized auth diagnostics, cause unknown
-- [docs/postmortems/](docs/postmortems/) — incident forensics; design docs keep the resulting rules and link here
-- [docs/postmortems/2026-09-09-stale-thinking.md](docs/postmortems/2026-09-09-stale-thinking.md) — message-index reuse left stale green thinking below newer commands; explicit streaming retirement
-- [docs/postmortems/2026-09-09-deleted-browser-reconciler.md](docs/postmortems/2026-09-09-deleted-browser-reconciler.md) — deleted browser revision remained active and raced new-generation provisioning
-- [docs/postmortems/2026-09-09-orb-local-tailnet-smoke.md](docs/postmortems/2026-09-09-orb-local-tailnet-smoke.md) — preview smoke must dial through the daemon on userspace Tailscale callers
-- [docs/postmortems/2026-09-09-release-hosting-bucket-iam.md](docs/postmortems/2026-09-09-release-hosting-bucket-iam.md) — scoped release cannot read the application hosting bucket during plan
-- [docs/postmortems/2026-09-08-identity-cold-start.md](docs/postmortems/2026-09-08-identity-cold-start.md) — short HTTP attempt caps abandon queued mint requests and self-throttle behind runtime API cold starts
-- [docs/postmortems/2026-09-08-workspace-image-readonly-check.md](docs/postmortems/2026-09-08-workspace-image-readonly-check.md) — captured workspace template fails resize after a successful read-only check
-- [docs/postmortems/2026-09-08-orb-local-release-builder-user.md](docs/postmortems/2026-09-08-orb-local-release-builder-user.md) — orb-local release blocked by implicit SSH username and runtime account collision
-- [docs/postmortems/2026-09-05-signing-key-bootstrap-orphans.md](docs/postmortems/2026-09-05-signing-key-bootstrap-orphans.md) — DST-discovered signing-key orphan leak, retry ownership fix, and preserved failure trace
-- [docs/postmortems/2026-10-28-node-wasm-wrapper-lifetime.md](docs/postmortems/2026-10-28-node-wasm-wrapper-lifetime.md) — Node 24 Wasm wrapper crash family, fixed-source upgrade and attribution limits
-
-Reference material:
-
-- [docs/postmortems/2026-09-09-stale-frontend-preview.md](docs/postmortems/2026-09-09-stale-frontend-preview.md) — failed Vite reload left an old fixture API serving a new browser client; restart and verify the actual shared service
-- [docs/postmortems/2026-09-09-upload-e2e-script-order.md](docs/postmortems/2026-09-09-upload-e2e-script-order.md) — upload validation exposed an ordered mock-inference script defect; all inference consumers need explicit acceptance barriers
-
-- [docs/postmortems/2026-09-05-tailscale-invalid-key-at-first-boot.md](docs/postmortems/2026-09-05-tailscale-invalid-key-at-first-boot.md) — failed initial enrollment, composed-DST reproduction, and incarnation-fenced key revocation
-- [docs/postmortems/2026-09-07-mixed-generation-drain-restart.md](docs/postmortems/2026-09-07-mixed-generation-drain-restart.md) — cross-revision restart and stale-provision races found by DST
-- [docs/postmortems/2026-09-07-explicit-start-terminal-backstop.md](docs/postmortems/2026-09-07-explicit-start-terminal-backstop.md) — explicit Start delayed by a process-local terminal backstop
-- [docs/postmortems/2026-09-07-stale-stopping-marker.md](docs/postmortems/2026-09-07-stale-stopping-marker.md) — an old process-local stop episode rejected a restarted orb
-- [docs/postmortems/2026-09-07-native-foundation-release-contracts.md](docs/postmortems/2026-09-07-native-foundation-release-contracts.md) — first native rollout contract failures and fixes
-- [docs/postmortems/2026-09-07-native-rust-dns-bootstrap.md](docs/postmortems/2026-09-07-native-rust-dns-bootstrap.md) — native boot blocked by Rust DNS resolver behavior
-- [docs/postmortems/2026-09-07-native-workspace-systemd-cycle.md](docs/postmortems/2026-09-07-native-workspace-systemd-cycle.md) — retained-workspace boot dropped by a systemd ordering cycle
-- [docs/postmortems/2026-09-09-release-iap-sdk-component.md](docs/postmortems/2026-09-09-release-iap-sdk-component.md) — missing SDK beta commands stopped reconciliation after successful apply
-- [docs/postmortems/2026-09-09-release-test-environment.md](docs/postmortems/2026-09-09-release-test-environment.md) — inherited release context let passing contract tests overwrite their caller's evidence
-- [docs/postmortems/2026-09-09-native-cleanup-dst-io.md](docs/postmortems/2026-09-09-native-cleanup-dst-io.md) — real diagnostic IO and a busy observer escaped deterministic cleanup scheduling
-- [docs/postmortems/2026-09-09-credential-probe-role-reset.md](docs/postmortems/2026-09-09-credential-probe-role-reset.md) — ambient SQL role targeted the production password; restoration and explicit-target safeguards
-- [docs/postmortems/2026-09-14-idle-stop-admission-race.md](docs/postmortems/2026-09-14-idle-stop-admission-race.md) — forced late child admission exposed a missing runtime fence before idle-stop drain
-- [docs/postmortems/2026-09-16-webkit-cache-readiness.md](docs/postmortems/2026-09-16-webkit-cache-readiness.md) — cold-history readiness assertions require protocol synchronization, not navigation timing
-- [docs/postmortems/2026-09-20-validator-host-key-change.md](docs/postmortems/2026-09-20-validator-host-key-change.md) — two first-boot key owners preceded a same-instance SSH identity rejection
-- [docs/postmortems/2026-09-15-docker-snapshot-validation-failure.md](docs/postmortems/2026-09-15-docker-snapshot-validation-failure.md) — missing Docker parent snapshot blocked four full-slice qualification scenarios; later builds do not clear the failure
-- [docs/postmortems/2026-09-14-webkit-compositor-validation-crash.md](docs/postmortems/2026-09-14-webkit-compositor-validation-crash.md) — native WebKit compositor fault during local qualification; passing isolated probes do not clear it
-- [docs/postmortems/2026-09-09-local-e2e-docker-startup.md](docs/postmortems/2026-09-09-local-e2e-docker-startup.md) — wrong containerd store and interrupted local validation; preserve evidence and owned fixtures
-- [docs/postmortems/2026-09-09-tracked-deployment-credentials.md](docs/postmortems/2026-09-09-tracked-deployment-credentials.md) — live credential confirmed in public plan archives; artifact containment and rotation status
-- [docs/postmortems/2026-10-05-mobile-reader-font-readiness.md](docs/postmortems/2026-10-05-mobile-reader-font-readiness.md) — controlled font swap preserved the reader anchor but invalidated an absolute-scroll assertion
-- [docs/postmortems/2026-09-07-native-build-cancellation-cleanup.md](docs/postmortems/2026-09-07-native-build-cancellation-cleanup.md) — interrupted release exited before builder cleanup
-- [docs/postmortems/2026-10-09-native-runtime-entry-acceptance.md](docs/postmortems/2026-10-09-native-runtime-entry-acceptance.md) — stale child-process matcher blocked native acceptance before apply
-- [docs/postmortems/2026-10-09-resource-fetch-main-branch.md](docs/postmortems/2026-10-09-resource-fetch-main-branch.md) — central resource fetch assumed `main`, failing non-`main` repositories
-- [docs/postmortems/2026-10-11-webkit-index-click-layout-shift.md](docs/postmortems/2026-10-11-webkit-index-click-layout-shift.md) — loading orb lists moved an index link mid-click; WebKit dropped the create
-- [docs/postmortems/2026-10-15-webkit-tab-close-libsoup.md](docs/postmortems/2026-10-15-webkit-tab-close-libsoup.md) — closing a loading WebKit tab corrupted its network process; later requests never completed
-- [docs/postmortems/2026-10-09-control-plane-cpu-429.md](docs/postmortems/2026-10-09-control-plane-cpu-429.md) — saturated shared control-plane CPU coincided with Cloud Run ingress refusals below configured concurrency
-- [docs/references/amp-orb-lessons.md](docs/references/amp-orb-lessons.md) — lessons from Amp's “Putting an Agent in an Orb”
-- [docs/EXE-DEV.md](docs/EXE-DEV.md) — the full exe.dev host-provider evaluation
-- [docs/AWS-MICROVMS.md](docs/AWS-MICROVMS.md) — the full AWS Lambda MicroVMs host-provider evaluation
-- [docs/PI-CODEX-E2E.md](docs/PI-CODEX-E2E.md) — Pi + mock-OpenAI-Codex E2E integration mechanism
-- [docs/DETERMINED-BUG.md](docs/DETERMINED-BUG.md) — `determined` 0.4.0 cross-task-await deadlock (fixed in 0.4.1)
-
-- [docs/references/pi-sdk-qualification.md](docs/references/pi-sdk-qualification.md) — historical SDK release and qualification receipts
-
-- [docs/references/native-mcp-qualification.md](docs/references/native-mcp-qualification.md) — historical native transport/auth/session characterization and original first failures
-
-- [docs/postmortems/2026-10-18-central-drain-close-race.md](docs/postmortems/2026-10-18-central-drain-close-race.md) — native failure/storage-close race blocked central deletion
-- [docs/postmortems/2026-10-23-frontend-chart-qualification.md](docs/postmortems/2026-10-23-frontend-chart-qualification.md) — responsive focus ownership and isolated Mermaid measurement
-- [docs/postmortems/2026-10-20-stopped-central-agent-recovery.md](docs/postmortems/2026-10-20-stopped-central-agent-recovery.md) — release shutdown during stopped-VM admission exposed a central recovery eligibility gap
-- [docs/postmortems/2026-11-06-private-plan-output.md](docs/postmortems/2026-11-06-private-plan-output.md) — private plan output boundaries
-- [docs/postmortems/2026-11-03-preview-request-log-exclusion.md](docs/postmortems/2026-11-03-preview-request-log-exclusion.md) — doubled backslashes made the preview request-log exclusion match nothing
-- [docs/postmortems/2026-11-03-preview-admission-clock-skew.md](docs/postmortems/2026-11-03-preview-admission-clock-skew.md) — preview admissions signed at the runtime's expiry limit failed under clock skew
-- [docs/postmortems/2026-10-24-claude-terminal-failure.md](docs/postmortems/2026-10-24-claude-terminal-failure.md) — subscription-limit failure retained a task synthesis handoff and busy ownership
+- [TODO.md](TODO.md) — actionable backlog
+- [docs/open-questions.md](docs/open-questions.md) — undecided questions (frozen numbering)
+- [docs/postmortems/](docs/postmortems/) — incident forensics; owning docs keep the resulting rules
+- [docs/references/amp-orb-lessons.md](docs/references/amp-orb-lessons.md) — lessons from Amp's orbs

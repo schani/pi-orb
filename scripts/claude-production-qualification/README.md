@@ -104,21 +104,7 @@ bash infra/native-vm/claude-acceptance.sh "$PWD" /owned/scratch-parent accept /o
 # /owned/traces/.pi-orb-claude-trace.<unique>
 ```
 
-**Qualification limit (2026-10-05):** current scoped native contracts pass, but
-two earlier synthetic fixture timeouts have lost schedules/scratch. Controlled
-inode-watch and late-health timeout classes were reproduced and fixed without
-uniquely attributing those occurrences. The user explicitly exempted only these two older occurrences on 2026-10-05;
-safe future trace retention is not retroactive proof. Separate explicit user
-acceptance clears the WebKit blocker for pinned Ubuntu after three passes,
-not the unknown Debian crash cause. Chromium's full-browser fixture repair passes four native controls and two
-complete both-engine target runs; current scoped browser blockers are cleared
-without claiming browser internals fixed (`docs/testing.md`). Frozen full configured E2E, control-plane image build and source-closure gates
-passed; supplemental real PostgreSQL contracts and the subsequent test/docs-only
-delta are recorded in `docs/testing.md`. No deployment or cloud canary is
-performed or authorized. Native attribution limits remain in
-`.context/claude-production-hardening/native/forensics/handoff.md`.
-
-## Local Docker invocation (not executed)
+## Local Docker invocation
 
 The runtime image does not carry these validator files; mount them read-only.
 The workspace mount is test-owned. Namespace creation requires these additional
@@ -136,26 +122,9 @@ docker run --rm --network none --cap-add SYS_ADMIN \
 The candidate must contain `iproute2`, `util-linux` and OpenSSL. No Docker
 build/run or native cloud image creation is part of the local checks above.
 
-## Cloud qualification remains approval-gated
+## Scope
 
-An authorized disposable image build can use the existing native-image builder,
-source archive/inventory hashes and isolated validation accounts. Standard
-acceptance now runs both harnesses. Preserve the image/workspace IDs, host-key
-fingerprint, safe guest result, cleanup ledger and original failures. Do not run
-`infra/release.sh`, change production images or apply production IaC as a way of
-creating a sandbox.
-
-This workload proves retained files across runtime process loss on the supplied
-filesystem; it is **not** a physical VM reboot, disk reattachment, Cloud Run/IAP
-role, real Secret Manager IAM or migration-job qualification. Those require
-separate disposable infrastructure and authorization. IAM qualification should
-use a dedicated synthetic secret: shared control-plane identity can add/read/
-destroy versions; orb and issuer identities cannot. Browser/runtime services
-share that identity today; route-role restrictions are application boundaries,
-not separate IAM identities. Never read the owner's secret for an IAM test.
-
-Real provider accounting requires separate explicit owner permission for a
-bounded inference and owner-observed subscription usage, not the synthetic
-bearer's `accountInfo()` metadata. Saved subscription tokens are model-only by
-the provider contract; a fake backend cannot validate their scope, yearly expiry,
-subscription ledger or organization effort enforcement.
+This proves retained files across runtime process loss on the supplied
+filesystem. It is not a physical VM reboot, disk reattachment, real Secret
+Manager IAM, migration-job or provider-accounting test. Never read the owner's
+secret or use `infra/release.sh`/production IaC to create a test sandbox.

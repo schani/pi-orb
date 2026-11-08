@@ -4,4 +4,4 @@
 
 Retained evidence contained only a generic initialization failure; no replicated initialization diagnostic survived. Source at `94d6884` discarded SDK exceptions and stderr. The original cause is unknown, not proven to be authentication, charts code or session corruption. Read-only disk attachment was denied for missing `compute.instances.attachDisk`; no disk was attached, permissions changed or recovery performed.
 
-Sources: committed transcript, Orb detail/inbox, Cloud Logging lifecycle/deletion records and GCE disk inventory. The resulting rule is in `docs/claude-agent-sdk.md`: preserve bounded, redacted initialization details in the user error and lifecycle log before disposal.
+Sources: committed transcript, Orb detail/inbox, Cloud Logging lifecycle/deletion records and GCE disk inventory. The resulting rule is in `docs/claude.md`: preserve bounded, redacted initialization details in the user error and lifecycle log before disposal.

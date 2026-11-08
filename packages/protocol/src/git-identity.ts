@@ -10,7 +10,7 @@ export const GitIdentitySchema = Type.Object(
   { name: Type.String(), email: Type.String() },
   { additionalProperties: false },
 );
-/** Both empty means cleared (docs/git-identity.md). */
+/** Both empty means cleared (docs/agent-context.md). */
 export type GitIdentity = Static<typeof GitIdentitySchema>;
 
 export interface GitIdentityValidationError {

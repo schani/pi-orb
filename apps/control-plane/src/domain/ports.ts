@@ -75,7 +75,7 @@ export interface CasUpdateFieldsParams {
   readonly hostSpecGeneration?: number | null;
   /**
    * Clear-only: retained discard evidence is dropped when a replacement
-   * commits, so it cannot shadow a later incident (docs/compute-replacement.md).
+   * commits, so it cannot shadow a later incident (docs/lifecycle.md).
    */
   readonly hostDiscardEvidence?: null;
 }
@@ -440,7 +440,7 @@ export interface ControlPlaneStore extends ActivityHeadlineStore, PreviewStore {
 
   /**
    * Atomically enters `failed`, revokes runtime authorization, and creates the
-   * incarnation-bounded compute-discard intent (docs/compute-replacement.md).
+   * incarnation-bounded compute-discard intent (docs/lifecycle.md).
    */
   failOrbAndRequestComputeDiscard(
     task: SimulationTask,
@@ -518,7 +518,7 @@ export interface ControlPlaneStore extends ActivityHeadlineStore, PreviewStore {
   ): ResultAsync<OrbRow, StoreError | StateConflict>;
 
   /**
-   * One transaction (docs/history-replication.md): verify/initialize immutable session
+   * One transaction (docs/history.md): verify/initialize immutable session
    * metadata, insert records (identical duplicates allowed, conflicts are
    * integrity errors), advance `replication_cursor` via compare-and-swap and
    * update `replicated_head_id`.
@@ -559,7 +559,7 @@ export interface ControlPlaneStore extends ActivityHeadlineStore, PreviewStore {
     params: HistorySearchParams,
   ): ResultAsync<HistorySearchPage, StoreError>;
 
-  /** Consistent snapshot for the history API and live handoff (docs/history-replication.md). */
+  /** Consistent snapshot for the history API and live handoff (docs/history.md). */
   readHistorySnapshot(
     task: SimulationTask,
     orbId: string,
@@ -620,7 +620,7 @@ export interface StartOrbHostRequest {
    * spec stamping. Providers conflict on any stamp difference; a null
    * expectation matches only an unstamped legacy resource, so pre-migration
    * compute can still restart in place until its next ordinary Start replaces
-   * it (docs/compute-replacement.md).
+   * it (docs/lifecycle.md).
    */
   readonly expectedSpecFingerprint: string | null;
 }
@@ -862,7 +862,7 @@ export interface ProjectSecretsDeps {
   readonly secrets: CredentialSecretStore;
 }
 
-/** Owner secrets reuse the project-secret engine with a user-keyed pointer (docs/owner-skills-secrets.md). */
+/** Owner secrets reuse the project-secret engine with a user-keyed pointer (docs/agent-context.md). */
 export interface OwnerSecretsDeps {
   readonly pointers: Pick<ProjectSecretPointerStore, "readSecretPointer" | "casWriteSecretPointer">;
   readonly secrets: CredentialSecretStore;

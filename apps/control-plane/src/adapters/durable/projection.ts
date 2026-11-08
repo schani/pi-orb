@@ -145,6 +145,7 @@ export function projectEntry(
         ? { type: "model_change", provider: data["provider"], modelId: data["modelId"] }
         : { type: "thinking_level_change", thinkingLevel: data["thinkingLevel"] }),
     });
+  // Written by earlier Pi versions; stored replication cursors may name these entries.
   if (entry.kind === "orb.instructions-adoption")
     return mapPiEntry({
       id,

@@ -11,4 +11,4 @@
 
 The result handler sets this terminal error on `is_error`; later success does not reset the aggregate outcome. The initiating error's identity and cause are unknown: steering diagnostics lacked error status. An interrupted restart result is only a hypothesis; a shutdown error is not excluded. Temporary investigation artifacts: `/tmp/d12-*` (not durable evidence).
 
-Correction: retain visible, bounded, redacted SDK error diagnostics independently of terminal outcomes. Contract: `docs/claude-agent-sdk.md`. This improves future attribution; it does not establish this incident's cause.
+Correction: retain visible, bounded, redacted SDK error diagnostics independently of terminal outcomes. Contract: `docs/claude.md`. This improves future attribution; it does not establish this incident's cause.

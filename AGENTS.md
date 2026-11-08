@@ -14,17 +14,19 @@ Discuss any change or addition to persisted state with the user before implement
 
 All changes to prompts must be approved by the user before implementation.
 
-The design docs are the source of truth for pi-orb's evolving design. `DESIGN.md` is the entry point: purpose, scope, product decisions, the architecture overview, and an index of the topical docs under `docs/` (one per subsystem: host provider, lifecycle, runtime protocol, history/replication, Pi adapter, control-plane API, web UI, credentials, deployment, testing, stack). Incident forensics live in `docs/postmortems/`, undecided design questions in `docs/open-questions.md`, and actionable work in `TODO.md`.
+Docs describe the current design, not its history. `DESIGN.md` is the entry point: purpose, scope, architecture and the doc map. Topical docs live under `docs/`, incident forensics in `docs/postmortems/`, undecided questions in `docs/open-questions.md`, actionable work in `TODO.md`. Git, PR descriptions and postmortems hold history.
 
-Whenever a conversation or implementation changes a requirement, decision, proposal, rejected approach, experimental finding, or open question:
+When a task changes a requirement, decision or contract, update the owning doc in the same task:
 
-1. Update the relevant `docs/` file in the same task. Do not let implementation silently diverge from the docs.
-2. Distinguish clearly between decisions (dated), current proposals, and unresolved questions. Preserve important rationale and evidence, not just the latest conclusion — rejected alternatives stay next to the decision that rejected them.
-3. Keep interfaces and examples synchronized with the surrounding prose.
-4. Open questions live only in `docs/open-questions.md`. Numbering is frozen and append-only: mark resolved in place, never renumber or delete, because code and docs reference questions by number.
-5. Actionable items (bugs, hardening, agreed follow-ups) live only in `TODO.md`: no TODO/FIXME comments in code, no TODOs buried in design prose. An item lives in exactly one of `TODO.md` / `docs/open-questions.md`; when a question is decided and the decision implies work, mark it resolved there and move the work to `TODO.md` in the same edit.
-6. Incident forensics get a file in `docs/postmortems/`; the design doc keeps the resulting rule or invariant plus a link.
-7. Reference docs by path (for example `docs/credentials.md`), never by section number. When adding a doc, add it to the index in `DESIGN.md`.
+1. One owner per fact. State each fact in exactly one doc; elsewhere link to it, never restate it.
+2. Rewrite, don't append. Replace superseded text so the doc reads as the current state. Organize by topic, never by date; no dated section headings. A rejected alternative gets at most two lines next to the decision that rejected it.
+3. No status in docs: no deployed, undeployed, local, qualified or authorized stamps, and no qualification logs, test counts, run IDs or SHAs. Deployment state is the deployed revision versus git; evidence belongs in PR descriptions or postmortems. Agreed design that is not yet built says so once at the top of its section and has a `TODO.md` item.
+4. Keep interfaces and examples synchronized with the surrounding prose.
+5. Open questions live only in `docs/open-questions.md`. Numbering is frozen: never renumber or delete, because code and docs reference questions by number. A resolved question shrinks to one line naming the owning doc.
+6. Actionable items live only in `TODO.md`, one line each plus links, with no evidence and no done items: no TODO/FIXME comments in code, no TODOs in design prose. An item lives in exactly one of `TODO.md` / `docs/open-questions.md`; when a decided question implies work, mark it resolved and move the work to `TODO.md` in the same edit.
+7. Incident forensics get a file in `docs/postmortems/`; the owning doc keeps only the resulting rule plus a link.
+8. Evidence links must resolve: tracked files, GitHub Actions runs or hosted-file URLs, never `.context/`, `/tmp/` or `/workspace/` paths.
+9. Reference docs by path (for example `docs/credentials.md`), never by section number. When adding or removing a doc, update the map in `DESIGN.md`.
 
 ## Audience
 
@@ -50,27 +52,9 @@ Run `npm run test:e2e` before deploying any change that touches the runtime prot
 
 No test may be flaky. A failure that does not reproduce on every run is evidence of an uncontrolled schedule, resource collision, or environmental assumption — never noise. It blocks deployment until it is root-caused; a passing rerun does not clear it. Never rerun merely to obtain green, weaken an assertion blindly, or hide the failure with a larger timeout. Preserve the first failure evidence, identify whether the defect is in the product, test synchronization, or harness isolation, and fix that cause with explicit deterministic synchronization or resource ownership wherever possible. This rule always holds, unless the user explicitly makes an exception.
 
-**UI exception (user-approved 2026-10-05):** flaky UI tests must still be fixed and validated, but deep investigation of a historical failure is optional once corrective stabilization is evidenced. A passing rerun alone is insufficient; new failing UI tests still require correction. Preserve first-failure evidence. Non-UI failures and DST replay/root-cause requirements are unchanged.
-
-**Historical frontend crash exception (user-approved 2026-10-14):** investigation/explanation of historical frontend/browser process crashes is not a merge/deployment requirement, independently of stabilization. Preserve first-failure evidence; no root-cause fix is claimed. Other UI failures, new crashes/failures, exact/current-head qualification, assertions, non-UI blockers and DST requirements remain unchanged. PR 100 evidence: `docs/testing.md`.
-
-**PR 66 WebKit exception (user-approved 2026-10-08):** explaining the historical WebKit navigation failures is not a merge/deployment requirement. Preserve the evidence; no root-cause fix is claimed. Normal qualification, new-failure handling, non-UI blockers and DST requirements remain unchanged.
-
-**PR 66 provider/APT exception (user-approved 2026-10-08):** explaining the recorded hosted Pi provider HTTP stalls and truncated `libproc2-0` download (12,800 of 62,804 bytes) is not a merge/deployment requirement. Preserve first-failure evidence; neither cause is claimed fixed or proven. This covers only those historical failures, separately from the WebKit exception. Normal exact-head qualification, correction of new failures and DST replay remain mandatory. Evidence: `docs/postmortems/2026-10-08-subagent-post-tool-missing-request.md`, `docs/postmortems/2026-10-08-runtime-apt-size-mismatch.md`.
-
-**PR 122 image-build exception (user-approved 2026-10-15):** explaining the historical 600s whole-image-build timeouts in Deploy run `38800758118` is not a merge/deployment requirement. Retained evidence cannot establish the stalled phase or cause; preserve it and claim no fix. This exception excludes the unrelated historical identity failure and all new failures. Exact-head qualification, assertions and DST replay/root-cause requirements remain unchanged. Evidence: `docs/postmortems/2026-10-15-runtime-dependency-qualification.md`.
-
-**PR 137 local-timeout exception (user-approved 2026-10-16):** explaining only the original local PostgreSQL MCP `beforeEach` 10s timeout and aggregate-image 30s timeout is not a merge/deployment requirement. Preserve evidence; no cause or fix is claimed. New failures, assertions, exact-head qualification and DST replay/root-cause requirements remain unchanged. Evidence: `docs/testing.md`.
-
-**Historical identity-cleanup exception (user-approved 2026-10-15):** Explaining Deploy `38596107385`’s cleanup cause is not a merge/deployment requirement; diagnostics remain deferred (`TODO.md`). Preserve first-failure evidence and the failed identity gate. New failures, exact-head gates, assertions and verified fixture cleanup remain mandatory. Evidence: `docs/postmortems/2026-10-14-identity-smoke-cleanup.md`.
-
-**Historical npm preparation exception (user-approved 2026-10-22):** attribution of Durable `39844782648`'s original npm exit 152 is waived. Preserve evidence; no cause or fix is claimed. New failures, exact-head qualification, assertions and DST replay remain mandatory. Evidence: `docs/postmortems/2026-10-22-local-fake-npm-preparation.md`.
-
-**Historical replacement-smoke exception (user-approved 2026-10-23, PDT):** attribution of only the original local 90s `TimeoutExpired` in `final-batch-infra-correct-env.log` is waived as a merge/deployment prerequisite. Preserve first-failure evidence; its cause remains unknown and no fix is claimed. Controlled 40%-CPU failures, new failures, exact-head gates, assertions, production rules, fixture cleanup and DST replay/root-cause requirements are not waived. Evidence: `docs/postmortems/2026-10-22-replacement-smoke-fixture-budget.md`.
+Approved exceptions for specific historical failures are listed in `docs/testing.md`. Each covers only its named failure; new failures, exact-head qualification, assertions and DST replay/root-cause requirements are never waived.
 
 For a DST failure, replay the recorded trace from `test-failures/` (`DST_REPLAY=<trace> npx vitest run …`) before any fix, understand the interleaving, and only then decide whether the defect is in the product or in the scenario's assumptions. Never delete the trace to make the suite pass.
-
-**Historical PR 163 runner-crash exception (user-approved 2026-10-23, PDT):** attribution of only run `39961953749` / job `120441887000` on `5253b681` (SIGSEGV, exit 139) is waived. Preserve evidence; faulting PID/stack and cause remain unknown, with no native-crash fix claimed. New failures, exact-head gates, assertions and DST requirements remain mandatory. Evidence: `docs/testing.md`.
 
 ## Observability
 

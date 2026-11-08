@@ -24,7 +24,7 @@ class BrowserEvidenceTest(unittest.TestCase):
         qualification = (ROOT / '.github/workflows/durable-qualification.yml').read_text()
         for value in ('pull_request:', 'contents: read', 'shard: [1, 2, 3, 4]',
                       'PI_ORB_E2E_BACKEND: process',
-                      'npm run test:e2e -- --project process --project provider --shard=',
+                      'npm run test:e2e -- --bail 1 --project process --project provider --shard=',
                       'retention-days: 14'):
             self.assertIn(value, qualification)
         for value in ('id-token: write', 'google-github-actions', 'infra/release.sh'):
@@ -121,7 +121,7 @@ class BrowserEvidenceTest(unittest.TestCase):
                 inventory = steps(workflow)
                 run = inventory[step_name]
                 projects = 'frontend --project provider --project postgres' if workflow == 'e2e.yml' else 'process --project provider'
-                self.assertIn('node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project ' + projects + ' --shard=', run)
+                self.assertIn('node scripts/local-fake-provider.mjs -- npm run test:e2e -- --bail 1 --project ' + projects + ' --shard=', run)
                 self.assertIn('PI_ORB_LOCAL_FAKE_EVIDENCE:', run)
                 upload = inventory['Upload local provider provenance']
                 self.assertIn('if: always()', upload)
@@ -140,7 +140,7 @@ class BrowserEvidenceTest(unittest.TestCase):
         self.assertNotIn('Diagnose frontend shard', body)
         self.assertIn('    name: E2E (${{ matrix.shard }}/4)', body)
         self.assertIn('    runs-on: ubuntu-24.04', body)
-        self.assertIn('    timeout-minutes: 40', body)
+        self.assertIn('    timeout-minutes: 60', body)
         self.assertIn('        shard: [1, 2, 3, 4]', body)
         workflow_steps = steps('e2e.yml')
         self.assertIn("node-version: '26.13.0'", workflow_steps['Set up Node.js'])
@@ -148,7 +148,7 @@ class BrowserEvidenceTest(unittest.TestCase):
         self.assertIn('run: |\n          npm run test:e2e:install\n', workflow_steps['Install pinned browser engines and system dependencies'])
         full = workflow_steps['Run end-to-end test']
         self.assertIn('DEBUG: pw:browser', full)
-        self.assertIn('node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project frontend --project provider --project postgres --shard=${{ matrix.shard }}/4', full)
+        self.assertIn('node scripts/local-fake-provider.mjs -- npm run test:e2e -- --bail 1 --project frontend --project provider --project postgres --shard=${{ matrix.shard }}/4', full)
         self.assertEqual(len(re.findall(r'^          node scripts/local-fake-provider.mjs -- npm run test:e2e --', body, re.M)), 1)
 
     def test_e2e_selects_and_reports_the_installed_playwright_chromium_before_tests(self):

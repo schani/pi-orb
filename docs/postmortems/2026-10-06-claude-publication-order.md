@@ -12,7 +12,7 @@ Rejected: stale in-flight reads. `HistoryFiles.read` is synchronous; every scan 
 
 The corrected deterministic adapter reproduction appends recovery assistant A after B's live blocks start, then appends durable assistant B with the exact streamed UUID before exit. Fresh final scans contain B, but publication stops at unmapped A forever; terminal drain fails closed. Publishing A before blocks is the passing control.
 
-Lookahead now permits native-only prefixes only if **every** remaining live block is owned by a UUID in `messageBlocks` and each UUID is an exact durable **assistant** message in the current scan. Publication preserves native order; only the matching record retires its own blocks. Already-published retirement is unchanged. Missing/mismatched UUIDs, wrong-role matches and unbound blocks still hold/fail closed. Current invariant: `docs/claude-agent-sdk.md`.
+Lookahead now permits native-only prefixes only if **every** remaining live block is owned by a UUID in `messageBlocks` and each UUID is an exact durable **assistant** message in the current scan. Publication preserves native order; only the matching record retires its own blocks. Already-published retirement is unchanged. Missing/mismatched UUIDs, wrong-role matches and unbound blocks still hold/fail closed. Current invariant: `docs/claude.md`.
 
 No inferred block ownership, changed source order/UUIDs, synthetic IDs, recovery-row omission, retries or new state machine. Existing visible identity-gap health and retained blocks diagnose rejected schedules; ordered frames and exact retirement IDs demonstrate accepted publication.
 

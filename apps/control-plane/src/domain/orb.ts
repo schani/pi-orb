@@ -17,7 +17,7 @@ export type BootHook = "setup" | "resume";
 export type BootHookFailureReason = "failed" | "timeout" | "hook_not_executable";
 
 /**
- * Domain view of an orb row (docs/history-replication.md). Timestamps are wall-clock
+ * Domain view of an orb row (docs/history.md). Timestamps are wall-clock
  * milliseconds; adapters convert to/from `timestamptz`.
  */
 export interface OrbRow {

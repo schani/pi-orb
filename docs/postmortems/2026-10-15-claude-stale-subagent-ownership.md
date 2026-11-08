@@ -17,4 +17,4 @@ Result-only RED: `redesign/standalone-reader-red.log` rejects standalone success
 Dedup RED/green and the first typing failures remain in `redesign/dedup-red.log`, `dedup-focused.log`, `typecheck-first.log`; source-proven snapshot-only correction is locally validated, not deployed.
 Earlier sync-cut trace `claude-workflow-race-sync-1792118897872-4.json` was replayed: the cut hit pending hook-history sync, not Workflow proof. Failure cuts now arm after root receipts; evidence and replay runners remain archived.
 
-Contract: `docs/claude-agent-sdk.md`. Current validation scope: `docs/testing.md`; local correction is undeployed, with no protocol/schema/persisted-field changes.
+Contract: `docs/claude.md`. Current validation scope: `docs/testing.md`; local correction is undeployed, with no protocol/schema/persisted-field changes.

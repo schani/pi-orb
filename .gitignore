@@ -2,8 +2,6 @@ node_modules/
 dist/
 coverage/
 test-failures/
-scripts/subagent-liveness/evidence/*
-!scripts/subagent-liveness/evidence/*.md
 *.tsbuildinfo
 .vite/
 __pycache__/

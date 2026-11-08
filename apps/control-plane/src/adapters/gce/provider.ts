@@ -253,7 +253,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
    * The one source of an orb host's non-secret launch facts: every field feeds
    * both the instance-insert body and `desiredSpecFingerprint`, so a host
    * cannot carry a setting the fingerprint does not cover — drift between the
-   * two would leave stale compute looking current (docs/compute-replacement.md).
+   * two would leave stale compute looking current (docs/lifecycle.md).
    *
    * Zone and project are deliberately absent. The data disk is zonal, so
    * compute replacement cannot move an orb: a replacement in the new zone would
@@ -775,7 +775,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
       // Compute is immutable: a stale instance is replaced, never repaired.
       // Verify the incarnation and specification stamps before booting so a
       // restart-in-place cannot resurrect an instance the caller believes it
-      // already replaced (docs/compute-replacement.md).
+      // already replaced (docs/lifecycle.md).
       const got = await this.request(
         "start",
         "GET",

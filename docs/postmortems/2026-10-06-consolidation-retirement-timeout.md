@@ -47,7 +47,7 @@ Qualification passed: 182 infrastructure tests plus filesystem checks, 21 releas
 
 Preserve the failed release record, its two explicit-zero proofs and the retained lock. Qualify and merge the correction, review lock ownership and the original runner's termination, then clear only that exact lock generation before a fresh first-consolidation Actions release. Recheck service absence, current process observations and pending Compute operations before migration. A larger timeout cannot manufacture samples from silent revisions.
 
-Recovery follows the existing main-branch Actions workflow after reviewed lock clearance. Automatic restoration of old controllers, database rollback and bypassing retirement remain rejected under `docs/control-plane-consolidation.md`. The initial investigation made no production changes and did not establish database/workspace integrity independently.
+Recovery follows the existing main-branch Actions workflow after reviewed lock clearance. Automatic restoration of old controllers, database rollback and bypassing retirement remain rejected under `docs/auth.md`. The initial investigation made no production changes and did not establish database/workspace integrity independently.
 
 Private local evidence: `.context/incident-20261006/` contains the authoritative release, failed Actions log, deletion audit receipt, independent service inventory, active pointer, raw Monitoring samples and summaries, and deterministic replay result.
 

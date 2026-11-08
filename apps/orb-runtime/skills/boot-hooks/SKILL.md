@@ -55,9 +55,11 @@ A present but non-executable hook is reported as a failure, not skipped.
   a backgrounded child still holding stdout keeps the hook open, and setup will
   hold the boot until its deadline kills the group. If you must leave something
   running, redirect its output: `… >/dev/null 2>&1 &`.
-- **`sudo` is in the prescribed image** (the runtime is root, so it elevates
-  nothing). An orb on the process host provider inherits the developer's machine
-  and may not have it — guard rather than assume:
+- **Use `sudo` for system changes.** On GCE the runtime runs as `orb` with
+  passwordless `sudo`, so `apt-get`, `/etc` and `/usr/local` need it; in Docker
+  the runtime is root and `sudo` elevates nothing. An orb on the process host
+  provider inherits the developer's machine and may not have it — guard rather
+  than assume:
   `if command -v sudo >/dev/null 2>&1; then sudo …; else …; fi`.
 - **Nothing a hook exports reaches your shells** — and neither does
   `/etc/profile.d` or `$HOME/.profile`. Your bash tool runs `bash -c` and the

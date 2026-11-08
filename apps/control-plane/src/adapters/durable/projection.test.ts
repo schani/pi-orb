@@ -54,6 +54,24 @@ describe("Durable root projection", () => {
       )._unsafeUnwrap(),
     ).toBeNull();
   });
+  it("keeps projecting stored instruction adoption entries so persisted cursors still resolve", () => {
+    const record = projectEntry(
+      entry({
+        kind: "orb.instructions-adoption",
+        data: {
+          customType: "pi-orb:personal-instructions",
+          data: { revision: 1, sha256: "abc" },
+          timestamp: 1000,
+        },
+      }),
+      "session:1",
+      "session",
+    )._unsafeUnwrap();
+    expect(record).toMatchObject({
+      id: "session:2",
+      overflow: { native: { type: "custom", customType: "pi-orb:personal-instructions" } },
+    });
+  });
   it("includes child conversation work after its background anchor became terminal", () => {
     const graph = {
       tasks: {

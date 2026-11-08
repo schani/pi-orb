@@ -42,7 +42,7 @@ resource "google_project_service" "apis" {
 }
 
 # The registered preview domain delegates to this zone; the application root
-# writes only its records (docs/ports.md).
+# writes only its records (docs/http-exposure.md).
 resource "google_dns_managed_zone" "preview" {
   name       = "pi-orb-preview"
   dns_name   = "${var.preview_domain}."

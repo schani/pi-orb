@@ -12,7 +12,7 @@ const current = (worker: LiveWorker) => worker.stats[0] ?? 0;
 /**
  * Process-wide registry of live code-mode workers. While any is live, one
  * `codemode.memory` JSON line per interval records worker and process memory;
- * an idle process logs nothing (docs/pi-adapter.md). Node writes stdout pipes and
+ * an idle process logs nothing (docs/pi.md). Node writes stdout pipes and
  * files synchronously on Linux, so an OOM kill cannot drop a buffered sample.
  */
 export class CodeModeMemory {

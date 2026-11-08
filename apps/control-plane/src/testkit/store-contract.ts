@@ -1931,7 +1931,7 @@ export function storeSemanticsContractTests(
       await seed();
       const seeded = (await store.getOrb(task, orb.id))._unsafeUnwrap();
       // No compute means nothing to replace: the start path provisions the
-      // current spec directly (docs/compute-replacement.md).
+      // current spec directly (docs/lifecycle.md).
       const hostless = await store.requestHostSpecReplacement(task, {
         orbId: orb.id,
         expectedStateVersion: 0,
@@ -2260,7 +2260,7 @@ export function storeSemanticsContractTests(
 
       // A finalize naming a fence other than the durable one is a conflict and
       // must change nothing — this WHERE clause is what makes a stale
-      // finalize harmless (docs/compute-replacement.md).
+      // finalize harmless (docs/lifecycle.md).
       const wrongFence = await store.finalizeHostDiscard(task, {
         orbId: orb.id,
         expectedStateVersion: 2,

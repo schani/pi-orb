@@ -42,7 +42,7 @@ function stateDetailOf(
   }
   if (orb.hostDiscardThroughIncarnation !== null) {
     // A spec replacement is routine deploy hygiene, not a failure: the user
-    // must not be told their orb failed (docs/compute-replacement.md).
+    // must not be told their orb failed (docs/lifecycle.md).
     return {
       type:
         orb.hostDiscardReason === "host_spec_changed"

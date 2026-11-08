@@ -4,7 +4,7 @@
 
 ## First failure
 
-The crop-mark frontend qualification passed 85 of 86 cases. WebKit established cached history, live controls, and one socket, but did not show `Orb doesn't exist` within five seconds after the test released a held history request. The unchanged first evidence remains in `test-failures/2026-09-18-crop-marks-full-frontend-webkit-missing-resource.md`.
+The crop-mark frontend qualification passed 85 of 86 cases. WebKit established cached history, live controls, and one socket, but did not show `Orb doesn't exist` within five seconds after the test released a held history request. The unchanged first evidence remains in `docs/postmortems/2026-09-18-crop-marks-webkit-missing-resource.md`.
 
 The crop-mark change touched only the rename field wrapper in `OrbPage`; it did not change loading, polling, history, or socket ownership.
 

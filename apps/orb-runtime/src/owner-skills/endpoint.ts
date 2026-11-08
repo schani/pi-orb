@@ -12,7 +12,7 @@ export interface OwnerSkillsFetchError {
   readonly retryable: boolean;
 }
 
-/** One bounded boot read of the orb project owner's skills (docs/owner-skills-secrets.md). */
+/** One bounded boot read of the orb project owner's skills (docs/agent-context.md). */
 export async function fetchOwnerSkills(
   env: BrokerEnv,
   fetcher: typeof fetch = fetch,

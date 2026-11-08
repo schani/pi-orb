@@ -393,7 +393,7 @@ type Turn =
   | { kind: "alert"; record: EventRecord; message: string }
   | { kind: "compaction"; record: CompactionRecord | EventRecord };
 
-/** Per docs/pi-adapter.md: custom messages need `display`; settings-fallback and compaction notices always show. */
+/** Per docs/pi.md: custom messages need `display`; settings-fallback and compaction notices always show. */
 function isDisplayedCustomMessage(record: EventRecord): boolean {
   return (
     record.eventType === "agent.settings_fallback" ||

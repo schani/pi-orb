@@ -3,7 +3,7 @@ import { specFingerprintOf } from "./spec-fingerprint.ts";
 
 /**
  * The fingerprint must be a pure function of the *effective* specification
- * (docs/compute-replacement.md): two code paths that build the same facts in a
+ * (docs/lifecycle.md): two code paths that build the same facts in a
  * different key order must agree, or every Start replaces the whole fleet's
  * compute for no reason.
  */

@@ -31,7 +31,7 @@ function isWireCloseCode(code: number): boolean {
 }
 
 /**
- * Live routing (docs/runtime-protocol.md/docs/history-replication.md): host-native
+ * Live routing (docs/runtime-protocol.md/docs/history.md): host-native
  * text frames and close signals are forwarded to/from the runtime without
  * application interpretation, except for the idle-auto-stop sniffs below.
  * The browser's `client.hello` is the first application frame. A connection race

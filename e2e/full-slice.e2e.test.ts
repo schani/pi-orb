@@ -315,7 +315,7 @@ async function computeIncarnation(id: string): Promise<number | null> {
  * whenever the container is recreated. Process: the recorded process-group
  * leader plus its loopback port, which change whenever the child is
  * relaunched. Either one detects an in-place bounce that leaves the
- * incarnation number untouched — the mutation `docs/compute-replacement.md`
+ * incarnation number untouched — the mutation `docs/lifecycle.md`
  * forbids and which an incarnation-only assertion cannot see.
  */
 async function computeIdentity(id: string, incarnation: number): Promise<string> {
@@ -1362,7 +1362,7 @@ describe("full slice E2E", () => {
         }
         // The durable edges tie the replacement to the specification change:
         // a discard requested for `host_spec_changed`, then the replacement
-        // incarnation provisioned after it (docs/compute-replacement.md).
+        // incarnation provisioned after it (docs/lifecycle.md).
         await waitForLifecycleEdges("host-spec replacement lifecycle edges", specOrbId, (lines) => {
           const discarded = lines.findIndex(
             (line) =>
@@ -1927,7 +1927,7 @@ describe("full slice E2E", () => {
     );
     expect(generatedName).toBe("Run E2E Tool Check");
 
-    // Replication lands through the HTTP pull, not the WebSocket (docs/history-replication.md).
+    // Replication lands through the HTTP pull, not the WebSocket (docs/history.md).
     await waitFor(
       "history replicated to database",
       async () => {
@@ -2176,10 +2176,10 @@ describe("full slice E2E", () => {
       const replica = JSON.stringify(
         (await readReplicatedHistorySnapshot(controlPlane, orbId)).records,
       );
-      expect(replica).toContain("pi-orb:personal-instructions");
-      expect(replica).toContain("pi-orb:project-instructions");
-      expect(serialized).not.toContain("PERSONAL_E2E_");
-      expect(serialized).not.toContain("PROJECT_E2E_");
+      for (const text of [serialized, replica]) {
+        expect(text).not.toContain("PERSONAL_E2E_");
+        expect(text).not.toContain("PROJECT_E2E_");
+      }
       const records = history.body["records"] as DisplayRecord[];
       expect(
         records.filter(

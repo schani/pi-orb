@@ -23,12 +23,12 @@ it("runs four isolated serial E2E shards without cancelling siblings or losing f
   const normalRun = source.split("- name: Run end-to-end test")[1]?.split("- name:")[0];
   expect(normalRun).toBeDefined();
   expect(source).toContain("  workflow_dispatch:\n");
-  expect(source).toContain("timeout-minutes: 40");
+  expect(source).toContain("timeout-minutes: 60");
   expect(normalRun).toContain(
     `run: |
           export PLAYWRIGHT_CHROMIUM_EXECUTABLE="$(node -e 'process.stdout.write(require("@playwright/test").chromium.executablePath())')"
           "$PLAYWRIGHT_CHROMIUM_EXECUTABLE" --version
-          node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project frontend --project provider --project postgres --shard=\${{ matrix.shard }}/4`,
+          node scripts/local-fake-provider.mjs -- npm run test:e2e -- --bail 1 --project frontend --project provider --project postgres --shard=\${{ matrix.shard }}/4`,
   );
   expect(normalRun).not.toMatch(/--(?:maxWorkers|retry|passWithNoTests)/u);
   expect(

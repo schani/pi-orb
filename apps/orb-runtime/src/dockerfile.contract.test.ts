@@ -130,7 +130,7 @@ describe("orb runtime Dockerfile contract", () => {
 
   it("installs the reviewed Google executable credential source", () => {
     // The `cloud-identity` skill tells the agent to point an external-account
-    // credential file at this absolute path (docs/workload-identity-recipes.md).
+    // credential file at this absolute path (docs/workload-identity.md).
     // Without it the agent's only alternative is writing its own credential
     // helper, which is exactly what "no unreviewed credential helper" forbids.
     expect(existsSync(join(repositoryRoot, "scripts/pi-orb-gcp-identity"))).toBe(true);
