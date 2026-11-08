@@ -579,6 +579,7 @@ function renderAgentRecords(
         }
         continue;
       }
+      if (block.type === "text" && block.text.trim() === "") continue;
 
       // Visible prose/reasoning/media is a boundary between maximal tool runs.
       flushTools();

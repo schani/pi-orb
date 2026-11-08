@@ -405,6 +405,17 @@ describe("HistoryView turn structure", () => {
       strips: html.match(/class="[^"]* activity-strip"/g)?.length ?? 0,
     };
   };
+  it("does not split a strip at an empty assistant reply", () => {
+    expect(
+      noticeLayout([
+        reasoning("a"),
+        reasoning("b"),
+        message("empty", "assistant", ""),
+        notice("pi-orb.sleep-wake"),
+        reasoning("c"),
+      ]),
+    ).toEqual({ notice: false, restartDots: true, strips: 1 });
+  });
   it("keeps a lone restart notice as its notice row", () => {
     expect(
       noticeLayout([message("prose", "assistant", "Prose."), notice("pi-orb.host-restarted")]),
