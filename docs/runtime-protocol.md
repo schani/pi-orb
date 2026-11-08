@@ -11,7 +11,7 @@ User messages do not travel on this socket; they enter the durable inbox (`docs/
 The browser opens `/api/v1/orbs/{orbId}/live` with subprotocol `pi-orb.runtime.v1`. The upgrade is authenticated by the browser session (`docs/auth.md`); session expiry closes the socket with `1008`.
 
 - **Claude:** attachment requires running compute. The control plane resolves the orb, opens the runtime's `/v1/live`, and forwards text frames and close/backpressure signals without parsing runtime→browser frames. The proxy installs browser handlers synchronously, before awaiting orb lookup, queues text frames during routing and flushes them in order once the runtime socket opens. It never injects its own data frames, so `client.hello` is the first application frame. Runtime endpoints are reachable only from the control plane's private network.
-- **Central Pi:** attaches to the in-process agent plane, read-only while stopped or before execution readiness. Stopped/sleeping views do not resume retained work.
+- **Central Pi:** attaches to the in-process agent plane; stopped or sleeping views attach read-only without resuming retained work (`docs/pi.md`).
 
 The proxy interprets browser→runtime frames only for idle auto-stop (`docs/lifecycle.md`): it consumes `client.presence` (the runtime ignores one defensively), and a `client.request` refreshes the advisory `last_busy_at` before being forwarded unchanged.
 
