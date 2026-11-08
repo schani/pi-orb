@@ -193,15 +193,32 @@ export function lineChartSpec(
           },
         ];
   });
-  const placed = spreadLabels(
-    last.map((item) => pixel(item.v)),
-    height,
+  const thresholds = spec.thresholds ?? [];
+  const labelTime = Math.max(
+    ...rows.map((row) => row.t),
+    ...bands.map((row) => row.t),
+    ...(spec.markers ?? []).map((marker) => marker.at),
   );
+  // All annotations share the right gutter, outside the data and threshold rules.
+  // Reserve half a line at each edge; even six series plus four thresholds fit at 180px.
+  const positions = [
+    ...thresholds.map((item) => pixel(item.value)),
+    ...(labels ? last.map((item) => pixel(item.v)) : []),
+  ];
+  const placed = spreadLabels(
+    positions.map((y) => Math.max(0, Math.min(height - 12, y - 6))),
+    height - 12,
+    16,
+  );
+  const labelValue = (index: number) => lo + (1 - ((placed[index] ?? 0) + 6) / height) * (hi - lo);
   const ends = last.map((item, index) => ({
     ...item,
-    lv: lo + (1 - (placed[index] ?? pixel(item.v)) / height) * (hi - lo),
+    lt: labelTime,
+    lv: labels ? labelValue(thresholds.length + index) : item.v,
   }));
-  const leaders = ends.some((item) => Math.abs(pixel(item.lv) - pixel(item.v)) > 1);
+  const leaders = ends.some(
+    (item) => item.t !== labelTime || Math.abs(pixel(item.lv) - pixel(item.v)) > 1,
+  );
   const format = timeFormat(spec);
   const x = {
     field: "t",
@@ -209,6 +226,8 @@ export function lineChartSpec(
     title: null,
     axis: {
       format,
+      labelOverlap: "greedy",
+      labelSeparation: 6,
       ...(narrow ? { tickCount: 3 } : {}),
       ...(xAxis === undefined
         ? {}
@@ -230,22 +249,43 @@ export function lineChartSpec(
     scale: { domain: names, range: colors },
     legend: null,
   };
-  const first = Math.min(...rows.map((row) => row.t));
   const layer: VegaLayer[] = [];
-  for (const threshold of spec.thresholds ?? [])
+  for (const [index, threshold] of thresholds.entries())
     layer.push({
-      data: { values: [{ y: threshold.value }] },
+      data: { values: [{ y: threshold.value, lv: labelValue(index), label: threshold.label }] },
       layer: [
         {
+          name: `threshold_rule_${index}`,
           mark: { type: "rule", color: BAD },
           encoding: { y: { field: "y", type: "quantitative" } },
         },
         {
-          mark: { type: "text", color: BAD, align: "left", baseline: "bottom", dx: 2, dy: -2 },
+          mark: { type: "rule", color: HAIRLINE, xOffset: 5, x2Offset: 13 },
           encoding: {
+            x: { datum: labelTime, type: "temporal" },
+            x2: { datum: labelTime },
             y: { field: "y", type: "quantitative" },
-            x: { datum: first, type: "temporal" },
-            text: { value: threshold.label },
+            y2: { field: "lv" },
+          },
+        },
+        {
+          name: `threshold_label_${index}`,
+          mark: {
+            type: "text",
+            color: BAD,
+            align: "left",
+            baseline: "middle",
+            dx: 16,
+            limit: narrow ? 140 : 240,
+          },
+          encoding: {
+            y: { field: "lv", type: "quantitative" },
+            x: { datum: labelTime, type: "temporal" },
+            text: { field: "label" },
+            tooltip: [
+              { field: "label", type: "nominal", title: "threshold" },
+              { field: "y", type: "quantitative", title: "value" },
+            ],
           },
         },
       ],
@@ -331,7 +371,7 @@ export function lineChartSpec(
         ? [
             {
               mark: { type: "rule", color: HAIRLINE, xOffset: 5, x2Offset: 13 },
-              encoding: { x, x2: { field: "t" }, y, y2: { field: "lv" }, opacity: isolate(0.25) },
+              encoding: { x, x2: { field: "lt" }, y, y2: { field: "lv" }, opacity: isolate(0.25) },
             },
           ]
         : []),
@@ -339,9 +379,9 @@ export function lineChartSpec(
         ? [
             {
               name: "end_labels",
-              mark: { type: "text", align: "left", dx: leaders ? 16 : 8, cursor: "default" },
+              mark: { type: "text", align: "left", baseline: "middle", dx: 16, cursor: "default" },
               encoding: {
-                x,
+                x: { ...x, field: "lt" },
                 y: { field: "lv", type: "quantitative" },
                 text: { field: "label" },
                 opacity: isolate(0.3),
@@ -1192,6 +1232,8 @@ export function tooltipRows(spec: ChartSpec, value: Record<string, unknown>): To
     return Object.entries(value)
       .filter(([, item]) => item !== "")
       .map(([label, item]) => ({ label, value: String(item) }));
+  if (value["time"] === undefined && typeof value["threshold"] === "string")
+    return [{ label: value["threshold"], value: formatValue(spec.unit, number(value["value"])) }];
   const { colors, dash } = seriesStyles(spec.series.length);
   const many = spec.series.length > 1;
   return [

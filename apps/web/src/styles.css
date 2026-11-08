@@ -2926,6 +2926,8 @@ pre,
 }
 
 .chart-tip {
+  width: max-content;
+  max-width: calc(100vw - 16px);
   position: fixed;
   z-index: 50;
   padding: 2px 8px;
@@ -2952,6 +2954,7 @@ pre,
 }
 
 .chart-tip .k {
+  overflow-wrap: anywhere;
   color: var(--g3);
 }
 
