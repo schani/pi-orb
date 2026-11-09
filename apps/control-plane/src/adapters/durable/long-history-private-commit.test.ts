@@ -3,11 +3,12 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { createRegistry, defineDoc, Harness } from "@earendil-works/pi-durable";
 import { NoSimulationTask } from "determined";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { makeOrbRow, makeProjectRow } from "../../testkit/fixtures.ts";
 import { composeControlPlaneDatabase } from "../database.ts";
 import type { Query } from "../durable-pg/executor.ts";
 import { PgDurableAuthority } from "../durable-pg/index.ts";
+import { PgStorage } from "../durable-pg/storage.ts";
 import type { PostgreSQLClient } from "../pg/client.ts";
 import { PGliteClient } from "../pg/pglite-client.ts";
 import { projectNativeCommit } from "./atomic-history.ts";
@@ -92,7 +93,7 @@ it("does not scan or republish multi-MiB root history for native private progres
           model: [{ role: "user", content: `${index}:${"x".repeat(16_384)}`, timestamp: index }],
         });
     }, BACKGROUND_CONTEXT);
-    expect(nativeEntryReads).toBeGreaterThan(0);
+    expect(nativeEntryReads).toBe(0);
     expect(publicHistoryWrites).toBeGreaterThan(0);
     const before = (
       await db.query(
@@ -121,6 +122,43 @@ it("does not scan or republish multi-MiB root history for native private progres
     expect((await database.store.getOrb(task, orb.id))._unsafeUnwrap()?.replicationCursor).toBe(
       oldCursor,
     );
+    const entries = vi.spyOn(PgStorage.prototype, "scanEntries");
+    const submissions = vi.spyOn(PgStorage.prototype, "scanSubmissions");
+    try {
+      await root.commit(async (tx) => {
+        await tx.appendEntry(root.id, { kind: "pi.system", data: { private: "configuration" } });
+        await tx.appendEntry(root.id, {
+          kind: "pi.message",
+          model: [{ role: "user", content: "incremental tail", timestamp: 201 }],
+        });
+      }, BACKGROUND_CONTEXT);
+      expect(nativeEntryReads).toBe(1);
+      expect(entries).not.toHaveBeenCalled();
+      expect(submissions).not.toHaveBeenCalled();
+      const cursor = (await database.store.getOrb(task, orb.id))._unsafeUnwrap()?.replicationCursor;
+      const tail = (
+        await db.query("SELECT record FROM history_records WHERE orb_id=$1 AND record_id=$2", [
+          orb.id,
+          cursor,
+        ])
+      )._unsafeUnwrap().rows[0]?.record;
+      expect(tail).toMatchObject({
+        id: cursor,
+        parentId: oldCursor,
+        type: "message",
+        role: "user",
+        timestamp: new Date(201).toISOString(),
+        content: [{ type: "text", text: "incremental tail" }],
+      });
+      expect(
+        (
+          await db.query("SELECT count(*)::int AS n FROM history_records WHERE orb_id=$1", [orb.id])
+        )._unsafeUnwrap().rows,
+      ).toEqual([{ n: 201 }]);
+    } finally {
+      entries.mockRestore();
+      submissions.mockRestore();
+    }
   } finally {
     await harness?.close(BACKGROUND_CONTEXT);
     await database.close();

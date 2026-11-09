@@ -276,10 +276,11 @@ export function projectHistory(
   sessionId: string,
   receipts: ReadonlyMap<number, PublicEntryReceipt> = new Map(),
   notifications: ReadonlySet<number> = new Set(),
+  initialParentId: string | null = null,
 ): Result<readonly HistoryRecord[], MappingError> {
   const records: HistoryRecord[] = [];
   for (const entry of entries) {
-    const parentId = records.at(-1)?.id ?? null;
+    const parentId = records.at(-1)?.id ?? initialParentId;
     const receipt = receipts.get(entry.id);
     const system = receipt?.system;
     if (

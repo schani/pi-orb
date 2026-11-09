@@ -16,6 +16,7 @@ import {
   defineExtension,
   defineTool,
   GenerationTask,
+  type Harness,
   hook,
   LiveDoc,
   MemoryStorage,
@@ -24,6 +25,7 @@ import {
   type Storage,
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
+import * as protocol from "@pi-orb/protocol";
 import { type ServerFrame, ServerFrameSchema } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
@@ -34,6 +36,7 @@ import { StorageFailure } from "../durable-pg/storage-boundary.ts";
 import { DurableAgent } from "./agent.ts";
 import { durableError } from "./manager.ts";
 import { MemoryAgentPersistence } from "./memory-persistence.testkit.ts";
+import * as projection from "./projection.ts";
 import { sectionExtension } from "./prompt.ts";
 
 function barrier() {
@@ -1816,3 +1819,202 @@ it.each([
     }
   },
 );
+
+it("maps only the appended native and display suffix, retaining causal tool context and private gaps", async () => {
+  let conversation!: Harness["conversation"];
+  const models = createModels();
+  models.setProvider(fauxProvider().provider);
+  const native = vi.spyOn(projection, "projectHistory");
+  const makeDisplay = protocol.createDisplayRecordProjector;
+  const visited: string[] = [];
+  const display = vi.spyOn(protocol, "createDisplayRecordProjector").mockImplementation(() => {
+    const project = makeDisplay();
+    return (record) => {
+      visited.push(record.id);
+      return project(record);
+    };
+  });
+  const authority = new MemoryAgentPersistence();
+  const open = async (existing = false) =>
+    (
+      await DurableAgent.open({
+        orbId: "suffix",
+        storage: (await authority.openOrb("suffix", existing))._unsafeUnwrap().storage,
+        models,
+        registry: createRegistry(),
+        env: new NodeExecutionEnv({ cwd: "/tmp" }),
+        checkoutCommit: null,
+        instructions: "",
+        initialSettings,
+        bindNativeConversation: (resolve) => {
+          conversation = resolve;
+        },
+      })
+    )._unsafeUnwrap();
+  let agent = await open();
+  const frames: ServerFrame[] = [];
+  agent.subscribe((frame) => frames.push(frame));
+  try {
+    const root = await conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT);
+    if (!root) expect.fail("Missing root conversation");
+    await root.commit(async (tx) => {
+      for (let index = 0; index < 64; index++)
+        await tx.appendEntry(root.id, {
+          kind: "pi.message",
+          model: [{ role: "user", content: `prefix ${index}`, timestamp: index }],
+        });
+      await tx.appendEntry(root.id, {
+        kind: "pi.message",
+        model: [
+          fauxAssistantMessage(fauxToolCall("bash", { command: "pwd" }, { id: "causal" }), {
+            stopReason: "toolUse",
+          }),
+        ],
+      });
+    }, BACKGROUND_CONTEXT);
+    (await agent.waitForIdle())._unsafeUnwrap();
+    const seeded = agent.snapshot()._unsafeUnwrap();
+    (await agent.close())._unsafeUnwrap();
+    agent = await open(true);
+    expect(agent.snapshot()._unsafeUnwrap().records).toEqual(seeded.records);
+    agent.subscribe((frame) => frames.push(frame));
+    const reopenedRoot = await conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT);
+    if (!reopenedRoot) expect.fail("Missing reopened root conversation");
+    const before = agent.snapshot()._unsafeUnwrap();
+    const saved = JSON.stringify(before);
+    native.mockClear();
+    visited.length = 0;
+    frames.length = 0;
+    await reopenedRoot.commit(async (tx) => {
+      await tx.appendEntry(reopenedRoot.id, { kind: "pi.system", data: { private: true } });
+      await tx.appendEntry(reopenedRoot.id, {
+        kind: "pi.message",
+        model: [
+          {
+            role: "toolResult",
+            toolCallId: "causal",
+            toolName: "bash",
+            content: [{ type: "text", text: "/tmp" }],
+            isError: false,
+            timestamp: 100,
+          },
+        ],
+      });
+    }, BACKGROUND_CONTEXT);
+    (await agent.waitForIdle())._unsafeUnwrap();
+    const after = agent.snapshot()._unsafeUnwrap();
+    expect.soft(native.mock.calls.flatMap(([entries]) => entries)).toHaveLength(2);
+    expect.soft(visited).toEqual([after.headId]);
+    expect(JSON.stringify(before)).toBe(saved);
+    expect(after.records.slice(0, -1)).toEqual(before.records);
+    expect(after.records.at(-1)).toMatchObject({ parentId: before.headId, role: "tool" });
+    expect(frames.filter((frame) => frame.type === "history.record")).toEqual([
+      expect.objectContaining({
+        record: protocol.projectDisplayRecords(after.records).at(-1),
+        headId: after.headId,
+      }),
+    ]);
+    expect(frames.find((frame) => frame.type === "history.record")).toMatchObject({
+      record: { content: [{ type: "tool_result", headline: null }] },
+    });
+  } finally {
+    await agent.close();
+    await authority.close();
+    native.mockRestore();
+    display.mockRestore();
+  }
+});
+
+it("publishes queued suffixes with coherent immutable snapshots and complete notification provenance", async () => {
+  let conversation!: Harness["conversation"];
+  const models = createModels();
+  models.setProvider(fauxProvider().provider);
+  const entered = barrier(),
+    release = barrier();
+  const snapshots: import("../../domain/agent-ports.ts").AgentSnapshot[] = [];
+  let hold = false;
+  const agent = (
+    await DurableAgent.open({
+      orbId: "queued-suffix",
+      storage: new MemoryStorage(),
+      models,
+      registry: createRegistry(),
+      env: new NodeExecutionEnv({ cwd: "/tmp" }),
+      checkoutCommit: null,
+      instructions: "",
+      initialSettings,
+      bindNativeConversation: (resolve) => {
+        conversation = resolve;
+      },
+      commitHistory: (snapshot) => {
+        snapshots.push(snapshot);
+        if (!hold) return okAsync(undefined);
+        hold = false;
+        entered.resolve();
+        return ResultAsync.fromPromise(release.promise, () => durableError("fixture barrier"));
+      },
+    })
+  )._unsafeUnwrap();
+  const frames: ServerFrame[] = [];
+  agent.subscribe((frame) => frames.push(frame));
+  try {
+    const root = await conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT);
+    if (!root) expect.fail("Missing root conversation");
+    const before = agent.snapshot()._unsafeUnwrap();
+    const frozen = JSON.stringify(before);
+    hold = true;
+    await root.commit(
+      (tx) =>
+        tx.appendEntry(root.id, {
+          kind: "pi.message",
+          model: [{ role: "user", content: "first", timestamp: 1 }],
+        }),
+      BACKGROUND_CONTEXT,
+    );
+    await entered.promise;
+    const pending = snapshots.at(-1);
+    if (!pending) expect.fail("Missing held projection");
+    const saved = JSON.stringify(pending);
+    await root.submit(
+      {
+        type: "write",
+        requestId: "subagent-notify:7:queued",
+        entry: {
+          kind: "pi.user",
+          model: [
+            {
+              role: "user",
+              timestamp: 2,
+              content: JSON.stringify({ agent_id: "7", description: "Check", message: "notice" }),
+            },
+          ],
+        },
+      },
+      BACKGROUND_CONTEXT,
+    );
+    expect(agent.snapshot()._unsafeUnwrap()).toMatchObject({
+      records: before.records,
+      headId: before.headId,
+    });
+    expect(frames.filter((frame) => frame.type === "history.record")).toEqual([]);
+    release.resolve();
+    (await agent.waitForIdle())._unsafeUnwrap();
+    const after = agent.snapshot()._unsafeUnwrap();
+    expect(JSON.stringify(before)).toBe(frozen);
+    expect(JSON.stringify(pending)).toBe(saved);
+    expect(after.records.slice(0, -1)).toEqual(pending.records);
+    expect(after.records.at(-1)).toMatchObject({
+      parentId: pending.headId,
+      type: "event",
+      eventType: "pi.custom_message",
+      subagent: { kind: "notification", id: "7", description: "Check", message: "notice" },
+    });
+    expect(
+      frames.filter((frame) => frame.type === "history.record").map((frame) => frame.record),
+    ).toEqual(protocol.projectDisplayRecords(after.records).slice(before.records.length));
+    expect(snapshots.at(-1)?.records).toEqual(after.records);
+  } finally {
+    release.resolve();
+    await agent.close();
+  }
+});
