@@ -9,6 +9,7 @@ import {
   probeNetworkGuard,
 } from "../../../../scripts/claude-sdk-contract/probe.mjs";
 import { ComposedClaudeFixture } from "../testkit/claude-composed.ts";
+import { claudeChildEnvironment } from "./auth.ts";
 import { bootNotificationModelText } from "./boot-notification.ts";
 import { BOOT_BASELINE_TYPE, planBootNotification } from "./boot-policy.ts";
 import { ClaudeHistory } from "./history.ts";
@@ -216,6 +217,30 @@ nativeIt(
     });
   },
   10_000,
+);
+
+nativeIt(
+  "resolves the production Fable alias to 5.2 for catalog and inference",
+  async () => {
+    const env = claudeChildEnvironment({}, "dummy", "/unused");
+    const result = await probeNativeSdk({
+      env: { ANTHROPIC_DEFAULT_FABLE_MODEL: env.ANTHROPIC_DEFAULT_FABLE_MODEL ?? "" },
+      beforeQuery(options) {
+        options.model = "fable";
+        options.effort = "high";
+      },
+    });
+    expect(result.supportedModels).toContainEqual({
+      value: "fable",
+      resolvedModel: "claude-fable-5-2",
+    });
+    expect(result.effectiveModel).toBe("claude-fable-5-2");
+    expect(result.requestSettings).toEqual([
+      { model: "claude-fable-5-2", effort: "high" },
+      { model: "claude-fable-5-2", effort: "high" },
+    ]);
+  },
+  30_000,
 );
 
 nativeIt(

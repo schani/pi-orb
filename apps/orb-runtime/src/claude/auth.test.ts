@@ -50,6 +50,7 @@ describe("Claude subscription boundary", () => {
       ANTHROPIC_API_KEY: "api",
       ANTHROPIC_AUTH_TOKEN: "api2",
       ANTHROPIC_BASE_URL: "http://api",
+      ANTHROPIC_DEFAULT_FABLE_MODEL: "claude-fable-5-1",
       CLAUDE_CODE_USE_BEDROCK: "1",
       CLAUDE_CODE_USE_VERTEX: "1",
       CLAUDE_CODE_OAUTH_TOKEN: "other",
@@ -70,6 +71,7 @@ describe("Claude subscription boundary", () => {
       CLOUD_ML_REGION: "us-east5",
       CLAUDE_CODE_OAUTH_TOKEN: "subscription",
       CLAUDE_CONFIG_DIR: "/private",
+      ANTHROPIC_DEFAULT_FABLE_MODEL: "claude-fable-5-2",
     });
     expect(base.CLAUDE_CODE_OAUTH_TOKEN).toBe("other");
   });

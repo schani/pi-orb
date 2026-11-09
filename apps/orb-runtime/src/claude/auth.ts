@@ -100,5 +100,6 @@ export function claudeChildEnvironment(
   }
   env.CLAUDE_CODE_OAUTH_TOKEN = token;
   env.CLAUDE_CONFIG_DIR = configDir;
+  env.ANTHROPIC_DEFAULT_FABLE_MODEL = "claude-fable-5-2";
   return env;
 }
