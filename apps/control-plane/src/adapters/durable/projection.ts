@@ -74,29 +74,11 @@ function isJsonObject(value: JsonValue | undefined): value is JsonObject {
 function publicMessage(message: NonNullable<EntryRecord["model"]>[number]) {
   if (message.role !== "toolResult" || message.toolName !== "codemode") return message;
   const details = message.details;
-  if (!isJsonObject(details) || !Array.isArray(details.calls)) return message;
-  return {
-    ...message,
-    details: {
-      ...details,
-      calls: details.calls.flatMap((call: JsonValue) => {
-        if (!isJsonObject(call)) return [];
-        return [
-          {
-            ...(typeof call.id === "number" ? { id: call.id } : {}),
-            ...(typeof call.name === "string" ? { name: call.name } : {}),
-            ...(typeof call.status === "string" ? { status: call.status } : {}),
-            ...(typeof call.durationMs === "number" ? { durationMs: call.durationMs } : {}),
-            argumentKeys:
-              Array.isArray(call.argumentKeys) &&
-              call.argumentKeys.every((key: JsonValue) => typeof key === "string")
-                ? call.argumentKeys
-                : [],
-          },
-        ];
-      }),
-    },
-  };
+  if (!isJsonObject(details)) return message;
+  const projectedDetails = { ...details };
+  delete projectedDetails.calls;
+  delete projectedDetails.omittedCalls;
+  return { ...message, details: projectedDetails };
 }
 
 /** Root transcript and child launch metadata are public history; native configuration stays private. */
@@ -145,6 +127,7 @@ export function projectEntry(
         ? { type: "model_change", provider: data["provider"], modelId: data["modelId"] }
         : { type: "thinking_level_change", thinkingLevel: data["thinkingLevel"] }),
     });
+  // Written by earlier Pi versions; stored replication cursors may name these entries.
   if (entry.kind === "orb.instructions-adoption")
     return mapPiEntry({
       id,
@@ -293,10 +276,11 @@ export function projectHistory(
   sessionId: string,
   receipts: ReadonlyMap<number, PublicEntryReceipt> = new Map(),
   notifications: ReadonlySet<number> = new Set(),
+  initialParentId: string | null = null,
 ): Result<readonly HistoryRecord[], MappingError> {
   const records: HistoryRecord[] = [];
   for (const entry of entries) {
-    const parentId = records.at(-1)?.id ?? null;
+    const parentId = records.at(-1)?.id ?? initialParentId;
     const receipt = receipts.get(entry.id);
     const system = receipt?.system;
     if (

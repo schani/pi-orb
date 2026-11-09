@@ -116,7 +116,7 @@ it.each(["chromium", "webkit"] as const)(
               (element) => element.ownerDocument.defaultView?.getComputedStyle(element).fontSize,
             ),
           ).toBe("16px");
-        check((await save.boundingBox())?.height).toBeGreaterThanOrEqual(48);
+        check((await save.boundingBox())?.height).toBeGreaterThanOrEqual(44);
         check(
           await page
             .locator("html")

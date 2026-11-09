@@ -80,7 +80,7 @@ it.each(["chromium", "webkit"] as const)(
       await check(main.locator(".busy-indicator")).toHaveCount(0);
       await check(main.locator(".history")).toHaveText("");
       const geometry = await connect.evaluate((element) => {
-        const notice = element.closest(".notice");
+        const notice = element.closest(".banner");
         const record = notice?.parentElement;
         if (!notice || !record) return null;
         const style = element.ownerDocument.defaultView?.getComputedStyle(record);
@@ -112,7 +112,7 @@ it.each(["chromium", "webkit"] as const)(
 
       failHistory = true;
       await page.reload();
-      await check(main.locator(".notice-error")).toContainText("history unavailable:");
+      await check(main.locator(".banner-error")).toContainText("history unavailable:");
       await check(main.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
       await check(main.locator(".rec-sys > .rec-px")).toHaveCount(0);
       await page.goto(`${origin}/orbs/missing-notice-test`);

@@ -190,6 +190,8 @@ it.each([
   { source: "poll", open: false, existingArchive: false },
   { source: "click", open: false, existingArchive: false },
   { source: "delete", open: false, existingArchive: true },
+  { source: "delete", open: false, existingArchive: false },
+  { source: "delete", open: true, existingArchive: true },
   { source: "cancel", open: false, existingArchive: true },
   { source: "reject", open: false, existingArchive: true },
   { source: "pending", open: false, existingArchive: true },
@@ -295,6 +297,12 @@ it.each([
       );
       if (source === "delete") {
         await expectPage(page.getByText("Orb doesn't exist")).toBeVisible();
+        expect(page.url()).toBe(`${origin}/orbs/selected`);
+        if (open) await expectPage(disclosure).toHaveAttribute("open", "");
+        else await expectPage(disclosure).not.toHaveAttribute("open");
+        await page.clock.runFor(2000);
+        if (open) await expectPage(disclosure).toHaveAttribute("open", "");
+        else await expectPage(disclosure).not.toHaveAttribute("open");
         expect(page.url()).toBe(`${origin}/orbs/selected`);
         return;
       }
@@ -908,12 +916,12 @@ flowchart LR
     const sourceToggle = unsafe.getByRole("button", { name: "Show Mermaid source" });
     await sourceToggle.focus();
     await expectPage(sourceToggle).toBeFocused();
-    await sourceToggle.click();
+    await sourceToggle.press("Enter");
     await expectPage(unsafe.locator("pre code")).toHaveText(hostile);
     await unsafe.getByRole("button", { name: "Show diagram" }).click();
     await unsafe.getByRole("button", { name: "Open diagram" }).click();
     const dialog = page.locator("dialog.mermaid-dialog");
-    await expectPage(dialog.locator("svg")).toBeVisible();
+    await expectPage(dialog.locator(".mermaid-dialog-canvas svg")).toBeVisible();
     await expectPage(dialog.locator("script, [onerror], [onclick]")).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expectPage(dialog).toBeHidden();

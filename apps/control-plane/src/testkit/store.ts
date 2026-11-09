@@ -2078,7 +2078,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         hostDiscardError: null,
         // Retained evidence from an earlier failure survives the request: it
         // is cleared only when a replacement commits or a later failure
-        // supersedes it (docs/compute-replacement.md).
+        // supersedes it (docs/lifecycle.md).
         hostDiscardRequestedAt: params.now,
         updatedAt: params.now,
       };
@@ -2313,7 +2313,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     }
     if (orb.harnessSessionId !== session.id || !jsonEqual(orb.harnessSessionHeader, session)) {
       if (orb.replicationCursor === null) {
-        // An empty replica pins nothing (docs/history-replication.md): with no committed
+        // An empty replica pins nothing (docs/history.md): with no committed
         // cursor, a changed session identity is legitimate rotation — a
         // runtime that never flushed starts a fresh session on reboot.
         return { id: session.id, header: session };

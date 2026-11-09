@@ -21,4 +21,4 @@ The initiating loss or mismatch is unproven: no original browser frame capture e
 
 An applied transcript prefix must remain ordered and parent-closed. A browser must not advance its resumable cursor beyond a missing ancestor; a delivered inbox row remains provisional until its matching user record is applied, repaired, or a visible synchronization failure is shown.
 
-No fix was implemented or deployed. Repair and deterministic coverage are tracked in `TODO.md`. The design invariant is in `docs/transcript-cache.md`.
+No fix was implemented or deployed. Repair and deterministic coverage are tracked in `TODO.md`. The design invariant is in `docs/history.md`.

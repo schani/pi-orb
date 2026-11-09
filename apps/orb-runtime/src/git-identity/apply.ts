@@ -39,7 +39,7 @@ const fsStep = Result.fromThrowable(
  * One bounded read of the project owner's identity, written to git's XDG global
  * file. `~/.gitconfig` is created empty if absent and never rewritten: it
  * outranks the XDG file and receives in-orb `git config --global` writes, so
- * those survive the next boot (docs/git-identity.md).
+ * those survive the next boot (docs/agent-context.md).
  */
 export function applyGitIdentity(
   broker: BrokerEnv,

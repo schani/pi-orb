@@ -138,8 +138,9 @@ it.each(["duplicate delivery", "replication snapshot"] as const)(
     expect(f.history.view.filter((record) => record.id === uuid)).toEqual([
       expect.objectContaining({
         id: uuid,
-        type: "event",
-        eventType: "claude.input_receipt",
+        type: "message",
+        role: "user",
+        content,
         inboxMessageIds: messageIds,
         overflow: expect.objectContaining({
           sessionId: f.state.id,

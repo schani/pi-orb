@@ -32,7 +32,7 @@ The probes were intended to capture a fault/core, not obtain a green release res
 
 At the user's request, updated the exact `@playwright/test` pin and lockfile from **1.62.1 to 1.63.0**, the current stable release. The managed WebKit changes from **26.5 / build 2336** to **26.6 / build 2359**; managed Chromium is now **153.0.8010.12 / build 1243**. `npm ci` and `playwright install --with-deps --no-remove chromium webkit` completed; the latter preserves older browser installations for diagnosis.
 
-With core dumps enabled and `DEBUG=pw:browser`, `npm run test:e2e:frontend` passes **41/41 tests** (27 session/desktop and 14 phone cases across Chromium/WebKit), including the original WebKit 320px case. Typecheck and lint pass. No test assertions, retries, renderer flags or timeouts changed. The subsequent complete PR rerun also passes **10 files / 106 tests** on Playwright 1.63.0; provenance is in `scripts/subagent-liveness/evidence/final-qualification-2026-09-14.md`. Neither passing run establishes the original crash's cause.
+With core dumps enabled and `DEBUG=pw:browser`, `npm run test:e2e:frontend` passes **41/41 tests** (27 session/desktop and 14 phone cases across Chromium/WebKit), including the original WebKit 320px case. Typecheck and lint pass. No test assertions, retries, renderer flags or timeouts changed. The subsequent complete PR rerun also passes **10 files / 106 tests** on Playwright 1.63.0; provenance is in `docs/postmortems/2026-09-14-subagent-qualification-evidence.md`. Neither passing run establishes the original crash's cause.
 
 The [1.63.0 release notes](https://github.com/microsoft/playwright/releases/tag/v1.63.0) announce WebKit 26.6 but do not identify a fix matching this fault. Since the old build also passed subsequent probes, this result establishes compatibility with the newer stable build, **not a demonstrated crash fix**. Release-blocking status remains unchanged. Upgrade/install/browser logs are retained locally under `.context/webkit-upgrade/`.
 
@@ -73,6 +73,6 @@ The Chromium core is retained privately with mode 0600 under `.context/pr-qualif
 
 ## Retained artifacts and rule
 
-Raw logs remain under `.context/subagents-continuation/`: `merged-e2e.log`, `webkit-kernel-first.log`, `webkit-diagnostic-matched.log`, `webkit-probe-*.log` and `webkit-probes.txt`. Sanitized full-suite/kernel/probe-result copies are in the downloadable archive indexed by `scripts/subagent-liveness/evidence/README.md`; the historical ledger is `scripts/subagent-liveness/evidence/continuation-2026-09-14.md`.
+Raw logs remain under `.context/subagents-continuation/`: `merged-e2e.log`, `webkit-kernel-first.log`, `webkit-diagnostic-matched.log`, `webkit-probe-*.log` and `webkit-probes.txt`. Sanitized full-suite/kernel/probe-result copies are in the downloadable archive indexed by `docs/postmortems/2026-09-14-subagent-qualification-evidence.md`; the historical ledger is `docs/postmortems/2026-09-14-subagent-qualification-evidence.md`.
 
 The passing subagent/Docker/PostgreSQL cases establish their own coverage, not a clean combined release gate. Native browser crashes must retain process/kernel evidence; an isolated passing rerun cannot substitute for a cause and deterministic repair or a justified platform remedy. The invariant remains the no-flake rule in `docs/testing.md`.

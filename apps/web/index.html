@@ -3,7 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
-    <meta name="theme-color" content="#ffffff" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#000000" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="pi-orb" />
@@ -25,6 +27,11 @@
         background-color: #ffffff;
         background-clip: text;
         pointer-events: none;
+      }
+      @media (prefers-color-scheme: dark) {
+        .status-bar-band {
+          background-color: #000000;
+        }
       }
     </style>
   </head>

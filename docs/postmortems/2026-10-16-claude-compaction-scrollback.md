@@ -6,7 +6,7 @@ The native bridge was not inspected. Private evidence remains in `/tmp/target-hi
 
 **Decision — 2026-10-16:** default Claude snapshots read all committed replica records; Pi and explicit anchors retain ancestry semantics. No stored parents, IDs, cursors, native state or persisted schema change.
 Component-aware Kahn ordering keeps rooted components together, parents before children and cursor last. Rejected timestamp sort plus ancestor DFS: an experiment on the incident records moved six old messages after compaction.
-Exact native append ordinals were not retained; unrelated branches/ties have deterministic causal presentation, not recovered append order. Contract: `docs/history-replication.md`.
+Exact native append ordinals were not retained; unrelated branches/ties have deterministic causal presentation, not recovered append order. Contract: `docs/history.md`.
 
 Initial regressions exposed missing pre-compaction records, then missing-parent validation and a nontransitive invalid-timestamp comparator; corrected with explicit validation and invalid timestamps mapped to zero (evidence: `/tmp/claude-scrollback-{regression-red,focused,comparator-red}.log`).
 Final checks passed: shared memory/PGlite/PostgreSQL contracts, ordering helper, existing HTTP/inbox tests, and typecheck (`/tmp/pr142-{focused-tests,final-postgres-tests,final-typecheck}.log`).

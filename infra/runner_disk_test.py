@@ -215,7 +215,7 @@ class RunnerDiskTests(unittest.TestCase):
         self.assertEqual(e2e.count('infra/runner_disk.py'), 1)
         self.assertNotIn('infra/runner_disk.py', durable)
         self.assertIn('timeout-minutes: 30', ci)
-        self.assertIn('timeout-minutes: 40', e2e)
+        self.assertIn('timeout-minutes: 60', e2e)
         self.assertIn('timeout-minutes: 10', e2e)
 
 

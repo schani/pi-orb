@@ -36,7 +36,7 @@ import {
 import { createFilesystemHostedByteStore } from "./adapters/hosting/filesystem.ts";
 import { createGcsHostedByteStore, createGcsTokenProvider } from "./adapters/hosting/gcs.ts";
 import { createMcpOAuthFetch, SdkMcpOAuth } from "./adapters/mcp-oauth.ts";
-import { probeMcp } from "./adapters/mcp-probe.ts";
+import { checkMcp, probeMcp } from "./adapters/mcp-probe.ts";
 import { OAuthUpstreamRefresher } from "./adapters/oauth/refresher.ts";
 import { readIssuerUrl } from "./adapters/oidc/issuer-url.ts";
 import {
@@ -134,7 +134,7 @@ import {
 import { registerIssuerRoutes } from "./http/issuer-routes.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
 import { MCP_OAUTH_CALLBACK, registerMcpOAuthRoutes } from "./http/mcp-oauth-routes.ts";
-import { registerMcpRoutes } from "./http/mcp-routes.ts";
+import { registerMcpRoutes, registerProjectMcpStatusRoute } from "./http/mcp-routes.ts";
 import { registerOrbFilesBoundary, registerOrbFilesGateway } from "./http/orb-files-gateway.ts";
 import { orbFilesBaseUrl } from "./http/orb-files-url.ts";
 import { registerPreviewAuth } from "./http/preview-auth-routes.ts";
@@ -347,7 +347,7 @@ export async function main(
   }
 
   // E2E mode routes central Codex auth and model calls to the mock
-  // (docs/PI-CODEX-E2E.md).
+  // (docs/testing.md).
   const mockOpenAi = readMockOpenAiEnv(process.env);
   if (mockOpenAi !== null) {
     bootTask.log("E2E mode: Codex OAuth/inference routed to", mockOpenAi.oauthBaseUrl);
@@ -452,7 +452,7 @@ export async function main(
     databaseKind: databaseKind === "pglite" ? "pglite" : "postgres",
     version: CONTROL_PLANE_VERSION,
   };
-  // Forward-only immutable-spec replacement fence (docs/compute-replacement.md).
+  // Forward-only immutable-spec replacement fence (docs/lifecycle.md).
   // An unparsable or unset value folds to 0: such a revision replaces nothing
   // a real deploy stamped, and the next real deploy replaces forward.
   const specGeneration = Number.parseInt(env("PI_ORB_HOST_SPEC_GENERATION", "0"), 10) || 0;
@@ -967,6 +967,13 @@ export async function main(
       await registerLiveProxy(browser, httpTask, deps);
       startupPhase("websocket.complete");
       registerRoutes(browser, httpTask, deps, systemView, signingKeyDeps, filesBaseUrl);
+      registerProjectMcpStatusRoute(browser, httpTask, deps.userScope, {
+        store: deps.store,
+        catalog: database.mcp,
+        projectSecrets: deps.projectSecrets,
+        oauth: mcpOAuth,
+        probe: checkMcp,
+      });
       registerMcpOAuthRoutes(browser, httpTask, database.mcp, mcpOAuth, appOrigin);
       registerMcpRoutes(browser, httpTask, database.mcp, async (projectId, config) => {
         const snapshot = await getProjectSecretSnapshot(httpTask, deps.projectSecrets, projectId);
@@ -1153,7 +1160,7 @@ export async function main(
   signingKeyRepair = ensureSigningKeyInBackground();
 
   // Background loops: same domain code as the simulations, on real time
-  // (docs/history-replication.md, docs/lifecycle.md).
+  // (docs/history.md, docs/lifecycle.md).
   const activationReader =
     activationBucket === ""
       ? undefined

@@ -2,7 +2,7 @@
 
 ## Incident
 
-Deploy [35168145109](https://github.com/schani/pi-orb/actions/runs/35168145109) applied `022_typed_history_fields.sql` at `2026-09-17T01:38:06.336Z` without first stopping running orbs, contrary to the then-current manual requirement in `docs/pi-adapter.md`. A legacy `1fcc261` runtime continued writing after the one-time backfill. The deployment had no compatibility or typed-rejection boundary for later legacy-shaped writes.
+Deploy [35168145109](https://github.com/schani/pi-orb/actions/runs/35168145109) applied `022_typed_history_fields.sql` at `2026-09-17T01:38:06.336Z` without first stopping running orbs, contrary to the then-current manual requirement in `docs/pi.md`. A legacy `1fcc261` runtime continued writing after the one-time backfill. The deployment had no compatibility or typed-rejection boundary for later legacy-shaped writes.
 
 The automated release itself completed with durable outcome `validated` at `01:53:47Z`; GitHub completed at `01:53:59Z`. That verdict covers its encoded gates, not the omitted fleet writer fence. Migration compatibility enforcement remains a follow-up.
 

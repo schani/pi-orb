@@ -18,7 +18,7 @@ describe("repository skipped-skill notice", () => {
       <OrbResourceWarnings warnings={[{ path: ".agents/skills/example/SKILL.md", code }]} />,
     );
     expect(html).toContain('class="rec rec-sys orb-notice"');
-    expect(html).toContain('class="rec-bd notice"');
+    expect(html).toContain('class="rec-bd banner"');
     expect(html).toContain("Skipped repository skill");
     expect(html.match(/\.agents\/skills\/example\/SKILL.md/g)).toHaveLength(1);
     expect(html).toContain(reason);

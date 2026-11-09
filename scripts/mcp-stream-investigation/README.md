@@ -8,4 +8,4 @@ After `npm ci`, run the retained proxy tests with the repository-local runner:
 ./node_modules/.bin/vitest run --config scripts/mcp-stream-investigation/vitest.config.ts
 ```
 
-Historical stream-abort findings, sanitized first-failure ledger, controlled-injection limits, and mock fix validation: [docs/postmortems/2026-09-27-mcp-isolation-stream-abort.md](../../docs/postmortems/2026-09-27-mcp-isolation-stream-abort.md).
+Background: [docs/postmortems/2026-09-27-mcp-isolation-stream-abort.md](../../docs/postmortems/2026-09-27-mcp-isolation-stream-abort.md).

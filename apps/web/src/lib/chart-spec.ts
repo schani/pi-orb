@@ -20,17 +20,19 @@ export interface VegaSpec extends VegaLayer {
   params?: { name: string; value: unknown }[];
 }
 
-const INK = "#000";
-const MUTED = "#555";
-const HAIRLINE = "#999";
-const GRID = "#e6e6e6";
-const FILL = "#f2f2f2";
-const PALE = "#d9d9d9";
-const BAD = "#b42318";
-const INK_COLORS = ["#000", "#555", "#777"];
+/** Vega writes these into SVG attributes, where the page's theme resolves them live. */
+const PAPER = "var(--w)";
+const INK = "var(--k)";
+const MUTED = "var(--g3)";
+const HAIRLINE = "var(--g2)";
+const GRID = "var(--g1x)";
+const FILL = "var(--g1)";
+const PALE = "var(--g1x)";
+const BAD = "var(--bad)";
+const INK_COLORS = [INK, MUTED, MUTED];
 const INK_DASH = [[], [6, 3], [1.5, 3]];
 /** Validated against #fff for colour-blind and normal-vision separation across all pairs. */
-const HUES = ["#2a78d6", "#eb6834", "#4a3aa7", "#1baf7a", "#c2418a", "#7a5c00"];
+const HUES = [1, 2, 3, 4, 5, 6].map((index) => `var(--chart-${index})`);
 const LABEL_GAP = 13;
 /** Opacity of lines that are not the isolated series. */
 const DIMMED = 0.12;
@@ -57,7 +59,7 @@ export const CHART_CONFIG = {
   axisBand: { domain: false, ticks: false, labelColor: INK, labelFontSize: 11, labelPadding: 8 },
   line: { strokeWidth: 2, strokeCap: "round", strokeJoin: "round" },
   bar: { cornerRadius: 0, color: INK },
-  point: { filled: true, size: 56, stroke: "#fff", strokeWidth: 2, opacity: 1 },
+  point: { filled: true, size: 56, stroke: PAPER, strokeWidth: 2, opacity: 1 },
   text: { font: "JetBrains Mono", fontSize: 11, color: INK },
   rule: { color: INK, strokeWidth: 1 },
   legend: { disable: true },
@@ -191,15 +193,32 @@ export function lineChartSpec(
           },
         ];
   });
-  const placed = spreadLabels(
-    last.map((item) => pixel(item.v)),
-    height,
+  const thresholds = spec.thresholds ?? [];
+  const labelTime = Math.max(
+    ...rows.map((row) => row.t),
+    ...bands.map((row) => row.t),
+    ...(spec.markers ?? []).map((marker) => marker.at),
   );
+  // All annotations share the right gutter, outside the data and threshold rules.
+  // Reserve half a line at each edge; even six series plus four thresholds fit at 180px.
+  const positions = [
+    ...thresholds.map((item) => pixel(item.value)),
+    ...(labels ? last.map((item) => pixel(item.v)) : []),
+  ];
+  const placed = spreadLabels(
+    positions.map((y) => Math.max(0, Math.min(height - 12, y - 6))),
+    height - 12,
+    16,
+  );
+  const labelValue = (index: number) => lo + (1 - ((placed[index] ?? 0) + 6) / height) * (hi - lo);
   const ends = last.map((item, index) => ({
     ...item,
-    lv: lo + (1 - (placed[index] ?? pixel(item.v)) / height) * (hi - lo),
+    lt: labelTime,
+    lv: labels ? labelValue(thresholds.length + index) : item.v,
   }));
-  const leaders = ends.some((item) => Math.abs(pixel(item.lv) - pixel(item.v)) > 1);
+  const leaders = ends.some(
+    (item) => item.t !== labelTime || Math.abs(pixel(item.lv) - pixel(item.v)) > 1,
+  );
   const format = timeFormat(spec);
   const x = {
     field: "t",
@@ -207,6 +226,8 @@ export function lineChartSpec(
     title: null,
     axis: {
       format,
+      labelOverlap: "greedy",
+      labelSeparation: 6,
       ...(narrow ? { tickCount: 3 } : {}),
       ...(xAxis === undefined
         ? {}
@@ -228,22 +249,43 @@ export function lineChartSpec(
     scale: { domain: names, range: colors },
     legend: null,
   };
-  const first = Math.min(...rows.map((row) => row.t));
   const layer: VegaLayer[] = [];
-  for (const threshold of spec.thresholds ?? [])
+  for (const [index, threshold] of thresholds.entries())
     layer.push({
-      data: { values: [{ y: threshold.value }] },
+      data: { values: [{ y: threshold.value, lv: labelValue(index), label: threshold.label }] },
       layer: [
         {
+          name: `threshold_rule_${index}`,
           mark: { type: "rule", color: BAD },
           encoding: { y: { field: "y", type: "quantitative" } },
         },
         {
-          mark: { type: "text", color: BAD, align: "left", baseline: "bottom", dx: 2, dy: -2 },
+          mark: { type: "rule", color: HAIRLINE, xOffset: 5, x2Offset: 13 },
           encoding: {
+            x: { datum: labelTime, type: "temporal" },
+            x2: { datum: labelTime },
             y: { field: "y", type: "quantitative" },
-            x: { datum: first, type: "temporal" },
-            text: { value: threshold.label },
+            y2: { field: "lv" },
+          },
+        },
+        {
+          name: `threshold_label_${index}`,
+          mark: {
+            type: "text",
+            color: BAD,
+            align: "left",
+            baseline: "middle",
+            dx: 16,
+            limit: narrow ? 140 : 240,
+          },
+          encoding: {
+            y: { field: "lv", type: "quantitative" },
+            x: { datum: labelTime, type: "temporal" },
+            text: { field: "label" },
+            tooltip: [
+              { field: "label", type: "nominal", title: "threshold" },
+              { field: "y", type: "quantitative", title: "value" },
+            ],
           },
         },
       ],
@@ -329,7 +371,7 @@ export function lineChartSpec(
         ? [
             {
               mark: { type: "rule", color: HAIRLINE, xOffset: 5, x2Offset: 13 },
-              encoding: { x, x2: { field: "t" }, y, y2: { field: "lv" }, opacity: isolate(0.25) },
+              encoding: { x, x2: { field: "lt" }, y, y2: { field: "lv" }, opacity: isolate(0.25) },
             },
           ]
         : []),
@@ -337,9 +379,9 @@ export function lineChartSpec(
         ? [
             {
               name: "end_labels",
-              mark: { type: "text", align: "left", dx: leaders ? 16 : 8, cursor: "default" },
+              mark: { type: "text", align: "left", baseline: "middle", dx: 16, cursor: "default" },
               encoding: {
-                x,
+                x: { ...x, field: "lt" },
                 y: { field: "lv", type: "quantitative" },
                 text: { field: "label" },
                 opacity: isolate(0.3),
@@ -708,9 +750,9 @@ const tickLabel = (ms: number) =>
 const LANE = 22;
 /** Fill and label colour by tooltip state. */
 const SPAN_COLORS = {
-  failed: [BAD, "#fff"],
-  queued: ["#fff", MUTED],
-  "critical path": [INK, "#fff"],
+  failed: [BAD, PAPER],
+  queued: [PAPER, MUTED],
+  "critical path": [INK, PAPER],
   "": [PALE, INK],
 } as const;
 
@@ -826,7 +868,7 @@ export function heatmapSpec(spec: HeatmapChart): VegaSpec {
         })),
       ),
     },
-    mark: { type: "rect", stroke: "#fff", strokeWidth: 1 },
+    mark: { type: "rect", stroke: PAPER, strokeWidth: 1 },
     encoding: {
       x: {
         field: "x",
@@ -977,7 +1019,7 @@ export function compareSpec(spec: CompareChart, { narrow }: { narrow: boolean })
       mark: {
         type: "point",
         filled: true,
-        fill: "#fff",
+        fill: PAPER,
         strokeWidth: 1.5,
         size: 40,
         yOffset: offset,
@@ -1190,6 +1232,8 @@ export function tooltipRows(spec: ChartSpec, value: Record<string, unknown>): To
     return Object.entries(value)
       .filter(([, item]) => item !== "")
       .map(([label, item]) => ({ label, value: String(item) }));
+  if (value["time"] === undefined && typeof value["threshold"] === "string")
+    return [{ label: value["threshold"], value: formatValue(spec.unit, number(value["value"])) }];
   const { colors, dash } = seriesStyles(spec.series.length);
   const many = spec.series.length > 1;
   return [

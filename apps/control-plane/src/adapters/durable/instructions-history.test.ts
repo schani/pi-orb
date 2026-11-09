@@ -6,7 +6,7 @@ import { expect, it } from "vitest";
 import { DurableAgent, type DurableAgentOptions } from "./agent.ts";
 import { MemoryAgentPersistence } from "./memory-persistence.testkit.ts";
 
-it("records private instruction adoption edges once across reopen, including clearing", async () => {
+it("writes no instruction history when instructions change across reopen", async () => {
   const authority = new MemoryAgentPersistence();
   const models = createModels();
   models.setProvider(fauxProvider({ models: [{ id: "one" }] }).provider);
@@ -20,7 +20,6 @@ it("records private instruction adoption edges once across reopen, including cle
       env: new NodeExecutionEnv({ cwd: "/tmp" }),
       checkoutCommit: "commit",
       instructions: content,
-      instructionSnapshots: { personal: { revision, content }, project: { revision, content } },
       initialSettings: { model: { provider: "faux", id: "one" }, thinkingLevel: "off" },
     } satisfies DurableAgentOptions;
     return (await DurableAgent.open(options))._unsafeUnwrap();
@@ -28,34 +27,14 @@ it("records private instruction adoption edges once across reopen, including cle
   let agent = await open(0, "");
   const history = async () => (await agent.pullHistory(null, 100))._unsafeUnwrap().records;
   try {
-    expect(await history()).toHaveLength(2);
+    const initial = await history();
+    expect(initial).toHaveLength(2);
     await agent.close();
     agent = await open(1, "PRIVATE_INSTRUCTION");
-    const adopted = await history();
-    expect(adopted).toHaveLength(4);
-    expect(JSON.stringify(adopted)).toContain("pi-orb:personal-instructions");
-    expect(JSON.stringify(adopted)).toContain("pi-orb:project-instructions");
-    expect(JSON.stringify(adopted)).not.toContain("PRIVATE_INSTRUCTION");
-    expect(adopted.slice(2)).toMatchObject([
-      {
-        overflow: { native: { customType: "pi-orb:personal-instructions", data: { revision: 1 } } },
-      },
-      {
-        overflow: { native: { customType: "pi-orb:project-instructions", data: { revision: 1 } } },
-      },
-    ]);
-    await agent.close();
-    agent = await open(1, "PRIVATE_INSTRUCTION");
-    expect(await history()).toEqual(adopted);
+    expect(await history()).toEqual(initial);
     await agent.close();
     agent = await open(2, "");
-    const cleared = await history();
-    expect(cleared).toHaveLength(6);
-    expect(cleared.slice(0, 4)).toEqual(adopted);
-    expect(cleared.slice(4)).toMatchObject([
-      { overflow: { native: { data: { revision: 2 } } } },
-      { overflow: { native: { data: { revision: 2 } } } },
-    ]);
+    expect(await history()).toEqual(initial);
   } finally {
     await agent.close();
     await authority.close();

@@ -41,7 +41,6 @@ import type {
   DeliverOrbMessageResponse,
   HistoryRecord,
   OrbMessageSystem,
-  PersonalInstructions,
   PullHistoryResponse,
   RequestResultFrame,
   RuntimeEvent,
@@ -52,11 +51,6 @@ import type {
 import { createDisplayRecordProjector, reasoningHeadline } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, type Result, ResultAsync } from "neverthrow";
-import {
-  instructionsAdoption,
-  PERSONAL_INSTRUCTIONS_ADOPTION,
-  PROJECT_INSTRUCTIONS_ADOPTION,
-} from "../../../../orb-runtime/src/domain/instructions-adoption.ts";
 import {
   codexModelDisplayName,
   eligibleCodexModels,
@@ -115,16 +109,6 @@ const Identity = defineDoc<{
     settings: {},
     publicSettingsInitialized: false,
   }),
-});
-
-const InstructionAdoptions = defineDoc<Record<string, { revision: number; sha256: string }>>({
-  kind: "orb.instruction-adoptions",
-  version: 1,
-  checkpointWhen: () => false,
-  scope: "conversation",
-  history: "latest",
-  fork: "initial",
-  initial: () => ({}),
 });
 
 function publicSettings(state: Readonly<AgentState>): AgentSettings | null {
@@ -198,10 +182,6 @@ export interface DurableAgentOptions {
   readonly checkoutCommit: string | null;
   readonly hooks?: RuntimeHooks;
   readonly instructions: string;
-  readonly instructionSnapshots?: {
-    readonly personal: PersonalInstructions;
-    readonly project: PersonalInstructions;
-  };
   readonly initialSettings?: AgentSettings;
   readonly now?: () => number;
   readonly edge?: (
@@ -224,7 +204,8 @@ export class DurableAgent implements AgentSessionFacade {
   private readonly listeners = new Set<(frame: ServerFrame) => void>();
   private readonly invalidationListeners = new Set<() => void>();
   private records: HistoryRecord[] = [];
-  private entries: EntryRecord[] = [];
+  private readonly projectDisplay = createDisplayRecordProjector();
+  private pendingEntries: EntryRecord[] = [];
   private receipts: Record<string, Receipt> = {};
   private settingsReceipts: Record<string, string> = {};
   private turnStart = 0;
@@ -401,21 +382,6 @@ export class DurableAgent implements AgentSessionFacade {
             );
             doc.publicSettingsInitialized = true;
           }
-          if (options.instructionSnapshots) {
-            const adoptions = await tx.doc(InstructionAdoptions, root.id);
-            for (const [customType, snapshot] of [
-              [PERSONAL_INSTRUCTIONS_ADOPTION, options.instructionSnapshots.personal],
-              [PROJECT_INSTRUCTIONS_ADOPTION, options.instructionSnapshots.project],
-            ] as const) {
-              const next = instructionsAdoption(snapshot, adoptions[customType] ?? null);
-              if (!next) continue;
-              await tx.appendEntry(root.id, {
-                kind: "orb.instructions-adoption",
-                data: { customType, data: next, timestamp: options.now?.() ?? Date.now() },
-              });
-              adoptions[customType] = next;
-            }
-          }
           doc.instructionDigest = createHash("sha256").update(options.instructions).digest("hex");
           // pi-durable creates the same document lazily before the first provider request.
           rootSessionId = (await tx.doc(ProviderDoc, root.id)).sessionId;
@@ -478,7 +444,7 @@ export class DurableAgent implements AgentSessionFacade {
         let cursor: Cursor | undefined;
         do {
           const page = await root.entries({}, 256, cursor, context);
-          agent.entries.unshift(...[...page.items].reverse());
+          agent.pendingEntries.unshift(...[...page.items].reverse());
           cursor = page.next;
         } while (cursor !== undefined);
         stage = "observations";
@@ -513,7 +479,7 @@ export class DurableAgent implements AgentSessionFacade {
                 agent.runTaskId = live.run?.taskId ?? agent.runTaskId ?? live.runFailure?.taskId;
               }
               if (change.type === "entry" && change.value.conversationId === root.id) {
-                agent.entries.push(change.value);
+                agent.pendingEntries.push(change.value);
                 const entry = change.value;
                 const owner =
                   entry.model?.[0]?.role === "assistant" && entry.byTaskId !== undefined
@@ -540,6 +506,7 @@ export class DurableAgent implements AgentSessionFacade {
                 }
               }
             }
+            // Submission provenance may follow its entry in this publication.
             if (changed) agent.queueProjection();
           },
           end: (end) => {
@@ -893,20 +860,29 @@ export class DurableAgent implements AgentSessionFacade {
   }
 
   private queueProjection(): Promise<Result<void, RuntimeClientError>> {
-    const entries = [...this.entries];
-    const notifications = new Set(this.notificationEntries);
+    const entries = this.pendingEntries;
+    this.pendingEntries = [];
     this.pendingProjection++;
     this.projection = this.projection
       .then(async (previous) => {
         if (previous.isErr()) return previous;
         const receipts = new Map<number, PublicEntryReceipt>();
-        for (const [entryId, messageId] of this.inboxEntries) {
-          const receipt = this.receipts[messageId];
-          if (receipt) receipts.set(entryId, receipt);
+        const notifications = new Set<number>();
+        for (const entry of entries) {
+          const messageId = this.inboxEntries.get(entry.id);
+          const receipt = messageId === undefined ? undefined : this.receipts[messageId];
+          if (receipt) receipts.set(entry.id, receipt);
+          if (this.notificationEntries.has(entry.id)) notifications.add(entry.id);
         }
-        const projected = projectHistory(entries, this.session.id, receipts, notifications);
+        const projected = projectHistory(
+          entries,
+          this.session.id,
+          receipts,
+          notifications,
+          this.records.at(-1)?.id ?? null,
+        );
         if (projected.isErr()) return err(durableError("central history mapping failed"));
-        const records = [...projected.value];
+        const records = this.records.concat(projected.value);
         const snapshot: AgentSnapshot = {
           orbId: this.options.orbId,
           runtimeInstanceId: this.runtimeInstanceId,
@@ -918,33 +894,29 @@ export class DurableAgent implements AgentSessionFacade {
         };
         const persisted = await this.options.commitHistory?.(snapshot);
         if (persisted?.isErr()) return err(persisted.error);
-        const project = createDisplayRecordProjector();
-        const known = new Set(this.records.map((record) => record.id));
         this.records = records;
-        for (const record of records) {
-          const display = project(record);
-          if (!known.has(record.id)) {
-            if (
-              record.type === "message" &&
-              record.role === "assistant" &&
-              this.operationOutcome !== "aborted"
-            )
-              this.operationOutcome =
-                record.finishReason === "error"
-                  ? "failed"
-                  : record.finishReason === "aborted"
-                    ? "aborted"
-                    : "completed";
-            this.publish({
-              v: 1,
-              type: "history.record",
-              at: new Date(this.now()).toISOString(),
-              record: display,
-              retiredBlockIds: this.retiredBlocks.get(record.id) ?? [],
-              headId: record.id,
-            });
-            this.retiredBlocks.delete(record.id);
-          }
+        for (const record of projected.value) {
+          const display = this.projectDisplay(record);
+          if (
+            record.type === "message" &&
+            record.role === "assistant" &&
+            this.operationOutcome !== "aborted"
+          )
+            this.operationOutcome =
+              record.finishReason === "error"
+                ? "failed"
+                : record.finishReason === "aborted"
+                  ? "aborted"
+                  : "completed";
+          this.publish({
+            v: 1,
+            type: "history.record",
+            at: new Date(this.now()).toISOString(),
+            record: display,
+            retiredBlockIds: this.retiredBlocks.get(record.id) ?? [],
+            headId: record.id,
+          });
+          this.retiredBlocks.delete(record.id);
         }
         return ok(undefined);
       })

@@ -388,19 +388,36 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
 
 type Turn =
   | { kind: "user"; record: MessageRecord }
-  | { kind: "inbox-receipt"; record: EventRecord; messages: OrbMessageView[] }
-  | { kind: "peer"; record: EventRecord; senderId: string }
   | { kind: "agent"; key: string; records: Array<MessageRecord | EventRecord> }
   | { kind: "alert"; record: EventRecord; message: string }
   | { kind: "compaction"; record: CompactionRecord | EventRecord };
 
-/** Per docs/pi-adapter.md: custom messages need `display`; settings-fallback and compaction notices always show. */
+/** Per docs/pi.md: custom messages need `display`; settings-fallback and compaction notices always show. */
 function isDisplayedCustomMessage(record: EventRecord): boolean {
   return (
     record.eventType === "agent.settings_fallback" ||
     record.eventType === "agent.compaction" ||
     record.custom?.display === true
   );
+}
+
+/** Restart notices are activity steps; their row stays the literal notice. */
+function restartHeadline(record: EventRecord): string | undefined {
+  switch (record.custom?.customType) {
+    case "pi-orb.harness-restarted":
+      return "harness restarted";
+    case "pi-orb.sleep-wake":
+      return "sleep finished";
+    case "pi-orb.host-restarted":
+    case "pi-orb.turn-resume":
+    case "pi-orb.turn-resume-declined":
+      // One boot marker type covers both causes; only its text says which.
+      return blockText(record.content ?? []).startsWith("The agent runtime was restarted")
+        ? "runtime restarted"
+        : "host restarted";
+    default:
+      return undefined;
+  }
 }
 
 function assistantFailure(record: MessageRecord): string | null {
@@ -451,6 +468,7 @@ function renderAgentRecords(
   records: readonly (MessageRecord | EventRecord)[],
   pairing: ToolPairing,
   tools: readonly ToolChip[],
+  senderNames: ReadonlyMap<string, string | null>,
 ): ActivityItem[] {
   const items: ActivityItem[] = [];
   const push = (node: ReactNode) => {
@@ -475,6 +493,31 @@ function renderAgentRecords(
   for (const record of records) {
     if (record.type === "event") {
       flushTools();
+      if (record.eventType === "orb.message" && record.sender !== undefined) {
+        const senderId = record.sender.orbId;
+        const node = (
+          <PeerNotice
+            key={record.id}
+            id={record.id}
+            senderId={senderId}
+            name={senderNames.get(senderId)}
+            text={blockText(record.content ?? [])}
+          />
+        );
+        items.push({
+          key: record.id,
+          node,
+          step: {
+            key: record.id,
+            identity: record.id,
+            node,
+            state: "notification",
+            label: "notification",
+            headline: senderNames.get(senderId)?.trim() || senderId,
+          },
+        });
+        continue;
+      }
       const facts = subagentStep(record);
       if (facts !== undefined) {
         const node = <OwnedSubagent key={record.id} record={record} />;
@@ -486,13 +529,30 @@ function renderAgentRecords(
         push(<DeliveryRow key={record.id} record={record} />);
         continue;
       }
-      push(
+      const node = (
         <div className="record-custom" key={record.id}>
           <p className={record.compactionOutcome === "failed" ? "msg-text error-text" : "msg-text"}>
             <PlainChatText>{blockText(record.content ?? [])}</PlainChatText>
           </p>
-        </div>,
+        </div>
       );
+      const headline = restartHeadline(record);
+      items.push({
+        key: record.id,
+        node,
+        ...(headline === undefined
+          ? {}
+          : {
+              step: {
+                key: record.id,
+                identity: record.id,
+                node,
+                state: "restart",
+                label: "restart",
+                headline,
+              },
+            }),
+      });
       continue;
     }
 
@@ -518,6 +578,7 @@ function renderAgentRecords(
         }
         continue;
       }
+      if (block.type === "text" && block.text.trim() === "") continue;
 
       // Visible prose/reasoning/media is a boundary between maximal tool runs.
       flushTools();
@@ -577,17 +638,19 @@ const AgentRecords = memo(
     records,
     pairing,
     tools,
+    senderNames,
     live,
     busy = false,
   }: {
     records: readonly (MessageRecord | EventRecord)[];
     pairing: ToolPairing;
     tools: readonly ToolChip[];
+    senderNames: ReadonlyMap<string, string | null>;
     live?: LiveAgentContent | undefined;
     busy?: boolean;
   }) {
     const openState = useContext(OpenDetailValue);
-    const items = renderAgentRecords(records, pairing, tools);
+    const items = renderAgentRecords(records, pairing, tools, senderNames);
     if (live !== undefined) items.push(...liveAgentItems(live));
     return [
       ...groupActivity(items, openState),
@@ -598,6 +661,7 @@ const AgentRecords = memo(
   (previous, next) => {
     if (
       previous.tools !== next.tools ||
+      previous.senderNames !== next.senderNames ||
       previous.live !== next.live ||
       previous.busy !== next.busy ||
       previous.records.length !== next.records.length ||
@@ -629,11 +693,7 @@ function turnKey(turn: Turn): string {
 
 function groupTurns(records: readonly DisplayRecord[], queuedMessages: readonly OrbMessageView[]) {
   const represented = representedInboxMessageIds(records);
-  const pending = new Map(
-    queuedMessages
-      .filter((message) => !represented.has(message.id))
-      .map((message) => [message.id, message]),
-  );
+  const pendingMessages = queuedMessages.filter((message) => !represented.has(message.id));
   const turns: Turn[] = [];
   const appendAgentPart = (record: MessageRecord | EventRecord) => {
     const last = turns[turns.length - 1];
@@ -653,16 +713,8 @@ function groupTurns(records: readonly DisplayRecord[], queuedMessages: readonly 
         turns.push({ kind: "compaction", record });
         break;
       case "event":
-        if (record.eventType === "claude.input_receipt") {
-          const messages = (record.inboxMessageIds ?? []).flatMap((id) => {
-            const message = pending.get(id);
-            if (message === undefined) return [];
-            pending.delete(id);
-            return [message];
-          });
-          if (messages.length > 0) turns.push({ kind: "inbox-receipt", record, messages });
-        } else if (record.eventType === "orb.message" && record.sender !== undefined) {
-          turns.push({ kind: "peer", record, senderId: record.sender.orbId });
+        if (record.eventType === "orb.message" && record.sender !== undefined) {
+          appendAgentPart(record);
         } else if (record.alert !== undefined) {
           turns.push({ kind: "alert", record, message: record.alert.message });
         } else if (record.eventType === "agent.compaction") {
@@ -673,7 +725,7 @@ function groupTurns(records: readonly DisplayRecord[], queuedMessages: readonly 
         break;
     }
   }
-  return { turns, pendingMessages: [...pending.values()] };
+  return { turns, pendingMessages };
 }
 
 function OwnedSubagent({ record }: { record: EventRecord }) {
@@ -719,12 +771,11 @@ function liveAgentItems(live: LiveAgentContent): ActivityItem[] {
   return items;
 }
 
-function CorrespondenceBand({
+function PeerNotice({
   senderId,
   name,
   text,
   id,
-  pending = false,
   status,
   error,
 }: {
@@ -732,27 +783,41 @@ function CorrespondenceBand({
   name: string | null | undefined;
   text: string;
   id: string;
-  pending?: boolean;
   status?: string;
   error?: string;
 }) {
+  const openState = useContext(OpenDetailValue);
+  const [open, setOpen] = useState(() => openState?.opened.has(id) ?? false);
   return (
-    <article
-      className={`rec rec-peer${pending ? " rec-q" : ""}`}
-      data-history-row={pending ? undefined : id}
-      aria-label="Orb message"
-    >
-      <div className="rec-bd">
-        <div className="peer-heading">
-          <a className="peer-sender" href={`/orbs/${encodeURIComponent(senderId)}`}>
+    <ActivityRailRow
+      className="peer-notice"
+      label="notification"
+      headline={open ? undefined : error}
+      state={status === "failed" ? "failed" : "neutral"}
+      metric={
+        <>
+          <a
+            className="peer-sender"
+            title={name?.trim() || senderId}
+            href={`/orbs/${encodeURIComponent(senderId)}`}
+          >
             {name?.trim() ? name : senderId}
           </a>
-          {status !== undefined && <span className="rec-status">{status}</span>}
-        </div>
-        <div className="peer-body">{text}</div>
-        {error !== undefined && <div className="error-text">{error}</div>}
+          {status !== undefined && <span className="tag rec-status">{status}</span>}
+        </>
+      }
+      defaultOpen={open}
+      onToggle={(value) => {
+        setOpen(value);
+        if (value) openState?.opened.add(id);
+        else openState?.opened.delete(id);
+      }}
+    >
+      <div className="peer-body">
+        {text}
+        {open && error !== undefined && <div className="error-text">{error}</div>}
       </div>
-    </article>
+    </ActivityRailRow>
   );
 }
 
@@ -769,23 +834,25 @@ function renderInboxMessage(
   const failed = message.status === "failed";
   if (message.system?.kind === "orb_message") {
     return (
-      <CorrespondenceBand
-        key={message.id}
-        id={message.id}
-        senderId={message.system.senderOrbId}
-        name={senderNames.get(message.system.senderOrbId)}
-        text={blockText(message.content.filter((block) => block.type === "text"))}
-        pending
-        status={status}
-        {...(failed && message.error !== undefined ? { error: message.error } : {})}
-      />
+      <article className="rec rec-orb" key={message.id} aria-label="Orb message">
+        <div className="rec-bd">
+          <PeerNotice
+            id={message.id}
+            senderId={message.system.senderOrbId}
+            name={senderNames.get(message.system.senderOrbId)}
+            text={blockText(message.content.filter((block) => block.type === "text"))}
+            status={status}
+            {...(failed && message.error !== undefined ? { error: message.error } : {})}
+          />
+        </div>
+      </article>
     );
   }
   return (
     <article className={`rec ${system ? "rec-orb" : "rec-you"} rec-q`} key={message.id}>
       <span className="visually-hidden">{system ? "System:" : "You:"}</span>
       <div className="rec-bd">
-        <span className="rec-status">{status}</span>
+        <span className="tag rec-status">{status}</span>
         {message.content.map((block, index) =>
           block.type === "text" ? (
             <ChatMarkdown key={index}>{block.text}</ChatMarkdown>
@@ -812,25 +879,8 @@ function renderTurn(
   live?: LiveAgentContent,
   busy = false,
   compactionIdentity?: string,
-  orbState?: OrbView["state"],
 ): ReactNode {
   switch (turn.kind) {
-    case "inbox-receipt":
-      return (
-        <div key={turn.record.id} data-history-row={turn.record.id}>
-          {turn.messages.map((message) => renderInboxMessage(message, orbState, senderNames))}
-        </div>
-      );
-    case "peer":
-      return (
-        <CorrespondenceBand
-          key={turn.record.id}
-          id={turn.record.id}
-          senderId={turn.senderId}
-          name={senderNames.get(turn.senderId)}
-          text={blockText(turn.record.content ?? [])}
-        />
-      );
     case "user":
       return (
         <article className="rec rec-you" key={turn.record.id} data-history-row={turn.record.id}>
@@ -849,6 +899,7 @@ function renderTurn(
               records={turn.records}
               pairing={pairing}
               tools={tools}
+              senderNames={senderNames}
               live={live}
               busy={busy}
             />
@@ -1001,7 +1052,6 @@ export const HistoryView = memo(function HistoryView({
                     turn.kind === "compaction" && turn.record.id === compactionResult?.id
                       ? compaction?.operationId
                       : undefined,
-                    orbState,
                   ),
             )}
           {pendingMessages.map((message) => renderInboxMessage(message, orbState, senderNames))}
@@ -1013,6 +1063,7 @@ export const HistoryView = memo(function HistoryView({
                   records={[]}
                   pairing={pairing}
                   tools={tools}
+                  senderNames={senderNames}
                   live={liveAgentContent}
                   busy={busy}
                 />

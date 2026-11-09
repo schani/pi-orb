@@ -7,7 +7,7 @@ import { ProjectNewOrbLink } from "./ProjectNewOrbLink.tsx";
 it("preserves the approved Pi tile and authentic Claude asterisk geometry", () => {
   const pi = renderToStaticMarkup(<HarnessIcon harness="pi" />);
   expect(pi).toContain('viewBox="0 0 16 16"');
-  expect(pi).toContain('fill="#555555"');
+  expect(pi).toContain('fill="var(--tile-gray)"');
   expect(pi).toContain('d="M4 5h8M6 5v3.5Q6 10 5 11M10 5v5q0 1 1 1"');
   const claude = renderToStaticMarkup(<HarnessIcon harness="claude" />);
   expect(claude).toContain('viewBox="0 0 24 24"');

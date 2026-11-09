@@ -17,9 +17,13 @@ export type IconName =
   | "more"
   | "trend"
   | "source"
-  | "expand";
+  | "expand"
+  | "refresh"
+  | "key";
 
 const PATHS: Record<IconName, string> = {
+  refresh: "M13 6a5 5 0 1 0 0 4 M13 2v4H9",
+  key: "M8 8h6M11 8v2M14 8v2",
   trend: "M2 2v12h12 M4 10l3-4 3 2 4-5",
   fold: "m3 6 5 5 5-5",
   send: "M8 13V3M3 8l5-5 5 5",
@@ -33,7 +37,7 @@ const PATHS: Record<IconName, string> = {
   stop: "M4 4h8v8H4z",
   pen: "M3 10 10 3l3 3-7 7H3z M8 5l3 3",
   archive: "M3 6v7h10V6 M2 3h12v3H2z M6 9h4",
-  bin: "M4 6h16M9 6V3h6v3M6 9v11h12V9M10 10v6M14 10v6",
+  bin: "M2 4h12M6 4V2h4v2M4 6v8h8V6M6.5 7v4M9.5 7v4",
   x: "m4 4 8 8m0-8-8 8",
   copy: "M6 6h7v8H6z M3 10H2V2h8v1",
   terminal: "M3 4l4 4-4 4 M9 12h4",
@@ -41,7 +45,7 @@ const PATHS: Record<IconName, string> = {
   expand: "M2 6V2h4 M10 2h4v4 M14 10v4h-4 M6 14H2v-4",
 };
 
-/** Square-ended utility controls; the crisp bin retains its selected 24px geometry. */
+/** Square-ended utility controls on one 16px grid at one stroke. */
 export function IconSprite() {
   return (
     <svg style={{ display: "none" }} aria-hidden="true" focusable="false">
@@ -49,10 +53,10 @@ export function IconSprite() {
         <symbol
           key={name}
           id={`i-${name}`}
-          viewBox={name === "bin" ? "0 0 24 24" : "0 0 16 16"}
+          viewBox="0 0 16 16"
           fill={name === "start" || name === "stop" ? "currentColor" : "none"}
           stroke={name === "start" || name === "stop" ? "none" : "currentColor"}
-          strokeWidth={name === "bin" ? "1.9" : "1.5"}
+          strokeWidth="1.5"
           strokeLinecap="square"
         >
           <path d={path} />
@@ -63,6 +67,7 @@ export function IconSprite() {
               <circle cx="12" cy="13" r="2" />
             </>
           )}
+          {name === "key" && <circle cx="5" cy="8" r="3" />}
         </symbol>
       ))}
     </svg>

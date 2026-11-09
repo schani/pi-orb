@@ -383,7 +383,7 @@ export function registerRoutes(
     return sendGitIdentity(reply, result);
   });
 
-  /** Owner-scoped like personal instructions (docs/owner-skills-secrets.md). */
+  /** Owner-scoped like personal instructions (docs/agent-context.md). */
   type Named = FastifyRequest<{ Params: { name: string } }>;
   const owned =
     <E>(send: (reply: FastifyReply, error: E) => FastifyReply) =>

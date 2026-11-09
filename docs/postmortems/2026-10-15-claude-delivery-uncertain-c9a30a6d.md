@@ -20,7 +20,7 @@ Six other inbox inputs have ordinary UUID receipts and are delivered; this input
 
 ## Correction and limits
 
-**Approved decision — 2026-10-15; local, undeployed:** append an existing-schema `claude.input_receipt` event from the proven pair plus saved provenance, including already fingerprinted roots. Never rewrite old records/native bytes or replay input. Full contract and boot-position rationale: `docs/claude-agent-sdk.md`; qualification: `docs/testing.md`.
+**Approved decision — 2026-10-15; local, undeployed:** append an existing-schema `claude.input_receipt` event from the proven pair plus saved provenance, including already fingerprinted roots. Never rewrite old records/native bytes or replay input. Full contract and boot-position rationale: `docs/claude.md`; qualification: `docs/testing.md`.
 
 The unreplicated final tail, five earlier reachability restart cycles, and exact process exit code/signal remain unexplained. No separate provider rejection or SDK crash is established. No native debug/exit logs were found; deleted-VM journald is unavailable. Published result: https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/c9a30a6d-afb3-4a51-a979-335ae7ac389e/analyst-onboarding-redesigns-v4.html
 

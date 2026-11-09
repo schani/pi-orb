@@ -1,4 +1,4 @@
--- Durable whole-project deletion (docs/project-deletion.md).
+-- Durable whole-project deletion (docs/teardown.md).
 ALTER TABLE projects ADD COLUMN state text NOT NULL DEFAULT 'active'
   CHECK (state IN ('active', 'deleting'));
 ALTER TABLE projects ADD COLUMN state_version bigint NOT NULL DEFAULT 0;

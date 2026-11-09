@@ -223,7 +223,7 @@ interface FakeHost {
   /**
    * Immutable launch specification carried by this incarnation, or `null` for
    * a legacy resource created before stamps existed: "unstamped" is a state
-   * the real adapters can observe (docs/compute-replacement.md rule 1), so the
+   * the real adapters can observe (docs/lifecycle.md rule 1), so the
    * world must be able to represent it.
    */
   specFingerprint: string | null;
@@ -354,7 +354,7 @@ export class FakeWorld {
    * opaque token. The provider hashes it with the orb's repository URL into
    * `desiredSpecFingerprint`, deliberately **without** the deploy generation:
    * an ordinary redeploy that changes nothing effective must produce the same
-   * fingerprint and therefore replace nothing (docs/compute-replacement.md).
+   * fingerprint and therefore replace nothing (docs/lifecycle.md).
    * A scenario that wants a real host-spec update calls this.
    */
   setDesiredSpec(spec: string): void {
@@ -860,7 +860,7 @@ export class FakeWorld {
    * down) and its token read back, while a wrong incarnation or a stamp that
    * contradicts the requested specification is a non-retryable conflict that
    * only the durable replacement path can resolve — never an in-place repair
-   * and never a silent adoption (docs/compute-replacement.md).
+   * and never a silent adoption (docs/lifecycle.md).
    *
    * `specFingerprint` is required and may be `null` to create the legacy
    * unstamped cohort; there is deliberately no default, because a default that
@@ -1044,7 +1044,7 @@ export class FakeWorld {
     if (state.config.containerNeverStarts) return;
     const fs = state.filesystem;
     if (fs.sessionId !== null && fs.entries.length === 0) {
-      // Post-flush-gate runtime contract (docs/history-replication.md): a session that
+      // Post-flush-gate runtime contract (docs/history.md): a session that
       // never flushed a record evaporates with the process — the next boot
       // starts a fresh session identity.
       fs.sessionId = null;
@@ -1401,7 +1401,7 @@ export class FakeOrbHostProvider implements OrbHostProvider {
   }
 
   /**
-   * The pure fingerprint calculation of docs/compute-replacement.md: it hashes
+   * The pure fingerprint calculation of docs/lifecycle.md: it hashes
    * the effective specification with the orb's repository URL and harness
    * kind, and nothing else. The deploy generation is deliberately not an
    * input — an ordinary redeploy of an unchanged specification must leave the

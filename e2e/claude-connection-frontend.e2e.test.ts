@@ -208,8 +208,8 @@ describe.each(["chromium", "webkit"] as const)("%s one-click Claude connection",
       await f.page.keyboard.press("End");
       await check(claude).toBeFocused();
       if (width <= 600) {
-        check((await instructions.boundingBox())?.height).toBeGreaterThanOrEqual(48);
-        check((await claude.boundingBox())?.height).toBeGreaterThanOrEqual(48);
+        check((await instructions.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+        check((await claude.boundingBox())?.height).toBeGreaterThanOrEqual(44);
       }
       await f.page.keyboard.press("Escape");
       await check(gear).toBeFocused();

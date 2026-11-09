@@ -1,13 +1,16 @@
 # Foundation root
 
-This root owns the stable project foundation: enabled APIs, versioned state
-bucket, Artifact Registry, service accounts, recurring build/deploy grants, and
-the workload-identity trust that admits the deployer. Apply it only with the
-separate organization/bootstrap identity. The recurring deployer cannot change
-its own account, admission policy, project APIs, or state-bucket policy.
+Owns the stable project foundation: enabled APIs, versioned state bucket,
+Artifact Registry, service accounts, recurring build/deploy grants, networks and
+the workload-identity trust that admits the deployer. Apply it only with a
+separate administrator identity; the recurring deployer cannot change its own
+account, admission policy, project APIs or state-bucket policy
+(`docs/deployment.md`).
 
-For a new project, an administrator first creates the state bucket (the backend
-cannot create itself), then initializes and applies the root:
+## New project
+
+An administrator first creates the state bucket (the backend cannot create
+itself), then:
 
 ```sh
 tofu -chdir=infra/foundation init \
@@ -17,18 +20,23 @@ tofu -chdir=infra/foundation plan -out=foundation.plan \
 tofu -chdir=infra/foundation apply foundation.plan
 ```
 
-The existing project must use `./infra/foundation/adopt.sh`. It acquires the
-same GCS release lock as deployment, saves both generation-pinned remote states
-locally with mode 0600, and prints the exact state moves. `--execute` pushes the
-validated projection foundation-first with generation preconditions. An
-interruption can therefore leave duplicate ownership, never missing ownership;
-a rerun recognizes identical resource IDs and completes the app-side removal.
-The projected foundation reports schema version 0, so releases remain blocked
-until an administrator reviews and applies the foundation plan. No cloud
-resource is applied by adoption. State backups are retained at the printed path.
+Review every saved plan; require no stable-resource replacement. Use a temporary
+administrator login only for this, verify the result through federation in an
+empty HOME/gcloud configuration (the real `.agents/resume`), then revoke the
+login. Never copy it to other orbs or store a personal refresh token.
 
-After `adopt.sh --execute`, initialize the new state and import each verified
-unconditional legacy deployer membership before planning its removal:
+## Adopting an existing project
+
+`./infra/foundation/adopt.sh` acquires the global release lock, saves both
+generation-pinned remote states locally (mode 0600) and prints the exact state
+moves. `--execute` pushes the projection foundation-first with generation
+preconditions; an interruption can leave duplicate ownership, never missing
+ownership, and a rerun completes it. The projected foundation reports schema
+version 0, so releases stay blocked until the foundation plan is reviewed and
+applied. Adoption applies no cloud resource.
+
+Then import each **verified** unconditional legacy deployer membership (omit
+absent ones) before planning its removal:
 
 ```sh
 PROJECT=playground-dev-6ae7
@@ -57,177 +65,121 @@ done
 tofu -chdir=infra/foundation plan -out="$PLAN_DIR/foundation-scoped.plan" \
   -var=project="$PROJECT" -var=state_bucket="$BUCKET" \
   -var=adopt_legacy_deployer_grants=true
-```
-
-Import only memberships confirmed in the live policy; omit absent ones. Review
-the saved plan, require no stable-resource replacement, then apply it to install
-the scoped replacement grants. Remove the old unconditional state-bucket grant
-without matching the new conditioned grant:
-
-```sh
 tofu -chdir=infra/foundation apply "$PLAN_DIR/foundation-scoped.plan"
 gcloud storage buckets remove-iam-policy-binding "gs://$BUCKET" \
   --member="$DEPLOYER" --role=roles/storage.objectAdmin --condition=None
-```
-
-Finally, plan with `adopt_legacy_deployer_grants` at its default `false`. The
-only removals must be the imported obsolete deployer memberships. Apply that
-exact saved plan:
-
-```sh
 tofu -chdir=infra/foundation plan -out="$PLAN_DIR/foundation-final.plan" \
   -var=project="$PROJECT" -var=state_bucket="$BUCKET"
 tofu -chdir=infra/foundation apply "$PLAN_DIR/foundation-final.plan"
 ```
 
-The old bootstrap script granted the deployer project IAM administration,
-service-account administration/user, service-usage administration, and a
-project-wide Artifact Registry writer role. It also held project-wide Compute
-network, Service Networking, and IAP administration. For adoption, import those exact
-member bindings as `google_project_iam_member.obsolete_deployer[...]` with
-`adopt_legacy_deployer_grants=true`. Then return the variable to its default
-`false`; the reviewed foundation plan removes only that deployer member from
-those roles. Never replace this with authoritative role bindings, which
-could revoke unrelated administrators. The old unconditional state-bucket
-object-admin member must likewise be explicitly removed after the conditioned
-`static-plane/` member and read-only `foundation/` member are applied.
+The final plan (variable back at default `false`) may remove only the imported
+memberships. Never replace this with authoritative role bindings, which could
+revoke unrelated administrators. Remove the unconditional state-bucket grant
+only after the conditioned `static-plane/` and read-only `foundation/` members
+are applied.
 
-The application VPC, subnets, and private-services connection are foundation
-resources because IAM Conditions do not expose names for Compute networks,
-subnets, or addresses. The recurring deployer receives `networkUser` on the
-three exact subnets. Firewall administration is conditioned to the two
-application firewall resources. This grant cannot mutate the foundation image-build
-VPC or firewall. These
-grants pass local provider validation; a bootstrap using only the WIF deployer must still
-prove the complete permission set before production use.
+## Grants to the deployer
 
-Hosting-bucket deployment permissions are foundation-owned and apply to the shared
-federated deployer, so every admitted orb in this repository project receives them
-without a personal Google login. The application still owns the hosting bucket
-and its control-plane object-access policy. A custom role limits bucket metadata
-and IAM management to exactly `pi-orb-hosting-PROJECT`; neither new role includes
-direct object permissions. Managing that bucket's IAM is nevertheless high trust:
-the deployer can change who can access its files. A separate create-only role is
-project-scoped because GCS checks `storage.buckets.create` on the project before
-a bucket exists. It can create another bucket, but does not grant management of
-other existing buckets. This is an explicit platform-granularity limitation, not
-a claim that bucket creation can be restricted to one future name. Contract tests
-pin the permission sets and exact-name/type management condition.
+All grants go to the shared federated `pi-orb-amp-deployer`, so GitHub Actions
+and every admitted project orb inherit them without personal logins. The release
+never administers its own grants.
 
-`.agents/resume` installs the committed non-secret executable-source configuration
-and registers the same federated account on every start. A one-time administrator
-login is only for reviewing/applying changes to foundation authority; never copy
-that login to other orbs or store a personal refresh token in project secrets.
-Verify the new grant in an empty HOME/gcloud configuration through the real resume
-hook before revoking the administrator's temporary login. Already-running orbs
-receive the updated shared IAM grant; they do not need new personal credentials.
+- **State bucket:** object access conditioned to `static-plane/`, read-only on
+  `foundation/`.
+- **Networks:** the deployer gets `networkUser` on the three exact
+  subnets and firewall administration conditioned to the two application
+  firewalls; it cannot touch the image-build VPC or firewall.
+- **Hosting bucket:** a custom role limits bucket metadata and IAM management to
+  exactly `pi-orb-hosting-PROJECT` (type and name condition). Bucket creation is
+  a separate project-scoped role because GCS checks `storage.buckets.create` on
+  the project; it can create other buckets but not manage existing ones. Neither
+  grants object access. Managing that bucket's IAM is still high trust. The
+  application owns the bucket and its control-plane access policy.
+- **Logging exclusions:** custom role `deployer_logging_exclusions` grants only
+  `logging.exclusions.create/get/update/delete`, project-wide (not limited to
+  `mcp-oauth-callback`). No sinks, buckets, log deletion or IAM. Do not substitute
+  `roles/logging.admin`. The application service depends on the actual callback
+  exclusion and OAuth secret IAM, so a failed creation cannot publish a revision
+  ahead of them.
+- **Foundation plan reads:** custom role `piOrbFoundationPlanReader` grants
+  `iam.workloadIdentityPools.get`, `iam.workloadIdentityPools.getAttestationRules`,
+  `iam.workloadIdentityPoolProviders.get`, `storage.buckets.getIamPolicy`,
+  `iam.serviceAccounts.get`, `iam.serviceAccounts.getIamPolicy`, `iam.roles.get`,
+  `servicenetworking.services.get`, `resourcemanager.projects.getIamPolicy`,
+  `artifactregistry.repositories.getIamPolicy`. No IAM writes.
+- **Preview ingress:** Cloud Domains, Cloud DNS and Certificate Manager APIs; the
+  public zone `pi-orb-preview` for `var.preview_domain` (`piorb.live`); `dns.admin`
+  on that zone only; project `certificatemanager.editor` and
+  `compute.loadBalancerAdmin` (project-wide load-balancer authority). The domain
+  itself was registered once with `gcloud domains registrations register
+  --cloud-dns-zone=pi-orb-preview`, outside Terraform (paid, with contact data).
+- **Release SSH:** see below.
 
-### Release logging-exclusion authority (2026-09-11; applied and federation-verified)
+Contract tests pin the permission sets and conditions (`iam_contract.test.mjs`).
 
-`google_project_iam_custom_role.deployer_logging_exclusions` grants only
-`logging.exclusions.create/get/update/delete` to the shared federated deployer.
-This is a project-level grant: it can change other project exclusions, not only
-`mcp-oauth-callback`. It does not grant sink/bucket administration, log deletion,
-or IAM changes. Do not describe it as an exact-name restriction or substitute
-`roles/logging.admin`. Exclusion management is necessary for the application
-root's callback-query protection and remains high-trust logging policy authority.
+## Control-plane grants
 
-A foundation administrator must review and apply this role and its additive
-member binding once, using the normal saved-plan workflow above. Both GitHub
-Actions and admitted project orbs then inherit the grant through the existing
-service account; no personal login, new GitHub secret, or new WIF admission is
-needed for recurring releases. The release must not administer its own grant.
-Verify as the federated identity with:
+`pi-orb-control-plane` gets `compute.instanceAdmin.v1` conditioned to
+`…/instances/pi-orb-*`, `…/disks/pi-orb-*` and `pi-orb*` subnetworks, so a bug
+cannot mutate foreign VMs; unconditioned `compute.viewer` for list, get, guest
+attributes and operation waits; `compute.imageUser` on `pi-orb-*` images only;
+`iam.serviceAccountUser` on the orb VM account; and `logging.logWriter`.
+
+Verify release authority as the federated identity (read-only; runs in every
+release before checks, with missing permissions and the foundation remedy in the log):
 
 ```sh
 python3 -m infra.release_preflight playground-dev-6ae7
 ```
 
-This read-only permission test runs in every full release before checks, builds,
-migrations and apply, with missing permission names and the foundation remedy
-in the workflow log. It does not create a probe exclusion or blindly retry a
-denial. The preflight verdict is recorded in the existing durable release gate.
-The application service also depends on the actual exclusion and OAuth secret IAM,
-so an unsuccessful first creation cannot publish a new application revision ahead
-of those protections. Additional logging sinks still require qualification.
-Live adoption applied exactly the custom role and additive member binding under
-the generation-matched release lock: two creates, no changes or deletes. An
-isolated gcloud configuration using federation passed the authority preflight
-and confirmed no project-IAM/custom-role administration permissions. The
-administrator login was revoked, and the normal federated preflight passed again.
-Application recovery is recorded separately in
-`docs/postmortems/2026-09-11-release-logging-exclusion-iam.md`.
+The debug service account and the deployer's Token Creator binding on it are
+outside this root (`infra/bootstrap-amp-oidc.sh`). Verify that
+`pi-orb-amp-deployer@PROJECT` has `roles/iam.serviceAccountTokenCreator` on
+`pi-orb-debug@PROJECT` after foundation changes.
 
-### GitHub one-button deployment admission (2026-09-09)
+## GitHub deployment admission
 
 `github.tf` admits only `schani/pi-orb/.github/workflows/deploy.yml` dispatched
-manually from `main`. The provider checks immutable repository ID `1307054237`
-and owner ID `61363`, ref, event and workflow ref together. It grants
-`workloadIdentityUser` on the existing scoped deployer, not new project roles.
-No GitHub repository secret or service-account key is required. Adding this
-identity is a one-time foundation administrator operation; an already
-authenticated orb cannot grant new identities authority.
+manually from `main`: the provider checks repository ID `1307054237`, owner ID
+`61363`, ref, event and workflow ref together. It grants `workloadIdentityUser`
+on the existing deployer, no new project roles. No GitHub secret or key. An
+already authenticated orb cannot grant new identities authority.
 
-The control-plane account can read exactly
-`static-plane/releases/active.json` in the state bucket. It cannot list or read
-Terraform state through that conditional grant. This token-free generation
-record is the startup barrier for autonomous application loops; only the release
-controller may publish it after independently establishing old-process retirement.
+## Outputs and activation object
 
-The bootstrap `Deploy` workflow initially verifies keyless access only. It must
-not apply an application release until the rollout, recording and validation
-stages have been implemented and tested.
+The control-plane account can read exactly `static-plane/releases/active.json`,
+not Terraform state; only the release controller writes it.
 
-The application root retains its `static-plane` state prefix and reads the `foundation` state prefix from
-`var.foundation_state_bucket`. Its project, region, and zone must match the
-foundation outputs. Releases should read `zone`, `state_bucket`,
-`artifact_registry_repository`, network and subnet identities and CIDRs,
-`image_build_subnetwork`, and `image_builder_service_account_email` from this
-root rather than reconstructing them. The isolated build subnet and its builder-only IAP firewall let a fresh
-project build the accepted native image before the application root exists.
+The application root keeps prefix `static-plane` and reads the `foundation`
+prefix from `var.foundation_state_bucket`; project, region and zone must match.
+Releases read `zone`, `state_bucket`, `artifact_registry_repository`, network and
+subnet identities and CIDRs, `image_build_subnetwork` and
+`image_builder_service_account_email` from this root rather than reconstructing
+them. The isolated build subnet and its builder-only IAP firewall let a fresh
+project build the native image before the application root exists.
 
-IAP release access is restricted to SSH destinations in the isolated build
-subnet and the exact orb `/20`. Builder, validator, and orb instances set
-`block-project-ssh-keys=TRUE`, so `gcloud compute ssh` publishes a fresh caller's
-key through instance metadata. The build role covers builder and validator
-metadata; a separate scoped role permits workload-instance metadata writes.
-Neither grant permits project SSH metadata changes. The tunnel condition uses the
-documented `destination.ip` and `destination.port` attributes
-([Google IAP TCP forwarding](https://cloud.google.com/iap/docs/using-tcp-forwarding)).
-Google documents no CIDR operator for `destination.ip`, so the exact `/20`
-prefixes are divided across bounded condition bindings; each remains below the
-12-logical-operator IAM Conditions limit and still requires port 22.
+## Release SSH
 
-The debug service account and its Token Creator binding remain outside this
-root. Before the first scoped release, an administrator must verify that
-`pi-orb-amp-deployer@PROJECT.iam.gserviceaccount.com` still has
-`roles/iam.serviceAccountTokenCreator` on
-`pi-orb-debug@PROJECT.iam.gserviceaccount.com`; `infra/bootstrap-amp-oidc.sh`
-creates that service-account-level binding.
+Builder, validator and orb instances set `block-project-ssh-keys=TRUE`, so
+`gcloud compute ssh` publishes a fresh caller key through instance metadata. The
+build role covers builder and validator metadata; a separate scoped role permits
+metadata writes on `pi-orb-*` workload instances. Neither permits project SSH
+metadata changes. Release smokes always use IAP tunneling.
 
-### Release SSH contract gate (decision 2026-10-14)
+`deployer_iap_tunnel` admits port 22 only to the isolated build subnet and the
+exact orb `/20`, using `destination.ip` and `destination.port`
+([IAP TCP forwarding](https://cloud.google.com/iap/docs/using-tcp-forwarding)).
+There is no CIDR operator, so the prefixes are split across bounded condition
+bindings, each under the 12-logical-operator IAM Conditions limit and each
+requiring port 22.
 
-Run `infra/foundation/test.sh` with OpenTofu 1.13.2. CI installs the same
-checksum-pinned binary as deployment and requires this separate gate.
-`tests/release_ssh.tftest.hcl` uses a Google mock plan to pin the complete
-`deployer_iap_tunnel` expression map: three exact keys, port 22 conjoined
-with grouped exact IP prefixes, and at most 12 rendered logical operators.
-This pins rendered policy text, not CEL evaluation or live IAM enforcement.
-
-The gate validates a temporary copy of the real module, then omits only
-`imports.tf` adoption directives for the mock plan: OpenTofu 1.13.2 crashes on
-mock imports. Init disables the backend and keeps the lockfile readonly; no
-cloud credentials are needed. Mutation evidence and scope: `docs/testing.md`.
-
-### Preview ingress authority (2026-11-03; applied)
-
-The foundation enables Cloud Domains, Cloud DNS and Certificate Manager, owns the public zone
-`pi-orb-preview` for `var.preview_domain` (`piorb.live`), and grants the deployer `dns.admin`
-on that zone only plus project `certificatemanager.editor` and `compute.loadBalancerAdmin`.
-The latter is project-wide load-balancer authority, including other forwarding rules and URL
-maps. A temporary administrator login applied exactly these seven additions with a targeted
-saved plan. After the release, a second reviewed plan removed only the consolidation leftovers:
-the unused `pi-orb-issuer@` service account (no keys or workloads), its two bindings and the
-deployer's IAP web-service admin grant. The foundation then planned no changes. The domain
-was registered once with `gcloud domains registrations register --cloud-dns-zone=pi-orb-preview`,
-not Terraform: it is a paid registration with registrant contact data.
+**Rendered-contract gate:** `infra/foundation/test-tofu.sh` (OpenTofu 1.13.2;
+CI `checks` runs it). `infra/foundation/test.sh` runs it plus the Node
+contracts that `npm run test:infra` also runs. `tests/release_ssh.tftest.hcl` uses a Google mock plan to pin the
+complete `deployer_iap_tunnel` expression map: three exact keys, port 22 conjoined
+with grouped exact IP prefixes, at most 12 rendered logical operators. It pins
+rendered policy text, not CEL evaluation or live enforcement. The gate validates
+a temporary copy of the module, then omits only `imports.tf` for the mock plan
+(OpenTofu 1.13.2 crashes on mock imports). The backend is disabled and the
+lockfile read-only; no cloud credentials.

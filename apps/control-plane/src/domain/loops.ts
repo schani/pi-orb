@@ -148,7 +148,7 @@ async function pollHistoryOnce(
   } else {
     deps.control.clearRetryAttempts(key);
   }
-  // Retryable failures retry at the ordinary polling cadence (docs/history-replication.md); an
+  // Retryable failures retry at the ordinary polling cadence (docs/history.md); an
   // integrity failure has already failed the orb and requested compute discard
   // (replication.ts), and an invariant failure parks this orb's pulls until the fix is deployed.
   deps.control.setNextAttemptAt(

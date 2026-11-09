@@ -1,7 +1,13 @@
 import { Fragment, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { ActivityRailOpen, ActivityRailRow } from "./ActivityRailRow.tsx";
 
-export type ActivityStepState = "thinking" | "success" | "notification" | "failed" | "running";
+export type ActivityStepState =
+  | "thinking"
+  | "success"
+  | "notification"
+  | "failed"
+  | "running"
+  | "restart";
 
 export interface ActivityStep {
   key: string;
@@ -27,6 +33,9 @@ export interface ActivityOpenMemory {
 }
 
 const DOT_WIDTH = 12;
+/** Material "refresh" with a widened gap at the arc start, drawn in the success dot's box. */
+const RESTART_PATH =
+  "M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8A8 8 0 0 0 19.42 15L17.20 15A6 6 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z";
 const MORE_WIDTH = 44;
 
 /** Folds each maximal run of two or more steps into one strip; other items render unchanged. */
@@ -131,7 +140,24 @@ export function ActivityStrip({
                 setOpen(false);
                 setPicked((current) => (current === step.key ? null : step.key));
               }}
-            />
+            >
+              {step.state === "restart" && (
+                <svg
+                  className="activity-strip-glyph"
+                  viewBox="3.7 3.7 16.6 16.6"
+                  aria-hidden="true"
+                  focusable="false"
+                >
+                  <path
+                    d={RESTART_PATH}
+                    fill="currentColor"
+                    stroke="currentColor"
+                    strokeWidth="0.6"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              )}
+            </button>
           ))}
           {tip !== null && (
             <span
@@ -139,7 +165,7 @@ export function ActivityStrip({
               role="tooltip"
               style={{
                 left: Math.max(4, tip.left - 16),
-                top: tip.top - 22,
+                top: tip.top - 24,
                 maxWidth: `min(60ch, calc(100vw - ${Math.max(4, tip.left - 16) + 8}px))`,
               }}
             >

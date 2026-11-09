@@ -71,7 +71,8 @@ it("materializes nested streamed output without leaking it and formats string re
     expect(result.output).toContainEqual({ type: "text", text: "secret" });
     const live = await fixture.harness.snapshot(LiveDoc, fixture.root.id, ctx);
     expect(live?.tools?.[0]?.output ?? "").not.toContain("secret large output");
-    expect(JSON.stringify(result.details)).toContain('"status":"ok"');
+    expect(result.details).not.toHaveProperty("calls");
+    expect(result.details).not.toHaveProperty("omittedCalls");
   } finally {
     await fixture.close();
   }

@@ -22,7 +22,7 @@ export interface CursorConflict {
   readonly type: "cursor_conflict";
 }
 
-/** A replication problem no retry can repair (docs/history-replication.md). */
+/** A replication problem no retry can repair (docs/history.md). */
 export interface ReplicationIntegrityError {
   readonly type: "replication_integrity";
   readonly reason:

@@ -451,7 +451,7 @@ describe("frontend-only browser behavior", () => {
     });
     try {
       await gotoFrontendFixture(page, `${origin}${ORB_PATH}`);
-      const notice = page.locator(".notice", { hasText: "OpenAI device login required." });
+      const notice = page.locator(".banner", { hasText: "OpenAI device login required." });
       await expectPage(notice).toBeVisible();
       await expectPage(notice).toContainText("TEST-CODE");
       await expectPage(notice).toContainText("expires in");
@@ -466,7 +466,7 @@ describe("frontend-only browser behavior", () => {
       await expectPage(row.locator(".rec-px")).toHaveCount(0);
       await expectPage(row).not.toContainText("···");
       const layout = await row.evaluate((element) => {
-        const body = element.querySelector(".notice");
+        const body = element.querySelector(".banner");
         const style = element.ownerDocument.defaultView?.getComputedStyle(element);
         const bounds = element.getBoundingClientRect();
         return {
@@ -504,7 +504,7 @@ describe("frontend-only browser behavior", () => {
     });
     try {
       await page.goto(`${origin}${ORB_PATH}`);
-      const notice = page.locator(".notice", { hasText: "Preparing OpenAI login…" });
+      const notice = page.locator(".banner", { hasText: "Preparing OpenAI login…" });
       await expectPage(notice).toBeVisible();
       await expectPage(notice.locator("a")).toHaveCount(0);
       await expectPage(notice.locator("button")).toHaveCount(0);
@@ -1195,7 +1195,7 @@ describe("frontend-only browser behavior", () => {
               return frame.top < box.bottom - 0.5 && frame.bottom > box.top + 0.5;
             });
             const probe = marker.ownerDocument.createElement("span");
-            probe.style.cssText = "position:absolute;width:calc(3ch + 6px)";
+            probe.style.cssText = "position:absolute;width:calc(3ch + 8px)";
             marker.append(probe);
             const expectedWidth = probe.getBoundingClientRect().width;
             probe.remove();
@@ -2305,6 +2305,134 @@ describe("frontend-only browser behavior", () => {
     },
   );
 
+  it("checks project MCP health inline without changing authorization or drafts", async () => {
+    const page = await browser.newPage({ viewport: { width: 320, height: 740 } });
+    const project = "frontend-fixture-project";
+    const grant = randomUUID();
+    const server = {
+      name: "service",
+      description: "Service",
+      url: "https://example.com/mcp",
+      headers: {},
+      oauth: { id: grant },
+    };
+    let revision = 1;
+    let status = "available";
+    let fail = false;
+    let hold = false;
+    let reads = 0;
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(`**/api/v1/projects/${project}/mcp`, (route) => {
+      if (route.request().method() === "PUT") revision++;
+      return route.fulfill({ json: { revision, servers: [server] } });
+    });
+    await page.route(`**/api/v1/projects/${project}/mcp/${grant}/oauth`, (route) =>
+      route.fulfill({ json: { status: "connected" } }),
+    );
+    const healthUrl = `**/api/v1/projects/${project}/mcp/status`;
+    await page.route(healthUrl, async (route) => {
+      reads++;
+      const report = { revision, servers: [{ name: "service", status }] };
+      if (hold) {
+        hold = false;
+        await held;
+      }
+      await route.fulfill(
+        fail
+          ? { status: 503, json: { error: { code: "unavailable", message: "fixture" } } }
+          : { json: report },
+      );
+    });
+    try {
+      await gotoFrontendFixture(page, `${origin}/projects/${project}/mcp`);
+      const mcp = page.getByRole("tabpanel", { name: "MCPs", exact: true });
+      const summary = mcp.locator("summary").filter({ hasText: "service" });
+      const health = summary.locator(".mcp-health");
+      const refresh = mcp.getByRole("button", { name: "Refresh MCP health", exact: true });
+      await expectPage(health).toHaveText("available");
+      await expectPage(summary).toContainText("grant stored");
+      await summary.click();
+      const description = mcp.getByLabel("Description", { exact: true });
+      await description.fill("draft survives health refresh");
+      status = "unavailable";
+      await refresh.click();
+      await expectPage(health).toHaveText("unavailable");
+      await expectPage(summary).toContainText("grant stored");
+      status = "needs-auth";
+      await description.focus();
+      await page.evaluate("window.dispatchEvent(new Event('focus'))");
+      await expectPage(summary).toContainText("grant stored");
+      await expectPage(health).toHaveText("auth required");
+      await expectPage(description).toBeFocused();
+      await expectPage(description).toHaveValue("draft survives health refresh");
+
+      // The held old-revision success must not overwrite the post-save failure.
+      status = "available";
+      hold = true;
+      const started = page.waitForRequest(healthUrl);
+      await refresh.click();
+      await started;
+      await expectPage(health).toHaveText("checking…");
+      await expectPage(refresh).toBeDisabled();
+      const pendingReads = reads;
+      await page.evaluate(
+        "window.dispatchEvent(new Event('focus')); window.dispatchEvent(new Event('focus'))",
+      );
+      await expectPage(refresh).toBeDisabled();
+      expectPage(reads).toBe(pendingReads);
+      await page.getByRole("tab", { name: "Secrets", exact: true }).click();
+      await page.getByRole("tab", { name: "MCPs", exact: true }).click();
+      await expectPage(health).toHaveText("checking…");
+      expectPage(reads).toBe(pendingReads);
+      status = "unavailable";
+      await mcp.getByRole("button", { name: "save", exact: true }).click();
+      await expectPage(health).toHaveText("unknown");
+      expectPage(reads).toBe(pendingReads);
+      const late = page.waitForResponse(healthUrl);
+      release();
+      await (await late).finished();
+      await expectPage(health).toHaveText("unavailable");
+      expectPage(reads).toBe(pendingReads + 1);
+
+      revision++;
+      await refresh.click();
+      await expectPage(health).toHaveText("unknown");
+      fail = true;
+      await refresh.click();
+      await expectPage(mcp.getByRole("alert")).toContainText("Could not check MCP health");
+      await expectPage(health).toHaveText("unknown");
+      fail = false;
+      revision--;
+      status = "available";
+      await refresh.click();
+      await expectPage(health).toHaveText("available");
+      await expectPage(mcp.getByRole("alert")).toHaveCount(0);
+      await page.getByRole("tab", { name: "Secrets", exact: true }).click();
+      const inactiveReads = reads;
+      await page.evaluate("window.dispatchEvent(new Event('focus'))");
+      await expectPage(page.getByRole("tabpanel", { name: "Secrets", exact: true })).toBeVisible();
+      expectPage(reads).toBe(inactiveReads);
+      await page.getByRole("tab", { name: "MCPs", exact: true }).click();
+      await expectPage(health).toHaveText("available");
+      await expectPage(description).toBeVisible();
+      expectPage(
+        await page
+          .locator("body")
+          .evaluate(
+            (body) =>
+              body.ownerDocument.documentElement.scrollWidth <=
+              (body.ownerDocument.defaultView?.innerWidth ?? 0),
+          ),
+      ).toBe(true);
+    } finally {
+      release();
+      await closeRoutedPage(page);
+    }
+  });
+
   it("exercises the real ledger UI, fixture OAuth, disclosure ownership and consistent tab spacing", async () => {
     const page = await browser.newPage();
     const projectId = randomUUID();
@@ -2428,7 +2556,7 @@ describe("frontend-only browser behavior", () => {
           }),
         );
       }
-      expectPage(spacing).toEqual(Array(3).fill(["8px", "10px", "10px", "10px"]));
+      expectPage(spacing).toEqual(Array(3).fill(["8px", "12px", "12px", "12px"]));
       const current = await (
         await page.request.get(`${origin}/api/v1/projects/${projectId}/mcp`)
       ).json();
@@ -2857,7 +2985,7 @@ describe("frontend-only browser behavior", () => {
       });
       expectPage(instructionsGeometry).not.toBeNull();
       expectPage(instructionsGeometry?.borderLeft).toBe(0);
-      expectPage(instructionsGeometry?.padding).toBe("8px 10px");
+      expectPage(instructionsGeometry?.padding).toBe("8px 12px");
       expectPage(instructionsGeometry?.pointerEvents).toBe("none");
       expectPage(instructionsGeometry?.resize).toBe("vertical");
       expectPage(instructionsGeometry?.crop.left).toBeCloseTo(
@@ -3085,7 +3213,7 @@ describe("frontend-only browser behavior", () => {
           `${origin}/orbs/frontend-long-history`,
           "frontend-long-history",
         );
-        const banner = page.locator(".notice-error", { hasText: error });
+        const banner = page.locator(".banner-error", { hasText: error });
         await expectPage(banner).toHaveCount(1);
         await page.getByRole("button", { name: "expire session" }).click();
         await expectPage(page.locator(".session-ribbon")).toBeVisible();
@@ -3106,7 +3234,7 @@ describe("frontend-only browser behavior", () => {
           const view = document.defaultView;
           const rect = (selector: string) =>
             document.querySelector(selector)?.getBoundingClientRect();
-          const banner = rect(".orb-header-stack .notice-error");
+          const banner = rect(".orb-header-stack .banner-error");
           const header = rect(".orb-header");
           const ribbon = rect(".session-ribbon");
           const index = rect(".orb-index");

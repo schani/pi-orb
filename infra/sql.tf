@@ -1,5 +1,5 @@
 # Cloud SQL Postgres, private IP only, backups + PITR from day one
-# (docs/history-replication.md). The replica is the durable product history.
+# (docs/history.md). The replica is the durable product history.
 
 resource "google_sql_database_instance" "pi_orb" {
   name                = "pi-orb"
@@ -109,7 +109,7 @@ resource "google_secret_manager_secret_iam_member" "cp_project_secrets_versions"
 }
 
 # Shared immutable-version parent for owner (user-scoped) environment-secret
-# bundles (docs/owner-skills-secrets.md). Payloads repeat the user identity;
+# bundles (docs/agent-context.md). Payloads repeat the user identity;
 # users are never deleted, so there is no deletion finalizer.
 resource "google_secret_manager_secret" "user_secrets" {
   secret_id = "pi-orb-credential-user-secrets"

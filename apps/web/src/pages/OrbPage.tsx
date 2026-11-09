@@ -2159,7 +2159,7 @@ function OrbConversation({
           <OrbFailureBanner message={orb?.lastError} />
           <OrbResourceWarnings warnings={orb?.resourceWarnings} />
           {dropFeedback && (
-            <div className="orb-drop-feedback" role="status">
+            <div className="banner banner-error orb-drop-feedback" role="status">
               {dropFeedback}
             </div>
           )}

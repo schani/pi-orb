@@ -15,8 +15,13 @@ import {
   type ToolExecutionResult,
   ToolTask,
 } from "@earendil-works/pi-durable";
-import { McpHttpError, McpTimeoutError } from "@earendil-works/pi-mcp";
-import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
+import {
+  InMemoryTransport,
+  InsufficientScopeError,
+  SdkError,
+  SdkErrorCode,
+  SdkHttpError,
+} from "@modelcontextprotocol/client";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
@@ -54,9 +59,17 @@ it("shares owner-scoped consent retries and joins publication despite caller can
           expect(ctx.abortSignal).toBe(owner.signal);
           connections++;
           if (!authorized) return errAsync({ code: "forbidden", message: "secret credential" });
-          const { client, server } = createInMemoryTransportPair();
-          server.onMessage((message) => {
+          const [client, server] = InMemoryTransport.createLinkedPair();
+          server.onmessage = (message) => {
             if (!("method" in message) || !("id" in message)) return;
+            if (message.method === "server/discover") {
+              void server.send({
+                jsonrpc: "2.0",
+                id: message.id,
+                error: { code: -32601, message: "Unsupported" },
+              });
+              return;
+            }
             void server.send({
               jsonrpc: "2.0",
               id: message.id,
@@ -69,7 +82,7 @@ it("shares owner-scoped consent retries and joins publication despite caller can
                     }
                   : { tools: [{ name: "read", inputSchema: { type: "object" } }] },
             });
-          });
+          };
           void server.start();
           return okAsync(client);
         },
@@ -142,10 +155,18 @@ it("reports a failed MCP server without blocking healthy discovery and calls", a
       {
         name: "healthy",
         connect: () => {
-          const { client, server } = createInMemoryTransportPair();
-          server.onMessage((message) => {
+          const [client, server] = InMemoryTransport.createLinkedPair();
+          server.onmessage = (message) => {
             if (!("method" in message) || !("id" in message)) return;
-            const respond = (result: unknown) =>
+            if (message.method === "server/discover") {
+              void server.send({
+                jsonrpc: "2.0",
+                id: message.id,
+                error: { code: -32601, message: "Unsupported" },
+              });
+              return;
+            }
+            const respond = (result: Record<string, unknown>) =>
               server.send({ jsonrpc: "2.0", id: message.id, result });
             if (message.method === "initialize")
               void respond({
@@ -166,7 +187,7 @@ it("reports a failed MCP server without blocking healthy discovery and calls", a
               healthyCalls++;
               void respond({ content: [{ type: "text", text: "pong" }] });
             }
-          });
+          };
           void server.start();
           return okAsync(client);
         },
@@ -222,9 +243,17 @@ it("discovers MCP, executes validated QuickJS calls with fresh scoped connection
         connect: () => {
           const connection = ++auth;
           stages.push({ connection, method: "connect" });
-          const { client, server } = createInMemoryTransportPair();
-          server.onMessage((message) => {
+          const [client, server] = InMemoryTransport.createLinkedPair();
+          server.onmessage = (message) => {
             if (!("method" in message) || !("id" in message)) return;
+            if (message.method === "server/discover") {
+              void server.send({
+                jsonrpc: "2.0",
+                id: message.id,
+                error: { code: -32601, message: "Unsupported" },
+              });
+              return;
+            }
             stages.push({
               connection,
               method: message.method,
@@ -232,7 +261,7 @@ it("discovers MCP, executes validated QuickJS calls with fresh scoped connection
                 ? { arguments: (message.params as { arguments?: unknown })?.arguments }
                 : {}),
             });
-            const respond = (result: unknown) =>
+            const respond = (result: Record<string, unknown>) =>
               server.send({ jsonrpc: "2.0", id: message.id, result });
             if (message.method === "initialize")
               void respond({
@@ -272,7 +301,7 @@ it("discovers MCP, executes validated QuickJS calls with fresh scoped connection
                 content: [{ type: "text", text: params.arguments.value }],
               });
             }
-          });
+          };
           void server.start();
           return okAsync(client);
         },
@@ -354,10 +383,18 @@ it("rejects explicit null for parameterless MCP tools before hooks, authorizatio
         name: "fixture",
         connect: () => {
           credentials++;
-          const { client, server } = createInMemoryTransportPair();
-          server.onMessage((message) => {
+          const [client, server] = InMemoryTransport.createLinkedPair();
+          server.onmessage = (message) => {
             if (!("method" in message) || !("id" in message)) return;
-            const respond = (result: unknown) =>
+            if (message.method === "server/discover") {
+              void server.send({
+                jsonrpc: "2.0",
+                id: message.id,
+                error: { code: -32601, message: "Unsupported" },
+              });
+              return;
+            }
+            const respond = (result: Record<string, unknown>) =>
               server.send({ jsonrpc: "2.0", id: message.id, result });
             if (message.method === "initialize")
               void respond({
@@ -371,7 +408,7 @@ it("rejects explicit null for parameterless MCP tools before hooks, authorizatio
               calls.push((message.params as { arguments: unknown }).arguments);
               void respond({ content: [{ type: "text", text: "pong" }] });
             }
-          });
+          };
           void server.start();
           return okAsync(client);
         },
@@ -461,10 +498,18 @@ it("rejects raw MCP arguments before native coercion, hooks, authorization and c
         name: "strict",
         connect: () => {
           credentials++;
-          const { client, server } = createInMemoryTransportPair();
-          server.onMessage((message) => {
+          const [client, server] = InMemoryTransport.createLinkedPair();
+          server.onmessage = (message) => {
             if (!("method" in message) || !("id" in message)) return;
-            const respond = (result: unknown) =>
+            if (message.method === "server/discover") {
+              void server.send({
+                jsonrpc: "2.0",
+                id: message.id,
+                error: { code: -32601, message: "Unsupported" },
+              });
+              return;
+            }
+            const respond = (result: Record<string, unknown>) =>
               server.send({ jsonrpc: "2.0", id: message.id, result });
             if (message.method === "initialize")
               void respond({
@@ -479,7 +524,7 @@ it("rejects raw MCP arguments before native coercion, hooks, authorization and c
               calls.push(args);
               void respond({ content: [{ type: "text", text: "accepted" }] });
             }
-          });
+          };
           void server.start();
           return okAsync(client);
         },
@@ -566,10 +611,18 @@ it("discovers oversized MCP arguments and safely explains missing required field
       {
         name: "posthog",
         connect: () => {
-          const { client, server } = createInMemoryTransportPair();
-          server.onMessage((message) => {
+          const [client, server] = InMemoryTransport.createLinkedPair();
+          server.onmessage = (message) => {
             if (!("method" in message) || !("id" in message)) return;
-            const respond = (result: unknown) =>
+            if (message.method === "server/discover") {
+              void server.send({
+                jsonrpc: "2.0",
+                id: message.id,
+                error: { code: -32601, message: "Unsupported" },
+              });
+              return;
+            }
+            const respond = (result: Record<string, unknown>) =>
               server.send({ jsonrpc: "2.0", id: message.id, result });
             if (message.method === "initialize")
               void respond({
@@ -599,7 +652,7 @@ it("discovers oversized MCP arguments and safely explains missing required field
               effects++;
               void respond({ content: [{ type: "text", text: "ok" }] });
             }
-          });
+          };
           void server.start();
           return okAsync(client);
         },
@@ -639,19 +692,25 @@ it("discovers oversized MCP arguments and safely explains missing required field
   }
 });
 
-it.each(["timeout", "http", "abort"] as const)(
+it.each(["timeout", "http", "abort", "scope"] as const)(
   "records sanitized %s discovery failure with the active phase and elapsed time",
   async (kind) => {
     let now = 0;
     const failures: unknown[] = [];
     const controller = new AbortController();
-    const { client } = createInMemoryTransportPair();
+    const [client] = InMemoryTransport.createLinkedPair();
     client.start = async () => {
       now = 9;
       if (kind === "abort") controller.abort();
       throw kind === "timeout"
-        ? new McpTimeoutError(30_000)
-        : new McpHttpError(503, "SECRET", "SECRET");
+        ? new SdkError(SdkErrorCode.RequestTimeout, "SECRET", { timeout: 30_000 })
+        : kind === "scope"
+          ? new InsufficientScopeError({
+              requiredScope: "SECRET",
+              resourceMetadataUrl: new URL("https://SECRET.invalid"),
+              errorDescription: "SECRET",
+            })
+          : new SdkHttpError(SdkErrorCode.ClientHttpNotImplemented, "SECRET", { status: 503 });
     };
     const mcp = new McpTools(
       [{ name: "fixture", connect: () => okAsync(client) }],
@@ -671,8 +730,8 @@ it.each(["timeout", "http", "abort"] as const)(
             kind === "timeout" ? "request_timeout" : kind === "abort" ? "cancelled" : "http",
           ...(kind === "timeout"
             ? { requestTimeoutMs: 30_000 }
-            : kind === "http"
-              ? { httpStatus: 503 }
+            : kind === "http" || kind === "scope"
+              ? { httpStatus: kind === "scope" ? 403 : 503 }
               : {}),
         },
       ]);

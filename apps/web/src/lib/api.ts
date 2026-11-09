@@ -99,6 +99,7 @@ import {
   type McpConfig,
   McpOAuthStartSchema,
   McpOAuthStatusSchema,
+  ProjectMcpStatusSchema,
 } from "@pi-orb/protocol";
 
 export function getMcpOAuthStatus(projectId: string, id: string) {
@@ -218,6 +219,17 @@ export function saveProjectInstructions(projectId: string, content: string) {
       headers: jsonHeaders,
       body: JSON.stringify({ content }),
       signal: AbortSignal.timeout(15_000),
+    },
+  );
+}
+
+export function getProjectMcpStatus(projectId: string) {
+  return apiFetch(
+    ProjectMcpStatusSchema,
+    `/api/v1/projects/${encodeURIComponent(projectId)}/mcp/status`,
+    {
+      cache: "no-store",
+      signal: AbortSignal.timeout(75_000),
     },
   );
 }

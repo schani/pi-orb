@@ -13,7 +13,7 @@ The failed operation rejected ingress, but late task notification created a synt
 
 ## Decision — 2026-10-24
 
-Contain only the retained structured terminal rejection: `success` + `is_error: true` + `api_error_status: 429`. Before root/handoff release, fail existing runtime health as `claude_rate_limit`, request best-effort native queued-turn cancellation, and immediately start supervised shutdown. Accepted steering/queued turns, explicit Abort, manual compaction and existing closing retain their gates. Contract: `docs/claude-agent-sdk.md`.
+Contain only the retained structured terminal rejection: `success` + `is_error: true` + `api_error_status: 429`. Before root/handoff release, fail existing runtime health as `claude_rate_limit`, request best-effort native queued-turn cancellation, and immediately start supervised shutdown. Accepted steering/queued turns, explicit Abort, manual compaction and existing closing retain their gates. Contract: `docs/claude.md`.
 
 The existing control-plane failed-runtime path durably records `lastError`/`lifecycle:runtime-failed` and stops the whole compute. The user sees failure and must wait for quota reset, then restart manually. No automatic retry, reset-time parsing, successful operation finish or healthy/idle recovery. Preserve uncertain ownership; exact native terminal notifications may still retire their own task/inventory edges.
 

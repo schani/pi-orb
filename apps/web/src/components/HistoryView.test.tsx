@@ -311,6 +311,127 @@ describe("HistoryView turn structure", () => {
     expect(states(strips[1] ?? "")).toEqual(["thinking", "running"]);
     expect(html).not.toContain("Next plan");
   });
+  const HOST_TEXT = "The host was restarted. All processes running before the restart were killed.";
+  const RUNTIME_TEXT = "The agent runtime was restarted. Other processes may still be running.";
+  it.each([
+    [
+      "pi.custom_message",
+      "pi-orb.sleep-wake",
+      `${HOST_TEXT} Scheduled sleep finished.`,
+      "sleep finished",
+    ],
+    [
+      "pi-orb.sleep-wake",
+      "pi-orb.sleep-wake",
+      `${HOST_TEXT} Scheduled sleep finished.`,
+      "sleep finished",
+    ],
+    [
+      "pi.custom_message",
+      "pi-orb.harness-restarted",
+      "Agent harness restarted with unfinished work; recovery is resuming.",
+      "harness restarted",
+    ],
+    ["pi-orb.host-restarted", "pi-orb.host-restarted", HOST_TEXT, "host restarted"],
+    ["pi-orb.host-restarted", "pi-orb.host-restarted", RUNTIME_TEXT, "runtime restarted"],
+    ["pi-orb.turn-resume", "pi-orb.turn-resume", `${HOST_TEXT} Resuming.`, "host restarted"],
+    [
+      "pi-orb.turn-resume-declined",
+      "pi-orb.turn-resume-declined",
+      RUNTIME_TEXT,
+      "runtime restarted",
+    ],
+  ])(
+    "folds a %s %s notice into the surrounding strip and agent turn",
+    (eventType, customType, text, headline) => {
+      const records: HistoryRecord[] = [
+        { ...message("before", "assistant", ""), content: [{ type: "reasoning", text: "Plan" }] },
+        {
+          id: "restart",
+          parentId: null,
+          timestamp: "time-restart",
+          type: "event",
+          eventType,
+          content: [{ type: "text", text }],
+          custom: { customType, display: true },
+          overflow: {},
+        },
+        {
+          ...message("after", "assistant", ""),
+          content: [
+            { type: "tool_call", callId: "read-1", name: "read", arguments: { path: "a.ts" } },
+          ],
+        },
+      ];
+      const html = renderToStaticMarkup(
+        <HistoryView records={records} liveBlocks={[]} tools={[]} busy={false} />,
+      );
+      expect({
+        turns: html.match(/<article class="rec [^"]*"/g),
+        strips: html.match(/class="[^"]* activity-strip"/g)?.length,
+        steps: [...html.matchAll(/data-step="(\w+)"/g)].map((match) => match[1]),
+        restart: html.includes(`aria-label="restart · ${headline}"`),
+        collapsedNotice: html.includes("record-custom"),
+      }).toEqual({
+        turns: ['<article class="rec rec-orb"'],
+        strips: 1,
+        steps: ["thinking", "restart", "running"],
+        restart: true,
+        collapsedNotice: false,
+      });
+    },
+  );
+  const notice = (customType: string): HistoryRecord => ({
+    id: "notice",
+    parentId: null,
+    timestamp: "time-notice",
+    type: "event",
+    eventType: customType,
+    content: [{ type: "text", text: "Notice text." }],
+    custom: { customType, display: true },
+    overflow: {},
+  });
+  const reasoning = (id: string): HistoryRecord => ({
+    ...message(id, "assistant", ""),
+    content: [{ type: "reasoning", text: "Plan" }],
+  });
+  const noticeLayout = (records: HistoryRecord[]) => {
+    const html = renderToStaticMarkup(
+      <HistoryView records={records} liveBlocks={[]} tools={[]} busy={false} />,
+    );
+    return {
+      notice: html.includes('<div class="record-custom"><p class="msg-text">Notice text.'),
+      restartDots: html.includes('data-step="restart"'),
+      strips: html.match(/class="[^"]* activity-strip"/g)?.length ?? 0,
+    };
+  };
+  it("does not split a strip at an empty assistant reply", () => {
+    expect(
+      noticeLayout([
+        reasoning("a"),
+        reasoning("b"),
+        message("empty", "assistant", ""),
+        notice("pi-orb.sleep-wake"),
+        reasoning("c"),
+      ]),
+    ).toEqual({ notice: false, restartDots: true, strips: 1 });
+  });
+  it("keeps a lone restart notice as its notice row", () => {
+    expect(
+      noticeLayout([message("prose", "assistant", "Prose."), notice("pi-orb.host-restarted")]),
+    ).toEqual({ notice: true, restartDots: false, strips: 0 });
+  });
+  it("keeps a failed restart notification as a strip boundary", () => {
+    expect(
+      noticeLayout([
+        reasoning("a"),
+        reasoning("b"),
+        notice("pi-orb.restart-notification-failed"),
+        reasoning("c"),
+        reasoning("d"),
+      ]),
+    ).toEqual({ notice: true, restartDots: false, strips: 2 });
+  });
   it.each([
     [
       "subagent-notification",
@@ -589,7 +710,7 @@ describe("HistoryView turn structure", () => {
       />,
     );
     expect(queuedHtml).toContain("rec rec-you rec-q");
-    expect(queuedHtml).toContain('class="rec-status">queued</span>');
+    expect(queuedHtml).toContain('class="tag rec-status">queued</span>');
     expect(queuedHtml).toContain("queued while starting");
 
     const committed: MessageRecord = {
@@ -657,12 +778,12 @@ describe("HistoryView turn structure", () => {
         ]}
       />,
     );
-    expect(html).toContain('class="rec-status">steering</span>');
+    expect(html).toContain('class="tag rec-status">steering</span>');
     expect(html).toContain("Please check the phone layout too.");
     expect(html).toContain('class="visually-hidden">You:</span>');
   });
 
-  it("places receipt batches once, prefers canonical content and preserves the live tail", () => {
+  it("uses canonical bodies without hydrating old receipts and preserves pending input and the live tail", () => {
     const inbox = (id: string): OrbMessageView => ({
       id,
       orbId: "orb-1",
@@ -693,14 +814,22 @@ describe("HistoryView turn structure", () => {
         ]}
         tools={[]}
         busy
-        queuedMessages={[inbox("a"), inbox("b"), inbox("c")]}
+        queuedMessages={[
+          inbox("a"),
+          inbox("b"),
+          inbox("c"),
+          { ...inbox("pending"), status: "queued" },
+        ]}
       />,
     );
-    expect(html.match(/body-[abc]/g)).toEqual(["body-b", "body-a", "body-c"]);
+    expect(html.match(/body-[abc]/g)).toEqual(["body-c"]);
+    expect(html).toContain("body-pending");
     expect(html).toContain("Live continuation.");
-    expect(html).toContain('data-history-row="batch"');
+    expect(html).not.toContain('data-history-row="batch"');
     expect(html).not.toContain('data-history-row="duplicate"');
-    expect(html.match(/class="rec rec-orb"/g)).toHaveLength(1);
+    expect(html.match(/class="rec rec-orb"/g)).toHaveLength(2);
+    expect(html.indexOf("After receipt.")).toBeLessThan(html.indexOf("body-pending"));
+    expect(html.indexOf("body-pending")).toBeLessThan(html.indexOf("Live continuation."));
   });
 
   it("shows a message the runtime rejected as failed, with its reason", () => {
@@ -722,7 +851,7 @@ describe("HistoryView turn structure", () => {
         queuedMessages={[failed]}
       />,
     );
-    expect(html).toContain('class="rec-status">failed</span>');
+    expect(html).toContain('class="tag rec-status">failed</span>');
     expect(html).toContain('class="error-text">400 invalid_request: message payload too large<');
     expect(html).toContain("a payload the runtime refuses");
   });
@@ -1576,7 +1705,7 @@ describe("orb correspondence", () => {
     inboxMessageIds: [pending.id],
   };
 
-  it.each([false, true])("renders full literal correspondence once, pending=%s", (queued) => {
+  it.each([false, true])("discloses literal notifications once, pending=%s", (queued) => {
     const html = renderToStaticMarkup(
       <HistoryView
         {...idle}
@@ -1593,7 +1722,11 @@ describe("orb correspondence", () => {
         senderNames={new Map([[senderId, "runtime handshake"]])}
       />,
     );
-    expect(html.match(/class="rec rec-peer(?: rec-q)?"/g)).toHaveLength(1);
+    expect(
+      html.match(/class="activity-rail-row activity-rail-row-neutral peer-notice"/g),
+    ).toHaveLength(1);
+    expect(html).toContain('class="activity-rail-label">notification</span>');
+    expect(html).not.toMatch(/<details[^>]* open=/);
     expect(html).toContain(`href="/orbs/${senderId}">runtime handshake</a>`);
     expect(html).toContain(
       "&lt;script&gt;bad()&lt;/script&gt;\n&lt;img src=x onerror=&quot;bad()&quot;&gt; &amp; &quot;quotes&quot;\n**literal**\n" +
@@ -1601,15 +1734,40 @@ describe("orb correspondence", () => {
         "\nsecond",
     );
     expect(html).not.toMatch(/<script>|<img|<strong>literal<\/strong>|rec-you/);
-    const band = html.match(/<article class="rec rec-peer[^"]*"[^>]*>([\s\S]*?)<\/article>/)?.[1];
+    const band = html.match(/<details class="[^"]*peer-notice"[^>]*>([\s\S]*?)<\/details>/)?.[1];
     expect(band).toBeDefined();
     expect(band).not.toContain("chat-markdown");
     if (!queued) {
-      expect(html.match(/class="rec rec-orb"/g)).toHaveLength(2);
+      expect(html.match(/class="rec rec-orb"/g)).toHaveLength(1);
       expect(html.indexOf("before")).toBeLessThan(html.indexOf("peer-body"));
       expect(html.indexOf("peer-body")).toBeLessThan(html.indexOf("after"));
       expect(html).not.toMatch(/rec-q|rec-status/);
     }
+  });
+
+  it("folds peer receipts and adjacent committed/live tools into one maximal run", () => {
+    const tool = (id: string): MessageRecord => ({
+      ...message(id, "assistant", ""),
+      content: [{ type: "tool_call", callId: id, name: "bash", arguments: { command: "pwd" } }],
+    });
+    const html = renderToStaticMarkup(
+      <HistoryView
+        {...idle}
+        records={[tool("before"), receipt, tool("after")]}
+        tools={[{ callId: "live", name: "bash", state: "running", message: null }]}
+        senderNames={new Map([[senderId, "runtime handshake"]])}
+      />,
+    );
+    expect(html.match(/class="rec rec-orb"/g)).toHaveLength(1);
+    expect(html.match(/class="[^"]* activity-strip"/g)).toHaveLength(1);
+    expect([...html.matchAll(/data-step="(\w+)"/g)].map((match) => match[1])).toEqual([
+      "running",
+      "notification",
+      "running",
+      "running",
+    ]);
+    expect(html).toContain('aria-label="notification · runtime handshake"');
+    expect(html).not.toContain("snapshot-");
   });
 
   it("requires trusted provenance, not human text, correlation or another event type", () => {
@@ -1626,7 +1784,7 @@ describe("orb correspondence", () => {
       />,
     );
     expect(html).toContain('class="rec rec-you"');
-    expect(html).not.toMatch(/rec-peer|href="\/orbs\//);
+    expect(html).not.toMatch(/peer-notice|href="\/orbs\//);
   });
 
   it.each([
@@ -1649,10 +1807,14 @@ describe("orb correspondence", () => {
         senderNames={new Map([[senderId, "runtime handshake"]])}
       />,
     );
-    expect(html).toContain(`class="rec-status">${label}</span>`);
+    expect(html).toContain(`class="tag rec-status">${label}</span>`);
     expect(html).toContain(`href="/orbs/${senderId}">runtime handshake</a>`);
     expect(html).toContain("peer-body");
-    if (status === "failed") expect(html.match(/Rejected &lt;token&gt;/g)).toHaveLength(1);
+    expect(html).toContain('class="activity-rail-label">notification</span>');
+    if (status === "failed") {
+      expect(html.match(/>Rejected &lt;token&gt;</g)).toHaveLength(1);
+      expect(html).toContain("activity-rail-row-failed peer-notice");
+    }
   });
 
   it.each(["renamed <sender>", null, "", undefined])(

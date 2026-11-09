@@ -845,7 +845,7 @@ async function reconcileCreateStart(
       // compute exists but its commit may not have landed yet, so a failOrb
       // CAS could still succeed and discard the winner's fresh compute.
       // Re-read and reconcile instead; the durable spec/incarnation logic
-      // owns any surviving mismatch (docs/compute-replacement.md).
+      // owns any surviving mismatch (docs/lifecycle.md).
       if (provisioned.error.code === "conflict") return { type: "conflict" };
       return failOrb(task, deps, orb, "provider_failed", provisioned.error.message);
     }
@@ -961,7 +961,7 @@ async function reconcileCreateStart(
       // compute exists but its commit may not have landed yet, so a failOrb
       // CAS could still succeed and discard the winner's fresh compute.
       // Re-read and reconcile instead; the durable spec/incarnation logic
-      // owns any surviving mismatch (docs/compute-replacement.md).
+      // owns any surviving mismatch (docs/lifecycle.md).
       if (provisioned.error.code === "conflict") return { type: "conflict" };
       return failOrb(task, deps, orb, "provider_failed", provisioned.error.message);
     }
@@ -2003,7 +2003,7 @@ async function reconcileStopping(
   )
     return waiting("drain_blocked");
 
-  // The controlled-shutdown pull barrier (docs/history-replication.md).
+  // The controlled-shutdown pull barrier (docs/history.md).
   const outcome =
     agentPlacement(deps.agentPlane, orb) === "central"
       ? { type: "caught_up" as const, committedRecords: 0 }

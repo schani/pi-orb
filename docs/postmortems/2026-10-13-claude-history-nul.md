@@ -22,7 +22,7 @@ JSON permits escaped NUL (`\u0000`); PostgreSQL JSONB rejects it. The replica's 
 
 **Required correction (2026-10-13):** replica storage must losslessly round-trip valid history strings, including NUL in normalized and native overflow fields; deleting/replacing characters or skipping records is not acceptable. Receipt and cursor atomicity must remain intact.
 
-**Decision (2026-10-13; user-approved; deployed later that day):** store complete records/session metadata as PostgreSQL `json`, not `jsonb`. Drivers decode whole values; SQL payload field processing remains forbidden because it can reject escaped NUL/unpaired UTF-16. Preserve relational constraints, duplicated identity guards, structural duplicates and atomic records/cursor/receipts. No stripping, skipping or compatibility staging. Contract: `docs/history-replication.md`; follow-ups: `TODO.md`.
+**Decision (2026-10-13; user-approved; deployed later that day):** store complete records/session metadata as PostgreSQL `json`, not `jsonb`. Drivers decode whole values; SQL payload field processing remains forbidden because it can reject escaped NUL/unpaired UTF-16. Preserve relational constraints, duplicated identity guards, structural duplicates and atomic records/cursor/receipts. No stripping, skipping or compatibility staging. Contract: `docs/history.md`; follow-ups: `TODO.md`.
 
 ## Qualification evidence
 

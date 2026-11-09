@@ -18,8 +18,10 @@ import {
   type JsonObject,
   JsonObjectSchema,
   type JsonValue,
+  type MessageInputBlock,
   OrbMessageSenderSchema,
   systemInputEvent,
+  systemInputModelContent,
 } from "@pi-orb/protocol";
 import { err, ok, Result } from "neverthrow";
 import { Type } from "typebox";
@@ -266,6 +268,7 @@ export class ClaudeHistory {
   private deriveInputReceipts(
     natives: readonly JsonObject[],
     records: readonly HistoryRecord[],
+    inputContent: (uuid: string) => readonly MessageInputBlock[] | undefined,
   ): Result<HistoryRecord[], ClaudeHistoryError> {
     const root = (native: JsonObject) =>
       native.sessionId === this.session &&
@@ -359,15 +362,13 @@ export class ClaudeHistory {
       if (attachment !== copies.at(-1)) continue;
       if (!boundedIdentifier(this.session) || !boundedIdentifier(provenance.operationId))
         return conflict("invalid identity");
-      const record: HistoryRecord = {
+      const base = {
         id,
         parentId: additions.at(-1)?.id ?? records.at(-1)?.id ?? null,
         timestamp:
           text(natives[removal.index]?.timestamp) ??
           records.find((item) => item.id === attachment.id)?.timestamp ??
           this.timestamp,
-        type: "event",
-        eventType: "claude.input_receipt",
         inboxMessageIds: [...provenance.messageIds],
         overflow: {
           sessionId: this.session,
@@ -387,18 +388,38 @@ export class ClaudeHistory {
                   : "human",
         },
       };
-      if (existing === undefined) additions.push(record);
-      else if (existing.type === "event" && existing.eventType === "claude.input_receipt") {
+      if (existing === undefined) {
+        let record: HistoryRecord = { ...base, type: "event", eventType: "claude.input_receipt" };
+        if (base.overflow.inputKind === "human" || base.overflow.inputKind === "peer") {
+          const content = inputContent(id);
+          if (content === undefined || content.length === 0)
+            return conflict("accepted input content unavailable");
+          record = provenance.sender
+            ? systemInputEvent({
+                ...base,
+                sender: provenance.sender,
+                content: systemInputModelContent(content, {
+                  kind: "orb_message",
+                  senderOrbId: provenance.sender.orbId,
+                }),
+              })
+            : { ...base, type: "message", role: "user", content: [...content] };
+        }
+        additions.push(record);
+      } else if (existing.overflow.attachmentLine !== undefined) {
         if (
-          JSON.stringify(existing.overflow) !== JSON.stringify(record.overflow) ||
-          JSON.stringify(existing.inboxMessageIds) !== JSON.stringify(record.inboxMessageIds)
+          JSON.stringify(existing.overflow) !== JSON.stringify(base.overflow) ||
+          JSON.stringify(existing.inboxMessageIds) !== JSON.stringify(base.inboxMessageIds)
         )
           return conflict("committed receipt differs");
       }
     }
     return ok(additions);
   }
-  scan(path: string | null): Result<readonly HistoryRecord[], ClaudeHistoryError> {
+  scan(
+    path: string | null,
+    inputContent: (uuid: string) => readonly MessageInputBlock[] | undefined = () => undefined,
+  ): Result<readonly HistoryRecord[], ClaudeHistoryError> {
     if (this.loadError !== null) return err(this.loadError);
     return Result.fromThrowable(
       () => {
@@ -579,7 +600,7 @@ export class ClaudeHistory {
           });
         next.push(record);
       }
-      const receipts = this.deriveInputReceipts(natives, next);
+      const receipts = this.deriveInputReceipts(natives, next, inputContent);
       if (receipts.isErr()) return err(receipts.error);
       next.push(...receipts.value);
       if (next.length === this.records.length) return ok(this.records);

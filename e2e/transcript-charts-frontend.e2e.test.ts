@@ -65,7 +65,7 @@ it.each(["chromium", "webkit"] as const)(
 
       await gotoFrontendHistory(page, `${origin}/orbs/${ORB}`, ORB);
       const rows = page.locator("details.chart-strip");
-      await expect(rows).toHaveCount(10);
+      await expect(rows).toHaveCount(12);
       for (const each of await rows.all()) {
         await expect(each).toHaveAttribute("open", "");
         await expect(each.locator(".chart-canvas svg")).toBeVisible();
@@ -73,8 +73,56 @@ it.each(["chromium", "webkit"] as const)(
         await expect(each.locator(".chart-canvas > div")).toHaveCount(1);
         await expect(each.locator(".chart-strip-spark svg")).toBeVisible();
       }
-      await expect.poll(() => renders.length).toBe(10);
-      expect(renders).toEqual(Array(10).fill(expect.objectContaining({ outcome: "rendered" })));
+      await expect.poll(() => renders.length).toBe(12);
+      expect(renders).toEqual(Array(12).fill(expect.objectContaining({ outcome: "rendered" })));
+
+      const recurrence = row(page, "Query-error recurrence");
+      const annotationBounds = () =>
+        recurrence.locator(".chart-canvas svg text").evaluateAll((nodes) =>
+          nodes
+            .filter((node) => /baselineworst|^(HTTP5xx|uncaught) /.test(node.textContent ?? ""))
+            .map((node) => {
+              const box = node.getBoundingClientRect();
+              return {
+                text: node.textContent,
+                x: box.x,
+                y: box.y,
+                right: box.right,
+                bottom: box.bottom,
+              };
+            }),
+        );
+      const assertSeparated = async (count: number) => {
+        await expect.poll(async () => (await annotationBounds()).length).toBe(count);
+        const boxes = await annotationBounds();
+        for (const [index, a] of boxes.entries()) {
+          for (const b of boxes.slice(index + 1)) {
+            expect(
+              a.right <= b.x || b.right <= a.x || a.bottom + 1 <= b.y || b.bottom + 1 <= a.y,
+              `${a.text} overlaps ${b.text}`,
+            ).toBe(true);
+          }
+        }
+        const rules = await recurrence
+          .locator('g[class*="threshold_rule_"] line')
+          .evaluateAll((nodes) =>
+            nodes.map((node) => {
+              const box = node.getBoundingClientRect();
+              return { x: box.x, right: box.right, y: box.y };
+            }),
+          );
+        expect(rules).toHaveLength(2);
+        for (const box of boxes)
+          for (const rule of rules)
+            expect(
+              box.x > rule.right || box.right < rule.x || box.bottom < rule.y || box.y > rule.y,
+              `${box.text} intersects threshold rule`,
+            ).toBe(true);
+        return boxes;
+      };
+      const annotations = await assertSeparated(4);
+      const ends = annotations.filter((item) => !item.text?.includes("baselineworst"));
+      expect(Math.abs((ends[0]?.x ?? 0) - (ends[1]?.x ?? 0))).toBeLessThan(1);
 
       // Single series: latest value in the summary, not repeated as an end label.
       const latency = row(page, "checkout-api p95 latency");
@@ -127,6 +175,35 @@ it.each(["chromium", "webkit"] as const)(
       ).toHaveCount(0);
       await key.locator("[data-series]", { hasText: "us-east-1b" }).hover();
       await expect.poll(() => dimmedLines(narrowZones.locator(".chart-canvas svg"))).toBe(5);
+      await assertSeparated(2);
+      const long = row(page, "Long threshold annotations");
+      const longLabel = long.locator("g.threshold_label_0_marks text");
+      await expect(longLabel).toBeVisible();
+      const phoneGeometry = await long.evaluate((node) => {
+        const text = node.querySelector("g.threshold_label_0_marks text")?.getBoundingClientRect();
+        const rule = node.querySelector("g.threshold_rule_0_marks line")?.getBoundingClientRect();
+        return {
+          labelWidth: text?.width ?? 0,
+          plotWidth: rule?.width ?? 0,
+          right: text?.right ?? 0,
+          viewport: node.ownerDocument.defaultView?.innerWidth ?? 0,
+        };
+      });
+      expect(phoneGeometry.labelWidth).toBeLessThanOrEqual(141);
+      expect(phoneGeometry.plotWidth).toBeGreaterThan(100);
+      expect(phoneGeometry.right).toBeLessThanOrEqual(phoneGeometry.viewport);
+      for (const [index, label] of [
+        "2× baseline worst; count and persistence also required",
+        "x".repeat(80),
+      ].entries()) {
+        const target = long.locator(`g.threshold_label_${index}_marks text`);
+        await target.scrollIntoViewIfNeeded();
+        await hover(page, target, 0.5, 0.5);
+        await expect(page.locator(".chart-tip")).toContainText(label);
+        const tipBox = await page.locator(".chart-tip").boundingBox();
+        expect(tipBox?.x).toBeGreaterThanOrEqual(8);
+        expect((tipBox?.x ?? 0) + (tipBox?.width ?? 0)).toBeLessThanOrEqual(382);
+      }
       expect(errors).toEqual([]);
     }
   },

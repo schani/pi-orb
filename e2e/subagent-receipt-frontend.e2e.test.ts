@@ -174,12 +174,9 @@ for (const width of [1280, 390, 320]) {
         });
         expectPage(focused).toMatchObject({
           focusVisible: true,
-          background: "rgb(255, 255, 255)",
-          color: "rgb(0, 0, 0)",
-          sourceColor: "rgb(85, 85, 85)",
-          outline: "solid",
-          outlineWidth: "1px",
-          outlineColor: "rgb(85, 85, 85)",
+          background: "rgb(0, 0, 0)",
+          color: "rgb(255, 255, 255)",
+          sourceColor: "rgb(255, 255, 255)",
         });
         expectPage(focused.summaryHeight).toBe(geometry.ordinaryHeight);
         expectPage(focused.sourceWidth).toBeGreaterThan(0);
@@ -188,6 +185,23 @@ for (const width of [1280, 390, 320]) {
       await page.keyboard.press("Tab");
       await summary.focus();
       await expectFocusedNotice();
+      await summary.hover();
+      await expectFocusedNotice();
+      await page.mouse.move(0, 0);
+      const stripSummary = strip.locator("> summary");
+      await stripSummary.focus();
+      const marker = await stripSummary.locator(".activity-rail-marker").evaluate((element) => {
+        const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+        return { background: style?.backgroundColor, color: style?.color };
+      });
+      expectPage(marker).toEqual({ background: "rgb(0, 0, 0)", color: "rgb(255, 255, 255)" });
+      const step = strip.locator(".activity-strip-body > .activity-rail-row > summary").first();
+      await step.focus();
+      await step.hover();
+      await expectPage(step).toHaveCSS("background-color", "rgb(0, 0, 0)");
+      await expectPage(step).toHaveCSS("color", "rgb(255, 255, 255)");
+      await page.mouse.move(0, 0);
+      await summary.focus();
       await summary.press("Enter");
       await expectPage(preview).toHaveCount(0);
       await expectFocusedNotice();

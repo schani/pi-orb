@@ -1,177 +1,93 @@
 # Repository layout and stack
 
-These choices are accepted for the first vertical slice. Start small and extract or add dependencies only after a concrete need appears.
+Start small; add a dependency or extract a package only after a concrete need appears. Error-handling rules are owned by `AGENTS.md` ("Error handling").
 
-## Language and workspace
+## Toolchain
 
-Recommend:
+TypeScript throughout (runtime, control plane, web UI, shared contracts, tests), ESM only, npm workspaces with one lockfile. No Nx, Turborepo or other task orchestrator. `tsc --build` type-checks and compiles servers; Vite builds only the browser. Server-side development and tests use Node's built-in type stripping. Compiler options are strict, including `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `useUnknownInCatchVariables` and `erasableSyntaxOnly`. Shared types are not wire validation: network boundaries validate at runtime.
 
-- TypeScript throughout the runtime, control plane, web UI, shared contracts, and tests;
-- Node.js 26.13.0 LTS and ESM modules;
-- npm 12.2.1 workspaces, one lockfile, and no additional package-manager dependency;
-- no Nx, Turborepo, or general task orchestrator;
-- `tsc --build` for type checking/production compilation and Vite only for the browser build;
-- Node's built-in TypeScript stripping for server-side development/tests where its supported erasable syntax is sufficient;
-- strict compiler options including `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `useUnknownInCatchVariables`, and `erasableSyntaxOnly` where compatible.
+Exact pins live in the root and workspace `package.json` files and `package-lock.json`; this table names the lines and why.
 
-TypeScript lets the Pi SDK, `determined`, `neverthrow`, protocol schemas, server, and browser share one type system. Network boundaries still require runtime validation; compile-time sharing is not wire validation.
+| Tool | Line | Notes |
+|---|---|---|
+| Node.js | 26 LTS | Pinned identically in `.github/workflows/*.yml`, both Dockerfiles and `infra/native-vm/install.sh` (archive checksum from the official signed SHA-256 manifest). Node 26 has V8's Wasm wrapper lifetime protection that Node 24 lacks (`docs/postmortems/2026-10-28-node-wasm-wrapper-lifetime.md`). |
+| npm | 12 | Root `packageManager`. CI, every Docker stage and native installs install and verify it before use. Locally: `npm install --global npm@<packageManager version>` and check `npm --version` before `npm ci`. Hoisted install, lockfile v3. |
+| TypeScript | 7 | Pinned exactly so compiler upgrades are explicit. |
+| Vite / `@vitejs/plugin-react` | 8 / 6 | Plain `react()`, no Babel options or optional compiler peers. Browser targets stay explicit (`chrome107`, `edge107`, `firefox104`, `safari16`) rather than Vite 8's narrower default. Root owns Vite for Vitest's peer. |
+| Vitest | 5 | Unit, adapter, component and DST tests. |
+| Playwright | 1.x | Real-browser E2E only where SSR/transport tests cannot establish behavior (`docs/testing.md`). |
+| Biome | 2.x | Pinned exactly with its schema; lint, format, import organization. |
+| Pi family (`@earendil-works/*`) | 1.5 | Chord and every Pi package move together, with the sealed patches (`docs/pi.md`). |
+| Claude Agent SDK / CLI | aligned | Host-native Claude (`docs/claude.md`). |
+| esbuild | root-owned | Native build/acceptance tooling; must not depend on Chord's hoisting. |
 
-**Toolchain decision (2026-10-16).** Use Node 24.22.0 LTS, Vite 8.3.4 with React plugin 6.1.2, and Vitest 5.0.5: update the supported LTS and build/test tools together, not Node 26 Current or the Pi family. Root owns Vite explicitly for Vitest's peer, pins `@types/node` 24.19.2 to the runtime major, and owns esbuild 0.28.2 for native build consumers independently of Chord's hoisting. Preserve existing browser targets explicitly rather than adopting Vite 8's narrower default. Vite's Rolldown/Oxc and native artifacts require clean-install/build qualification; Node changes also require PTY and runtime E2E gates. Evidence and limits: `docs/dependency-audit.md`, `docs/testing.md`.
+**npm 12 lifecycle scripts.** Dependency scripts are denied by default. `allowScripts` approves exactly node-pty, Claude's native CLI install and esbuild's binary-version guard; without them npm 12 leaves Claude's CLI as a placeholder and skips esbuild's mismatch check. All other hooks stay blocked (agent-browser repairs its own executable bits; the Google/protobuf hooks are unneeded). Image installs keep `--ignore-scripts`, explicit sealed control-plane patching and node-pty-only rebuild/spawn gates. npm 12 refuses bundled lifecycle scripts even when allowlisted, so the isolated fake-provider wrapper explicitly runs only Fling's bundled SQLite install script after locked install and version checks (`docs/postmortems/2026-11-04-npm12-bundled-sqlite.md`).
 
-**Node security decision (2026-10-22).** Pin Node 24.22.1 across CI, Docker and native builds for the [TLS, DNS and Brotli security fixes](https://nodejs.org/en/blog/release/v24.22.1), staying on Node 24 LTS. Bundled npm remains 11.19.1; npm dependencies and the Pi family are unchanged. Native archives use the official signed SHA-256 manifest; installed Node inventory and build-phase logs retain the existing diagnostics. Qualification and limits: `docs/testing.md`.
-
-**Maintenance decision (2026-10-22).** Refresh the existing Fastify plugins, IP parser, PostgreSQL clients/types, Markdown parser, WebSocket implementation/types and Zod within their current release lines. Pin Biome 2.6.2, Vite 8.3.5 and Playwright 1.64.1; preserve workspace range policy. Static's content-disposition 3 and pg's protocol/connection-string patches follow their owning dependencies. Pi stays aligned at 1.3.0 with its sealed patches. Qualification and lint-scope rationale: `docs/testing.md`.
-
-**Biome decision (2026-11-04).** Pin [Biome 2.6.4](https://github.com/biomejs/biome/releases/tag/%40biomejs%2Fbiome%402.6.4) and its schema for linter performance and daemon/editor correctness fixes. Keep lint rules, GritQL scope and formatting policy unchanged; update only Biome's platform artifacts in the lockfile.
-
-**Node LTS decision (2026-10-28).** Pin Node 26.13.0 (Lithium LTS) across CI, Docker and native builds to obtain V8's Wasm wrapper lifetime protection absent from Node 24.22.1. Node 26 is now LTS, unlike the Current release rejected on October 16. Bundled npm is 11.20.0; root `@types/node` is 26.6.6 with its required `undici-types` 8.9.0. Other dependencies and worker/GC/JIT policy are unchanged. Retain signed native-archive verification, installed-version inventory and existing build/native-failure artifacts. Evidence and attribution limits: `docs/postmortems/2026-10-28-node-wasm-wrapper-lifetime.md`; qualification: `docs/testing.md`.
-
-**npm decision (2026-11-04).** Pin npm 12.2.1 independently of Node 26.13.0. Root `packageManager` declares it; CI, every Docker stage and native installation install and verify it before use. For local work, run `npm install --global npm@12.2.1` (or install into an isolated prefix and prepend its `bin` to `PATH`), then `test "$(npm --version)" = 12.2.1` before `npm ci`. The [registry metadata](https://registry.npmjs.org/npm/12.2.1) supports Node `^22.22.2 || ^24.15.0 || >=26.0.0`; the [release notes](https://github.com/npm/cli/releases/tag/v12.2.1) document npm 12's default-deny dependency scripts, Git/remote sources, strict CLI flags and removed shrinkwrap support. Keep the existing hoisted installation strategy, lockfile v3 and all dependency resolutions/patches. No Git/remote policy exceptions are needed.
-
-Exact lifecycle approvals cover node-pty, Claude's native CLI installation and esbuild's binary-version guard. Without approval npm 12 leaves Claude's CLI placeholder and skips esbuild's mismatch rejection; controlled npm 11/12 probes demonstrate both regressions. Other dependency hooks remain blocked: agent-browser's CLI repairs executable permissions itself, while the Google/protobuf hooks are unnecessary here. Image installs retain `--ignore-scripts`, explicit sealed control-plane patching and node-pty-only rebuild/spawn gates. The isolated fake-provider wrapper preserves its cloudflared denial and approves only its locked esbuild hook. npm 12 refuses bundled lifecycle scripts even when allowlisted: after locked installation and Fling/SQLite version verification at the fixed bundle path, the wrapper explicitly runs only the bundled SQLite install script before service launch. It changes no lockfile or upstream pin. Source rule and incident: `docs/postmortems/2026-11-04-npm12-bundled-sqlite.md`. Qualification and limits: `docs/testing.md`.
-
-**Pi decision (2026-10-16).** Upgrade the aligned Pi family to 1.3.0 and use Durable's native code-mode adapter. Upstream owns nested tasks/journals and replay; pi-orb supplies scoped tools, resource/cancellation policy and private user-facing output. Native documents/tasks use existing PostgreSQL JSON storage, preserving completed history without a compatibility phase for unfinished custom executions. Rationale and persistence boundaries: `docs/pi-durable-evaluation.md`; qualification: `docs/testing.md`.
-
-**Pi decision (user-approved 2026-11-05).** Align Chord and the Pi family on published stable 1.5.0, using pi-ai Models for inference and coding-agent for real OAuth login and skill helpers. Native lazy record upgrades, terminal restart-limit recovery and memory-first progress are approved (`docs/pi-durable-evaluation.md`). Rebase three sealed patches across 15 files against verified published tarballs, preserving broker diagnostics, native sandbox/journal/image bounds and atomic backlog admission. Native declaration rendering, canonical/normalized namespace matching and omitted-transport behavior are selected; all resource/privacy/replay guards remain. Chord's optional exact WebSocket peer requires a scoped `@earendil-works/chord@1.5.0` → `ws@8.22.1` override to retain the existing newer WebSocket contract without legacy-peer resolution or downgrade. Pi's upstream Undici/minimatch pins replace the obsolete coding-agent override; static/glob and metadata/gaxios security overrides remain. Models retains upstream OpenCode session headers. **Failed-run policy (2026-10-24):** `DurableAgent.open` configures native `HarnessSettings.afterFailedRun: "continue"` for both `model_error` and `no_model`. Failed inputs settle once before queued input starts; a still-missing model settles the finite queued batch unanswered. This Harness configuration adds no persisted state. Optional trace propagation remains off. Persisted-state approval, scheduler/report integration and recovery evidence: `docs/pi-durable-evaluation.md`. Exact versions, pristine/patched file hashes and three patch seals: `scripts/apply-dependency-patches.mjs`; rationale and code-mode/Durable source URLs: `patches/pi-codemode.PROVENANCE.md`, `patches/pi-durable.PROVENANCE.md`.
-
-Published patch inputs also include [Pi AI source](https://github.com/earendil-works/pi/tree/v1.5.0/packages/ai) / [npm artifact](https://registry.npmjs.org/@earendil-works/pi-ai/-/pi-ai-1.5.0.tgz). Artifact integrity is locked in `package-lock.json`.
+**Lint.** A scoped GritQL plugin enforces no-`throw` in first-party production code while allowing test assertions and testkit invariants. Markdown/YAML formatters stay disabled (enabling them would rewrite unrelated files). `noComponentHookFactories` is off only in `apps/web/src/lib/create-orb-request.test.ts`, where it mistakes `Intl.DateTimeFormat` doubles for components.
 
 ## Directory layout
 
 ```text
 apps/
-  control-plane/
-    src/
-      domain/           # polling/lifecycle state machines and interfaces
-      adapters/         # central Pi Durable, PostgreSQL/PGlite, host adapters
-      http/             # Fastify routes and WebSocket proxy
-  orb-runtime/
-    src/
-      claude/           # native Claude harness, boot and history
-      execution/        # workspace RPC and guest services
-      http/             # history pull and live WebSocket endpoints
-      inspection/       # in-orb sibling listing and replicated-transcript CLI
-  web/                  # React browser UI
-
+  control-plane/src/
+    domain/           # lifecycle/polling state machines and ports
+    adapters/         # central Pi Durable, PostgreSQL/PGlite, Docker/GCE/process hosts, auth
+    http/             # Fastify routes and WebSocket proxies
+  orb-runtime/src/
+    claude/           # native Claude harness, boot and history
+    execution/        # workspace RPC and guest services
+    http/             # history pull, live WebSocket, runtime endpoints
+    inspection/       # in-orb CLI: siblings, transcripts
+  web/                # React browser UI
 packages/
-  protocol/             # TypeBox schemas and inferred wire/history types
-  luna/                 # Central auxiliary model/request/response adapter policy
-
-infra/
-  opentofu/             # added when the cloud slice begins
-
-docker-compose.yml      # local PostgreSQL and static development services
-package.json
-tsconfig.base.json
+  protocol/           # TypeBox schemas and inferred wire/history types
+  luna/               # central auxiliary-model request/response policy
+  mock-openai/        # fake inference for tests
+  native-image/       # GCE image builder
+infra/                # OpenTofu roots, release scripts, native-VM install
+patches/              # sealed Pi patches and provenance
+scripts/              # patch runner, fake provider, smokes, diagnostics
+e2e/                  # end-to-end suites
 ```
 
-`protocol` is shared because it has three real consumers. Central auxiliary inference uses `luna` for fixed model selection, no-tool/minimal-reasoning options, response parsing and typed provider errors. The concrete turn-summary adapter belongs in `apps/control-plane/src/adapters/luna-summarizer.ts`; the summary coordinator consumes its port without importing Pi. Prompts, credentials, scheduling and product-specific output validation remain with their owners. Keep `OrbHostProvider`, repositories, broader Pi integration, fakes, and tests inside the application that owns them. Extract other domain, adapter, provider, or test-support packages only when another application genuinely needs them.
+`protocol` is shared because it has three real consumers; the web app depends on it, never on control-plane code. `luna` owns fixed auxiliary model selection, no-tool/minimal-reasoning options, response parsing and typed provider errors; prompts, credentials, scheduling and output validation stay with their owners (the turn-summary adapter is `apps/control-plane/src/adapters/luna-summarizer.ts`). `OrbHostProvider`, repositories, Pi integration, fakes and tests stay inside the owning application. Domain directories import no Fastify, React, PostgreSQL, Docker or Pi. No generic `common`/`utils` packages.
 
-The web app depends on `protocol`, not control-plane implementation code. Domain directories contain no Fastify, React, PostgreSQL, Docker, or Pi imports. Avoid generic `common` or `utils` packages.
+**Dependency ownership.** Declare a dependency in the workspace that imports or executes it; an import-only scan is not enough (peers, executables and fixtures count). The runtime owns Chord (execution server imports) and production `ws` (`preview/loopback-websocket.ts`) and `determined`. `native-image` keeps `determined` as a dev dependency (types for DST tests only). Root build tools are not duplicated into workspaces.
 
-## Dependencies that earn their keep now
+## Dependencies
 
-Runtime dependencies:
+Runtime:
 
-- `neverthrow`: mandatory Result-based error handling;
-- `determined`: mandatory deterministic scheduling/failure simulation;
-- `@earendil-works/pi-durable`: central Pi conversation/task authority and execution environments;
-- `@earendil-works/pi-coding-agent`: central OAuth login and skill helpers;
-- `@anthropic-ai/claude-agent-sdk`: host-native Claude;
-- `fastify`: robust HTTP routing, body limits, lifecycle, and schema integration for both servers;
-- `@fastify/websocket`: WebSocket upgrade/lifecycle integration (and its `ws` implementation);
-- `typebox`: one source for runtime JSON validation and inferred TypeScript protocol types;
-- `pg`: the production PostgreSQL network client;
-- `@electric-sql/pglite`: embedded PostgreSQL for Docker-free local development and store contract tests;
-- `react` and `react-dom`: the web UI.
+- `neverthrow` (Result-based errors) and `determined` (deterministic simulation) are mandatory.
+- `@earendil-works/pi-durable` and family: central Pi authority; `pi-coding-agent` for OAuth login and skill helpers; `pi-ai` Models for inference.
+- `@anthropic-ai/claude-agent-sdk`: host-native Claude.
+- `fastify` and `@fastify/websocket` (with `ws`) for both servers; `@fastify/static` for control-plane assets. Replacing them means writing and securing our own routing, body handling and upgrade lifecycle.
+- `typebox`: one source for runtime validation and inferred protocol types, shared through `packages/protocol`.
+- `pg` (network PostgreSQL) and `@electric-sql/pglite` (embedded PostgreSQL); versions and extension policy: `docs/history.md` ("Search").
+- `@modelcontextprotocol/client` (control plane only): MCP (`docs/mcp.md`).
+- `undici` (direct): socket-time DNS-guarded Agents passed to native fetch in the MCP probe/OAuth adapters. Use `connect.lookup`, never custom certificate verification; keep public-address checks and `redirect: "error"`.
+- `google-auth-library` + native fetch for GCE and Google APIs (no generated client); `openid-client`, `@hapi/iron`, `cookie` for login and sealed sessions (`docs/auth.md`).
+- `node-pty` and `@wterm/*` (exact) for the terminal (`docs/terminal.md`).
+- `react`, `react-dom`, `react-markdown`; Mermaid (lazy, strict security level) and Vega/Vega-Lite (lazy) for transcript diagrams and charts. Mermaid ≥12.2 is required for KaTeX's trust-bypass fix.
 
-Development/build dependencies:
+Everything else begins as first-party code or an existing CLI. HTTP uses native `fetch` wrapped at the adapter; no tRPC, Axios or generated API client. No router, query-cache or state-management library: the UI uses a small first-party reducer/context and validates received data with the shared schemas. Logging is a tiny structured JSON wrapper over `console`, not Pino. Docker and Git are driven through their CLIs via `execFile`, not Dockerode or a Git library. OIDC signing (RS256, JWK export, RFC 7638 `kid`) is first-party over `node:crypto` behind the signer port; `jose` was rejected while the surface stays RS256-only.
 
-- the latest stable `typescript` release, pinned exactly so compiler upgrades are explicit;
-- `vite` and `@vitejs/plugin-react`;
-- `@biomejs/biome`, pinned exactly, for repository-wide linting, formatting, and import organization; a scoped GritQL plugin preserves the no-throw rule for first-party production code while allowing test assertions and deterministic-testkit invariants to throw;
-- `vitest` for unit, adapter, component, and deterministic simulation tests;
-- `@playwright/test` for focused real-browser E2E coverage, beginning with frontend-only IAP-session recovery (`docs/testing.md`; added 2026-09-03).
+**Overrides** (root `package.json`, each scoped to its owner): Chord's optional exact WebSocket peer → the existing newer `ws`; `@fastify/static` → `glob` 14 and `gcp-metadata` → `gaxios` 7.3 for the glob/minimatch advisories. No global or transitive-major overrides.
 
-Everything else should begin as first-party code or use an existing CLI.
-
-**Dependency patch installation (2026-10-18).** Root and packaged control-plane installs run `node scripts/apply-dependency-patches.mjs` after locked npm installation. The single patch set covers Pi AI, codemode and Durable. The runner validates exact package versions, patch SHA-256 and pristine/patched file hashes before any mutation. It canonicalizes the install root, clears inherited Git configuration/environment and prevents enclosing-repository discovery. Missing inputs, drift or application failure reject with patch-specific diagnostics; already-applied patches pass reverse checks. Execution/Claude hosts install unmodified locked production dependencies, without the patch runner or patch files. Guest/native loaded-closure checks verify zero patched files; installed transitive package presence does not imply a loaded harness or patch requirement.
-
-Git remains an installation prerequisite. The scoped runner avoids a patch parser/fork and the vulnerable installer-only `patch-package → find-yarn-workspace-root → micromatch → braces` chain ([GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)). Rejected: official patch-package 8.0.1 and its canary retain that chain; 6.0.7 adds vulnerable `tmp`. Native sandbox, image-decoder and replay changes retain strict provenance (`patches/pi-codemode.PROVENANCE.md`, `patches/pi-durable.PROVENANCE.md`); exact-source qualification is recorded in `docs/testing.md`.
-
-**Security dependency refresh (2026-10-22).** MCP client `2.3.1` (and its exact core dependency) fixes cross-origin redirect credential forwarding ([GHSA-6prh-2h8m-c8cw](https://github.com/advisories/GHSA-6prh-2h8m-c8cw)). Fastify `5.12.7` fixes case-sensitive header-schema validation ([GHSA-389g-gv7q-r4x8](https://github.com/advisories/GHSA-389g-gv7q-r4x8)); no first-party `propertyNames` header schema was found. SDK `1.32.1` retains its Express limiter range; the lock resolves `express-rate-limit → ip-address` to `10.7.4`, fixing unbounded IPv6 zone parsing ([GHSA-rxp7-6hxx-x8q5](https://github.com/advisories/GHSA-rxp7-6hxx-x8q5)). No first-party use of that parser or SDK Express OAuth handlers was found. These are affected-dependency fixes, not demonstrated application exploits.
-
-Direct Undici selects [`8.12.3`](https://github.com/nodejs/undici/releases/tag/v8.12.3) (2026-11-04). Production imports supply socket-time DNS-guarded Agents to native fetch in the MCP probe/OAuth adapters; TLS renegotiation errors can reach this transport ([GHSA-qrxm-fqhp-jwvm](https://github.com/nodejs/undici/security/advisories/GHSA-qrxm-fqhp-jwvm)). Function-valued Agent TLS options must remain intact ([GHSA-2m5v-pch6-74hx](https://github.com/nodejs/undici/security/advisories/GHSA-2m5v-pch6-74hx)); reviewed adapters use `connect.lookup`, not custom certificate verification. Existing public-address checks, `redirect: "error"`, typed failures and redacted OAuth diagnostics remain required. A credential-bearing OAuth regression verifies callers cannot enable redirects.
-
-**First-party security refresh (2026-10-24).** Refresh MCP SDK/Express-owned body-parser to `2.4.0` (and its required qs `6.16.1`), AJV-owned fast-uri to `3.1.9`, and fast-json-stringify-owned fast-uri to `4.2.3`. These fix [compressed-body DoS](https://github.com/advisories/GHSA-27r3-jxmh-p828) and [URI interpretation](https://github.com/advisories/GHSA-w74x-v6f9-j3xg) findings without changing their owners.
-
-Pi `1.4.0` pins Undici `8.10.2`. An npm override scoped to `@earendil-works/pi-coding-agent@1.4.0` selects `8.12.3`, above the [8.12.2 fix floor](https://github.com/nodejs/undici/releases/tag/v8.12.2), without a source backport or global major forcing. Npm hoists `8.12.3`, shared with the control-plane direct dependency. OpenAI’s optional `>=5 <9` peer inherits `8.12.3`; a version-qualified child selector still intersects that range. The three sealed patches are independent of this override. Our SDK path does not call the CLI/RPC/interactive dispatcher that installs EnvHttpProxyAgent/Undici globals; package loading alone establishes neither network use nor exploitability. Node's bundled fetch is separate.
-
-Mermaid `12.2.0` first accepts fixed KaTeX: `11.17.2`, `12.0.0` and `12.1.0` constrain it below the [trust-bypass fix](https://github.com/advisories/GHSA-238p-pmpm-9mq7) in `0.18.2`. Its `^0.18.0` range locks `0.18.10`; no `0.19` upgrade. Presentation/security policy: `docs/web-ui.md`; qualification: `docs/testing.md`. These remediate dependencies, not demonstrated application exploits. External fake-provider/Fling/esbuild inputs are excluded.
-
-**Mermaid upgrade (2026-11-04).** Use [`12.3.0`](https://github.com/mermaid-js/mermaid/releases/tag/mermaid%4012.3.0) for corrected flowchart edge-ID parsing beside node shapes ([#8459](https://github.com/mermaid-js/mermaid/pull/8459)) and renderer fixes. Its required ELK dependency resolves to `0.12.0`; the adapter still selects Dagre. DOMPurify `3.4.17` already meets the release’s security floor, and KaTeX remains `0.18.10`: this bump claims no additional security remediation. Keep unrelated resolutions and the Pi/Chord `1.4.0` family and patches unchanged. Built-browser qualification: `docs/testing.md`.
-
-## HTTP, WebSocket, and schemas
-
-Keep Fastify, `@fastify/websocket`, and TypeBox because replacing them would mean writing and securing our own router, request body handling, upgrade lifecycle, and runtime validators. Share TypeBox schemas through `packages/protocol` and infer types from them.
-
-Use native `fetch` for HTTP. Wrap external calls immediately with `ResultAsync.fromThrowable`, validate status and body explicitly, and return a typed error. Do not use tRPC, Axios, or a generated API client initially.
+**Dependency patches.** Root and packaged control-plane installs run `node scripts/apply-dependency-patches.mjs` after locked install. One patch set covers Pi AI, codemode and Durable. The runner validates exact package versions, patch SHA-256 and pristine/patched file hashes before mutating, canonicalizes the install root, clears inherited Git config/environment and blocks enclosing-repository discovery; drift or failure rejects with patch-specific diagnostics, and already-applied patches pass reverse checks. Execution/Claude hosts install unmodified locked production dependencies; guest loaded-closure checks verify zero patched files. Git is an install prerequisite. Rejected: `patch-package` (its installer chain carries a `braces` advisory; 6.0.7 adds vulnerable `tmp`). Provenance: `patches/*.PROVENANCE.md`.
 
 ## Database
 
-Use `pg` directly with parameterized SQL. The initial schema and query set are small, and adding Kysely now would duplicate abstractions before it provides enough value.
+`pg` directly with parameterized SQL; no query builder until query volume demands one.
 
-- Write explicit transaction helpers that issue `BEGIN`, `COMMIT`, and `ROLLBACK` and return `ResultAsync`.
-- Keep numbered SQL migration files and a small migration runner. Applied migrations are keyed by full filename and sorted lexicographically. The locally applied `029_orb_harness.sql` retains its name alongside `029_history_record_shape.sql`; their prefixes are not identities. Renaming it would reapply its column addition to the retained POC database (decided 2026-10-05).
-- Validate/map database rows at the adapter boundary rather than trusting untyped driver output.
-- Define repository interfaces next to the control-plane domain code.
-- Provide a deterministic in-memory implementation for DST and real PostgreSQL integration tests.
+- Explicit transaction helpers issue `BEGIN`/`COMMIT`/`ROLLBACK` and return `ResultAsync`; rollback never depends on throwing.
+- Numbered SQL migrations with a small runner. Applied migrations are keyed by full filename, sorted lexicographically: `029_orb_harness.sql` and `029_history_record_shape.sql` share a prefix and both stay (renaming would reapply).
+- Rows are validated and mapped at the adapter boundary. Repository interfaces live beside the domain; DST uses deterministic in-memory implementations.
+- IDs come from `crypto.randomUUID()`; no PostgreSQL UUID extension.
+- No generic user/auth, live-event, polling-job, host-resource, audit or request-claim tables. Purpose-built tables (`orb_messages`, `orb_spawns`) are not job tables.
 
-Add a typed query builder later only if query volume or refactoring pain demonstrates the need. Do not use a transaction API that requires throwing to roll back.
+**PGlite.** `PI_ORB_DATABASE_KIND=pglite` embeds PostgreSQL-as-WebAssembly in the control plane, filesystem-backed at `PI_ORB_PGLITE_PATH` (`npm run dev:local`); tests use it in memory. Docker development uses a PostgreSQL server. Both drivers implement one `PostgreSQLClient` query/transaction boundary feeding the same stores, migrations, row mapping and SQL. PGlite is single-connection: it preserves CAS, atomic commits, deferred constraints, JSONB and recursive reconstruction for one process, but not pool behavior, network error mapping or multi-instance serialization; real-PostgreSQL tests own those. Rejected: the earlier SQLite adapter, which duplicated the schema and store with different semantics.
 
-### Embedded PGlite composition (decided and implemented 2026-08-07)
+**Parameter intent.** node-postgres encodes from the JavaScript value; PGlite from the server-reported OID. Structured parameters therefore declare intent: `jsonParam()` for `json`/`jsonb`, `arrayParam()` for arrays. A shared prepare step rejects any bare array or plain object with a non-retryable `invariant` before the driver runs. `jsonParam(null)` binds SQL NULL. The store contract runs on both drivers; equal SQL text is not equal driver behavior (`docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md`).
 
-The container-restricted pi coding-agent environment has no PostgreSQL server binaries installed. The Docker-free composition therefore uses PGlite, PostgreSQL compiled to WebAssembly and embedded in the control-plane process. `PI_ORB_DATABASE_KIND=pglite` uses the filesystem-backed directory configured by `PI_ORB_PGLITE_PATH`; the root `npm run dev:local` command selects it together with `PI_ORB_HOST_PROVIDER=process`. Tests construct PGlite without a path for an ephemeral in-memory database. Local development remains filesystem-backed by default because conversation history and credential pointers must survive control-plane restarts.
-
-**PGlite packaging decision (2026-11-04, PST).** Pin engine `0.5.12` with wrapper `0.0.14` to satisfy its exact peer without permitting unqualified coupled upgrades. The extension remains `1.5.1`; payload verification and native-version boundaries: `docs/history-search.md`.
-
-PGlite and network PostgreSQL implement a small `PostgreSQLClient` query/transaction boundary. Both feed the same `PostgreSQLControlPlaneStore`, `PostgreSQLCredentialPointerStore`, numbered migrations, row mapping, and SQL. The prior SQLite adapter was rejected and removed: although it enabled Docker-free execution, it duplicated the complete schema and store implementation while testing different type, JSON, constraint, and transaction semantics. The replacement removes that divergence and lets the backend-agnostic store contract suite observe the domain interfaces against production SQL.
-
-**Parameter-intent rule (decided 2026-08-11, from `docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md`).** The two clients do **not** bind parameters the same way: node-postgres encodes from the JavaScript value (a JS array becomes a PostgreSQL array literal, a plain object becomes JSON), PGlite from the parameter OID the server reports. Structured parameters therefore state their intent — `jsonParam()` for a `json`/`jsonb` column, `arrayParam()` for a PostgreSQL array — and a shared prepare step in both clients rejects any remaining bare array or bare plain object with a non-retryable `invariant` `StoreError` before the driver is called. `jsonParam(null)` binds SQL NULL, never `'null'::jsonb`. The store contract runs on both drivers (`docs/testing.md`, store-substrate rule); SQL text equality is not driver equality.
-
-`StoreError` has three classes. `unavailable` is a retryable outage, `corruption` is a constraint violation (`23503`/`23505`/`23514`), and `invariant` is a deterministic bug of ours — SQLSTATE class `22` or `42`, or the parameter guard above. An `invariant` never carries `retryable: true`, answers HTTP 500 `internal` rather than 503, and parks the loops that would otherwise re-attempt it forever (`docs/lifecycle.md`).
-
-PGlite is single-user/single-connection. Its exclusive transaction API and explicit rollback preserve the required semantics for one control-plane process, including lifecycle and credential-pointer CAS, atomic replication commits, deferred constraints, JSONB, timestamps, and recursive history reconstruction. It does **not** establish connection-pool behavior, network error mapping, or serialization between multiple control-plane instances. Real PostgreSQL E2E/integration tests and deploy smoke tests remain authoritative for those properties. The same full-slice E2E runs with PGlite + the process host when `PI_ORB_E2E_BACKEND=process`, and with a PostgreSQL server + Docker by default.
-
-## Web UI
-
-Use React with Vite, browser APIs, and a small first-party reducer/context for HTTP and WebSocket state.
-
-Do not add TanStack Router, TanStack Query, or a state-management package initially. The first UI has few routes and one live session. Add a router or query-cache library only after navigation/caching behavior becomes nontrivial.
-
-Use the shared TypeBox schemas to validate data received by the browser. Playwright drives the small set of interactions that require a real browser and cannot be established by SSR or transport tests; keep ordinary components on Vitest. Defer styling/component-library selection.
-
-## Tests, logging, Docker, and infrastructure
-
-- Use Vitest for domain, protocol, adapter, component, and `determined` tests.
-- Use real PostgreSQL and Docker integration tests where fakes cannot establish adapter correctness.
-- Use a tiny structured JSON logging wrapper around `console` initially instead of Pino.
-- Implement `DockerOrbHostProvider` by invoking the Docker CLI with `execFile`, wrapped at the boundary, instead of adding Dockerode.
-- Invoke the Git CLI directly for cloning rather than adding a Git library.
-- Add OpenTofu/Terraform only when implementing the cloud deployment; it is not an application dependency.
-- Add the GCE client only when `GceOrbHostProvider` is implemented.
-- Implement OIDC workload-identity signing (RS256 JWTs, JWK export, RFC 7638 `kid` thumbprints; `docs/workload-identity.md`) as first-party code over `node:crypto` behind the signer port, instead of adding `jose` (decided 2026-08-21). Node 24's `crypto` provides RSA key generation, signing, and JWK export natively; the JOSE surface we need is on the order of a hundred lines and must sit behind a DST-fakeable port either way. Rejected alternative: `jose`, defensible because JOSE serialization details are easy to get subtly wrong — revisit if the issuer grows beyond RS256 or the hand-rolled surface accretes.
-
-Test framework assertions and React/framework error boundaries may use exceptions where their contracts require them; production/domain APIs remain Result-based. Every external adapter owns immediate exception/rejection conversion. No Docker, database, filesystem, Git, HTTP, Pi SDK, or future GCP exception may cross into domain code.
-
-## Error handling
-
-- First-party code does not use exceptions for expected or recoverable control flow.
-- Synchronous fallible operations return `neverthrow` `Result<T, E>`.
-- Asynchronous fallible operations return `ResultAsync<T, E>`.
-- Public domain, adapter, and service APIs expose explicit discriminated error types rather than raw `Error` objects.
-- Calls into third-party or platform code that can throw or reject must be caught at the immediate boundary with `Result.fromThrowable`, `ResultAsync.fromThrowable`, or an equivalent narrow wrapper, then mapped into a typed application error.
-- Do not allow a rejected promise from an external dependency to escape into first-party domain code.
-- Exceptions are allowed only where a framework or third-party callback contract requires them, such as a top-level framework error boundary. Such exceptions must be contained at that boundary and converted to/logged as typed failures where possible.
-- Database transaction rollback must not depend on first-party code throwing. Use an explicit/controlled transaction API and return a `Result`.
-- Lint rules should reject `throw` statements in first-party source, with narrowly documented overrides only for required boundaries.
+**`StoreError`.** `unavailable`: retryable outage. `corruption`: constraint violation (`23503`/`23505`/`23514`). `invariant`: our deterministic bug (SQLSTATE class `22`/`42` or the parameter guard); never retryable, HTTP 500 `internal`, and parks the loops that would retry it (`docs/lifecycle.md`).

@@ -105,7 +105,7 @@ describe("Pi dependency patch installation", () => {
     expect(read("patches/@earendil-works+pi-codemode+1.5.0.patch")).not.toContain(path);
   });
 
-  it("keeps native Durable journals, namespace discovery and previews on the public contract", () => {
+  it("keeps native Durable journals, namespace discovery and argument semantics", () => {
     const base = "node_modules/@earendil-works/pi-durable/dist/codemode/";
     for (const barrel of ["index.js", "index.d.ts"]) {
       expect(read(`${base}${barrel}`)).toContain("CodemodeRunDoc, CodemodeJournalDoc,");
@@ -117,16 +117,9 @@ describe("Pi dependency patch installation", () => {
     );
     expect(native).not.toContain('namespace.name.split("__").at(-1)');
     expect(native).not.toContain('toCodemodeIdentifier(namespace.name).split("__").at(-1)');
-    expect(native).toContain("Object.keys(value).slice(0, 16)");
-    expect(native).toContain(": typeof value).slice(0, 256)");
-    expect(native).toContain(
-      'const args = call.args === undefined ? "" : argumentPreview(call.args);',
-    );
-    expect(native).toContain("return `tools.${made.name}(${argumentPreview(made.arguments)})`;");
-    expect(native).toContain("${call.name}(${argumentPreview(call.args)})`");
-    expect(native).not.toContain("JSON.stringify(call.args)");
-    expect(native).not.toContain("JSON.stringify(made.arguments)");
-    // Display sanitization must not change native execution, journal or replay equality.
+    expect(native).not.toContain("argumentPreview");
+    expect(native).toContain("JSON.stringify(call.args)");
+    expect(native).toContain("JSON.stringify(made.arguments)");
     expect(native).toContain("sameJson(made.arguments, call.args ?? {})");
     expect(native).toContain("const args = (call.args === undefined ? {} : call.args);");
     expect(native).not.toContain("const args = (call.args ?? {});");
@@ -190,26 +183,6 @@ describe("Pi dependency patch installation", () => {
       expect(Buffer.from(bytes).equals(expected)).toBe(true);
       expect(data).toBe(expected.toString("base64"));
     }
-  });
-
-  it("bounds native display previews to keys without exposing argument values", () => {
-    const native = read("node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js");
-    const helper = native.match(/function argumentPreview\(value\) \{[\s\S]*?\n\}/)?.[0];
-    expect(helper).toBeDefined();
-    const preview = runInNewContext(`(${helper})`) as (value: unknown) => string;
-    expect(preview({ token: "PREVIEW_CANARY", nested: { password: "PREVIEW_CANARY" } })).toBe(
-      '["token","nested"]',
-    );
-    expect(preview("PREVIEW_CANARY")).toBe('"string"');
-    expect(preview(null)).toBe('"object"');
-    expect(preview(undefined)).toBe('"undefined"');
-    const many = Object.fromEntries(
-      Array.from({ length: 17 }, (_, index) => [`key${index}`, "PREVIEW_CANARY"]),
-    );
-    expect(JSON.parse(preview(many))).toHaveLength(16);
-    const long = { ["k".repeat(300)]: "PREVIEW_CANARY" };
-    expect(preview(long)).toHaveLength(256);
-    expect(preview(long)).not.toContain("PREVIEW_CANARY");
   });
 
   it("retains CPU checkpoints for both execute and deterministic start workers", () => {

@@ -2,7 +2,7 @@ import { err, ok, type Result } from "neverthrow";
 import { type Static, Type } from "typebox";
 import { Check } from "typebox/value";
 
-/** Owner-level skills and secrets apply to every project of the owner (docs/owner-skills-secrets.md). */
+/** Owner-level skills and secrets apply to every project of the owner (docs/agent-context.md). */
 const closed = { additionalProperties: false } as const;
 
 export const OWNER_SKILLS_PATH = "/api/v1/owner-skills";

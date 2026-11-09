@@ -14,6 +14,7 @@ const ready = {
   labels: { "pi-orb-native-build": input.operationId, "pi-orb-native-version": input.version },
   status: "READY",
 };
+const pending = { ...ready, status: "PENDING" };
 
 function commandFailure(action: "create" | "describe", body: string): Error {
   return Object.assign(new Error("command failed"), {
@@ -35,7 +36,7 @@ const absent = () =>
 
 function harness(
   reads: (Error | object)[],
-  options: { elapsed?: number; logFailure?: number } = {},
+  options: { elapsed?: number; logFailure?: number; createResponse?: object[] } = {},
 ) {
   let now = 0;
   const calls: string[][] = [];
@@ -45,7 +46,11 @@ function harness(
   const runner: CommandRunner = async (_command, args, commandOptions) => {
     calls.push(args);
     timeouts.push(commandOptions.timeout);
-    if (args[2] === "create") throw lostResponse();
+    if (args[2] === "create") {
+      if (options.createResponse !== undefined)
+        return { stdout: JSON.stringify(options.createResponse), stderr: "" };
+      throw lostResponse();
+    }
     now += options.elapsed ?? 0;
     const response = reads.length > 1 ? reads.shift() : reads[0];
     if (response instanceof Error) throw response;
@@ -70,6 +75,37 @@ function harness(
 }
 
 describe("native capture read-only recovery", () => {
+  it("polls a successful PENDING create until the same image is READY", async () => {
+    const h = harness([pending, ready], {
+      createResponse: [pending],
+    });
+    const result = await h.effects.capture(input, "runtime", h.abort.signal);
+    expect(result.isOk() && result.value.id).toBe(ready.id);
+    expect(h.calls.map((args) => args[2])).toEqual(["create", "describe", "describe"]);
+    expect(h.logs).toHaveLength(3);
+    expect(h.now()).toBe(5_000);
+  });
+
+  it.each(["READY", "PENDING"])(
+    "rejects a changed create id on the first %s read",
+    async (status) => {
+      const h = harness([{ ...ready, status, id: "999" }], { createResponse: [pending] });
+      const result = await h.effects.capture(input, "runtime", h.abort.signal);
+      expect(result.isErr() && result.error.message).toBe("invalid image response shape");
+      expect(h.calls.map((args) => args[2])).toEqual(["create", "describe"]);
+    },
+  );
+
+  it.each([0, 7_000])("bounds successful PENDING recovery with %i ms reads", async (elapsed) => {
+    const h = harness([pending], { createResponse: [pending], elapsed });
+    const result = await h.effects.capture(input, "runtime", h.abort.signal);
+    expect(result.isErr() && result.error.message).toBe("capture recovery deadline exceeded");
+    expect(h.now()).toBe(60_000);
+    expect(h.calls.filter((args) => args[2] === "create")).toHaveLength(1);
+    expect(h.calls.filter((args) => args[2] === "describe")).toHaveLength(elapsed === 0 ? 12 : 5);
+    expect(h.timeouts.slice(1).every((timeout) => timeout <= 10_000)).toBe(true);
+  });
+
   it("recovers a successful insert whose synchronous response was Google's HTML 502", async () => {
     const h = harness([ready]);
     const result = await h.effects.capture(input, "runtime", h.abort.signal);
@@ -131,15 +167,22 @@ describe("native capture read-only recovery", () => {
     expect(h.calls).toHaveLength(3);
   });
 
-  it.each(["read", "wait", "log"] as const)(
-    "cancels during %s without accepting success",
-    async (phase) => {
+  it.each(
+    (["read", "wait", "log"] as const).flatMap((phase) =>
+      [false, true].map((pendingCreate) => ({ phase, pendingCreate })),
+    ),
+  )(
+    "cancels during $phase without accepting success (PENDING create=$pendingCreate)",
+    async ({ phase, pendingCreate }) => {
       const abort = new AbortController();
       let commands = 0;
       let logs = 0;
       const result = await new GcloudImageBuildEffects(
         async () => {
-          if (++commands === 1) throw lostResponse();
+          if (++commands === 1) {
+            if (pendingCreate) return { stdout: JSON.stringify([pending]), stderr: "" };
+            throw lostResponse();
+          }
           if (phase === "read") abort.abort();
           return {
             stdout: JSON.stringify(phase === "wait" ? { ...ready, status: "PENDING" } : ready),
@@ -200,19 +243,25 @@ describe("native capture read-only recovery", () => {
     expect(result.isErr() && result.error.message).toContain("capture recovery deadline exceeded");
   });
 
-  it("bounds reads even if an injected clock does not progress", async () => {
-    let commands = 0;
-    const result = await new GcloudImageBuildEffects(
-      async () => {
-        if (++commands === 1) throw lostResponse();
-        throw transientRead();
-      },
-      { now: () => 0, wait: async () => {} },
-      () => okAsync(undefined),
-    ).capture(input, "runtime", new AbortController().signal);
-    expect(result.isErr()).toBe(true);
-    expect(commands).toBe(13);
-  });
+  it.each([false, true])(
+    "bounds reads with a frozen clock (PENDING create=%s)",
+    async (pendingCreate) => {
+      let commands = 0;
+      const result = await new GcloudImageBuildEffects(
+        async () => {
+          if (++commands === 1) {
+            if (pendingCreate) return { stdout: JSON.stringify([pending]), stderr: "" };
+            throw lostResponse();
+          }
+          throw transientRead();
+        },
+        { now: () => 0, wait: async () => {} },
+        () => okAsync(undefined),
+      ).capture(input, "runtime", new AbortController().signal);
+      expect(result.isErr() && result.error.message).toBe("capture recovery read limit exceeded");
+      expect(commands).toBe(13);
+    },
+  );
 
   it.each([{ killed: true }, { code: "ETIMEDOUT" }, { signal: "SIGKILL" }])(
     "does not recover terminated command %j",
@@ -231,7 +280,7 @@ describe("native capture read-only recovery", () => {
     },
   );
 
-  it.each([ready, { ...ready, name: "foreign" }, { ...ready, status: "PENDING" }])(
+  it.each([ready, { ...ready, name: "foreign" }, { ...ready, status: "FAILED" }])(
     "validates successful create response %j",
     async (body) => {
       let calls = 0;
@@ -244,6 +293,23 @@ describe("native capture read-only recovery", () => {
         () => okAsync(undefined),
       ).capture(input, "runtime", new AbortController().signal);
       expect(result.isOk()).toBe(body === ready);
+      expect(calls).toBe(1);
+    },
+  );
+
+  it.each([ready, [], [ready, ready], [null], null, "not-json"])(
+    "rejects malformed create envelope %j",
+    async (body) => {
+      let calls = 0;
+      const result = await new GcloudImageBuildEffects(
+        async () => {
+          calls++;
+          return { stdout: body === "not-json" ? body : JSON.stringify(body), stderr: "" };
+        },
+        undefined,
+        () => okAsync(undefined),
+      ).capture(input, "runtime", new AbortController().signal);
+      expect(result.isErr()).toBe(true);
       expect(calls).toBe(1);
     },
   );
@@ -271,11 +337,21 @@ describe("native capture read-only recovery", () => {
     expect(result.isErr()).toBe(true);
     expect(h.calls).toHaveLength(2);
     expect(h.now()).toBe(0);
+    for (const status of ["READY", "PENDING"]) {
+      const create = harness([ready], { createResponse: [{ ...ready, status, ...fields }] });
+      const created = await create.effects.capture(input, "runtime", create.abort.signal);
+      expect(created.isErr()).toBe(true);
+      expect(create.calls).toHaveLength(1);
+    }
   });
 
-  it.each(["read", "log"] as const)(
-    "returns before a stuck %s and handles its late rejection",
-    async (boundary) => {
+  it.each(
+    (["read", "log"] as const).flatMap((boundary) =>
+      [false, true].map((pendingCreate) => ({ boundary, pendingCreate })),
+    ),
+  )(
+    "returns before a stuck $boundary and handles its late rejection (PENDING create=$pendingCreate)",
+    async ({ boundary, pendingCreate }) => {
       let started: () => void = () => {};
       const inFlight = new Promise<void>((resolve) => {
         started = resolve;
@@ -289,7 +365,10 @@ describe("native capture read-only recovery", () => {
       let commands = 0;
       const resultPromise = new GcloudImageBuildEffects(
         async () => {
-          if (++commands === 1) throw lostResponse();
+          if (++commands === 1) {
+            if (pendingCreate) return { stdout: JSON.stringify([pending]), stderr: "" };
+            throw lostResponse();
+          }
           if (boundary === "read") {
             started();
             return late;

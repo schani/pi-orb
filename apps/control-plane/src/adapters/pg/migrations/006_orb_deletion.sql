@@ -1,4 +1,4 @@
--- Durable, crash-recoverable permanent orb deletion (docs/orb-deletion.md).
+-- Durable, crash-recoverable permanent orb deletion (docs/teardown.md).
 ALTER TABLE orbs DROP CONSTRAINT orbs_state_check;
 ALTER TABLE orbs ADD CONSTRAINT orbs_state_check CHECK (state IN (
   'creating', 'starting', 'running', 'stopping', 'stopped', 'failed', 'deleting'

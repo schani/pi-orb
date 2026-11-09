@@ -15,8 +15,8 @@ import { normalizeTerminalSelection } from "../lib/terminal-copy.ts";
 import { type TerminalGridMetrics, terminalShadeLayout } from "../lib/terminal-layout.ts";
 import { Icon } from "./Icons.tsx";
 
-const HORIZONTAL_PADDING = 30;
-const VERTICAL_PADDING = 26;
+const HORIZONTAL_PADDING = 24;
+const VERTICAL_PADDING = 24;
 const INITIAL_METRICS: TerminalGridMetrics = {
   cellWidth: 8,
   cellHeight: 20,

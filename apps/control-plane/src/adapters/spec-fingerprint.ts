@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
  * two code paths would otherwise fingerprint differently — and a fingerprint
  * that is not a pure function of the effective specification replaces the
  * whole fleet's compute on the next Start for no reason
- * (docs/compute-replacement.md).
+ * (docs/lifecycle.md).
  */
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -21,7 +21,7 @@ function canonicalize(value: unknown): unknown {
 
 /**
  * The one host-specification fingerprint calculation, shared by every host
- * provider (`desiredSpecFingerprint`, docs/compute-replacement.md). Callers
+ * provider (`desiredSpecFingerprint`, docs/lifecycle.md). Callers
  * pass the non-secret launch facts whose change requires replacing compute.
  */
 export function specFingerprintOf(parts: Record<string, unknown>): string {

@@ -108,10 +108,12 @@ it.each(["denied", "unbound"] as const)(
   },
 );
 
-it("describes family inspection and alerts without parent delivery", () => {
+it("describes family inspection and restricts alert usage", () => {
   const tools = createOrbTools({ invoke: () => okAsync({}) });
   expect(tools.find((tool) => tool.name === "orb_self")?.description).toMatch(/parent.*child/i);
-  expect(tools.find((tool) => tool.name === "orb_alert")?.description).toContain("Notify the user");
+  expect(tools.find((tool) => tool.name === "orb_alert")?.description).toBe(
+    "Alert the user. Only use this if something is wrong, or they asked for it.",
+  );
 });
 
 it("binds peer sends to durable tool call identity, never model sender input", async () => {

@@ -10,7 +10,7 @@ import { inspectFailedRuntime } from "./runtime-recovery.ts";
 
 /**
  * The classified result of pulling one orb until it is caught up
- * (docs/history-replication.md). Integrity failures have already been acted on
+ * (docs/history.md). Integrity failures have already been acted on
  * (orb failed, compute discard requested) when this returns.
  */
 export type PollOutcome =
@@ -18,7 +18,7 @@ export type PollOutcome =
   | {
       readonly type: "retryable";
       readonly message: string;
-      /** No retry can clear this one: a `StoreError` with code `invariant` (docs/history-replication.md). */
+      /** No retry can clear this one: a `StoreError` with code `invariant` (docs/history.md). */
       readonly invariant?: boolean;
     }
   | { readonly type: "integrity"; readonly reason: ReplicationIntegrityError["reason"] }
@@ -64,7 +64,7 @@ function validatePullResponse(
 
 /**
  * Mark the orb `failed` with a typed error and request compute discard — the
- * shared non-retryable integrity path (docs/history-replication.md). The CAS
+ * shared non-retryable integrity path (docs/history.md). The CAS
  * comes first: a `stopping` orb's host stopped before the row is claimed lets
  * the drain reconciler observe an already-stopped host and CAS the orb to a clean
  * `stopped`, discarding the integrity signal (DST-found 2026-08-06).
@@ -132,7 +132,7 @@ type YieldedPollOutcome = { readonly type: "yielded"; readonly committedRecords:
 
 /**
  * Pull one orb from its committed cursor until the runtime returns no new
- * complete records (docs/history-replication.md). Non-empty commits loop immediately;
+ * complete records (docs/history.md). Non-empty commits loop immediately;
  * cursor conflicts re-read and continue (another poller won); retryable
  * failures return to the ordinary polling cadence with the cursor unchanged.
  * A bounded caller gets `retryable`, not `caught_up`, if its attempt limit ends first.
@@ -261,7 +261,7 @@ export async function pollOrbUntilCaughtUp(
       orb.harnessSessionId !== response.session.id
     ) {
       // An empty replica pins nothing, so the store accepts this as legitimate
-      // rotation (docs/history-replication.md) — silently, which would make a
+      // rotation (docs/history.md) — silently, which would make a
       // lost session look like nothing happened. The domain re-derives the
       // store's condition here so the acceptance is on the record; adapters
       // stay quiet. Logged once: the session check or batch commit below adopts

@@ -1,428 +1,266 @@
 # Orb host provider
 
+How orb compute is provisioned: the `OrbHostProvider` port, incarnations and immutable host specifications, runtime readiness, the runtime image, and the process, Docker and GCE providers. The lifecycle state machine that drives these operations is `docs/lifecycle.md`; deletion-grade cleanup is `docs/teardown.md`.
+
 ## Agent placement
 
-Pi runs centrally with PostgreSQL authority; its process, Docker and GCP hosts run execution services only. Claude runs natively on its selected host with filesystem resume authority. Harness selection is independent of host provider.
+Pi runs centrally in the control plane with PostgreSQL authority; its hosts run execution services only (`PI_ORB_RUNTIME_MODE=execution`). Claude runs natively on its host with filesystem resume authority (`PI_ORB_RUNTIME_MODE=claude`). Process, Docker and GCE derive the mode from the stored harness (`pi`/`claude`) passed in provision bootstrap and desired-spec input; provider-owned selection overrides `extraEnv`. The effective harness participates in the spec fingerprint. No model bearer enters launch specifications, provider metadata, fingerprints or public orb views.
 
-## Verified Claude recovery launch proof
-
-**Decision — 2026-10-06; implemented locally, undeployed.** `ProvisionOrbHostRequest.claudeRecoveryProof?` is `{ episode, disposedIncarnation, replacementIncarnation }`. Lifecycle supplies it only from finalized, verified disposal for the current replacement incarnation. Providers reserve `PI_ORB_CLAUDE_RECOVERY_PROOF` and override inherited/configured values; project secrets and repository hook environment cannot override it. The runtime captures and validates the bounded launch proof before hooks/environment application. It is boot authority, not desired-spec configuration or a new broker capability.
-
-Only providers advertising `verifiesWholeComputeDisposal: true` can authorize automatic uncertain-worker replacement. Docker/GCE verify the disposable container/VM scope; the process provider verifies only recorded groups, not escaped descendants, and remains ineligible. Isolated fake-provider HTTP/WS tests are not evidence of physical cloud disposal.
-
-How orb compute is provisioned and managed: the `OrbHostProvider` port, runtime readiness, the Docker and GCE implementations, and evaluated alternatives. The lifecycle state machine that drives these operations is specified in `docs/lifecycle.md`.
-
-## Harness launch selection (POC, 2026-10-04)
-
-The lifecycle passes the stored harness in provision bootstrap and desired-spec inputs. Process, Docker and GCE derive `runtimeMode: execution|claude` from harness `pi|claude` and launch `PI_ORB_RUNTIME_MODE=execution|claude`; provider-owned selection overrides `extraEnv`. Process metadata retains it for supervised crash relaunch and Stop/Start. The effective harness participates in the immutable fingerprint, including GCE native runtime configuration. No model bearer is added to launch specifications, provider metadata, fingerprints or public orb views.
-Qualification is source- and provider-specific (`docs/testing.md`, `TODO.md`).
-
-**Resource/lifecycle contract (2026-10-04):** autonomous host stop does not abort ongoing central work; unload only when quiescent and still stopped, preserving stable handles (`docs/lifecycle.md`). Initial control-plane Git contents, manifest and SHA persist in PostgreSQL. Fresh checkout waits for that exact SHA through `GET /api/runtime/initial-checkout`, then runs normal hooks; resume never resets dirty files. Pending acquisition is excluded from host-spec fingerprint churn. Allocation and fetching run concurrently. Endpoint and bounded bootstrap authentication retries: `docs/runtime-protocol.md`.
+Initial Git contents, manifest and exact SHA for central Pi persist in PostgreSQL; the control plane fetches the repository's default branch (`HEAD`), and a failed Git command logs `resources.failed code=fetch reason=<missing_ref|authentication|repository_not_found|network|unknown>`. Central Pi provisioning always sets `awaitInitialCheckoutCommit`, even when the SHA is known. A fresh checkout polls `GET /api/runtime/initial-checkout` (bearer plus exact `x-orb-incarnation`) within the 20-minute deadline: `200 {commitSha}`, `202 {pending:true}`, `409 {error:checkout_admission_revoked}`, `503 {error:resource_acquisition_failed|unavailable}`. Acquisition failure is terminal and `unavailable` retryable. An initial `401` may precede the provider's bearer CAS and is retryable only until the first authenticated response; after an authenticated `202`, `401` is terminal; `403` and `409` are always fatal. It then checks out that SHA and runs the normal hooks. Retained workspaces bypass the endpoint, and resume never resets dirty files. Pending acquisition is excluded from fingerprint churn; allocation and fetching run concurrently.
 
 ## The `OrbHostProvider` port
 
-The abstraction is named `OrbHostProvider`. The control plane and lifecycle state machine depend only on this interface; Docker is one implementation and GCE can be another. No control-plane service or HTTP handler may invoke Docker directly.
-
-The host provider only manages infrastructure. It does not know about Pi, Claude Code, conversations, prompts, or history replication.
+The control plane and lifecycle depend only on this port (`apps/control-plane/src/domain/ports.ts`). No control-plane service or HTTP handler invokes Docker, GCE or processes directly. Providers manage infrastructure only: no knowledge of Pi, Claude, conversations, prompts or history.
 
 ```ts
 type OrbHostState = "starting" | "running" | "stopping" | "stopped" | "failed";
 
-type OrbHostProviderOperation = "provision" | "start" | "stop" | "destroy" | "observe" | "list";
-
 interface OrbHostProviderError {
   type: "orb_host_provider_error";
   provider: string;
-  operation: OrbHostProviderOperation;
+  operation: "provision" | "start" | "stop" | "discard" | "destroy" | "observe" | "list";
   code: "unavailable" | "conflict" | "invalid_state" | "operation_failed" | "cancelled";
   message: string;
   retryable: boolean;
 }
 
-// In-process adapter context; never serialized on the wire.
-interface OperationContext {
-  signal: AbortSignal;
-}
+interface OperationContext { signal: AbortSignal } // in-process only
 
-interface OrbHostRef {
-  provider: string; // e.g. "docker" or "gce"
-  resourceId: string; // container ID, instance name, etc.
+interface OrbHostRef { provider: string; resourceId: string }
+
+interface OrbHostObservation {
+  ref: OrbHostRef;
+  orbId: string;
+  incarnation: number;              // unstamped legacy compute reads as 0
+  specFingerprint: string | null;   // legacy compute reports null
+  state: OrbHostState;
+  lastStartedAt?: number;           // epoch ms of the last entry into running
+  runtimeAddress?: { baseUrl: string }; // ephemeral; never persisted authority
+  failure?: { code: string; message: string };
 }
 
 interface ProvisionOrbHostRequest {
   orbId: string;
   incarnation: number;
+  claudeRecoveryProof?: ClaudeRecoveryProof;
   bootstrap: {
     repositoryUrl: string | null;
     harness?: "pi" | "claude";
+    initialCheckoutCommit?: string;
+    awaitInitialCheckoutCommit?: boolean;
   };
 }
 
-interface OrbHostObservation {
+interface StartOrbHostRequest {
   ref: OrbHostRef;
-  orbId: string;
-  incarnation: number; // unstamped legacy compute is incarnation 0
-  state: OrbHostState;
-  lastStartedAt?: number; // last host start, epoch milliseconds
+  expectedIncarnation: number;
+  expectedSpecFingerprint: string | null; // null matches only unstamped legacy compute
+}
 
-  // Ephemeral observation; never authoritative persisted state.
-  runtimeAddress?: {
-    baseUrl: string;
-  };
-
-  failure?: {
-    code: string;
-    message: string;
-  };
+interface ProvisionedOrbHost {
+  ref: OrbHostRef;
+  incarnation: number;
+  runtimeTokenHash: string; // SHA-256 of the token the host actually carries
+  specFingerprint: string;
+  specGeneration: number;
 }
 
 interface OrbHostProvider {
   readonly kind: string;
-
-  /**
-   * Idempotent by orbId. Creates and starts the host, or returns the
-   * existing matching host. Resolving means infrastructure is running,
-   * not that the orb runtime has passed health checks.
-   */
-  provision(
-    request: ProvisionOrbHostRequest,
-    context: OperationContext,
-  ): ResultAsync<
-    { ref: OrbHostRef; incarnation: number; runtimeTokenHash: string },
-    OrbHostProviderError
-  >;
-
-  /** Idempotent; refuses a resource carrying a different incarnation. */
-  start(
-    request: { ref: OrbHostRef; expectedIncarnation: number },
-    context: OperationContext,
-  ): ResultAsync<void, OrbHostProviderError>;
-
-  /** Gracefully stops compute while retaining its filesystem. Idempotent. */
-  stop(ref: OrbHostRef, context: OperationContext): ResultAsync<void, OrbHostProviderError>;
-
-  /** Removes fenced compute while preserving authoritative workspace state. */
-  discardCompute(
-    request: { orbId: string; throughIncarnation: number },
-    context: OperationContext,
-  ): ResultAsync<void, OrbHostProviderError>;
-
-  /** Permanently removes every provider resource owned by orbId. Idempotent. */
-  destroy(orbId: string, context: OperationContext): ResultAsync<void, OrbHostProviderError>;
-
-  /**
-   * Returns null only when the provider definitively reports that the
-   * resource does not exist. Provider/transport uncertainty is Err.
-   */
-  observe(
-    ref: OrbHostRef,
-    context: OperationContext,
-  ): ResultAsync<OrbHostObservation | null, OrbHostProviderError>;
-
-  /** Used for reconciliation and leaked-resource discovery. */
-  listManagedHosts(
-    context: OperationContext,
-  ): ResultAsync<OrbHostObservation[], OrbHostProviderError>;
+  readonly specGeneration: number;
+  readonly verifiesWholeComputeDisposal?: true;
+  desiredSpecFingerprint(input: {
+    orbId: string;
+    repositoryUrl: string | null;
+    harness?: "pi" | "claude";
+  }): string;
+  provision(task: SimulationTask, request: ProvisionOrbHostRequest, context: OperationContext): ResultAsync<ProvisionedOrbHost, OrbHostProviderError>;
+  start(task: SimulationTask, request: StartOrbHostRequest, context: OperationContext): ResultAsync<void, OrbHostProviderError>;
+  stop(task: SimulationTask, ref: OrbHostRef, context: OperationContext): ResultAsync<void, OrbHostProviderError>;
+  discardCompute(task: SimulationTask, request: { orbId: string; throughIncarnation: number }, context: OperationContext): ResultAsync<void, OrbHostProviderError>;
+  destroy(task: SimulationTask, orbId: string, context: OperationContext): ResultAsync<void, OrbHostProviderError>;
+  observe(task: SimulationTask, ref: OrbHostRef, context: OperationContext): ResultAsync<OrbHostObservation | null, OrbHostProviderError>;
+  listManagedHosts(task: SimulationTask, context: OperationContext): ResultAsync<OrbHostObservation[], OrbHostProviderError>;
+  executionBinding?(task: SimulationTask, ref: OrbHostRef, context: OperationContext): ResultAsync<{ baseUrl: string; token: string; incarnation: string; cwd: string }, OrbHostProviderError>;
+  diagnose?(task: SimulationTask, ref: OrbHostRef, context: OperationContext): ResultAsync<string | null, OrbHostProviderError>;
 }
 ```
 
-Every finite provider call receives an `OperationContext`. The provider passes its signal to the underlying HTTP/process API and returns a typed `cancelled` error after cancellation is observed. Cancellation does not promise rollback of an external side effect: an ambiguous provision/start/stop is resolved by later idempotent `observe` and reconciliation.
+- `provision` is idempotent by orb ID and incarnation: it creates and starts the host or returns the matching existing one. Resolving means infrastructure is running, not that the runtime is ready. `runtimeTokenHash` is minted for a new host and read back from the delivery channel for an existing one; lifecycle commits it next to the host ref (`docs/credentials.md`).
+- `start` is idempotent and refuses a resource with a different incarnation or spec stamp (typed `conflict`), checked before any state change.
+- `stop` gracefully stops compute and keeps its filesystem.
+- `discardCompute` removes every exact-orb compute incarnation at or below `throughIncarnation` and preserves authoritative storage. It resolves only on verified absence; uncertainty is an error.
+- `destroy` is deletion-grade: it enumerates every exact-orb incarnation, including legacy unstamped names, then removes authoritative storage. It addresses resources by orb identity so cleanup works when `host_ref` was lost (`docs/teardown.md`).
+- `observe` returns `null` only on definitive absence; provider or transport uncertainty is `Err`. There is no `unknown` or `missing` state.
+- `listManagedHosts` serves reconciliation and the orphan sweep.
+- `diagnose` returns bounded host-side evidence (GCE guest attributes) for boot failure and diagnosis-before-discard.
+- `verifiesWholeComputeDisposal` means verified disposal ends the entire worker scope. Docker and GCE advertise it; the process provider does not (it verifies recorded process groups, not escaped descendants). Only advertising providers can authorize automatic Claude uncertain-worker replacement (`docs/lifecycle.md`).
 
-**Deletion extension implemented 2026-08-08.** `docs/orb-deletion.md` adds an idempotent `destroy(orbId, context)` operation and `destroy` operation discriminant. Unlike `stop`, it removes compute and the authoritative persistent filesystem; it addresses resources by deterministic orb identity so cleanup still works when `host_ref` was lost. The durable `deleting` lifecycle and tombstone sweep own retries and stale-provision races.
+Every call takes an `OperationContext`; the provider passes its signal to the underlying API and returns typed `cancelled` once cancellation is observed. Cancellation does not roll back external side effects; ambiguous outcomes are resolved by later idempotent `observe` and reconciliation.
 
-**Failed-compute disposal foundation implemented 2026-08-12.** Provision/start/results/observations now carry the compute incarnation. Docker containers, GCE instances, process refs, and provider stamps use incarnation-specific identity; legacy unstamped compute reads as incarnation 0. `discardCompute` enumerates exact-orb compute and removes only resources at or below its durable fence while preserving the workspace. Full `destroy` enumerates every incarnation before deleting storage. The process adapter persists the launched process-group leader so a replacement control-plane process can verify and terminate compute it did not launch. Lifecycle observation mismatches fail closed and create the ordinary discard intent. The deterministic stateful GCE model and the remaining crash/failpoint matrix are still implementation work in `docs/compute-replacement.md`.
+The port deliberately omits `restart` (lifecycle composes stop/start), `exec` (runtime protocol), per-orb machine/OS/image configuration, harness operations, and runtime health or busy state. Infrastructure and credential-delivery settings belong to provider construction (`DockerOrbHostProviderOptions`, `GceOrbHostProviderOptions`, `ProcessOrbHostProviderOptions`).
 
-There is intentionally no `unknown` host state. Failure to determine state is an error, not a durable state. There is also no `missing` state; definitive absence is represented by `observe()` returning `null`.
+### Claude recovery launch proof
 
-The interface intentionally omits:
+`ProvisionOrbHostRequest.claudeRecoveryProof` is `{ episode, disposedIncarnation, replacementIncarnation }`. Lifecycle supplies it only from finalized, verified disposal for the current replacement incarnation. Providers reserve `PI_ORB_CLAUDE_RECOVERY_PROOF` and override inherited or configured values; project secrets and the hook env file cannot override it. The runtime validates the bounded proof before applying hooks or environment. It is boot authority, not desired-spec configuration.
 
-- `restart`: the control plane composes `stop` and `start`;
-- `exec`: runtime operations go through the orb runtime protocol;
-- per-orb machine type, CPU, RAM, region, OS, or image configuration;
-- harness-specific operations;
-- runtime health and busy state, which belong to the runtime protocol.
+## Incarnations and immutable host specifications
 
-Prescriptive infrastructure and provider-specific credential-delivery settings live in provider construction/configuration, for example:
+A compute incarnation is disposable process/container/VM state; the workspace is not. Compute is never repaired in place. The replacement rules and their lifecycle ordering are in `docs/lifecycle.md`; this section is the provider half.
 
-```ts
-new DockerOrbHostProvider({
-  image: "pi-orb-runtime:<digest>",
-  network: "pi-orb",
-});
+| Provider | Compute (incarnation-specific) | Authoritative storage (fixed) |
+| --- | --- | --- |
+| GCE | instance `pi-orb-<orbId>-i<n>` plus its auto-delete boot disk and ephemeral NIC/IP | data disk `pi-orb-data-<orbId>` (`autoDelete: false`) |
+| Docker | container `pi-orb-<orbId>-i<n>` | volume `pi-orb-data-<orbId>` |
+| Process | runtime process group and incarnation metadata/log handles | per-orb workspace directory |
 
-new GceOrbHostProvider({
-  projectId: "playground-dev-6ae7",
-  zone: "us-central1-a",
-  machineType: "n2d-highmem-2",
-  runtimeImage: "us-central1-docker.pkg.dev/…/pi-orb-runtime:<digest>",
-});
-```
+The legacy un-suffixed name `pi-orb-<orbId>` reads as incarnation 0. Incarnation-specific names prevent a delayed delete-by-name from reaching a replacement. All names keep the `pi-orb-` prefix that IAM conditions scope compute mutations to (`infra/foundation/iam.tf`). Observations report the actual inspected resource name, never a reconstructed one. No cleanup path deletes by substring, by stale `host_ref` alone, or without exact ownership and incarnation checks.
 
-The shared contract is a persistent filesystem plus a host running the orb runtime with provider-delivered environment variables (the broker pair in `docs/credentials.md`). GCE runs the runtime directly under systemd on Debian; the Docker provider uses a container, and the process provider launches a local process. Packaging never enters the lifecycle engine. Project secrets arrive through the existing broker URL/bearer.
+**Spec fingerprints.** `desiredSpecFingerprint({ orbId, repositoryUrl, harness })` is pure and goes through one canonical helper (`apps/control-plane/src/adapters/spec-fingerprint.ts`: recursively key-sorted JSON, SHA-256), so revisions building the same effective spec cannot disagree. It is rendered at incarnation 0: rotating an incarnation is not a spec change.
 
-**Persistent home decision (2026-08-09).** The runtime user's complete Unix home is ordinary durable orb state, independent of any particular extension or tool. Every provider sets `HOME` to `<work-dir>/home`: `/workspace/home` in Docker/GCE and the corresponding per-orb process-host workspace path. The runtime independently creates that directory with mode `0700`, repairs its permissions on every boot, resets `HOME` to the authoritative path, and fails readiness with `home_init_failed` if it cannot establish it. This defense in depth prevents alternate providers/direct launches from silently writing home-relative state into a disposable container layer or the process provider's shared host home. Docker's writable layer and the GCE boot disk remain intentionally disposable; all software following `$HOME`/`os.homedir()` now lands on the attached orb filesystem alongside the repository, native Claude history and guest credential cache. Orb deletion removes the home with the same authoritative filesystem.
+- GCE hashes the single `launchSpec` that also builds the insert body: runtime image resource and numeric ID, per-instance runtime configuration, boot disk size, machine type, subnetwork, service account and scopes, scheduling and data-disk size. A host cannot carry a setting the fingerprint does not cover.
+- Zone and project ID are excluded. The data disk is zonal; a replacement in another zone would come up on an empty workspace. A zone or project move is an explicit operator migration.
+- Process includes its configured command directory.
 
-**Runtime tool baseline decisions (2026-08-08, extended 2026-08-09, 2026-08-12, 2026-08-22, 2026-08-25, and 2026-09-18).** The prescribed runtime image includes Python 3, the `python` → `python3` command alias, and Python virtual-environment support. Agents can use either command and create a project-local environment with `python -m venv .venv`; `pip` is available inside that environment. The image deliberately does not add global `python3-pip`: Debian's externally-managed Python policy favors virtual environments. The `zip` and `unzip` command-line tools are also installed by default so every image-backed orb can create and extract ZIP archives.
+**The stamp lives on the compute:** GCE metadata `pi-orb-host-spec-fingerprint`, Docker label `pi-orb.host-spec-fingerprint`, process `specFingerprint` in `host.json`. Provision-reuse and `start` verify incarnation and stamp before any state change and return `conflict` on mismatch; a stale-spec incarnation is never started, resurrected or rewritten.
 
-**Bun and git-crypt baseline (decided 2026-10-22; revised 2026-11-04; not deployed).** Docker and native Debian images include Bun 1.4.4 (`bun` and `bunx`) and git-crypt 0.8.0 in `/usr/local/bin`. `infra/install_bun.sh` pins SHA-256-verified [official release archives](https://github.com/oven-sh/bun/releases/tag/bun-v1.4.4): x64 baseline (avoids an AVX2 requirement) for amd64 and aarch64 for arm64. Native images remain amd64. Both builds check exact executable versions; native production acceptance repeats the checks as `orb`. No installation runs at orb boot; no keys or credentials are baked in.
+**Deploy generation.** `PI_ORB_HOST_SPEC_GENERATION` (infrastructure `-var deploy_generation=$(date +%s)`, clamped monotonic by `infra/release.sh`) reaches each adapter as `specGeneration` and is committed with the fingerprint as the orb's `host_spec_generation`. It fences the replacement decision forward-only (`docs/lifecycle.md`).
 
-**git-crypt source pin (2026-11-04).** [Upstream 0.8.0](https://github.com/AGWA/git-crypt/releases/tag/0.8.0) fixes OpenSSL 3 compilation and avoids short GPG key IDs. Bookworm and Trixie package 0.7.0; Bookworm has no backport. The sole upstream binary is x86_64 and imports GLIBC_2.38, above Bookworm's 2.36. `infra/install_git_crypt.sh` therefore builds the unmodified source on each image architecture using existing build tools plus Debian `libssl-dev`. It pins release commit `160cf642e1c0f83c1668ad0d59e879d97b97a95b` and archive SHA-256 `2e01dd367d5c415f9ee8841741a74c1da6d698977fd344995268e5b1cddfa29f`, checked before extraction/build/install. This is an HTTPS-fetched, locally measured source checksum, not an upstream signature: the release has no checksum/signature asset and its commit is unsigned. The x86_64 binary's GitHub API SHA-256 was separately verified, but that binary is not installed. Build logs record source commit/checksum and executable version; native source inventory includes the installer. GPL-3.0-or-later `COPYING` and the complete unmodified source archive (including the OpenSSL permission) remain in `/usr/local/share/doc/git-crypt/`. Dynamic OpenSSL remains Debian-managed. The optional installer prefix supports isolated local qualification.
+**Image pinning.** GCE composition requires `PI_ORB_GCE_IMAGE_RESOURCE` (an exact `projects/.../global/images/...`, never a family) and `PI_ORB_GCE_IMAGE_ID`, plus the workspace template resource and ID. The provider reads each image and rejects an ID mismatch before any disk or instance mutation, so name reuse or a moving alias cannot change host contents invisibly. Local Docker image selection is independent.
 
-**Rust baseline revision (decided 2026-09-18).** Rustup is prescribed. The image includes the checksum-verified, version-pinned `rustup` multiplexer and its `cargo`, `rustc`, `rustdoc`, `rustfmt`, Clippy, and Cargo helper proxies, but no Rust toolchain. The native build packages `build-essential` and `pkg-config` make ordinary C/C++ addon compilation available inside every orb and source-build the runtime's approved `node-pty` dependency during image construction (`docs/terminal.md`); this supersedes the earlier decision not to ship a native build toolchain. On each runtime boot, after establishing persistent `$HOME`, the runtime points `RUSTUP_HOME` and `CARGO_HOME` into that home and prepends `$CARGO_HOME/bin` to `PATH`. The runtime itself does not probe, select, download, or update a toolchain, so its Rust initialization cannot delay or fail readiness. Users and repository setup hooks may install toolchains explicitly; repository `rust-toolchain.toml` files may select and acquire a toolchain through ordinary rustup proxy behavior. Toolchains, installed Cargo commands, registry/git caches, and Cargo configuration survive stop/start and native-image replacement as ordinary orb state. The earlier automatic stable installation caused boot to depend on `static.rust-lang.org`; incident evidence remains in `docs/postmortems/2026-09-07-native-rust-dns-bootstrap.md`.
+**Provider disposal mappings.**
 
-Browser automation is prescribed (decided 2026-08-09). The runtime dependency pins [`agent-browser`](https://github.com/vercel-labs/agent-browser) 0.41.2, exposes its CLI globally in the image, and installs Debian Chromium with its system libraries, rather than downloading a browser into a particular user's home at image-build time. This works on both supported image architectures and leaves `$HOME` available for agent-browser's per-orb sessions, profiles, and state. The appended system-prompt baseline names the tool and its `open` → `snapshot`/element-ref workflow so its availability is discoverable without replacing Pi's normal prompt resources.
-
-**Browser dependency update (2026-11-04; not deployed).** [0.41.2](https://github.com/vercel-labs/agent-browser/releases/tag/v0.41.2) keeps the CLI launcher, bundled platform binaries, and Node ≥24 requirement; no adapter or prompt change is needed. The native image still marks its packaged Linux x64 binary executable after the scripts-disabled install. Isolated local Linux x64 qualification covers launcher/snapshot refs, session/home storage isolation, timeout continuity, bare `open` retaining an explicit profile, and storage restore bypassing page-script hooks while reporting redirected origins in `skippedOrigins`. This is not native cloud-image or full E2E qualification.
-
-The Google Cloud CLI is prescribed (decided 2026-08-22), alongside the GitHub CLI and git that image-backed orbs already carry. The image adds Google's `cloud-sdk` apt repository — armored keyring under `/usr/share/keyrings`, pinned with `signed-by` — in the same layer as the GitHub CLI repository, and installs the `google-cloud-cli` package only. No extra components ship: not `google-cloud-cli-app-engine-*`, not `kubectl`. The base package brings `gcloud`, `gsutil`, and `bq`, and even so costs about 0.66 GB — the arm64 image measured 1.90 GB before and 2.57 GB after (SDK 581.0.0, 2026-08-22). That cost is accepted because agents working on GCP-hosted projects otherwise cannot inspect or operate the resources they are asked about. No credentials are baked into the image; an orb authenticates `gcloud` per use like any other tool.
-
-`sudo` is prescribed (decided 2026-08-25, `docs/orb-setup-hook.md`). The repository-owned boot hooks match Amp's convention, and Amp scripts reach for `sudo apt-get …` throughout; the image had no `sudo` at all, so every such script failed on its first line. The runtime keeps running as root, where `sudo` is a no-op elevation — that is the point: installing the package is far cheaper than rewriting every repository's script, and it costs nothing an orb's agent could not already do. Running the runtime as an unprivileged user with passwordless `sudo`, as Amp does, stays a separate hardening decision (open question 42) and does not block the hooks.
-
-Three point-of-use CLI shims are installed into `/usr/local/bin` and are part of the baseline: `gh` and `pi-orb-git-credential` for broker-backed GitHub auth (`docs/credentials.md`), and the multi-command `pi-orb` dispatcher. Its original workload-identity command (`docs/workload-identity.md`, added 2026-08-21), `pi-orb id-token --audience <audience> [--ttl-seconds <60..3600>]`, mints a short-lived OIDC token from the control plane using the provider-injected runtime environment and prints the JWT plus one trailing newline to stdout, so command substitution and executable credential sources can consume it directly. Since 2026-08-27, `pi-orb orbs [query] [--json]` lists/searches sibling metadata and `pi-orb transcript <orb-id> [--json]` reads a replicated conversation (`docs/control-plane-api.md`). Failures are concise stderr lines and per-class exit codes. Since 2026-10-01, `pi-orb self [--json]` reads current-orb identity and control-plane dashboard URL (`docs/control-plane-api.md`). Since 2026-09-05, plain `pi-orb archive` requests self-archival on user request (`docs/orb-archival.md`). The POSIX `sh` dispatcher execs the matching Node entry point (`apps/orb-runtime/src/id-token/cli.ts`, `apps/orb-runtime/src/inspection/cli.ts`, or `apps/orb-runtime/src/archive/cli.ts`), and the Dockerfile contract test asserts it is copied, executable, and names source the image carries. Alongside it the image bakes `scripts/pi-orb-gcp-identity` at `/usr/local/bin/pi-orb-gcp-identity`, the reviewed executable credential source a Google external-account configuration names (`docs/workload-identity-recipes.md`, added 2026-08-22).
-
-The image also bakes bundled platform skills at `/opt/pi-orb/skills`, outside the retained workspace. Docker and GCE reserve `PI_ORB_SKILLS_DIR` for host-native Claude and guest access. Central Pi acquires its own required bundled/repository resources before inference (`docs/pi-adapter.md`).
-
-The unsandboxed process provider cannot supply image packages: it inherits host executables. Bun and `git-crypt` must be installed locally when needed. `rustup`, Chromium, and `gcloud` are therefore documented local-test prerequisites — `gcloud` and `sudo` are image-only, so a process-host orb has them only if the developer's machine already does — and whether `sudo` there elevates at all is that machine's business; the Linux-only host also needs Python 3 and `build-essential` to compile `node-pty`. The workspace dependency supplies the `agent-browser` CLI, and each orb still keeps home-relative Rust and browser state in its private persistent home. The process provider now prepends the repository's `apps/orb-runtime/docker` directory to the child `PATH`, making the portable `pi-orb` dispatcher and the `pi-orb-git-credential` helper available exactly as they are in the image; this configured directory is part of the immutable host-spec fingerprint. Both shims derive their entry point from their own location — `/app` under `/usr/local/bin` in the image, the enclosing repository otherwise — so one file serves both hosts. **GitHub credential helper on process hosts (2026-09-04).** A process host has no system gitconfig to carry the image's `credential.https://github.com.helper` setting, and the orb's `HOME` is private, so the developer's global gitconfig does not reach it either; cloning a private repository failed with `could not read Username for 'https://github.com'`. When `commandDirectory` is configured the provider therefore exports `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` naming that helper, appended after any entries the inherited environment already carries. Environment configuration, not a written gitconfig file, because it reaches every git the runtime spawns — its own clone, Pi's shell tool, the terminal PTY — without owning a file in the orb's home; the `gh` shim, which shares that `PATH`, got the same self-locating entry-point fix. The process provider supplies its repository skills path through the same explicit `PI_ORB_SKILLS_DIR` contract; the runtime never guesses a path from its filesystem layout.
-
-`provision` returns the host ref together with `runtimeTokenHash` — the SHA-256 of the per-incarnation runtime token the host actually carries, minted at creation and read back from the delivery channel for existing hosts (docs/credentials.md). The lifecycle machine commits this observed hash next to the host ref and re-commits when either changes.
-
-Current `GceOrbHostProvider` contract:
-
-- Each orb owns a separate persistent data disk, mirroring the Docker provider's volume/container split. Provisioning attaches an existing disk only when its exact `pi-orb-orb-id` label matches the requested orb; retained disks keep their existing size and type when defaults change. The Debian boot disk is disposable and is replaced on native-image upgrades without touching orb state.
-- The native image contains the runtime and its systemd units. Instance metadata supplies configuration; systemd supervises the runtime independently of Docker.
-- The workspace mount is ordered after disk validation and outside systemd's implicit `local-fs.target` transaction. Its explicit shutdown dependencies preserve clean unmounting. Image validation verifies the complete enabled `multi-user.target` graph, because checking the custom unit files alone does not expose cycles introduced by implicit target dependencies (`docs/postmortems/2026-09-07-native-workspace-systemd-cycle.md`).
-- `provision` creates the instance only when it does not exist. Recovery from a stop or a Spot preemption is `instances.start` on the same instance (restart-in-place); there is no recreate-and-reattach path in the common case.
-- Spot preemption appears as instance state `TERMINATED`. Instance status alone does not distinguish preemption from other terminations, and the provider does not consult Cloud Logging to find out; it logs the cause as "likely preemption". Host-down detection, restart initiation, and restart outcome are all logged as structured lifecycle events.
-- Networking: the control plane reaches the runtime on the instance's internal IP via Direct VPC egress from Cloud Run; the ephemeral public IP is outbound-only behind a deny-all-inbound firewall (see the infrastructure decisions below).
-- Validated on real infrastructure (2026-07-30, during the Cloud Run WebSocket validation exercise): a COS VM with no external IP pulls the container from Artifact Registry over Private Google Access and serves WebSockets to Cloud Run via Direct VPC egress. Orb VMs run as the dedicated minimal service account `pi-orb-orb-vm` (log writer); the project's default compute service account is disabled, so the provider must always pass the dedicated one. The dev project has no default VPC — the validation created network `pi-orb` / subnet `pi-orb-us-central1` (10.10.0.0/20, Private Google Access), which the OpenTofu static plane should adopt.
-
-The Docker provider publishes the runtime port to an ephemeral host-loopback port at container creation (`--publish 127.0.0.1:0:8080`) and reports the runtime address preferring that mapping, then the container's bridge-network IP, then the container name (decided and implemented 2026-08-06; E2E-validated on macOS Docker Desktop the same day). The loopback mapping is what makes a host-run control plane work on Docker Desktop, where bridge IPs are not host-routable; Docker re-picks the host port on every container start, which is safe because `runtimeAddress` is contractually an ephemeral observation re-read at observe time. The reverse direction uses the same mechanism on every platform: containers are created with `--add-host=host.docker.internal:host-gateway`, and the default control-plane URL handed to orbs is `http://host.docker.internal:<port>` (an explicitly configured URL still wins) — replacing the earlier bridge-gateway-IP derivation, which resolved to Docker Desktop's VM rather than the host and left booting runtimes unable to reach the credential broker. Containers created before 2026-08-06 lack both the published port and the host alias and are simply removed and re-provisioned per the POC stance. A container whose port mapping is absent still yields the bridge-IP/container-name forms, which remain correct on Linux and for a containerized control plane on the same network.
-
-**Shared Docker inventory (decided 2026-10-04).** `DockerOrbHostProviderOptions.inventoryScope`, composed from `PI_ORB_DOCKER_INVENTORY_SCOPE`, stamps `pi-orb.inventory-scope` on containers and volumes. Scoped inventory filters require that exact label; unscoped inventory excludes scoped containers after inspection. Direct container operations and volume deletion verify scope before mutation. Provisioning inspects the volume after `docker volume create` and requires the exact orb ID and inventory scope before mounting: create can return an existing volume without changing its labels. Foreign ownership returns a typed, non-retryable conflict; failed inspection prevents container creation. This isolates fresh E2E databases on a shared daemon without disabling orphan reconciliation. Fixture UUIDs remain fixed across control-plane restarts, differ between fixtures, and are queryable through Docker labels. Scope is deployment ownership, not a host-spec replacement input. Incident and final resource-preservation evidence: `docs/postmortems/2026-10-05-e2e-docker-inventory-isolation.md`.
+- GCE `discardCompute` lists by exact orb ownership, deletes matching instances at or below the fence (including the legacy name), waits for each operation and verifies absence. It never deletes the data disk. `destroy` additionally deletes and waits for the data disk, tolerating an already-deleted boot disk.
+- Docker force-removes matching containers; `destroy` removes the container before the volume. Shared images and networks are never removed.
+- Process persists the launched process-group leader and supervisor birth identity in host metadata, so a replacement control-plane process can verify and terminate compute it did not launch. Discard terminates the recorded group and removes only ephemeral launch metadata. `destroy` also removes the host directory recursively without following symlinks out of it.
 
 ## Runtime readiness
 
-`OrbHostProvider` state and runtime readiness are separate. `provision()`/`start()` succeeding means compute is running; an orb becomes `running` only after the control plane receives a ready response from the runtime.
+Provider state and runtime readiness are separate. `provision`/`start` success means compute is running; an orb becomes `running` only after the control plane receives a ready health response and persists its identity, session and commit data.
 
-The runtime starts its health server before doing slow initialization:
+The runtime starts its health server before slow initialization, so `GET /v1/health` answers with a typed `initializing`, `ready` or `failed` body whenever the process can serve HTTP (payload: `docs/runtime-protocol.md`). The control plane interprets the discriminant, not status codes. Network failure is distinct from any returned status. Central Pi execution readiness uses `/execution/ready` and needs no model authority on the host.
 
-```ts
-type RuntimeHealth =
-  | {
-      v: 1;
-      orbId: string;
-      runtimeInstanceId: string;
-      status: "initializing";
-      phase: "booting" | "cloning" | "setup_running" | "checking_project_secrets" | "loading_session" | "checking_auth";
-    }
-  | {
-      v: 1;
-      orbId: string;
-      runtimeInstanceId: string;
-      status: "ready";
-      sessionId: string;
-      checkoutCommit: string | null; // null: no repository or no commits
-      activity: "idle" | "busy";
-      operationId?: string;
-      // Present when boot notified an existing conversation or declined
-      // auto-resume (docs/lifecycle.md); absent on a fresh conversation.
-      turnResume?: {
-        outcome: "resumed" | "notified_restart" | "declined_already_resumed" | "resume_failed";
-        shape?: "trailing_tool_result" | "dangling_tool_calls" | "unanswered_user_message";
-        headRecordId?: string;
-      };
-    }
-  | {
-      v: 1;
-      orbId: string;
-      runtimeInstanceId: string;
-      status: "failed";
-      error: {
-        code: string;
-        message: string;
-        retryable: boolean;
-        diagnostics?: string; // sanitized, at most 16,384 characters
-      };
-    };
-```
+Native Claude is ready when the runtime identity matches the orb; the retained workspace exists and any configured checkout is valid; the session is created or loaded from the filesystem; the harness credential resolves; history-pull and WebSocket handlers are installed; and an idle runtime can accept a message.
 
-`GET /v1/health` returns HTTP 200 with this typed body whenever the process can serve HTTP. `initializing` and `failed` are reachable but not ready; the control plane interprets the discriminant instead of using status codes as lifecycle state. Network failure is distinct from a returned status.
+**Boot order.** Establish persistent `$HOME` and Rust state paths, check out the repository, run `.agents/setup`, fetch project secrets, run `.agents/resume`, merge the hook env file, then load the session (`docs/orb-setup-hook.md`). The runtime does no Rustup network or toolchain work.
 
-Native Claude ready means all of the following; central Pi execution readiness uses `/execution/ready` and does not require model authority on the host:
+**Session identity.** The runtime never replaces an existing session. If a session exists on the filesystem it must load; a load failure is non-retryable `session_load_failed`, never grounds for a fresh session. A new session is created only when none exists. A session-header mismatch during replication therefore means a bug or corruption (`docs/history.md`).
 
-- the runtime identity matches the requested orb;
-- the retained workspace exists; a retained Git checkout with a configured repository is valid;
-- the native Claude session has been created or loaded from that filesystem;
-- the selected harness credential resolves successfully;
-- history-pull and live WebSocket handlers are installed;
-- the runtime can accept a new message when idle.
+**Checkout.** A fresh clone goes to a temporary directory and is atomically renamed into place; restart reuses a complete checkout and cleans or retries an incomplete temporary clone. A repository without commits is valid: when the checkout has no refs, `checkoutCommit` is null. Refs with an unresolvable HEAD fail `clone_failed`.
 
-**Restart context (implemented 2026-09-05; native identity completed 2026-09-14).** The image sets `PI_ORB_CONTAINER=1` on Docker; native VM bootstrap also sets it because PID 1 defines that dedicated guest's lifetime. The runtime combines `/proc/sys/kernel/random/boot_id` with PID 1's start time from `/proc/1/stat` to identify the container execution lifetime; the kernel UUID alone would miss retained-container stop/start. `ProcessOrbHostProvider` forces `PI_ORB_CONTAINER=0` so even a containerized control plane cannot accidentally claim its unsandboxed children have a container-wide lifetime. Unknown/process-host execution identity uses conservative runtime-restart wording. The runtime supervisor additionally supplies a fresh `PI_ORB_SUPERVISOR_ID` per supervisor lifetime, stable across its runtime-child restarts. The process provider supervises directly in the control plane rather than through that wrapper: it persists its own `supervisorId` in private host metadata, preserves it through crash relaunch/provider recovery, and rotates it when explicit Start/provision changes desired state from stopped to running. This supplies the same admission-fence env contract without claiming detached descendants died or changing conservative restart wording. The active-child archival E2E caught the initially missing process-provider wiring: busy work was protected, then sealing correctly failed with `admission lifetime is unavailable`. Provider tests cover the env, stable crash identity and fresh Stop/Start identity. No provider port changed. Session-based notification, deduplication, crash-loop guarding, and failure visibility are specified in `docs/lifecycle.md`.
+**Repository-free projects.** `repositoryUrl: null` creates the retained `<work-dir>/repo` without `git init`, clone, pin admission or HEAD inspection, and reports `checkoutCommit: null`, even if the user later creates a repository there. The URL selects only fresh-workspace clones: attaching one to an existing non-Git workspace changes nothing; removing one keeps existing Git files. Corrupt Git metadata still fails boot when a URL is configured. Providers encode null as an empty `PI_ORB_REPOSITORY_URL`; runtimes also accept it absent. Creation failure is `workspace_init_failed`.
 
-**Decision 2026-10-22: repository-free projects.** `bootstrap.repositoryUrl: null` creates the normal retained `<work-dir>/repo` directory without `git init`, clone, initial-commit admission, pinning, or HEAD inspection. Pi execution and native Claude report `checkoutCommit: null`, including when the retained workspace contains a user-created repository. The project repository URL selects only fresh workspace clones. Existing non-Git workspaces remain non-Git after a URL is attached: no clone, initialization, or pin admission; `checkoutCommit` remains null. Removing a URL preserves existing Git files without HEAD inspection. Corrupt Git metadata still fails boot when a repository URL is configured. Existing workspace contents are never reset. Process, Docker, and GCE encode null as an empty `PI_ORB_REPOSITORY_URL`; runtime entrypoints also accept an absent variable. No synthetic commit or snapshot is created. Home, hooks, secrets, Git identity, instructions, broker credentials, and harness authentication retain their normal contracts. Workspace creation failures surface as `workspace_init_failed` through runtime health.
+**Failures.** Expected initialization failures (clone, invalid repository, unusable credentials) are reported as `failed` long enough for the control plane to record them. A runtime that owns bounded recovery stays `initializing` while retrying. Unexpected process failure exits the process and is handled by provider supervision (Docker restart policy, systemd on GCE, the Python supervisor for process hosts); an explicit provider `stop` reconciles that supervision to stopped.
 
-A fresh clone is written to a temporary directory and atomically renamed into place so a process crash cannot make a partial checkout look ready. Restart reuses a complete checkout/session and cleans or retries an incomplete temporary clone.
+**Restart context.** Docker images and native VMs set `PI_ORB_CONTAINER=1` (PID 1 defines the guest's lifetime). The runtime combines `/proc/sys/kernel/random/boot_id` with PID 1's start time from `/proc/1/stat` to identify the execution lifetime; the kernel UUID alone misses retained-container stop/start. The process provider forces `PI_ORB_CONTAINER=0`, so even a containerized control plane cannot claim container-wide lifetime for unsandboxed children. Each supervisor lifetime supplies a fresh `PI_ORB_SUPERVISOR_ID`, stable across runtime-child restarts. The process provider persists its own `supervisorId` in host metadata, keeps it through crash relaunch and provider recovery, and rotates it when explicit Start/provision moves desired state from stopped to running. These feed the idle-stop admission fence and restart wording (`docs/lifecycle.md`).
 
-**Decision 2026-10-06: a repository without commits is a valid checkout.** Its HEAD is unborn, so `git rev-parse HEAD` fails; the runtime then reports `checkoutCommit: null` when the checkout has no refs at all. A checkout that has refs but an unresolvable HEAD still fails with `clone_failed`. Previously every empty repository failed boot with `clone_failed: fatal: ambiguous argument 'HEAD'`.
+## Shared runtime environment
 
-After configuring the persistent home and Rust state paths, the runtime checks out the repository and then runs `.agents/setup`. The runtime itself performs no Rustup network or toolchain work; a setup hook that needs Rust may install or select its required toolchain before readiness.
+The shared contract is a persistent filesystem plus a host running the orb runtime with provider-delivered environment variables, including the broker URL/bearer pair (`docs/credentials.md`). Project secrets arrive through the broker. Packaging never enters lifecycle.
 
-**Rustup archive refresh (decided 2026-11-04, PST; not deployed).** Pin Rustup 1.29.3 in both image builds. Official [x86_64](https://static.rust-lang.org/rustup/archive/1.29.3/x86_64-unknown-linux-gnu/rustup-init.sha256) and [aarch64](https://static.rust-lang.org/rustup/archive/1.29.3/aarch64-unknown-linux-gnu/rustup-init.sha256) executables match the published SHA-256 files; builds verify before installation. Toolchain selection and persistent-home behavior are unchanged. Qualification: `docs/testing.md`.
+**Runtime user.** Docker runs the runtime as root (the image has no `USER`). Native GCE runs it as `orb` (UID/GID 2000) with passwordless sudo and `docker` group membership. Process hosts run as the developer's user. `sudo` is in both images so repository hooks using `sudo apt-get` work; as root it elevates nothing. The `orb` user is a tool-behavior choice, not an isolation boundary: Docker group membership already grants root ([Docker docs](https://docs.docker.com/engine/install/linux-postinstall/)).
 
-The runtime never replaces an existing session. Whether to create or load is decided solely from the persistent filesystem: if a session exists for this orb it must be loaded, and a session that exists but cannot be loaded is reported as `status: "failed"` with a non-retryable typed error such as `session_load_failed` — never treated as grounds for creating a fresh session. A new session may be created only when the filesystem contains none. This guarantees that the session identity the control plane records on first pull stays valid for the orb's entire life, so a session-header mismatch during replication can only mean a bug or filesystem corruption, never a legitimate replacement.
+**Persistent home.** Every provider sets `HOME=<work-dir>/home` (`/workspace/home` on Docker/GCE). The runtime creates it with mode `0700`, repairs permissions every boot, resets `HOME` to that path, and fails readiness with `home_init_failed` if it cannot. Anything following `$HOME`/`os.homedir()` therefore lands on the retained orb filesystem with the repository, native Claude history and guest credential cache. Docker's writable layer and the GCE boot disk stay disposable. On every boot, after establishing `$HOME`, the runtime sets `RUSTUP_HOME`/`CARGO_HOME` under it and prepends `$CARGO_HOME/bin` to `PATH`.
 
-Expected initialization failures such as clone failure, invalid repository state, or unusable credentials are represented by `status: "failed"` long enough for the control plane to record the typed error. Unexpected process failure exits the process and is handled by provider supervision/reconciliation. Each provider configures its native runtime supervision while the host is meant to run (Docker restart policy initially, a system service on GCE later); an explicit provider `stop` disables/reconciles that supervision to stopped.
+**Skills.** Images bake bundled platform skills at `/opt/pi-orb/skills`, outside the workspace. Providers set `PI_ORB_SKILLS_DIR`; the runtime never guesses a path. Central Pi acquires its own resources (`docs/pi.md`).
+
+## Runtime image baseline
+
+Docker (`apps/orb-runtime/Dockerfile`) and native Debian (`infra/native-vm/install.sh`) images carry the same prescribed tools. No installation runs at orb boot; no keys or credentials are baked in.
+
+- Node.js 26.13.0 LTS and npm 12.2.1; git, ripgrep, curl, `zip`/`unzip`, `sudo`.
+- Python 3 with the `python` alias and `venv`. No global `python3-pip`: Debian's externally-managed policy favors `python -m venv .venv`.
+- `build-essential`, `pkg-config`, `libssl-dev` for native addons. `node-pty` is rebuilt from source during image construction (`docs/terminal.md`).
+- Rustup 1.29.3 (SHA-256-verified per architecture) and its proxies, with **no toolchain**. Users, hooks or `rust-toolchain.toml` acquire toolchains, which persist in `$HOME`. Rejected: automatic stable installation, which made boot depend on `static.rust-lang.org` (`docs/postmortems/2026-09-07-native-rust-dns-bootstrap.md`).
+- Bun 1.4.4 (`bun`, `bunx`) from SHA-256-pinned official archives (`infra/install_bun.sh`): x64 baseline build (no AVX2 requirement) and aarch64.
+- git-crypt 0.8.0, built from pinned upstream source by `infra/install_git_crypt.sh` with commit and archive SHA-256 checked before build. Debian ships 0.7.0 and the upstream binary needs GLIBC 2.38. The checksum is locally measured over HTTPS, not an upstream signature. `COPYING` and the unmodified source archive are installed under `/usr/local/share/doc/git-crypt/`.
+- `agent-browser` 0.41.2 (pinned runtime dependency, CLI on `PATH`) with Debian Chromium. The native image marks its packaged Linux x64 binary executable after the scripts-disabled install; the unprivileged runtime cannot chmod a root-owned file.
+- `gh` and `google-cloud-cli` (base package only: `gcloud`, `gsutil`, `bq`; about 0.66 GB, accepted so agents can operate GCP projects). Both apt repositories use armored keyrings with `signed-by`.
+- Shims in `/usr/local/bin`: `gh` and `pi-orb-git-credential` for broker-backed GitHub auth (`docs/credentials.md`); the `pi-orb` POSIX dispatcher, which execs the Node entry point for `id-token`, `spawn`, `archive`, `delete`, `sleep`, `send`, `alert`, `host`, `expose`/`unexpose`/`previews`, `self`/`orbs`/`transcript`/`search`, and `help`; and `pi-orb-gcp-identity`, the executable credential source for Google external-account configs (`docs/workload-identity.md`). The Dockerfile contract test asserts each is copied, executable and names source the image carries. Both shims derive their entry point from their own location (`/app` in images, the enclosing repository otherwise). The image sets the system gitconfig `credential.https://github.com.helper`.
+
+Native images are amd64 only; Docker images are amd64 and arm64.
+
+Docker image APT steps do one authenticated index update, at most two verified download-only acquisitions, then one offline install, never repeating dpkg writes; `Acquire::Retries` does not retry unexpected-size rejections. Attempt, failure and install edges appear in build logs (`docs/postmortems/2026-10-08-runtime-apt-size-mismatch.md`).
+
+`pi-orb --help`, `-h` or `help` prints the full command reference; `pi-orb help <command>` and `pi-orb <command> --help|-h` print one section. A leading help flag ignores the rest and never runs the command. Help is static (no identity or network), writes stdout and exits 0; unknown commands or invalid help syntax print brief usage to stderr and exit 2.
+
+## Docker provider
+
+- Publishes the runtime port to an ephemeral loopback host port (`--publish 127.0.0.1:0:8080`) and reports the runtime address preferring that mapping, then the bridge IP, then the container name. Docker Desktop bridge IPs are not host-routable; the host port changes on every start, which is safe because `runtimeAddress` is an ephemeral observation.
+- Creates containers with `--add-host=host.docker.internal:host-gateway`; the default control-plane URL handed to orbs is `http://host.docker.internal:<port>` (explicit configuration wins). This works on Linux, OrbStack and macOS Docker Desktop.
+- **Inventory scope.** `PI_ORB_DOCKER_INVENTORY_SCOPE` stamps `pi-orb.inventory-scope` on containers and volumes. Scoped inventory requires that exact label; unscoped inventory excludes scoped containers. Direct operations and volume deletion verify scope before mutating. After `docker volume create` (which can return an existing volume unchanged), provisioning inspects the volume and requires the exact orb ID and scope before mounting; foreign ownership is a non-retryable `conflict`. This isolates E2E databases on a shared daemon without disabling orphan reconciliation. Scope is deployment ownership, not a spec input (`docs/postmortems/2026-10-05-e2e-docker-inventory-isolation.md`).
+- Mock-model environment variables are forwarded for tests.
+
+## Process provider
+
+A test-only backend for environments without Docker (for example an unprivileged container without a Docker socket, `CAP_SYS_ADMIN`, writable cgroups or usable namespaces). It requires explicit `PI_ORB_HOST_PROVIDER=process` and is Linux-only: `launch` refuses other platforms with non-retryable `operation_failed`, and launch-dependent tests skip on macOS. `npm run dev:local` selects it with embedded PGlite (`docs/stack.md`).
+
+- `stateDirectory` is required (`PI_ORB_PROCESS_STATE_DIR`, local default under `~/.pi-orb/process-hosts`). Each orb gets a `0700` directory with atomically written `host.json` (orb ID, incarnation, repository URL, harness, spec fingerprint, plaintext runtime token at mode `0600` for hash readback, loopback port, process group and birth identity, drain token, supervisor ID, desired state), a persistent `workspace/`, and stdout/stderr logs.
+- The child runs with `PI_ORB_WORK_DIR=<host-dir>/workspace`, a provider-created private `HOME=<host-dir>/workspace/home` (no inherited `XDG_CONFIG_HOME`, since boot writes git's XDG config — `docs/agent-context.md`), the normal orb/bootstrap/broker environment, `PI_ORB_RUNTIME_PORT=<port>` (runtimes default to 8080), and `PI_ORB_CONTROL_PLANE_URL=http://127.0.0.1:<port>`.
+- When `commandDirectory` is configured, the provider prepends `apps/orb-runtime/docker` to `PATH` (same `pi-orb` and credential shims as the images) and exports `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` naming the credential helper, after any inherited entries. The private `HOME` hides the developer's gitconfig, and environment configuration reaches every git the runtime spawns without owning a file in the home.
+- Each execution host has a small Linux Python supervisor (`supervisor.py`, Python 3.9+, pidfd support). It establishes subreaper ownership before publishing a ready receipt, watches control-plane identity through a pidfd, and drains descendants (including detached shells and dev servers) when the runtime or owner dies. A matching durable drain receipt is required before relaunch, disposal or workspace removal; missing or mismatched receipts fail closed. The provider writes desired `stopped` before termination and relaunches only desired-running hosts after verified drain. Elapsed time never proves cleanup (`docs/postmortems/2026-10-13-process-discard-deadline.md`). This is lifecycle management, not a security boundary.
+- Group termination measures real liveness: `kill(-pgid, 0)` answers for unreaped zombies, so the ladder corroborates with a `/proc` member scan (`Z` counts as dead), treats `EPERM` from an all-zombie group like `ESRCH`, and forgets the child once absence is verified, so `observe` reports `stopped` immediately.
+- `observe` reports a live child as `running` at `http://127.0.0.1:<port>`, and `stopped` when desired state is stopped and no child remains. `listManagedHosts` scans and validates metadata directories. A per-orb in-process lock suffices; cross-process provider concurrency is unsupported.
+- There is no filesystem, process, UID, network, resource or environment isolation. Repository code can modify the host and other process orbs; use only trusted repositories. All runtimes share one network namespace, so previews are unsupported (`docs/http-exposure.md`). A close-before-spawn port race is accepted; a collision makes the child retry the same bind.
+- It inherits host executables instead of image packages: Bun, git-crypt, rustup, Chromium, `gcloud` and `sudo` exist only if the developer's machine has them, and compiling `node-pty` needs Python 3 and `build-essential`. The workspace dependency supplies `agent-browser`.
+
+It exercises the real runtime protocol, persistent sessions, stop/start and lifecycle without emulating Docker. One control-plane OS process owns the management tree; execution runtimes remain child processes for environment, termination and crash isolation. It does not reproduce image packaging, container networking, cgroups or restart policy; Docker/GCE E2E and deploy smoke remain authoritative there.
+
+Rejected: a fake Docker CLI/API over processes; `proot`/`udocker` userspace images; nested `dockerd` with `vfs` but no namespace/cgroup privileges.
+
+## GCE provider
+
+### Placement and sizing
+
+- Raw Compute Engine in one project (`playground-dev-6ae7`), single hardcoded zone `us-central1-a`, no multi-zone logic. All orbs share the project.
+- Spot `n2d-highmem-2` (2 vCPU, 16 GiB), `instanceTerminationAction: STOP`. Machine type is in the fingerprint, so a size change applies at each orb's next ordinary Start.
+- Spot capacity exhaustion (`ZONE_RESOURCE_POOL_EXHAUSTED`/`RESOURCE_POOL_EXHAUSTED` on insert or start) is a typed provisioning error that fails the orb visibly. No zone or on-demand fallback.
+- 20 GiB disposable boot disk; fixed 50 GiB `pd-balanced` data disk per orb.
+- Orb VMs run as the dedicated `pi-orb-orb-vm` service account (Logging writer only; the project's default compute account is disabled, so the provider always passes it) with the `cloud-platform` scope. Repository code can query the metadata server and mint this account's tokens, which is why it is minimal; the runtime bearer is likewise exposed to code on the VM (`docs/credentials.md`). Private custom images require `roles/compute.imageUser` for the provisioning identity (`infra/foundation/iam.tf`). A project container can read the VM service-account email from metadata; that identity is deliberately minimal and is not a separate security boundary.
+- Networking: the control plane reaches the runtime on the internal IP through Direct VPC egress from Cloud Run (network `pi-orb`, subnet `pi-orb-us-central1`, 10.10.0.0/20, Private Google Access). The ephemeral public IP is outbound-only behind a deny-all-inbound firewall. No Cloud NAT.
+
+### Disks
+
+Each orb owns a separate data disk. Provisioning attaches an existing disk only when its exact `pi-orb-orb-id` label matches; retained disks keep their size and type. Only creation of a missing disk uses the pinned empty ext4 workspace template; retry and concurrent-create recovery verify the observed source image identity before adopting. Retained owned disks attach unchanged after template changes with no source-image requirement.
+
+The guest requires a 50 GiB disk containing an ext4 filesystem of exactly that size. Admission reads capacity, type and size without formatting, growing or repairing; it mounts `/workspace` with normal journal handling. Missing, unsupported, wrong-size or unmountable storage fails boot visibly. Full read-only integrity checking is a build gate on the empty template, not a per-restart check. A stale "format" flag was rejected because it can authorize destruction after disk reuse (`docs/postmortems/2026-09-08-workspace-image-readonly-check.md`).
+
+### Lifecycle mapping
+
+- `provision` inserts the instance only when absent. Stop and Spot recovery restart the same instance (`instances.start`) with disks intact.
+- Spot preemption appears as `TERMINATED`. The provider does not consult Cloud Logging and logs "likely preemption". GCE status lags guest power-off by 30 s or more, so preemption may surface through runtime silence instead (`docs/postmortems/2026-08-07-preemption-lost-turn.md`). An honest `host_preempted` label, if ever wanted, belongs in `diagnose()`. Rejected: a best-effort history drain on the ~30 s preemption notice; the unreplicated tail is recovered on the next start.
+- Failed compute is disposed, not restarted in place: a hard stop during Docker layer extraction left a mountable boot disk with corrupt layers that Docker reported as `Already exists`, and re-pull or same-VM restart reused the poisoned cache (`docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md`, `docs/postmortems/2026-08-12-spot-preemption-corrupt-entrypoint-layer.md`). Deleting the instance removes the auto-delete boot disk and preserves `/workspace`.
+- The native `runtime_never_answered` sub-deadline (`docs/lifecycle.md`) sits above the guest's 10-minute workspace-unit bound and below the create/start deadline.
+
+### Native image
+
+A minimal Debian 12 image runs the runtime directly under systemd; the VM is the isolation boundary. COS was rejected: it does not support non-containerized applications or a host package manager, and the developer environment (`sudo apt-get` hooks, browser libraries, toolchains) needs both.
+
+- **Minimal package set.** Every package must serve boot/operations, the runtime, Docker, or a prescribed capability. Exclude recommends, caches, build credentials and build-only artifacts; keep compilers because they are a prescribed capability. Project dependencies belong in setup hooks. Package purposes are in `infra/native-vm/PACKAGES.md`; the build records inventory and sizes.
+- **Pins.** Base `projects/debian-cloud/global/images/debian-12-bookworm-v20261027`. Installation refreshes Debian packages, then pins Docker Engine/CLI `5:29.9.3-1~debian.12~bookworm`, containerd.io `2.4.2-3~debian.12~bookworm` and google-guest-agent `1:20261021.00-g1`. Build and acceptance parse daemon configuration and check package versions before checking that daemons are disabled.
+- **Rollback** is a new forward-generation release adopted through ordinary stopped-compute replacement; running guests adopt a new image only through Stop/Start.
+- **Build and release.** `npm run native-image:build` (procedure: `infra/native-vm/README.md`; release flow: `docs/deployment.md`) snapshots sources, builds on a disposable on-demand `e2-standard-4` builder, seals, captures the runtime image and an empty 50 GiB ext4 workspace image, validates a fresh VM and emits a manifest with source hashes, base image, package inventory and output resource/ID. Releases reject dirty sources and unvalidated images. Application code is baked in; no boot-time download. Images have unique names, are retained for rollback, and are rebuilt for OS/security updates. Effects run behind injected gcloud adapters with unit/DST coverage; Packer was rejected for that reason. The builder machine is fixed (no machine/zone fallback) after `n2d-highmem-4` stockouts (`docs/postmortems/2026-09-30-native-mcp-qualification.md`).
+
+### Boot and supervision
+
+- `workspace.mount` mounts the data disk at `/workspace` before any dependent service. Mount failure prevents the runtime and Docker from writing into an empty boot-disk directory. The mount is ordered after disk validation and outside systemd's implicit `local-fs.target`; image validation verifies the complete enabled `multi-user.target` graph, because checking only custom units missed an implicit-dependency cycle (`docs/postmortems/2026-09-07-native-workspace-systemd-cycle.md`). With the disk absent, runtime, Docker, containerd and the socket stay inactive and no environment is written; the device job expires after 90 s, and SSH also waits for local filesystems, so the serial console is the diagnostic channel.
+- A privileged bootstrap reads the `pi-orb-config` metadata document and writes runtime credentials to a root-owned mode-0600 environment file under `/run`. No instance identity or project secrets enter the image. Bootstrap retries transient metadata failures (network errors, timeouts, HTTP 5xx) for 60 s because the guest agent reconfigures networking at boot; HTTP 4xx fails at once. A recovered retry publishes a `metadata_retried` boot edge (`docs/postmortems/2026-10-10-bootstrap-metadata-network-race.md`).
+- systemd starts a small TypeScript supervisor, which starts the runtime in its own process group, publishes the first ready or typed failed health edge, and forwards TERM/INT while observing the real exit. Health transport/schema errors retry without a supervisor deadline. Exit before terminal health publishes `runtime_exited_before_ready` with code or signal. systemd keeps restart, cgroup cleanup and outer startup-failure reporting. Folding supervision into the runtime was rejected: a process cannot report its own loader crash.
+- After readiness the supervisor probes localhost every 10 s with a 2 s deadline and logs `runtime_health_failed`, `runtime_health_recovered` and `runtime_child_exited` edges (last local success, requested-shutdown status, exit code/signal) to the `pi-orb-boot` log. Healthy probes are silent. Compare these with control-plane request failures for the same instance and window (`docs/lifecycle.md`): local success near remote failures suggests a path problem; simultaneous local failure suggests guest trouble. Neither proves cause, a child exit does not prove OOM, and missing records prove nothing (`docs/postmortems/2026-10-16-c9a30a6d-restart-loop.md`).
+- **SSH host keys.** The Google guest agent manager is the sole host-key producer. The host-key gate starts after and wants the manager but must not require its initial successful start, so a transient producer exit cannot latch SSH off. SSH requires gate success. The gate verifies the real instance ID, Google's ECDSA/Ed25519/RSA key pairs and matching published guest attributes within 90 s; mismatch or timeout fails closed with a guest diagnostic. No competing key generator, blind SSH retry or longer timeout (`docs/postmortems/2026-10-01-native-ssh-startup-dependency.md`).
+- **Guest evidence.** Instance metadata enables guest attributes. Workspace, bootstrap, supervisor and runtime publish structured edges to guest attribute `pi-orb/boot-status` and Cloud Logging `pi-orb-boot`. A specific boot error is never overwritten by a generic systemd diagnostic; unit/journal evidence is published separately, and workspace capacity is reported only after mount. `diagnose()` reads these, and lifecycle folds them into failure records before discard. Runtime stdout/stderr lives only in journald and disappears with the VM, so anything needed after deletion must be published explicitly.
+- Setup runs once per incarnation, secrets after setup, resume on every runtime start (`docs/orb-setup-hook.md`). Image replacement discards system-package changes made by setup; setup recreates them.
+
+### Docker on native VMs
+
+Docker Engine, Buildx and Compose are installed for project workloads. Docker, its socket and containerd are disabled at boot and on every later boot; the agent starts Docker with `sudo systemctl start docker`. Readiness and health never depend on Docker, and Docker errors are application errors, not an orb state. Orb Stop stops the VM, which also stops Docker-owned containers. A project may opt into its own startup policy.
+
+**Durability.** Non-regenerable workload data, including Docker volumes, writable container layers and locally built images, must survive compute replacement. Docker `data-root` is `/workspace/docker`, and containerd's persistent `root` is `/workspace/containerd`; with the containerd image store, `data-root` alone does not retain images. Transient sockets and process state stay under `/run`. Both daemons require the mounted disk. Stores are preserved whole, including caches; cleanup may remove only positively identified regenerable data. Replacement never wipes stores to repair startup; store failures need visible diagnosis and data-preserving recovery. The containerd config edit is asserted by parsing the resulting TOML. Engine upgrades may apply upstream bookkeeping conversions to retained stores, never custom migrations (`docs/deployment.md`).
 
 ## Infrastructure decisions
 
-- The first infrastructure backend is local Docker.
-- The cloud backend is raw Google Compute Engine, not Cloud Workstations.
-- All cloud orbs will live in one GCP project rather than one GCP project per source project.
-- The development GCP project has display name `playground-dev` and project ID `playground-dev-6ae7`.
-- The current prescribed cloud location is the single hardcoded zone `us-central1-a`. No multi-zone or multi-region logic initially.
-- **Orb VM sizing (decided 2026-09-18).** The prescribed GCE shape is Spot `n2d-highmem-2`: 2 vCPUs and 16 GiB RAM. This halves CPU and RAM from `n2d-highmem-4` to halve per-orb compute cost. Machine type remains part of the immutable host-spec fingerprint, so existing compute adopts the smaller shape through replacement on its next ordinary Start after deployment.
-- Spot capacity exhaustion (`ZONE_RESOURCE_POOL_EXHAUSTED` on instance create or start) maps to a typed provisioning error that fails the orb and is shown to the user. There is no zone or on-demand fallback initially.
-- Boot-failure detection (implemented; born from cloud smoke-testing): while an orb is `creating`/`starting`, the reconciler records a per-probe boot picture (host state, attempts, whether the runtime ever answered, last error) exposed to the UI as a `waiting_for_runtime` state detail. Because the runtime's health server starts before slow initialization, a running host whose runtime has never answered past `unreachableBootDeadlineMs` (12 minutes for native GCE; 3 minutes for Docker/process) fails fast as `runtime_never_answered` instead of burning the 15-minute deadline; the terminal error carries the probes plus provider diagnostics (`OrbHostProvider.diagnose`, reading the GCE guest-attribute startup markers). A transiently failing diagnose defers the failure one poll so evidence is never dropped. Deadline failures carry the same evidence. Covered by DST scenarios including the adversarial-scheduling case where a best-effort host stop is cancelled and repaired by the backstop sweep.
-- The earlier in-place repair fence did not fence lifecycle authority: on 2026-08-11 a deleted stale Cloud Run revision continued reconciling for 7 minutes 42 seconds and could still start compute and fail durable orb state. Drained-revision deletion is cleanup, not correctness. Incident: `docs/postmortems/2026-08-11-release-smoke-restart-registry-timeout.md`.
-- **Immutable-host replacement superseded in-place repair (decided 2026-08-12, implemented 2026-08-16; `docs/compute-replacement.md`).** The preceding incident is history, not the contract. `ensureCurrentScript`, `setMetadata` script/image rewrites, and every `repaired` outcome are gone from the GCE adapter; there is no in-place host-repair path left in the code.
-  - **Immutable spec fingerprints.** Every provider exposes a pure `desiredSpecFingerprint({ orbId, repositoryUrl, harness })` computed through one shared canonical helper (`apps/control-plane/src/adapters/spec-fingerprint.ts`: recursively key-sorted JSON, SHA-256) so two revisions building the same effective specification through different code paths cannot disagree. GCE hashes the native image resource and numeric ID, per-instance configuration, and boot-disk size, machine type, subnetwork, service account and scopes, scheduling, and data-disk size — all read from the single `launchSpec` that also builds the instance-insert body, so a host cannot carry a setting the fingerprint does not cover. The fingerprint is rendered at incarnation 0 on purpose: rotating an incarnation must not read as a specification change. Zone and project ID are deliberately excluded (see `docs/compute-replacement.md`): the data disk is zonal, so a zone move would provision an empty workspace and is an operator migration rather than a replacement.
-  - **The stamp lives on the compute.** GCE writes `pi-orb-host-spec-fingerprint` into instance metadata at insert; Docker writes the `pi-orb.host-spec-fingerprint` label; the process provider records `specFingerprint` in its `host.json`. Provision-reuse and `start` verify the stamp *before any state change* and return a typed `conflict` on mismatch — a stale-spec incarnation is never started, resurrected, or rewritten. `StartOrbHostRequest.expectedSpecFingerprint` is `string | null`; null means a legacy row that predates stamping and matches only unstamped compute, so pre-migration hosts restart in place until their next ordinary Start replaces them.
-  - **The deploy generation fences the decision, not the write.** `PI_ORB_HOST_SPEC_GENERATION` (infrastructure: `-var deploy_generation=$(date +%s)`, clamped monotonically by `infra/release.sh`) reaches each adapter as `OrbHostProviderOptions.specGeneration` and is committed alongside the fingerprint as the orb's `host_spec_generation`. Only the ordinary start path compares specifications; a revision configured below the committed generation declines with one edge and starts the existing compute unchanged. A draining revision therefore cannot replace newer-spec compute backward.
-  - **The GCE image is pinned by resource and numeric identity.** Composition requires `PI_ORB_GCE_IMAGE_RESOURCE` and `PI_ORB_GCE_IMAGE_ID`. The provider verifies `images.get` before provisioning and fingerprints both values, so deleting and recreating an image under the same name cannot silently change the desired artifact. Local Docker image selection remains independent.
-- **Native guest evidence (implemented 2026-09-05).** Instance metadata enables guest attributes. Workspace, bootstrap, and runtime services publish structured edges to `pi-orb/boot-status` and Cloud Logging `pi-orb-boot`; the provider attaches these diagnostics to existing diagnosis-before-discard lifecycle records and user-visible failures. A missing or damaged workspace prevents bootstrap and runtime startup. Docker has no role in orb readiness. This preserves the durable-evidence rule established by `docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md`.
-- Probe failures name their cause (implemented 2026-08-06, same postmortem). undici reports every connection failure as the bare message `fetch failed` and hides the syscall error in `error.cause` (or, when several addresses were tried, in an `AggregateError`'s `errors`). The runtime client unwraps it at the adapter boundary — `fetch failed (ECONNREFUSED)` — so probe records and terminal errors distinguish "host up, nothing listening in the container" from `ETIMEDOUT`/`EHOSTUNREACH` routing and firewall failures. During the incident every probe read `fetch failed`; the one distinction would have pointed inside the container immediately.
-- Spot preemption is handled purely as the existing crashed-host path: the provider observes the instance `TERMINATED`, and recovery starts the same instance again in place with its disks intact. Rejected for now: a best-effort history drain on the ~30-second preemption notice — it would convert most preemptions into near-clean stops, but the first cloud slice stays simple; the unreplicated tail is recovered on the next start as docs/history-replication.md already allows. Note that GCE instance status lags the guest power-off by 30 s+, so a preemption may surface through the silence/`unreachable_restart` path rather than as observed-`TERMINATED` (`docs/postmortems/2026-08-07-preemption-lost-turn.md`). The in-flight turn a preemption kills is recovered by interrupted-turn resume at the next runtime boot (`docs/lifecycle.md`), which keys off the session tail and needs no cause disambiguation; if honest `host_preempted` labeling is ever wanted, a `zoneOperations.list` preemption check belongs in `diagnose()`, not in the observation contract. **Field correction 2026-08-12:** restarting the same VM is not sufficient when a preemption interrupts its first image pull. Orb `6ceb79c1` was preempted after five layers completed; the next pull trusted those layers as `Already exists`, then the container crash-looped before Node with `docker-entrypoint.sh: exec format error`. The published amd64 digest and entrypoint layer were healthy elsewhere, strongly matching the hard-stop cache-corruption path predicted by `docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md` without a deploy race; the stopped host's extracted layer was not directly inspected (`docs/postmortems/2026-08-12-spot-preemption-corrupt-entrypoint-layer.md`). A normal retrying `docker pull` does not repair layers dockerd already considers complete. **Decision 2026-08-12:** failed compute is disposed rather than repaired in place; GCE instance deletion removes the suspect auto-delete boot disk while preserving `/workspace`, and only a later explicit Start or current-failure message wake provisions an incarnation-fenced clean VM. The provider/lifecycle/store plan is `docs/compute-replacement.md`.
-- Cloud orbs boot a versioned minimal Debian image and run the runtime as `orb` (UID/GID 2000) under systemd. Configuration comes from the `pi-orb-config` metadata document. Bootstrap retries transient metadata failures (network errors, timeouts, HTTP 5xx) for 60 s because the guest agent briefly reconfigures networking at boot; HTTP 4xx fails at once. A recovered retry publishes a `metadata_retried` boot edge (decided 2026-10-10, `docs/postmortems/2026-10-10-bootstrap-metadata-network-race.md`). Runtime credentials are written to a root-owned mode-0600 environment file under `/run`. Image build, validation, and immutable identity are described in `infra/native-vm/README.md`.
-- Orb VMs use no Cloud NAT: each has an internal IP (used by the control plane) plus an ephemeral public IP for outbound traffic only, behind a deny-all-inbound firewall. Revisit NAT if orb count grows.
-- **Requirement (2026-09-04):** GCP orbs must support running Docker workloads. Initial candidates evaluated: expose the existing per-orb VM Docker socket; run a separate Docker daemon inside the orb container; run the runtime and Docker directly on an immutable VM image; or use a separate Docker worker. Socket access grants control of the VM and the runtime container ([Docker security](https://docs.docker.com/engine/security/)); host-side bind mounts also need consistent workspace paths ([bind mounts](https://docs.docker.com/engine/storage/bind-mounts/)). Nested Docker adds privilege, storage, and supervision concerns; native VM execution changes environment packaging; a separate worker adds lifecycle and workspace-sharing costs. The native Debian direction was selected on 2026-09-05; remaining choices are in `docs/open-questions.md`, question 48.
-- Node.js 26.13.0 LTS is prescribed.
-- A simple TypeScript project should require no orb configuration file.
-- Per-project machine sizing and arbitrary OS/package configuration are not part of the first slice.
-
-## Native GCE runtime (implemented 2026-09-05; first deployed 2026-09-07)
-
-A minimal Debian image runs the orb runtime directly on a dedicated VM as a systemd service, with Docker Engine, Buildx, and Compose installed for project workloads. The VM is the isolation boundary. The existing one-VM/one-data-disk model and immutable replacement machinery in `docs/compute-replacement.md` remain authoritative. Docker, its socket, and containerd are disabled at boot; the agent starts Docker explicitly. The guest requires a 50 GiB workspace disk containing an ext4 filesystem of exactly that size. Admission reads capacity/type/size metadata without formatting, growing or repairing the disk. It mounts `/workspace` before any dependent service, retaining normal ext4 journal handling; metadata/size refusal and mount failure fail boot visibly. Full read-only integrity checking belongs to the fresh empty template's build gate, not every retained-workspace restart.
-
-**Faster new workspaces (decided and implemented 2026-09-08).** The former full-device safety scan read a new 50 GiB disk for about 338 seconds of a measured 418-second fresh-orb boot. The builder creates and accepts a 50 GiB empty ext4 workspace image beside the native runtime image (the initial 10 GiB design was superseded by the fixed-capacity decision below), and pins both its resource name and numeric identity in the release manifest and application configuration. Only creation of a missing data disk uses that image; retry and concurrent-create recovery verify the observed source identity before adopting the disk. The builder checks the empty template read-only after its last unmount. The guest validates fixed capacity and ext4 metadata, then mounts without formatting, resizing or offline repair. Retained owned disks attach unchanged after template changes and require no source-image match. A missing or unsupported filesystem fails closed. Automated acceptance covers ambiguous create responses, concurrent creation, retained-disk replacement and Stop/Start, and image contents; the guest suite exercises exact-capacity admission, retained contents, mismatch refusal without writes, and the template's damaged-image refusal through real e2fsprogs. A stale format flag was rejected because it can authorize destruction after disk reuse; binding one-shot authority to an exact disk would require a durable create/format/retry state machine without improving the image-backed result.
-
-**Fixed workspace capacity (decided and implemented 2026-09-08):** use a 50 GiB filesystem template, 50 GiB validation workspace and 50 GiB production workspace. Remove the provider's configurable data-disk size and the guest's filesystem-growth/check-before-growth branches. Production already paid for 50 GiB from creation, so retaining a smaller filesystem saved no per-orb capacity cost; same-size construction removes a failure mode rather than adding a writable-check workaround. A template cannot provision a smaller disk, which is accepted for this single-user product. Retained disks remain owned and attached unchanged rather than reformatted; the guest rejects a capacity mismatch. The 20 GiB disposable OS boot disk is separate and unchanged. A disposable standalone GCE build passed complete image acceptance with this fixed shape, including guest runtime readiness and durable Cloud Logging evidence; the workspace image compressed to 160,256 bytes. Earlier small-template rationale, costs, rejected growth workarounds and failure/validation evidence remain in `docs/postmortems/2026-09-08-workspace-image-readonly-check.md`.
-
-The earlier production release at commit `17a29df` created, validated and grew a fresh workspace in 589 ms. The orb reached durable `running` 82.562 seconds after API creation, versus 418.473 seconds with the scan. Replacing an old-format orb attached its unchanged 50 GiB disk without a source-image requirement, validated its current-size filesystem in 824 ms, and preserved home, workspace and Docker-volume state. Same-spec Stop/Start reused the replacement VM and preserved the same state. Docker remained off until explicitly started and an immediate terminal passed after both boots. Exact image and timing evidence is in `docs/native-vm-prototype.md`.
-
-**COS comparison (researched 2026-09-05).** Native execution does not by itself select Debian. COS images can be customized with [COS Customizer](https://cos.googlesource.com/cos/tools/+/refs/heads/master/src/cmd/cos_customizer/README.md), but Google's [documented limitations](https://docs.cloud.google.com/container-optimized-os/docs/concepts/features-and-benefits) explicitly exclude support for non-containerized applications and omit a host package manager. Its [filesystem](https://docs.cloud.google.com/container-optimized-os/docs/concepts/disks-and-filesystem) has a verified read-only root, stateless `/etc`, and execution restrictions on ordinary writable paths. Bundling compatible native binaries and arranging executable storage/systemd configuration is a possible experiment, not a validated supported environment. The mismatch is the whole developer environment, including existing `sudo apt-get` setup hooks, browser libraries, and native toolchains, not merely running Node. Debian was selected for that environment on 2026-09-05. COS remains a fit for the alternative of a containerized developer environment with access to the host Docker daemon.
-
-**Minimal image (decided 2026-09-05).** Every installed package must serve boot/operations, the runtime, Docker, or an existing prescribed orb capability. Preserve the documented baseline, including browser automation, cloud/GitHub tools, Python, and native addon compilation; do not copy the Dockerfile package list without checking each dependency and its purpose. Project-specific dependencies belong in setup hooks. Exclude optional recommended packages, package caches, image-build credentials, and build-only artifacts; keep compilers where they also provide the prescribed native-build capability. Record the package inventory and installed sizes in the image build output. No desktop, unrelated services, or speculative tooling.
-
-**Image regeneration and testing (required 2026-09-05).** Regeneration must be a single easy-to-use, documented command, as specified in `docs/deployment.md`. The production implementation requires thorough unit and deterministic simulation coverage under `docs/testing.md`; the successful VM experiment alone does not satisfy that gate.
-
-**Packaging and releases (implemented 2026-09-05; first production release 2026-09-07).** `npm run native-image:build` builds and validates a versioned GCE image through injected gcloud adapters. Packer was considered; the selected orchestration keeps effects and timing behind the unit/DST boundary. Runtime source and the npm lockfile are shared with local container builds; native OS/tool installation lives in `infra/native-vm/`. The manifest records exact source hashes, base-image resource/ID, package inventory and output image resource/ID. Releases reject dirty sources and unvalidated images. Application code is baked into the image, avoiding a boot-time runtime download. Images have unique names; replacement pins both resource and numeric identity. Retain release images for rollback and rebuild for OS/security updates. See `docs/deployment.md`.
-
-**Boot and supervision.** Mount the existing data disk directly at `/workspace`; preserve `/workspace/home`, repository, session, and hook markers. A mount failure must prevent runtime or Docker workloads from writing into an empty boot-disk directory at that path. A privileged bootstrap reads per-instance metadata and writes protected ephemeral runtime configuration under `/run`; no instance identity or project secrets enter the image. systemd owns runtime restarts, bounded shutdown, and descendant cleanup. Test the existing SIGTERM cleanup, detached hook processes, and PTYs under that supervision. Keep setup once per incarnation, secrets after setup, and resume every runtime start. Docker containers belong to the Docker daemon, so stopping the runtime service alone does not stop them; orb Stop must continue stopping the VM, and Docker is an optional workload tool (decided 2026-09-05): Docker, its socket, and containerd are disabled by default. The agent starts Docker explicitly with `sudo systemctl start docker`; runtime readiness and health do not depend on it. The image does not enable Docker on subsequent boots either; a project may opt into its own startup policy.
-
-**Separate TypeScript runtime supervisor (decided 2026-09-08).** systemd starts a small supervisor process, which starts the runtime in its own process group, publishes the first ready or typed failed health edge to guest attributes and Cloud Logging, and forwards TERM/INT while observing the runtime's real exit. Health transport or schema errors retry without a supervisor readiness deadline. An exit before terminal health publishes `runtime_exited_before_ready` with its code or signal; diagnostic publication is bounded and cannot replace the runtime outcome. TypeScript shares the runtime's typed `neverthrow` boundaries and `determined` scheduling tests while the separate process retains loader-crash reporting. systemd retains restart, cgroup cleanup, and outer startup-failure reporting. Folding supervision into runtime `main.ts` was rejected because that process cannot report its own loader crash.
-
-**Runtime-silence diagnostics (decided 2026-10-16).** After readiness, the supervisor probes localhost every 10 s with a 2 s deadline. It logs `runtime_health_failed`, `runtime_health_recovered` and `runtime_child_exited` edges with the last local success and requested-shutdown status; exits include code or signal. Healthy probes are silent; systemd still owns restarts. Events use the existing `pi-orb-boot` Cloud Logging log without replacing startup guest attributes.
-
-Compare these local observations with control-plane request failures (`docs/lifecycle.md`) in the same instance and time window. Local success near remote failures suggests a path-specific problem; simultaneous local failure suggests guest/runtime trouble. Neither establishes cause. A child exit proves termination, not OOM. Export is bounded and best effort; missing records prove neither health nor absence of failure. Historical runtime silence remains unexplained (`docs/postmortems/2026-10-16-c9a30a6d-restart-loop.md`).
-
-**User and authority.** An ordinary `orb` user with a fixed UID/GID, passwordless sudo, and Docker access gives conventional development-tool behavior. It does not isolate repository code from the VM: [Docker group membership grants root authority](https://docs.docker.com/engine/install/linux-postinstall/). Retain minimal VM service-account grants and brokered project identity; audit metadata reachability from project containers. The native image uses UID/GID 2000 with sudo. Existing active orbs will be archived by the user before deployment (decided 2026-09-05); there is no active-orb migration or ownership conversion. Image replacement discards system-package changes made by setup; setup must recreate them. No live platform patching is proposed.
-
-**Docker durability (decided 2026-09-05).** Workload data that is not automatically regenerated must survive compute replacement, including Docker volumes. A stopped or detached resource is not necessarily disposable. Reject the earlier disposable-store proposal because it loses ordinary Compose volumes; preserving only bind mounts would not meet the requirement. Writable container layers and locally built images can also contain unique data, so classifying the entire image/snapshot store as cache is unsafe.
-
-**Storage configuration (implemented 2026-09-05).** Use Docker's supported `data-root` setting with `/workspace/docker`, preserving volumes and their metadata together. For the containerd image store, configure containerd's persistent `root` separately as `/workspace/containerd`; keep transient sockets/process state under `/run`. [Docker documents both settings](https://docs.docker.com/engine/daemon/). Preserve the complete stores initially, even though this also retains caches; separating proven-regenerable cache is an optimization, not a durability prerequisite. Both daemons must require the mounted data disk and retain exclusive per-orb ownership. Replacement must never wipe their stores to repair startup. A persistent store failure needs visible diagnosis and data-preserving recovery; ordinary platform-runtime boot remains independent of Docker's image layers. Cache cleanup may reclaim only positively identified regenerable data, never infer safety from an unused volume/container/image. The prototype validates these paths on Docker 29.1.3/containerd 2.3.4. Store handling when updating Docker is deferred until that update.
-
-**Diagnostics and acceptance.** Native services publish structured workspace, bootstrap, and runtime edges through guest attributes and Cloud Logging. Preserve diagnosis-before-discard, durable lifecycle edges, and user-visible failure details; Docker errors are ordinary application errors, not an orb readiness state. Preserve private runtime access, and validate Docker-published ports against the existing network policy. Acceptance must exercise the actual VM image: boot, Compose bind mounts and networking, image builds, browser/runtime E2E, shutdown, stop/start, image replacement with retained workspace, credential rotation, and mount/Docker/runtime failures. Provider changes need deterministic replacement/failure coverage; container E2E alone cannot validate systemd or guest-image behavior. Startup speed and release duration are measurements for the existing spike, not assumed benefits.
-
-### Focused VM-image prototype (completed 2026-09-05)
-
-The initial prototype established native runtime and storage behavior on disposable GCE resources; the subsequent implementation run validated the production provider and image builder. Deliver a repeatable image recipe, boot units, a scripted acceptance run, and a short evidence report. Run the actual orb runtime and its required tool baseline; a Node health server plus `docker run hello-world` is insufficient. Use isolated test identity/control-plane state and exact resource ownership for cleanup. Build two uniquely named image versions and run two VMs sequentially around one retained data disk. The replacement can be scripted directly for this experiment; that proves image/disk behavior, not production reconciler correctness.
-
-Recipe and runbook: `infra/native-vm/`. Experimental findings, failures, measurements, and production limits: `docs/native-vm-prototype.md`.
-
-Acceptance cases and their evidence:
-
-1. **Build and boot:** create an image from a pinned Debian base, retain the package inventory with purposes/sizes, and boot without installing platform packages or downloading runtime code. Measure image build duration, image disk usage, and time to runtime readiness. Inject orb identity at boot; verify the image contains no instance credentials or initialized orb state.
-2. **Usable orb:** connect the actual runtime to an isolated test control plane, complete a browser WebSocket handshake and agent shell turn, use a terminal PTY, run setup/resume and credential delivery, and exercise the browser/native-build baseline. The current E2E harness supports Docker and process hosts, so the VM connection needs an explicit test seam; its existing green suite is not evidence for native GCE behavior.
-3. **Docker and retention:** build an unpublished local image; create a container with a unique writable-layer file; run a small Compose database with an ordinary named volume and a bind-mounted project directory. After acknowledged writes and an explicit database checkpoint, verify those records/files, image identity, container configuration, home, and session after same-VM stop/start and again after deleting the first VM/boot disk and attaching the retained disk to a fresh VM from the second image. Verify new platform image identity and preserved workload state together. Preserve data from stopped containers and unattached volumes too. Check setup once per incarnation and resume on each runtime start; define and observe project-container restart behavior.
-4. **Failure behavior:** fail the workspace mount, terminate the runtime, and fail Docker startup on disposable fixtures. Assert no fallback writes to the boot disk, no duplicate runtime or leftover runtime-owned processes, no deletion of workload stores, and useful exported failure evidence. Exercise abrupt interruption separately with explicit synchronization and retain the first failure trace/logs; successful normal shutdown is not evidence of power-loss behavior.
-
-A pass demonstrates the tested native runtime, package baseline, Docker workflows, retained-state replacement, and supervision behavior on the selected versions. The follow-up in `docs/native-vm-prototype.md` exercises the production GCE provider/reconciler through an isolated native launch adapter. The implementation run also validates release contracts and disk-full recovery. Foundation adoption, the corrected production deployment and retained-disk replacement validation completed on 2026-09-07. Docker engine updates are outside this change. The packaging decision is resolved in `docs/open-questions.md`, question 48. The evidence report separates assertions from timings, records failures and fixes, and identifies any proposed package/storage changes. Production rollout still follows `docs/deployment.md`.
-
-## Local process provider for container-restricted test environments (decided and implemented 2026-08-07)
-
-Some development environments already run pi-orb inside an unprivileged container and do not expose a Docker socket. A test-only `ProcessOrbHostProvider` is the simplest backend for these environments. It runs each orb runtime as an ordinary child process on the same host, with no meaningful isolation. It is not a production host and must require the explicit `PI_ORB_HOST_PROVIDER=process` setting rather than becoming the default. The control plane owns the management tree; each execution host has a small Linux Python supervisor, with no separate management service. **Linux-only (2026-10-11).** Since that supervisor landed (2026-10-06), `launch` refuses other platforms with a non-retryable `operation_failed`; macOS is unsupported, and launch-dependent unit and E2E tests skip there.
-
-The evaluated pi coding-agent environment is suitable for this backend: Node 24, git, ripgrep, curl, and `gh` are already installed; `/workspace` is persistent and writable; and loopback TCP listeners are reachable by the control plane. It cannot run Docker as configured. There is no Docker CLI or `/var/run/docker.sock`; the effective capability set omits `CAP_SYS_ADMIN` and `CAP_NET_ADMIN`; the cgroup v2 mount is read-only; `mount(2)` is denied; and `unshare -Ur` is rejected by the outer seccomp/security policy. Installing `dockerd`, selecting the `vfs` storage driver, or using rootless Docker does not repair those missing kernel privileges. Docker is possible only if the environment's operator changes the outer sandbox: mount a trusted host Docker socket, or launch this environment privileged with usable namespaces and writable cgroups. The former grants host-equivalent control and the latter weakens the outer sandbox; neither can be enabled from inside an already-running environment.
-
-Implemented mapping:
-
-- `ProcessOrbHostProviderOptions.stateDirectory` is required. The adapter never chooses or embeds a filesystem path. Application composition reads `PI_ORB_PROCESS_STATE_DIR`, with a local convenience default derived from the user's home directory (for example `~/.pi-orb/process-hosts`), and passes the resolved path into the provider. Each orb gets a `0700` directory containing an atomically written metadata file, a persistent `workspace/`, and stdout/stderr logs. Metadata contains the orb ID, repository URL, plaintext runtime token (mode `0600`, needed for idempotent token-hash readback), assigned loopback port, and desired state. Child identity remains in the owning provider's in-memory table; runtimes cannot be adopted across control-plane processes because their IPC channel intentionally makes them exit when the owner disappears.
-- `provision` creates or reuses that directory by orb ID, mints a token only for a genuinely new host, chooses an unused loopback port, and launches supervised `node apps/orb-runtime/src/execution/main.ts` with `PI_ORB_WORK_DIR=<host-dir>/workspace`, `HOME=<host-dir>/workspace/home` (and no inherited `XDG_CONFIG_HOME`, since boot writes git's XDG config — `docs/git-identity.md`), the normal orb/bootstrap/broker environment, and a new `PI_ORB_RUNTIME_PORT=<assigned-port>`. The provider creates the private home before launch rather than inheriting the control-plane user's home. The runtime reads the optional port variable and defaults to 8080 for Docker/GCE. When a command directory is configured the child also carries `GIT_CONFIG_*` entries pointing `credential.https://github.com.helper` at the `pi-orb-git-credential` shim on that `PATH` (2026-09-04), the process-host stand-in for the image's system gitconfig.
-- The Linux execution supervisor requires Python 3.9+ and kernel pidfd support. It establishes subreaper ownership before publishing a ready receipt, watches control-plane identity through a pidfd, and drains descendants when the runtime or owner dies. This includes detached shells and workspace dev services. A matching durable drain receipt is required before relaunch, disposal or workspace removal; missing or mismatched receipts fail closed. The provider persists supervisor birth identity, writes desired `stopped` before termination, and only relaunches desired-running hosts after verified drain. Receipts and host logs preserve the outcome. Tests separate receipt-driven success from explicitly scheduled deadline expiry; elapsed time alone never proves cleanup (`docs/postmortems/2026-10-13-process-discard-deadline.md`). This is lifecycle management, not a security boundary.
-- `observe` reads metadata plus the provider's child table and reports a live child as `running` with `runtimeAddress.baseUrl = http://127.0.0.1:<port>`; it reports `stopped` when desired state is stopped and no child remains. `start` launches a child over the same workspace and token. `listManagedHosts` scans and validates metadata directories. A single-control-plane, per-orb in-process lock is sufficient for this test adapter; cross-process provider concurrency is explicitly unsupported.
-- The child receives `PI_ORB_CONTROL_PLANE_URL=http://127.0.0.1:<control-plane-port>` by default. Mock-OpenAI variables are forwarded exactly as in the Docker provider. All runtimes share one host/network namespace; HTTP previews are unsupported for this provider (`docs/ports.md`).
-- There is deliberately no filesystem, process, UID, network, resource, or environment isolation. Repository code can inspect and modify the host and other process-backed orbs. Use only with trusted test repositories. Port selection has a close-before-spawn race, accepted for this local test backend; an unlucky collision makes the supervised child retry the same bind until the port becomes free rather than adding socket activation or descriptor passing.
-- Group termination measures real liveness, not signal echoes (2026-08-16). `kill(-pgid, 0)` answers for exited-but-unreaped members, so under load a stop/discard could spuriously report "group still exists after SIGKILL" — the one measured flake class in this suite. The termination ladder now corroborates the probe with a zombie-aware member scan (`/proc` states; `Z` counts as dead), treats `EPERM` from a group whose members are all zombies like `ESRCH`, and forgets the supervised child as soon as absence is verified instead of waiting for libuv's reap — so `observe` reports `stopped` the moment the ladder's answer is definitive.
-
-This backend exercises the real runtime protocol, Pi adapter, persistent session, stop/start, and control-plane lifecycle without emulating Docker. One command starts the management tree: for example, `PI_ORB_HOST_PROVIDER=process npm run dev --workspace @pi-orb/control-plane`; that one control-plane OS process contains the provider/supervisor and creates runtime child processes only as orbs start. "Single process" here means no separate supervisor service. Execution runtimes remain child processes for independent environment, termination, crash handling and subprocess cleanup. Central Durable Harnesses are asynchronous JavaScript objects in the control-plane process; this execution isolation does not require per-orb agent processes or WorkerThreads.
-
-It does not reproduce the runtime image's package boundary, container networking, cgroups, Docker restart behavior, or image build, so Docker/GCE E2E and deploy smoke tests remain authoritative for those properties. PostgreSQL server binaries are not installed in the evaluated environment. Rather than installing and supervising a server, the process-mode composition uses embedded PGlite as described in `docs/stack.md`; database selection and location remain application configuration, not host-provider responsibilities. The root `npm run dev:local` script selects PGlite and the process provider, making the whole management tree one command while the control plane remains the only long-lived parent service. Adapter contract tests cover PostgreSQL migrations, CAS/transaction/history invariants, and credential-pointer CAS; current central qualification outcomes are recorded in `docs/testing.md`.
-
-Rejected as more complicated without useful test coverage: implementing a fake Docker CLI/API over host processes; `proot`/`udocker`-style userspace image execution; and attempting nested `dockerd` with `vfs` but no namespace/cgroup privileges.
-
-## exe.dev as a host provider (evaluated 2026-08-05 — feasible with caveats; proposal, not decided)
-
-exe.dev (https://exe.dev) was evaluated as a third `OrbHostProvider`. It offers microVMs (Cloud Hypervisor) booted directly from an OCI container image in ~2 seconds, with a persistent disk as the VM's root filesystem, SSH exec access, an HTTPS proxy per VM (`https://<vm>.exe.xyz`, ports 3000–9999 forwarded, gated by per-VM bearer tokens mintable offline by signing with the account SSH key), and an API that is the SSH CLI verbatim (`POST https://exe.dev/exec`, 30 s timeout, per-key rate limits, `--json` output). Custom images from private registries are supported (`new --image --registry-auth`), as are `--env` at create, `--setup-script` (≤10 KiB, first boot only), `--tag`, `--name`, `ls --json`, `rm`, `restart`, `cp`, `resize`. Pricing is a subscription over a shared resource pool (≈$20/mo, 25 VMs on the personal tier; team pools and a usage-based "Cloud Pool" exist), so idle VMs cost roughly nothing beyond disk.
-
-What maps cleanly onto the port: `provision` → `new --name=pi-orb-<orbId> --image=<runtime image> --env` (the runtime image boots as-is — no startup script, no disk-mount choreography, no konlet-style ordering problem); ownership/enumeration → name prefix + tags with `ls --json` (a dedicated exe.dev account also gives hard tenancy isolation); definitive absence → VM not in `ls`; `diagnose` → SSH exec (strictly better than GCE guest attributes); runtime→control-plane broker calls → already provider-agnostic URL+bearer by design.
-
-Three real impedance mismatches:
-
-1. **No stop/start lifecycle.** The CLI has only `new`/`rm`/`restart`; VMs are always-on (the pricing model makes idle nearly free, which removes most of the motivation for idle auto-stop). Our `stop` (idle stop, unreachable-restart, orphan sweep, `stopping` drain) would have to be emulated — e.g. halt the runtime process over SSH and record "stopped" in a VM tag so `observe` stays truthful — a virtual lifecycle layered on tags + exec, or the provider could report stop as a no-op with idle-stop disabled for this provider.
-2. **No durable-data/disposable-boot split.** The persistent disk *is* the rootfs instantiated from the image at create time. GCE delivers native-image upgrades by replacing the disposable boot disk; exe.dev has no way to re-image a VM without `rm` (which destroys `/workspace`). Existing orbs would be pinned to their creation-time image unless upgraded in place over SSH. Provision-reuse token readback would also go over SSH exec instead of instance metadata.
-3. **Network path inversion.** The control plane would reach the runtime through exe.dev's authenticated HTTPS proxy (`https://pi-orb-<orbId>.exe.xyz:8080` + `X-Exedev-Authorization` bearer) instead of a private VPC IP — `runtimeAddress` would need to grow provider-supplied headers, WebSocket forwarding through their proxy needs empirical verification, and the runtime broker Cloud Run service would have to move from `ingress=internal` to public ingress (acceptable: orb-token bearer auth is the real gate and was designed for exactly this).
-
-Unverified empirically: WS through the proxy, `ls --json` field shape (state/health), duplicate-`--name` behavior (needed for provision idempotency), whether an in-VM halt sticks, actual `/exec` rate limits (per-orb `observe` polling should be amortized into one periodic `ls` regardless), and private-registry auth against Artifact Registry (which wants short-lived tokens or a long-lived `_json_key`; mirroring the image to a PAT-authenticated registry may be simpler). Full writeup: [`docs/EXE-DEV.md`](docs/EXE-DEV.md). See open question 35.
-
-## AWS Lambda MicroVMs as a host provider (evaluated 2026-08-05 — feasible via externalized durable state; proposal, not decided)
-
-AWS Lambda MicroVMs (launched June 2026; docs: https://docs.aws.amazon.com/lambda/latest/dg/lambda-microvms-guide.html) were initially dismissed because of the hard maximum lifetime, then re-investigated on the premise that an orb can continue on a successor VM if the durable data survives. Conclusion: the lifetime cap is real and unavoidable — `maximumDurationInSeconds` caps a MicroVM at 28,800 s (8 h) spent in RUNNING **plus** SUSPENDED combined, TERMINATED is terminal, and there is no disk export, no volume attach/detach, and no image-from-running-VM API, so the local disk always dies with the VM. What makes it feasible anyway is that the durable-data/disposable-boot split can be reproduced with the durable side *outside* the VM: per-orb EFS (NFS through a customer-managed VPC egress connector; `additionalOsCapabilities: ["ALL"]` explicitly enables mounting filesystems) or, weaker, workspace sync to object storage from lifecycle hooks. The MicroVM becomes a disposable ≤8 h compute lease over an external filesystem, and the control plane rotates VMs proactively before the cap using the existing `stopping` drain machinery.
-
-What the platform provides: Firecracker VMs booted from a pre-initialized disk+memory snapshot (image built by AWS from a Dockerfile zip in S3 on a managed AL2023 base; ~3 min builds, ~1–12 s to RUNNING measured by third parties), real lifecycle verbs (`run-microvm`, `suspend-microvm`, `resume-microvm`, `terminate-microvm`, `list-microvms`, `get-microvm` with `stateReason`), automatic idle suspend with optional auto-resume on traffic, per-VM public HTTPS endpoint with mandatory short-lived JWE auth tokens (`create-microvm-auth-token`, `X-aws-proxy-auth` header, port-scoped) and explicit WebSocket/HTTP2/gRPC/SSE support, lifecycle hooks (`/run`, `/suspend`, `/resume`, `/terminate`) POSTed to the app including on max-duration termination, per-VM 16 KB `runHookPayload` at run time, ARM64 only, sizes 0.5–8 GB baseline memory (4× vertical burst, vCPU = memory/2), disk 8–32 GB. Pricing is per-second (≈$0.126/h for the default 2 GB/1 vCPU baseline: $0.0000277/vCPU-s + $0.0000037/GB-s), suspended VMs cost only snapshot storage ($0.08/GB-month; suspend writes $0.0038/GB, resume reads $0.00155/GB). Regions: us-east-1, us-east-2, us-west-2, eu-west-1, ap-northeast-1 — cross-cloud from our GCP control plane, which is just public HTTPS API calls plus a new AWS credential surface, but EFS and the egress connector require owning an AWS VPC.
-
-Mapping onto the port:
-
-- **Durable data**: per-orb EFS access point mounted by the runtime in the `/run` hook (mounting during image build is useless — the NFS mount would be baked into a snapshot shared by all VMs, and NFS TCP state does not survive snapshot restore; `/resume` must revalidate the mount too). This preserves the GCE-style split better than exe.dev does: image upgrades are trivial (terminate, `run-microvm` from the new image version, remount the same EFS path).
-- **`stop`**: short-term idle stop maps to `suspend-microvm` (state fully preserved, near-instant resume, ~zero cost) — but suspended time still burns the 8 h budget, so long-term stop must be flush + `terminate-microvm`, with "stopped" meaning "no VM exists; EFS holds the orb state" and `start` meaning "run a fresh VM + remount".
-- **Rotation** (new lifecycle obligation no other provider has): the control plane must track VM age and proactively drain + terminate + re-run before the 8 h cap. The `/terminate` hook does fire on cap-exceeded termination, but its timeout is undocumented, so the hook is a backstop, not the plan.
-- **`observe`/`list`**: `list-microvms` + `get-microvm`; definitive absence = not in list (plus EFS presence distinguishing "stopped" from "never existed"). Orb↔VM association goes through the run-hook payload and control-plane records; tags exist on images, per-VM tagging needs verification.
-- **Network path**: same inversion as exe.dev — `runtimeAddress` grows provider-supplied headers (JWE token), the runtime broker needs public egress and token-refresh logic (tokens are minted per call with configurable expiry; maximum expiry undocumented), and WebSockets are officially supported (server-side connections can send headers, so the subprotocol workaround is browser-only).
-- **Endpoint bandwidth is capped** (1–16 MB/s scaling with size) but applies only to endpoint traffic; git and package traffic uses the egress path.
-
-Unverified empirically, in rough order of risk: (1) EFS/NFS mount through a VPC egress connector from inside a MicroVM — nothing documents it, it merely follows from "VPC egress + CAP_SYS_ADMIN"; (2) git/workspace performance on EFS; (3) NFS mount survival across suspend/resume; (4) `/terminate` hook timeout; (5) auth-token maximum expiry and mint rate limits; (6) account memory quota headroom (quota covers RUNNING+SUSPENDED combined). Full writeup: [`docs/AWS-MICROVMS.md`](docs/AWS-MICROVMS.md). See open question 37.
-
-## Rejected: Cloud Workstations
-
-Cloud Workstations was evaluated and rejected due to pricing and limited value relative to a custom control plane:
-
-- normal Compute Engine charges;
-- an additional `$0.05 × vCPU` per active workstation hour;
-- a fixed `$0.20/hour` cluster fee;
-- no documented Spot configuration in the stable or beta workstation configuration schema;
-- we would still need custom health, history replication, restart recovery, and application control-plane logic.
-
-## Rejected: suspend/resume
-
-Suspend/resume was benchmarked on a Spot `n2d-highmem-4` in `us-central1-a`, using Debian 12 and Node.js 24. Across representative samples, resume generally saved only about 5–11 seconds relative to stop/start, with substantial variance. Suspend itself was slower than stop, though that latency could happen after the user left.
-
-All tested resumes preserved process state, but the payoff did not justify another lifecycle path in the first version. One Spot preemption also occurred during the benchmark, reinforcing the need for full restart recovery.
-
-Decision: implement stop/start only for now. All temporary benchmark cloud resources were deleted.
-
-Native GCE boot timing (decided 2026-09-05; superseded 2026-09-08): the original
-guest verified every byte before formatting a new workspace disk. Real 50 GiB admission exceeded the old
-three-minute deadline while this check was still running. The workspace unit
-has a ten-minute bound; GCE allows twelve minutes before declaring an unreachable
-runtime, within the fifteen-minute create/start deadline. The preformatted-image
-decision above removes that scan from new workspaces; this paragraph records the
-historical timing that motivated it.
+- A simple TypeScript project needs no orb configuration file. Per-project machine sizing and arbitrary OS/package configuration are out of scope.
+- Rejected: Cloud Workstations (extra per-vCPU and cluster fees, no Spot, and the custom control plane is still needed).
+- Rejected: suspend/resume. On Spot `n2d-highmem-4` it saved only about 5–11 s over stop/start and adds a lifecycle path.
+- Evaluated, not adopted: exe.dev microVMs (no stop/start and no durable-data/disposable-boot split; open question 35).
+- Evaluated, not adopted: AWS Lambda MicroVMs (8-hour lifetime cap; durable state would have to live on external EFS; open question 37).

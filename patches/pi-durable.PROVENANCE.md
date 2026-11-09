@@ -5,13 +5,13 @@ Upstream: https://github.com/earendil-works/pi/tree/v1.5.0/packages/durable
 Published artifact: https://registry.npmjs.org/@earendil-works/pi-durable/-/pi-durable-1.5.0.tgz
 Artifact SHA-256: `7e95b160ebebb7059dd5f5502419b85d52f1e0432a9e914e608364ae9b2b2a69`.
 Artifact integrity: `sha512-xeBP2vIo5NvsCMQ4Y/V+Z164xQEi9JWiBWHdjn4Z15EnFqV3c0FxJAX26FqyyyintrYyk+Enre94GNcvRlBA5g==`.
-Patch SHA-256: `2c448708ded63a7528a3751091e15df49f0a8b25af48a920c51ba1f840ea86ac`.
+Patch SHA-256: `837bbe87cc9001e189e875d2bf123e65dea49a23463f70a23d37d64c24bbebd6`.
 
 **Decision (2026-10-16):** retain upstream native execution, task identity, journal and replay. Export the existing `CodemodeRunDoc` and `CodemodeJournalDoc` through the public code-mode JavaScript/declaration barrels so chart replay reads native successful journal entries and completion decoration updates native `run.result` in the same commit. Private imports, copied document tokens and a second task document/journal are rejected.
 
 Initialize native namespace snapshots from all supplied namespaces, including resource-only MCP servers with no callable tools. Preserve optional descriptions/instructions and canonical names; existing longest-prefix assignment fills real tools. Discovery accepts canonical and normalized names. Empty tool lists already fit the native snapshot schema; no synthetic callable tools or new schema.
 
-Three display sites use one bounded preview: JSON-encoded object keys (first 16), otherwise the argument's type, truncated to 256 characters. Native started rows and earlier/current divergence descriptions must not expose argument values. Display previews do not alter execution arguments, nested inputs, native journal arguments or structural replay comparisons. Live internal slots and arbitrary tool error text still require first-party public-projection sanitization.
+Code-mode presentation and persistence policy: `docs/pi.md`. Native preview serialization is unpatched.
 
 **Decision (2026-10-16):** preserve explicit null in native tool calls for existing schema validation before hooks, authorization, credential acquisition or effects. Only omitted or undefined arguments default to {}; null must not become an effectful parameterless-object call. Actual native MCP coverage checks caught/uncaught null rejection, sanitized outcomes and exactly-once valid {}, omitted and undefined calls.
 
@@ -27,7 +27,7 @@ File SHA-256 pairs are pinned in `scripts/apply-dependency-patches.mjs`. Regress
 
 The rebase preserves upstream OpenCode session headers and optional telemetry contracts. Batch admission adds one content-free span; single-submit statuses and per-input identity remain native. Failed-run continuation uses the public native policy for both failure reasons.
 
-**Rebase (2026-11-05):** exact stable 1.5.0 retains three patch sets, 15 files and 39 hunks. Durable keeps seven files/13 hunks. Both code-mode barrels still omit the existing native run/journal tokens, so their export hunks remain necessary for chart replay. Resource-only namespaces, canonical/normalized discovery, value-free previews, explicit-null validation and the low-allocation decoder retain their guards.
+Exact stable 1.5.0 retains three patch sets, 16 files and 37 hunks. Durable keeps eight files/11 hunks. Both code-mode barrels still omit the existing native run/journal tokens, so their export hunks remain necessary for chart replay. Resource-only namespaces, canonical/normalized discovery, explicit-null validation and the low-allocation decoder retain their guards.
 
 `Conversation.submit(tx, draft)` remains native: it rejects admission after the transaction's first table write, including a previous admission. It cannot replace the atomic multi-input snapshot. `submitMany` retains pre-read request deduplication and empty/duplicate-only idle advancement; its final boundary now passes native `{ inputs: users, first }` to `startRun`, preserving the first-entry token used by native run hooks. New inputs honor native `whenIdle: "reject"`; known request IDs still return their receipts. No documents, journal format, task identity or recovery algorithm are patched. Native `afterFailedRun: "continue"` remains Harness configuration.
 
@@ -45,3 +45,5 @@ Artifact integrity: `sha512-VeWxNqTHSqRCf8AcY/6kvNwh+neRL6MPxZPePVztIQy6qqK9MR/Y
 Patch SHA-256: `f7d82a2a5b31d2d2ea11ce3674bb9adcd726bafd1cce43a0de62eada03ccaa37`.
 
 Two files/17 hunks retain typed, bounded Codex failure facts and request-bound safe broker metadata. Rebase follows the native catch block after upstream removed obsolete custom-input cleanup; transport selection and request behavior remain native. Runtime errors expose only valid WebSocket close codes; typed diagnostics keep allowlisted codes, validated request IDs and bounded numeric fields. Pristine/patched file hashes are sealed by `scripts/apply-dependency-patches.mjs`.
+
+**Decision (2026-11-06):** `Waiters.add` marks its already-aborted rejection handled. Callers return that promise across the Session line, so an in-flight commit could leave it unobserved past a macrotask and Node would exit. Evidence: `docs/postmortems/2026-11-06-control-plane-blackouts.md`.

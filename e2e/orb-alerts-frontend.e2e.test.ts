@@ -194,7 +194,7 @@ it("retains stopped historical alerts after reload and renders hostile multiline
     await expect.poll(() => unread(page)).toBeNull();
     const band = page.locator(".rec-alert", { hasText: "<img src=x onerror=alert(1)>" });
     await expect(band).toBeVisible();
-    await expect(band.locator(".alert-band")).toHaveCSS("background-color", "rgb(178, 31, 45)");
+    await expect(band.locator(".alert-band")).toHaveCSS("background-color", "rgb(180, 35, 24)");
     expect(await band.locator("img").count()).toBe(0);
     expect(await band.innerText()).toContain(message);
     const overflow = (await page.evaluate(

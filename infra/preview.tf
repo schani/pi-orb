@@ -10,7 +10,7 @@ resource "google_logging_project_exclusion" "preview_requests" {
   FILTER
 }
 
-# Wildcard HTTPS edge for preview hosts (docs/ports.md). The zone and
+# Wildcard HTTPS edge for preview hosts (docs/http-exposure.md). The zone and
 # its delegation are foundation-owned; this root writes only its records.
 locals {
   preview_count  = var.preview_origin != "" ? 1 : 0

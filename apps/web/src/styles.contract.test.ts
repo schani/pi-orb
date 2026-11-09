@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { TOKENS } from "./lib/design-tokens.ts";
 
 const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 
@@ -30,6 +31,12 @@ function media(condition: string): string {
   expect(blocks.length, `missing media ${condition}`).toBeGreaterThan(0);
   return blocks.join("\n");
 }
+
+it("disables mobile text autosizing so long rows keep the base size", () => {
+  const html = rule("html");
+  expect(html).toContain("-webkit-text-size-adjust: 100%");
+  expect(html).toContain("text-size-adjust: 100%");
+});
 
 it("hides a failed chart canvas while retaining its mount target", () => {
   expect(rule(".chart-canvas[hidden]")).toContain("display: none");
@@ -68,9 +75,9 @@ describe("orb alerts", () => {
   it("keeps long plain text inside a phone-width reverse band without coloring the orb row", () => {
     const band = rule(".alert-band");
     expect(css).toMatch(/(?:^|\n)\.rec-alert \{\s*padding: 4px 0;/);
-    expect(band).toContain("padding: 10px 12px");
-    expect(band).toContain("background: #b21f2d");
-    expect(band).toContain("color: #fff");
+    expect(band).toContain("padding: 8px 12px");
+    expect(band).toContain("background: var(--alert)");
+    expect(band).toContain("color: var(--on-alert)");
     expect(band).toContain("white-space: pre-wrap");
     expect(band).toContain("overflow-wrap: anywhere");
     expect(rule(".orb-entry-alert")).not.toContain("background");
@@ -221,7 +228,7 @@ describe("dashboard layout contract", () => {
     expect(css).not.toContain(".project-new-orb-row");
     expect(rule(".project-name")).toContain("min-width: 0");
     expect(rule(".project-head-actions > .icon-button", media("(max-width: 600px)"))).toContain(
-      "width: 48px",
+      "width: 44px",
     );
   });
   it("positions project boxes absolutely for masonry placement", () => {
@@ -250,19 +257,18 @@ describe("dashboard layout contract", () => {
     expect(rule(".dashboard-footer")).toContain("border-top: 1px solid var(--k)");
   });
 
-  it("gives the project name 18px and the orb name 14px on their own lines", () => {
+  it("gives the project name 18px and the orb name the base size on their own lines", () => {
     expect(rule(".project-head-name")).toContain("height: 24px");
     expect(rule(".project-name")).toContain("font-size: 18px");
     expect(rule(".project-name")).toContain("line-height: 24px");
     expect(rule(".new-project h2")).toContain("font-size: 18px");
-    expect(rule(".orb-entry-link")).toContain("font-size: 14px");
-    expect(rule(".orb-entry-link")).toContain("line-height: 22px");
+    expect(rule(".orb-entry-link")).not.toContain("font-size");
   });
 
   it("keeps every dashboard orb entry on its line grid behind its state hue", () => {
     expect(rule(".orb-entry")).toContain("border-left: 2px solid var(--g2)");
-    expect(rule(".orb-entry-del")).toContain("border-left-style: dotted");
-    expect(rule(".orb-entry-title")).toContain("height: 22px");
+    expect(rule(".orb-entry-deleting")).toContain("border-left-style: dotted");
+    expect(rule(".orb-entry-title")).toContain("height: var(--row)");
     expect(rule(".orb-entry-title")).toContain("align-items: center");
     expect(rule(".orb-entry-link")).toContain("white-space: nowrap");
     expect(rule(".orb-entry-meta")).toContain("height: var(--row)");
@@ -270,11 +276,11 @@ describe("dashboard layout contract", () => {
   });
 
   it("uses the stopped gray hue for sleeping rows without overriding selected fill", () => {
-    expect(rule(".s-sleep")).toContain("color: var(--st-stop)");
-    expect(rule(".orb-entry-sleep")).toContain("border-left-color: var(--st-stop)");
+    expect(rule(".s-sleeping")).toContain("color: var(--st-sleeping)");
+    expect(rule(".orb-entry-sleeping")).toContain("border-left-color: var(--st-sleeping)");
     expect(
       rule(
-        ".orb-entry-stop .orb-entry-link,\n.orb-entry-sleep .orb-entry-link,\n.orb-entry-arch .orb-entry-link,\n.orb-entry-archng .orb-entry-link,\n.orb-entry-del .orb-entry-link",
+        ".orb-entry-stopped .orb-entry-link,\n.orb-entry-sleeping .orb-entry-link,\n.orb-entry-archived .orb-entry-link,\n.orb-entry-archiving .orb-entry-link,\n.orb-entry-deleting .orb-entry-link",
       ),
     ).toContain("color: var(--g3)");
     expect(rule(".ix-row-current,\n.ix-row-current:hover")).toContain("background: var(--k)");
@@ -290,10 +296,10 @@ describe("dashboard layout contract", () => {
 
 describe("orb workspace layout contract", () => {
   it("uses gutter-free inverted user paper and plain white orb paper", () => {
-    expect(rule(".rec-you,\n.rec-orb,\n.rec-peer,\n.rec-alert")).toContain("display: block");
+    expect(rule(".rec-you,\n.rec-orb,\n.rec-alert")).toContain("display: block");
     const user = rule(".rec-you");
-    expect(user).toContain("background: var(--k)");
-    expect(user).toContain("color: var(--w)");
+    expect(user).toContain("background: var(--you)");
+    expect(user).toContain("color: var(--on-you)");
     expect(user).toContain("font-weight: 400");
     expect(rule(".rec-you .chat-markdown :not(pre) > code")).toContain("color: var(--k)");
     expect(rule(".rec-you .markdown-code-block")).toContain("background: var(--w)");
@@ -302,13 +308,13 @@ describe("orb workspace layout contract", () => {
     expect(error).toContain("background: var(--w)");
   });
 
-  it("keeps correspondence on gray paper with wrapping literal text, sender, and failures", () => {
-    expect(rule(".rec-peer")).toContain("background: var(--g1)");
-    expect(rule(".rec-peer")).toContain("color: var(--k)");
-    expect(rule(".peer-heading")).toContain("overflow-wrap: anywhere");
+  it("keeps notification bodies literal and wrapping, with linked senders", () => {
+    expect(rule(".peer-notice > summary")).toContain("minmax(0, 40%)");
+    expect(rule(".peer-sender")).toContain("text-overflow: ellipsis");
+    expect(rule(".peer-notice .rec-status")).toContain("flex: none");
+    expect(rule(".peer-sender")).toContain("border-bottom: 1px solid currentcolor");
     expect(rule(".peer-body")).toContain("white-space: pre-wrap");
     expect(rule(".peer-body")).toContain("overflow-wrap: anywhere");
-    expect(rule(".rec-peer .error-text")).toContain("overflow-wrap: anywhere");
   });
 
   it("scrolls wide tables instead of breaking words to squeeze columns", () => {
@@ -356,10 +362,10 @@ describe("orb workspace layout contract", () => {
     expect(rule(".orb-index")).toContain("overflow-y: auto");
     expect(rule(".orb-main")).toContain("grid-column: 2");
     expect(rule(".app:has(> .session-ribbon) .orb-index")).toContain(
-      "top: calc(var(--visual-viewport-top, 0px) + var(--ribbon))",
+      "top: calc(var(--visual-viewport-top, 0px) + var(--bar))",
     );
     expect(rule(".app:has(> .session-ribbon) .orb-index")).toContain(
-      "height: calc(var(--visual-viewport-height, 100dvh) - var(--ribbon))",
+      "height: calc(var(--visual-viewport-height, 100dvh) - var(--bar))",
     );
     const phone = media("(max-width: 600px)");
     expect(phone).toMatch(/\.orb-main \{\s*grid-column: 1;/);
@@ -387,10 +393,10 @@ describe("orb workspace layout contract", () => {
 
   it("retains the diagnostic gutter and keeps queue state visible", () => {
     expect(rule(".rec")).toContain("grid-template-columns: 32px minmax(0, 1fr)");
-    expect(rule(".rec-you,\n.rec-orb,\n.rec-peer,\n.rec-alert")).toContain("display: block");
+    expect(rule(".rec-you,\n.rec-orb,\n.rec-alert")).toContain("display: block");
     expect(rule(".busy-indicator")).toContain("padding: 0 12px");
-    expect(rule(".rec-q")).toContain("border-left: 2px dotted var(--w)");
-    expect(rule(".rec-status")).toContain("border: 1px solid currentcolor");
+    expect(rule(".rec-q")).toContain("border-left: 2px dotted var(--on-you)");
+    expect(rule(".tag")).toContain("border: 1px solid currentcolor");
   });
 
   it("overlays a full-width headerless terminal below the header and active-child rail", () => {
@@ -405,8 +411,8 @@ describe("orb workspace layout contract", () => {
     expect(rule(".orb-terminal-resize")).toContain("bottom: 0");
     expect(rule(".orb-terminal-resize")).toContain("cursor: ns-resize");
     expect(rule(".orb-terminal-body")).toContain("overflow: clip");
-    expect(terminal).toContain("padding: 13px 0");
-    expect(rule(".orb-terminal-window .orb-terminal-emulator")).toContain("padding: 0 15px");
+    expect(terminal).toContain("padding: 12px 0");
+    expect(rule(".orb-terminal-window .orb-terminal-emulator")).toContain("padding: 0 12px");
     expect(rule(".orb-terminal-window .orb-terminal-emulator")).toContain(
       "scroll-snap-type: y mandatory",
     );
@@ -500,9 +506,9 @@ describe("orb workspace layout contract", () => {
     expect(full).toContain("height: auto");
     expect(full).toContain("object-fit: contain");
     expect(dialog).toContain("max-height: calc(100dvh - 32px)");
-    expect(full).toContain("max-height: calc(100dvh - 70px)");
+    expect(full).toContain("max-height: calc(100dvh - 74px)");
     expect(css).toMatch(
-      /@media \(max-width: 600px\), \(any-pointer: coarse\) \{\s*\.tool-image-dialog \{[^}]*\}\s*\.tool-image-dialog-close \{[^}]*width: 44px;[^}]*height: 44px/,
+      /@media \(max-width: 600px\), \(any-pointer: coarse\) \{\s*\.tool-image-dialog \{[^}]*\}\s*button\.tool-image-dialog-close \{[^}]*width: 44px;[^}]*height: 44px/,
     );
   });
 });
@@ -510,7 +516,7 @@ describe("orb workspace layout contract", () => {
 it("gives owner skill disclosures and the add action phone touch targets", () => {
   const phone = media("(max-width: 600px)");
   const dialog = ".personal-instructions-dialog";
-  expect(rule(`${dialog} .project-mcp-connection > summary`, phone)).toContain("min-height: 48px");
+  expect(rule(`${dialog} .project-mcp-connection > summary`, phone)).toContain("min-height: 44px");
   expect(rule(`${dialog} .mcp-add-area > .text-action::before`, phone)).toContain("inset: -16px");
 });
 
@@ -518,4 +524,182 @@ it("reserves native keyboard chrome only for the focused phone editor", () => {
   expect(rule(".composer:has(.composer-input:focus)", media("(max-width: 600px)"))).toContain(
     "padding-bottom: max(env(safe-area-inset-bottom), var(--keyboard-accessory-inset, 0px))",
   );
+});
+
+describe("Signal / Boards system", () => {
+  const rootBlock = /:root \{[^}]*\}/.exec(css)?.[0] ?? "";
+  const darkBlock =
+    /@media \(prefers-color-scheme: dark\) \{\s*:root \{[^}]*\}\s*\}/.exec(css)?.[0] ?? "";
+  const body = css
+    .replace(rootBlock, "")
+    .replace(darkBlock, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+  const value = (block: string, name: string) =>
+    new RegExp(`${name}: ([^;]+);`).exec(block)?.[1]?.trim();
+  const declared = (name: string) => value(rootBlock, name);
+
+  it("keeps color literals in :root", () => {
+    expect(body.match(/#[0-9a-f]{3,8}\b|rgba?\(/gi)).toBeNull();
+  });
+
+  it("uses only custom properties that the CSS declares or the app sets", () => {
+    const sources = readdirSync(new URL(".", import.meta.url), {
+      recursive: true,
+      encoding: "utf8",
+    })
+      .filter((path) => /\.tsx?$/.test(path) && !/\.test\.tsx?$/.test(path))
+      .map((path) => readFileSync(new URL(path, import.meta.url), "utf8"))
+      .join("\n");
+    const used = new Set([...css.matchAll(/var\((--[\w-]+)/g)].map((match) => match[1]));
+    const undeclared = [...used].filter(
+      (name) => !css.includes(`${name}:`) && !new RegExp(`["'\`]${name}["':]`).test(sources),
+    );
+    expect(undeclared).toEqual([]);
+  });
+
+  it("stays on the spacing scale", () => {
+    const scale = new Set(["0", "1", "2", "4", "6", "8", "12", "16", "20", "24"]);
+    const offScale = [
+      ...body.matchAll(/(?:^|[\s;{])(?:gap|padding[a-z-]*|margin[a-z-]*): ([^;]+);/g),
+    ]
+      .flatMap((match) => [...(match[1] ?? "").matchAll(/(?<![\w.])-?(\d+)px/g)])
+      .map((value) => value[1] ?? "")
+      .filter((value) => Number(value) <= 24 && !scale.has(value));
+    expect(offScale).toEqual([]);
+  });
+
+  it("stays on the type, breakpoint and touch scales", () => {
+    const sizes = new Set([...css.matchAll(/font-size: (\d+)px/g)].map((match) => match[1]));
+    expect([...sizes].sort()).toEqual(["11", "16", "18", "26"].sort());
+    const widths = new Set([...css.matchAll(/width: (\d+)px\)/g)].map((match) => match[1]));
+    expect([...widths].sort()).toEqual(["600", "601", "900"].sort());
+    expect(css).not.toMatch(/(?:width|height): 48px/);
+  });
+
+  it("names orb states as the favicons do", () => {
+    for (const state of [
+      "running",
+      "transitional",
+      "stopped",
+      "sleeping",
+      "failed",
+      "archived",
+      "archiving",
+      "deleting",
+    ]) {
+      expect(rule(`.s-${state}`)).toContain(`color: var(--st-${state})`);
+      expect(css).toContain(`.orb-entry-${state} {`);
+    }
+    expect(css).not.toMatch(/\.(?:s|orb-entry)-(?:idle|start|stop|sleep|fail|arch|archng|del)\b/);
+  });
+
+  it("uses one inactive gray, one red and no signal hue on ink", () => {
+    expect(declared("--st-stopped")).toBe("var(--g3)");
+    expect(declared("--st-sleeping")).toBe("var(--g3)");
+    expect(declared("--st-archived")).toBe("var(--g3)");
+    expect(declared("--st-transitional")).toBe("var(--warn)");
+    expect(declared("--ok-bg")).toBeUndefined();
+    expect(rule(".alert-band")).toContain("background: var(--alert)");
+    expect(rule(".activity-strip-tip")).toContain("background: var(--w)");
+    expect(rule(".activity-strip-tip")).toContain("border: 1px solid var(--k)");
+  });
+
+  it("makes one banner, one tag and one section heading", () => {
+    expect(css).not.toMatch(/\.notice\b/);
+    expect(rule(".tag")).toContain("border: 1px solid currentcolor");
+    expect(css).not.toContain(".usage-page :is(h2, h3)");
+    expect(rule(".session-ribbon")).toContain("border-bottom: 1px solid var(--bad)");
+    expect(rule(".orb-entry-alert")).toBe("\n  border-left-color: var(--bad);\n");
+  });
+
+  it("gives phone orb actions 44px tap areas without growing the row", () => {
+    const touch = media("(max-width: 600px), (any-pointer: coarse)");
+    expect(rule(".orb-entry-actions", touch)).toContain("gap: 0");
+    expect(rule(".orb-entry-actions .icon-button", touch)).toContain("width: 44px");
+    expect(rule(".orb-entry-actions .icon-button::before", touch)).toContain("inset: -12px 0");
+    expect(rule(".orb-entry-meta")).toContain("height: var(--row)");
+  });
+
+  it("flips the primary button to paper on focus and never bolds selection", () => {
+    expect(rule(":is(button, a, summary):focus-visible")).toContain(
+      "background: var(--k) !important",
+    );
+    expect(rule(".new-project button:focus-visible")).toContain("background: var(--w) !important");
+    expect(rule(".ix-row-current,\n.ix-row-current:hover")).not.toContain("font-weight");
+    expect(css).not.toContain(".subagent-message-notice > summary:focus-visible");
+  });
+
+  it("publishes renderer colors that match both themes", () => {
+    for (const name of ["w", "k", "g1", "g1x", "g2", "g3", "bad"] as const) {
+      expect(TOKENS.light[name]).toBe(declared(`--${name}`));
+      expect(TOKENS.dark[name]).toBe(value(darkBlock, `--${name}`));
+    }
+  });
+
+  describe("dark theme", () => {
+    const hex = (name: string) => value(darkBlock, name) ?? "";
+    const luminance = (color: string) => {
+      const digits = color.slice(1);
+      const full = digits.length === 3 ? digits.replace(/./g, "$&$&") : digits;
+      const [r = 0, g = 0, b = 0] = [0, 2, 4]
+        .map((at) => Number.parseInt(full.slice(at, at + 2), 16) / 255)
+        .map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const contrast = (a: string, b: string) => {
+      const [high = 0, low = 0] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+      return (high + 0.05) / (low + 0.05);
+    };
+
+    it("follows the desktop setting", () => {
+      expect(rootBlock).toContain("color-scheme: light dark");
+      expect(darkBlock).not.toBe("");
+    });
+
+    it("keeps text AA on every surface", () => {
+      for (const surface of ["--w", "--g1", "--g1x", "--you"]) {
+        for (const text of ["--k", "--g3"]) {
+          expect(contrast(hex(text), hex(surface)), `${text} on ${surface}`).toBeGreaterThan(4.5);
+        }
+      }
+      for (const surface of ["--w", "--g1", "--g1x"]) {
+        for (const text of ["--ok", "--warn", "--bad"]) {
+          expect(contrast(hex(text), hex(surface)), `${text} on ${surface}`).toBeGreaterThan(4.5);
+        }
+      }
+      expect(contrast(hex("--bad"), hex("--bad-bg"))).toBeGreaterThan(4.5);
+      for (const fill of ["--g3", "--ok", "--warn", "--bad"]) {
+        expect(contrast(hex("--w"), hex(fill)), `paper on ${fill}`).toBeGreaterThan(4.5);
+      }
+      for (const chart of [1, 2, 3, 4, 5, 6]) {
+        expect(contrast(hex(`--chart-${chart}`), hex("--w"))).toBeGreaterThan(3);
+      }
+    });
+
+    it("overrides only the surfaces that are not a plain flip", () => {
+      expect(hex("--you")).toBe("#2b2b2b");
+      expect(hex("--alert")).toBe(declared("--bad"));
+      expect(value(darkBlock, "--tile-gray")).toBeUndefined();
+      expect(value(darkBlock, "--image-backing")).toBeUndefined();
+      expect(declared("--tile-gray")).toBe("#555");
+      expect(declared("--image-backing")).toBe("#fff");
+      expect(rule(".rec-you")).toContain("background: var(--you)");
+      expect(rule(".alert-band")).toContain("background: var(--alert)");
+      expect(rule(".msg-image")).toContain("background: var(--image-backing)");
+      expect(rule(".tool-image-thumbnail")).toContain("background: var(--image-backing)");
+      expect(rule(".tool-image-full")).toContain("background: var(--image-backing)");
+      expect(rule(".composer-attachment img")).toContain("background: var(--image-backing)");
+    });
+  });
+
+  it("colors favicon tiles from the same tokens", () => {
+    const allowed = new Set(["#555555", "#1a7e37", "#966100", "#b42318"]);
+    const dir = new URL("../public/favicons/", import.meta.url);
+    for (const file of readdirSync(dir).filter((name) => name.endsWith(".svg"))) {
+      const svg = readFileSync(new URL(file, dir), "utf8");
+      for (const match of svg.matchAll(/fill="(#[0-9a-f]+)"/g)) {
+        expect(allowed.has(match[1] ?? ""), `${file}: ${match[1]}`).toBe(true);
+      }
+    }
+  });
 });

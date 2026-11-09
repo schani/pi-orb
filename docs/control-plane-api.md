@@ -1,419 +1,21 @@
-# Projects and the control-plane API
-
-## Model usage (implemented locally 2026-10-13)
-
-`GET /api/v1/usage?boundaries=<JSON epoch-millisecond array>` returns selected-owner `{boundaries, summary, buckets, orbs}`, with `cache-control: no-store`. Bucket rows include `orbId` for per-orb timelines (2026-10-14); names remain in owner-scoped orb totals. The service validates bounded increasing edges; the ledger reads half-open intervals in one snapshot. Unknown fields/invalid ranges return 400, unavailable storage 503 and invalid aggregates 500. It does not wake compute. Contract and coverage: `docs/model-usage.md`.
-
-## HTTP preview registration (implemented locally, 2026-10-06)
-
-Runtime bearer identity scopes PUT/DELETE `/runtime/previews/:port` and GET `/runtime/previews`
-to the caller orb. PUT returns `{preview}`, GET `{previews}`, DELETE 204; an unset preview origin
-returns configuration-disabled, not a fabricated URL. The registration service rechecks
-lifecycle/token/incarnation at mutation; persisted generations fence revoke/re-register races.
-Registrations survive stop/start and replacement; deletion cascades them. URLs assert registration,
-not readiness. Preview-host paths execute only preview applications/reserved auth, never these
-CP APIs. `OrbView.previewActiveUntil` supplies activity status without changing agent busy.
-Authentication, runtime admission, limits and pending ingress acceptance: `docs/ports.md`.
-
-## Harness selection (POC, 2026-10-04)
-
-Creation accepts optional `harness: "pi" | "claude"`, defaulting to Pi. Migration `029_orb_harness.sql` persists the required, checked value; all orb views expose it without credential data. Selection is immutable: a conflicting supplied harness on a same-ID retry returns 409, while omission preserves the accepted selection. Start/Stop and compute replacement retain it. The durable `created` lifecycle edge includes harness. In-orb spawning inherits the fenced caller row; callers cannot select a different harness.
-
-Model authentication follows the selected harness and project owner; GitHub remains independent. Claude and Pi auto-naming use Luna with the project owner's Codex connection. Claude naming returns `skipped` when that connection is absent; naming never gates Claude startup or uses API-billed Claude auxiliary inference. Pi naming is unchanged. Connection/security contract: `docs/claude-agent-sdk.md` and `docs/credentials.md`.
-
-## Additional project instructions (implemented locally, 2026-09-15)
-
-`GET /api/v1/projects/:projectId/instructions` returns `{content, revision}` for that project, initially empty/revision 0. `PUT` accepts only `{content}` and atomically assigns content/increments revision under the project-row lock; deletion conflicts, missing project returns 404, malformed text 400, storage outage 503 and inconsistent storage 500. Replies are no-store. Text shares the personal-instructions validation contract (64 KiB UTF-8, exact whitespace, no NUL/unpaired surrogates). Fleet responses never include instruction bodies. Migration `020_project_instructions.sql` adds the two project-owned columns.
-
-`GET /runtime/v1/project-instructions` derives the project from the current active-incarnation bearer; it ignores caller project selectors and exposes no runtime write. Project instructions remain project-scoped under stage 2; they are not copied into the owner's personal instructions. Boot captures that snapshot for fresh and resumed sessions. Save never wakes compute or sends a message. Config tab, shared implementation boundaries, adoption metadata and tests: `docs/project-instructions.md`.
-
-## Personal instructions (stage 2 deployed 2026-09-17)
-
-`GET /api/v1/personal-instructions` returns `{content: string, revision: number}` for the signed-in user. A valid user with no row reads `{content: "", revision: 0}` until first write. `PUT` accepts only `{content}` and atomically updates that user's independent revision. Last-applied-wins, no automatic retries/CAS or per-project override. Empty content clears the managed instructions. Text preserves whitespace and is limited to 64 KiB UTF-8; NUL and unpaired surrogates are invalid. Both replies are `no-store`; invalid input returns 400, unavailable storage 503, inconsistent storage 500. Saving never changes lifecycle state or messages.
-
-`GET`/`PUT /api/v1/git-identity` read and replace the signed-in user's `{name, email}` (both empty when unset; last-write-wins, `no-store`, invalid 400, unavailable 503, inconsistent 500). `GET /runtime/v1/git-identity` returns the orb project owner's identity. Contract: `docs/git-identity.md`.
-
-Ops GET/PUT requires `X-Pi-Orb-User-Id` containing a known UUID; user principals cannot override themselves with it. `GET /runtime/v1/personal-instructions` derives the owner through the active incarnation's orb and project, not a viewer or request selector. There is no runtime write. Adoption remains next runtime start. Migration 023 replaces the `019_personal_instructions.sql` singleton while preserving legacy content, revision and timestamp. UI, migration and observability: `docs/personal-instructions.md`, `docs/multi-user.md`.
-
-## Workspace file uploads (implemented 2026-09-09)
-
-`/api/v1/orbs/:orbId/uploads` and its per-transfer `status`, `chunk`, `finish`, and `cancel` actions implement running-only, streaming browser uploads. The control plane persists metadata and forwards raw byte streams to the private runtime; it never buffers whole files or routes file bytes through the message inbox. The metadata POST atomically registers a selection's complete batch membership. Once every file is stored or cancelled, one message lists the successful paths with compute wake suppressed. The complete HTTP shapes, durable transfer states, activity/idle-stop rules, and validation are in `docs/workspace-uploads.md`.
-
-## Project model
-
-The first version requires no local checkout or user-operated CLI: lifecycle and conversation input are web-driven. A narrow CLI inside each running orb can read sibling-orb metadata and replicated transcripts so the agent can coordinate with prior work. Owner-scoped committed-history search uses authenticated `POST /runtime/v1/history/search` with a JSON query body and `{v:1,hits}` response; contract: `docs/history-search.md`.
-
-A signed-in user registers an owned project in the web UI with:
-
-- a project name, unique within that owner;
-- an optional public Git repository URL.
-
-The project and all child resources have one owner; there is no independent orb owner or transfer operation.
-
-An orb's first checkout clones the project's repository when configured; otherwise it creates an empty working directory without initializing Git. Restarting an existing workspace preserves it. There is no local-checkout upload, dirty-state patch, sync-back workflow, clone cache, prepared snapshot, or other checkout optimization initially. The initial clone uses the repository's default branch; the resolved commit should be recorded for observability.
-
-**Optional repositories (decided 2026-10-22).** Project creation and General updates accept omitted, null or blank `repositoryUrl`, normalized to SQL/API null. Nonblank values retain the allowlist below. `048_optional_project_repository.sql` makes `projects.repository_url` nullable while retaining the nonblank constraint for supplied strings. Project views and orb-inspection project metadata always include `repositoryUrl: string | null`. The stored value and API response expose the accepted configuration without extra logs. No synthetic Git repository or initial commit is created for name-only projects. Changing this setting never clones into or rewrites a retained workspace. Central Pi may acquire its first repository-resource snapshot on a later context open after a URL is added; an existing pin remains immutable (`docs/pi-adapter.md`).
-
-Repository URL validation is strict allowlisting, decided as follows:
-
-- accepted input is either an `https` URL or Git's common scp-style spelling, `git@host:owner/repo.git` (decided 2026-08-10); scp-style input is normalized to canonical `https` before persistence and cloning rather than enabling SSH transport, and `GIT_ALLOW_PROTOCOL=https` is set for the clone so redirects cannot switch protocols;
-- GitHub shorthand `owner/repo` and `github.com/owner/repo` is accepted (decided 2026-10-05), with optional `.git` and case-insensitive `github.com`. The shared validator expands only these two-segment forms to HTTPS under the same allowlist/path checks. The persisted canonical URL records the accepted repository without new logs;
-- the hostname must be on a fixed allowlist, initially `github.com`, `gitlab.com`, `bitbucket.org`, and `codeberg.org`; extending the list is configuration, not a design change;
-- HTTPS userinfo (credential-bearing URLs), explicit ports, and IP-literal hosts are rejected; the only accepted scp-style user is the conventional literal `git`;
-- the path must match the host's repository shape (for example `/{owner}/{repo}` with an optional `.git`);
-- validation runs at project creation and General-settings updates, and is re-run by the runtime immediately before cloning, because stage 1 identifies callers but does not authorize database resources by owner.
-
-This forecloses local paths outside the exact GitHub shorthand shape, `file://` URLs, credential leakage into the database and logs, and SSRF against internal networks or cloud metadata endpoints. Accepted shorthand is always interpreted as GitHub, never as a filesystem path.
-
-**History (2026-10-05):** `0f35069` introduced absolute-URL parsing and explicitly tested rejection of `github.com/owner/repo`; `0990477` changed docs only; `daaae94` added only scp-style input. Available history shows no prior shorthand support: this adds support, not a demonstrated regression fix.
-
-The environment is prescribed initially:
-
-- Debian 12 on native GCE hosts and in the local runtime image;
-- Node.js 26.13.0 LTS;
-- a versioned native Debian image on Spot `n2d-highmem-2` GCE VMs (2 vCPUs, 16 GiB RAM);
-- a fixed runtime container image for the local Docker provider;
-- no required orb configuration for a simple TypeScript project.
-
-Still open:
-
-- whether users can choose a branch or revision after the first slice;
-- whether and when to add an Orbfile;
-- whether to adopt conventional setup/restart hooks before introducing a general configuration format;
-- how prebuilt project environments or snapshots are keyed and invalidated later.
-
-## Minimal control-plane API
-
-The browser uses a small JSON API under `/api/v1`. Stages 1–2 application identity and ownership are deployed from `ec81e80`. Stage 3 owner-bound credentials is on `main`, qualified, and undeployed; deployment and coworker onboarding are not authorized:
-
-```text
-GET  /api/v1/session
-GET  /api/v1/system
-GET  /api/v1/projects
-POST /api/v1/projects
-GET  /api/v1/projects/:projectId
-PATCH /api/v1/projects/:projectId
-DELETE /api/v1/projects/:projectId
-GET  /api/v1/projects/:projectId/secrets
-PUT  /api/v1/projects/:projectId/secrets/:name
-DELETE /api/v1/projects/:projectId/secrets/:name
-GET  /api/v1/projects/:projectId/mcp
-PUT  /api/v1/projects/:projectId/mcp
-POST /api/v1/projects/:projectId/mcp/describe
-GET  /api/v1/projects/:projectId/mcp/:id/oauth
-POST /api/v1/projects/:projectId/mcp/:id/oauth/connect
-POST /api/v1/projects/:projectId/mcp/:id/oauth/disconnect
-GET  /api/v1/mcp/oauth/callback
-
-GET  /api/v1/projects/:projectId/orbs
-POST /api/v1/projects/:projectId/orbs
-GET  /api/v1/orbs/:orbId
-PATCH /api/v1/orbs/:orbId
-POST /api/v1/orbs/:orbId/start
-POST /api/v1/orbs/:orbId/stop
-POST /api/v1/orbs/:orbId/archive
-DELETE /api/v1/orbs/:orbId
-
-GET  /api/v1/orbs/:orbId/history
-GET  /api/v1/orbs/:orbId/details/:recordId/:detailKey?sessionId=...
-POST /api/v1/orbs/:orbId/headlines/:recordId/:detailKey?sessionId=...
-GET  /api/v1/orbs/:orbId/details/live/:operationId/:blockId?sessionId=...
-GET  /api/v1/orbs/:orbId/images/:recordId/:detailKey/:imageIndex?sessionId=...
-GET  /api/v1/orbs/:orbId/hosted-files
-PUT  /api/v1/orbs/:orbId/messages/:messageId
-POST /api/v1/orbs/:orbId/messages/poll
-WS   /api/v1/orbs/:orbId/live
-WS   /api/v1/orbs/:orbId/terminal
-```
-
-### Application principal (production validated 2026-10-06)
-
-**Production validated 2026-10-06 (`docs/deployment.md`).** The single application resolves a user from a stateless sealed Google-login session or an ops principal from a verified Google machine ID token on the ordinary API. Local development explicitly selects `PI_ORB_AUTH_MODE=local`; Google mode requires exact configured origins, client credentials, sealing key and immutable machine subject. Cookie sessions have fixed expiry, no database session row and no individual revocation: logout clears the browser cookie, but a copied cookie works until expiry. Full contract: `docs/credentials.md`; UUID-preserving migration 031: `docs/multi-user.md`; composition and cutover: `docs/deployment.md`, `docs/control-plane-consolidation.md`.
-
-Cookie-authenticated unsafe requests and browser WebSocket upgrades require the exact configured Origin; absent/null/foreign origins fail. Any foreign Origin on cookie reads also fails. Bound OAuth GET callbacks are narrow exceptions. No separate CSRF-token exchange or credentialed CORS is used. Invalid explicit Authorization never falls back to cookies. Machine tokens require the exact app-origin audience and immutable admitted subject; runtime bearers remain separate and neither bearer class requires browser Origin. Spoofed IAP headers grant no authority.
-
-`GET /auth/login?returnTo=<local-path>` starts login; `GET /auth/callback` validates the sealed ten-minute transaction, PKCE, state, nonce and Google identity. `POST /auth/logout` requires app Origin and clears the app cookie. APIs never redirect into login. The files host allows only hosted/live GET/HEAD and login/callback. Authentication failures are typed 401/403/503 (internal invariants 500), not redirects. Public shell, minimal health and workload discovery/JWKS remain accessible.
-
-`GET /api/v1/session` returns a no-store principal (cookie sessions additionally set `logoutAvailable: true`):
-
-```ts
-{ status: "ok", principal: { kind: "user", user: { id: string, email: string | null } } }
-{ status: "ok", principal: { kind: "ops", id: string } }
-```
-
-Issuer and subject are never browser response fields. Principal resolution precedes protected handlers; it does not change company-wide direct-resource access.
-
-### Stage-2 ownership selection (deployed 2026-09-17)
-
-Browser `GET /api/v1/projects`, `POST /api/v1/projects`, and personal-instructions and git-identity GET/PUT use the signed-in user. Default project/orb lists therefore show only that user's resources. Existing direct project, orb, history, hosted-file, settings and lifecycle routes remain accessible to any authenticated coworker; resource-specific services derive the addressed project's owner when owner context is needed. There is no user selector in the browser.
-
-The machine ops principal requires `X-Pi-Orb-User-Id` with a known UUID for exactly those six user-context operations: project list, project create, personal-instructions GET and PUT, git-identity GET and PUT. Missing, malformed or unknown selection fails explicitly. User principals cannot override their identity with this header. Owner IDs and typed failures may be logged for correlation; identity assertions, instruction bodies and secrets may not.
-
-### Hosted files (decided 2026-09-07)
-
-`GET /api/v1/orbs/:orbId/hosted-files` returns `{ files, cleanupIssues }` for working and archived
-orbs. Each file contains `path`, `url`, `size`, `mediaType`, and numeric `updatedAt`; cleanup issues
-contain `path` (nullable), `lastError`, and `lastErrorAt`. Missing orbs return `404`.
-
-File links navigate to the separate files hostname. That hostname serves only hosted/live reads;
-application APIs and WebSockets reject requests originating from hosted documents. Runtime uploads
-use the orb's existing bearer and cannot select another namespace. See `docs/hosting.md` for the
-wire protocol, storage, and lifecycle contract.
-
-### Live orb files (2026-11-05, PST; qualification pending)
-
-Existing orb HTTP responses expose optional `OrbView.filesBaseUrl`, derived from files-origin configuration and orb identity, not persisted state. Owner-only GET/HEAD reads use `/files/<uuid><encoded-absolute-path>` or `/files/repo/<uuid>/<encoded-relative-path>` on the files origin; full contract: `docs/orb-files.md`.
-
-### Deployment facts (decided and implemented 2026-09-04)
-
-`GET /api/v1/system` returns `{ hostProvider, databaseKind, version }` — the host provider this process constructs (`process` | `docker` | `gce`), the database it opened (`pglite` | `postgres`), and the control-plane package version. It exists so the dashboard footer can state which deployment the browser is looking at, which is the first question asked when a local window and a cloud window are open side by side. Every value is resolved once at boot and constant for the process's lifetime, so the route reads nothing — no store, no filesystem — per request. It carries deployment facts only: no connection strings, project or zone names, image references, secrets, or counts of anything the fleet is doing. It is registered with the rest of the browser API, and requires an application principal.
-
-### In-orb CLI help (decided 2026-10-17)
-
-`pi-orb --help`, `-h`, and `help` print the full command reference: arguments,
-options, examples, output, effects, safety, acceptance, retries and exit classes.
-`pi-orb help <command>` and `pi-orb <command> --help|-h` print the same command
-section. A command-leading help flag ignores remaining arguments and never runs
-the command; later message, prompt, file and option-value text is not scanned for help.
-Help is static, needs no runtime identity or network, writes stdout and exits 0.
-Unknown commands, invalid help syntax and missing root commands write brief usage
-and a full-help pointer to stderr and exit 2. Normal command dispatch is unchanged. Dispatcher integration
-tests check reference coverage against command usage constants, semantic guidance,
-literal argument preservation, and zero HTTP requests with a fixture runtime.
-
-### In-orb inspection API (ownership scope updated 2026-09-16)
-
-The production URL injected into an orb points at the single app origin; the incarnation bearer authorizes runtime routes, not browser APIs. The `pi-orb` CLI therefore uses two dedicated runtime-facing reads:
-
-```text
-GET /runtime/v1/orbs
-GET /runtime/v1/orbs/:orbId/transcript
-```
-
-Both require the existing per-incarnation runtime bearer and are available only while the calling orb's lifecycle authorizes that bearer. The list derives the authenticated orb's project owner and returns only that owner's projects/orbs, including archived or stopped orbs. The list response is one non-cacheable aggregate snapshot containing `currentOrbId` plus each orb's ID, nullable name, state, update time, and parent project ID/name/repository URL. `pi-orb orbs [query]` performs NFKC case-insensitive substring filtering locally across those identity fields, so there is no server search index, request per keystroke, or transcript-content search.
-
-The explicit transcript route remains trusted-company cross-user access. It returns the exact consistent full replicated-history snapshot, plus the same compact orb/project identity. The browser instead receives a projected display snapshot. It does not start the target orb or contact its runtime. Archived transcripts are sealed and complete; stopped/running transcripts have the completeness and lag semantics of `docs/history-replication.md`, so an active turn may briefly be newer than the returned replica. Missing targets return a typed `404`; deleting targets return a typed `409`, never another resource or a dashboard redirect. Both successful responses set `Cache-Control: no-store`. The default CLI renderer omits `overflow.native` while retaining normalized messages, reasoning, tool calls/results, compactions, and events; `--json` returns the complete replica wire response. Native conversation records remain lossless, but harness system prompt/tool state is reduced to identity before either response is built.
-
-This is intentionally not implemented by calling `/api/v1/*`: incarnation bearers authorize `/runtime/v1/*`, not browser APIs. It adds no table, migration, search cache, pagination, or mutable operation. Because these reads make no autonomous decision and write no state, durable lifecycle events would be noise; typed CLI errors are the user-visible observability, and route logging must never include transcript content. Conventional boundary tests cover protocol validation, CLI stdout/stderr and exit classes, bearer authorization, sanitized retryable/non-retryable store failures, and missing/deleting targets; the full-slice E2E covers one real sibling reading another. DST was rejected for this read path: it has no retry loop, lease, CAS, durable mutation, or concurrent state machine whose interleavings define correctness. If a stronger cross-row snapshot contract is later required during concurrent project/orb deletion, define that transaction boundary first and test it at the store/route concurrency boundary rather than adding schedule permutations to the current sequential reads.
-
-### Current orb identity (decided 2026-10-01)
-
-`pi-orb self [--json]` reads the authenticated caller and its spawn relations, without a fleet list. `GET /runtime/v1/orb/self` returns non-cacheable `{v:1,orb:{id,name,url,createdAt},project:{id,name,repositoryUrl},spawnedByOrb:{id,url}|null,children:[{id,name:string|null,url}]}`. The control plane constructs dashboard URLs from configured `PI_ORB_APP_ORIGIN`, never the runtime origin. Spawn provenance comes from `orb_spawns` and survives deletion of the parent: the historical ID/link remains, even when the parent URL shows a missing resource. The CLI prints a readable summary by default, structured JSON with `--json`, and typed errors on stderr. Reads create no lifecycle event. The earlier scalar `pi-orb url` proposal was rejected in favor of this identity command. The agent environment prompt mentions `pi-orb self [--json]` and its returned identity fields (decided 2026-10-01): a single line makes the command discoverable without duplicating CLI usage.
-
-**Spawn relations (2026-10-14):** native `orb_self` and runtime/CLI self share required `children`, listing existing direct accepted `orb_spawns` targets in ID order with current nullable names and dashboard URLs. Archived/deleting targets remain until removal; deleted targets and grandchildren are omitted; no children yields `[]`. A shared application service uses the store port, without new persisted state. Failures return sanitized typed errors, not partial identity. CLI prints `Spawned by:` and `Child:` name/ID/URL lines; `--json` preserves the schema.
-
-### Orb alerts (2026-09-30)
-
-`OrbView.unreadAlertId` is present while an alert is unread. Browser `POST /api/v1/orbs/:orbId/alerts/ack` accepts `{recordId}` and returns `{unreadAlertId: string | null}`. It clears only the observed alert, preserving a newer pointer. Missing orbs return 404; an unreplicated/non-alert identity returns 409; unavailable persistence/replication returns 503. The response is non-cacheable. Resource GETs never acknowledge alerts. Root-only native `orb_alert` and `pi-orb alert` flag the issuing orb for the user; alerts are not sent to its parent orb. Local subagent-only `notify_parent({message})` steers the parent agent within the same orb, not the user (decision 2026-10-17). Creation uses an authenticated local runtime endpoint, not a control-plane transcript write. `docs/orb-alerts.md` specifies persistence, entry semantics, and observability.
-
-### In-orb spawning (decided and implemented 2026-09-08)
-
-**Browser spawn provenance (implemented locally 2026-10-14; not deployed):** `OrbView.spawnedByOrb?: string` is the immutable caller orb ID from `orb_spawns`, omitted for non-spawned orbs. `GET /api/v1/projects/:projectId/orbs` and `GET /api/v1/orbs/:orbId` retain it after caller archival/deletion; mutation responses may omit it. It is provenance, not lifecycle ownership or an eligible display parent. Service/store reads expose the existing relation without new persisted state. Display rules: `docs/web-ui.md`. Runtime self-inspection retains its existing `{id,url}|null` shape; no runtime WebSocket or harness changes.
-
-`PUT /runtime/v1/orbs/:orbId/spawn` accepts `{ prompt, name? }` from a running orb's per-incarnation bearer. It derives the project from the caller and atomically commits an independent orb, its initial inbox message, and immutable acceptance/provenance. It returns non-cacheable `202 { orbId, projectId, url, messageId }` without waiting for boot or completion; `url` uses configured `PI_ORB_APP_ORIGIN`, not the runtime service origin. The new orb ID also identifies the initial message and retries. Same caller/body retries do not duplicate work; altered requests, retired identity, and lifecycle fences fail explicitly. CLI usage, transaction/authority boundaries, error classes, and project-owned deletion-safe retry tombstones: `docs/orb-spawning.md`.
-
-### In-orb self-archival (decided and implemented 2026-09-05)
-
-`POST /runtime/v1/orb/archive` is the mutation behind plain `pi-orb archive`. It accepts `{}` (or no body), derives the target from the per-incarnation bearer, and returns non-cacheable `202 { "orbId": "<caller-id>", "state": "archiving" }` at durable acceptance, never after waiting for completion. Extra fields are `400`; invalid identity is `401`; incompatible lifecycle/changed caller authority is `409`; store failures use sanitized `503`/`500` responses. Errors have `{ "error": { "code": "...", "message": "...", "retryable": false } }`, with `retryable` reflecting the failure. New requests require `running`; an authorized `archiving` retry is idempotent. Caller hash/incarnation and absence of a discard fence are checked at the database mutation, not merely at HTTP authentication. It grants no sibling mutation authority and does not grant browser `/api/v1/*` authority to runtime bearers. CLI failure after a lost response explicitly reports unknown acceptance. The agent prompt permits use only on user request. Irreversible file loss, turn completion, sealing, and observability: `docs/orb-archival.md`.
-
-### In-orb self-deletion (implemented locally 2026-09-19)
-
-`POST /runtime/v1/orb/delete` backs plain `pi-orb delete`. It accepts `{}` or no body and returns non-cacheable `202 { "orbId": "<caller-id>", "state": "deleting" }` at durable acceptance. The bearer exclusively determines the target. Extra fields are `400`, invalid identity is `401`, lifecycle/authority conflicts are `409`, and store failures are sanitized `503`/`500` errors with the same typed envelope as self-archival. Self-deletion requires `running`; caller hash, incarnation, state, and absence of pending compute disposal are fenced at the database write and revalidated on CAS retries. Browser deletion remains available from every state. Entering `deleting` revokes runtime authorization, so a subsequent `401` is not proof of completion. Cleanup can kill the CLI before acknowledgement; a lost response means unknown acceptance. There is no idle wait or history seal. The agent prompt requires explicit user request and exporting needed work first. Scope, lifecycle provenance, and verification: `docs/orb-deletion.md`.
-
-`PATCH /api/v1/projects/:projectId` atomically updates an active project's `{ name, repositoryUrl? }` (name required; optional repository decided 2026-10-22). Project names are NFKC-normalized, trimmed, whitespace-normalized strings of 1–80 characters and unique per owner. Create or rename conflicts within one owner return typed `409`; different owners may use the same normalized name. Omitted, null and blank repository values clear the setting; nonblank URLs use the creation allowlist/normalization rules above; invalid input returns 400 before either field changes. Updating a deleting project conflicts. The single SQL update fences both fields against deletion and persists `updatedAt`; DST and storage contracts cover that fence. The prior name-only update and immutable repository decision are superseded by General settings. Name changes appear immediately; the repository change affects future fresh checkouts and any not-yet-acquired central repository resources, never rewriting an existing orb's Git remote or workspace. Permanent project deletion is implemented as specified in `docs/project-deletion.md`: `DELETE /api/v1/projects/:projectId` atomically marks the project deleting and fans permanent deletion out to every child orb before removing the project row. The one orb update is the narrow naming endpoint described below. Permanent orb deletion is the asynchronous `DELETE` operation implemented in `docs/orb-deletion.md`: it removes both the authoritative filesystem and replica rather than retaining history. Read-only archival is implemented as specified in `docs/orb-archival.md`: it uses the same resource destruction but retains metadata and the sealed replica. OAuth is an internal prerequisite of orb creation/start, not a standalone frontend resource.
-
-The browser generates project, orb, and queued-message UUIDs with the shared `generateUuid()` helper and includes them in create requests. The helper uses `crypto.randomUUID()` when available and falls back to `crypto.getRandomValues()` because non-localhost plain-HTTP origins are not secure contexts and may not expose `randomUUID`; browser code must not call `crypto.randomUUID()` directly (`docs/postmortems/2026-08-10-send-anytime-plain-http-randomuuid.md`).
-
-```ts
-interface CreateProjectRequest {
-  id: string;
-  name: string;
-  repositoryUrl?: string | null;
-}
-
-interface UpdateProjectRequest {
-  name: string;
-  repositoryUrl?: string | null;
-}
-
-interface CreateOrbRequest {
-  id: string;
-  harness?: "pi" | "claude";
-  name?: string;
-  userTimeZone?: string;
-}
-
-interface UpdateOrbRequest {
-  name: string;
-}
-```
-
-The dashboard and index call this API directly with the chosen harness; native creation links carry `?harness=pi|claude` as browser intent, not a new API field. Both paths snapshot UUID, harness and browser time zone once; Retry sends the identical body (`docs/web-ui.md`).
-
-This makes a retried create naturally idempotent without an idempotency table: the same ID, owner and normalized content returns the existing resource (omitted, null and blank repositories are equivalent), while a different owner or content returns `409 conflict`. Creating an orb inherits the project's owner, requests its initial start and returns it in `creating` state. `userTimeZone`, when supplied, must be a valid IANA time zone; invalid values return 400. It is a per-orb creation snapshot, not a user preference or live setting. A retry with a different supplied zone returns 409; omitting it preserves the accepted zone. Concurrent same-ID creates preserve the first accepted snapshot. Migration `027_orb_user_time_zone.sql` adds nullable `orbs.user_time_zone TEXT` without backfill; the stored value is durable diagnostic evidence.
-
-```ts
-interface ProjectView {
-  id: string;
-  name: string;
-  repositoryUrl: string | null;
-  state: "active" | "deleting";
-  deletionProgress?: {
-    total: number;
-    remaining: number;
-    blocked: number;
-  };
-  createdAt: string;
-  updatedAt: string;
-}
-
-// Resource warnings: implemented and focused-test qualified locally, not deployed.
-interface OrbView {
-  id: string;
-  projectId: string;
-  harness: "pi" | "claude";
-  name: string | null;
-  state: "creating" | "starting" | "running" | "stopping" | "stopped" | "failed" | "deleting"
-    | "archiving" | "archived";
-  stateVersion: number;
-  activity?: "idle" | "busy";
-  unreadAlertId?: string;
-  spawnedByOrb?: string;
-  checkoutCommit?: string;
-  resourceWarnings?: Array<{
-    path: string;
-    code: "invalid_yaml" | "invalid_utf8" | "invalid_metadata" | "duplicate_name";
-  }>;
-  lastError?: string;
-  stateDetail?:
-    | { type: "discarding_failed_compute"; retrying: boolean; message?: string }
-    | { type: "draining_history"; retrying: boolean; message?: string }
-    | { type: "deleting_resources"; retrying: boolean; message?: string }
-    | {
-        type: "archiving_orb";
-        phase: "waiting_for_idle" | "sealing_history" | "deleting_resources";
-        retrying: boolean;
-        message?: string;
-      }
-    | {
-        type: "waiting_for_runtime";
-        hostState: string | null;
-        secondsSinceHostRunning: number | null;
-        probeAttempts: number;
-        lastProbeError?: string;
-      }
-    | { type: "running_setup"; secondsRunning: number }
-    | {
-        type: "setup_failed";
-        hook: "setup" | "resume";
-        reason: "failed" | "timeout" | "hook_not_executable";
-        logPath: string;
-      };
-  stateChangedAt: string;
-  actionRequired?:
-    | {
-        type: "openai_codex_device_login" | "github_device_login";
-        verificationUri: string;
-        userCode: string;
-        expiresAt: string;
-      }
-    | {
-        type: "owner_login_required";
-        provider: "openai-codex" | "github";
-      };
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface DisplayHistoryView {
-  orbId: string;
-  session: { id: string; timestamp?: string } | null;
-  cursor: string | null;
-  headId: string | null;
-  records: DisplayRecord[];
-}
-
-// GET /api/v1/orbs/:orbId/history is the browser display projection.
-// /runtime/v1/orbs/:orbId/transcript and /v1/history keep full HistoryRecord.
-```
-
-### Lazy transcript reads (decided 2026-10-01; implemented locally, validation pending)
-
-The browser history response and live `history.record` frames carry `DisplayRecord`, not full `HistoryRecord`. `DisplayHistoryView` retains the existing cursor/head envelope with nullable minimal session identity and no version field. The in-orb transcript CLI and runtime replication pull retain complete records. Details and images use the routes above; each requires `sessionId` to fence a replaced session. A committed response is `{v:1,sessionId,recordId,detailKey,state:"committed",body}`; live reads return `{v:1,sessionId,operationId,blockId,state:"running"|"completed"|"unavailable",body?}`. The committed body is a typed reasoning, tool-call, tool-result, image, compaction, or subagent detail. Live bodies are reasoning or tool-result progress. Images return binary bytes with a safe image Content-Type; no base64 enters JSON display responses. Successful responses are private, no-store.
-
-The control plane reads one addressed record from the replica before considering the current runtime. Missing orb/detail returns typed 404, session mismatch 409, unavailable runtime/storage 503; malformed query 400. Errors use `ControlPlaneHttpError` and the detail-read failure is logged as a content-free `display-detail-read-failed` edge with source and reason. A stopped/archived orb never wakes for a detail. See `docs/runtime-protocol.md` for runtime routes and `docs/web-ui.md` for disclosure polling.
-
-### Lazy activity headlines (implemented locally 2026-10-04; full qualification in progress, not deployed)
-
-The headline POST accepts source identity only, no body; success is `{headline: string}`. **Decided 2026-10-05; implemented locally, not deployed:** known terminal structured provider HTTP 503 gets three total generator attempts with 1-second/2-second backoff inside that same 30-second budget; no intermediate HTTP error is returned. Unknown/auth/empty/rejected/non-503 failures are not retried. Shared auxiliary Luna calls force SSE and zero SDK retries, including otherwise independent WebSocket retries. Headline credential resolution propagates its signal/expiry into broker admission; an already-issued rotating OAuth refresh must still settle fenced persistence/cleanup without returning a stopped caller's grant or admitting inference. Terminal failures retain the existing generic status/body; provider diagnostics remain content-free lifecycle fields, not browser payload. See `docs/activity-headlines.md` for policy and qualification. Authorize before cache/source access, use the project owner's Luna credentials, and never wake compute. Each independent POST owns a 30-second monotonic deadline, with missing replicated-source rereads every 1 second; first-success atomic cache insertion returns the stored winner. Required internal generator context `deadlineAt` preserves the original expiry and guards fresh Luna IO after owner-credential lookup, even with a late abort callback; no wire/global operation-context change. Once the target exists, one internal `atRecordId` snapshot supplies its ancestors, including an earlier inactive branch, without altering default HTTP history. Browser history bulk-enriches cached strings without inference; cache-read failure leaves null and emits no per-read lifecycle event. Only successful POST cache hits are silent; every terminal typed failure, including cache-read failure, emits one content-free outcome. **Approved correction (2026-10-29; qualification pending):** invalidated persistence (`storeOk(null)`) returns HTTP 409 `conflict`, `headline source changed`, `retryable: false`; atomic fences do not identify which source authority changed. Real store errors remain HTTP 503 `unavailable` with typed retryability (`invariant`/`corruption`: false). No new automatic retries. Typed failures, cancellation and the complete contract are in `docs/activity-headlines.md`.
-
-### Project secrets (decided and implemented 2026-08-28)
-
-Projects gain one write-only secret inventory inherited by every current and future orb. `GET .../secrets` returns revision, names, and update timestamps only; `PUT .../secrets/:name` accepts `{ value }` to create or replace a POSIX-named entry; `DELETE` removes it unless a header in the project's saved MCP catalog references it; then it returns HTTP 409 naming the using servers. Replacement remains allowed. The check and pointer publication share a project-row transaction lock with MCP catalog writes. No browser response reveals a current value or value-derived fingerprint. Mutations conflict once project deletion starts. The runtime receives the complete resolved set through the separate bearer-authenticated boot snapshot in `docs/credentials.md`; browser APIs never call that route. Missing projects preserve the requested URL and return the ordinary project-specific `404`.
-
-### Project MCP (implemented 2026-09-08)
-
-`GET .../mcp` returns `{revision, servers}` with secret references, never resolved headers. `PUT` atomically replaces that project's catalog using the expected revision; deletion-fenced, stale, or missing-secret-reference writes return 409, missing projects 404, malformed/duplicate entries 400, and unavailable storage 503. `POST .../mcp/describe` accepts one configuration and returns a bounded `{description}` after authenticated public-HTTPS inspection using project secrets. It does not persist the candidate or perform OAuth. All successful responses are non-cacheable. The separate incarnation-authenticated `GET /runtime/v1/mcp` returns only the caller's project catalog; it grants no configuration-write authority. Exact configuration fields, limits, probe network restrictions and restart-only catalog adoption: `docs/mcp.md`.
-
-OAuth (implemented locally 2026-09-10) adds `oauth: {id}` to a catalog entry. Status returns `{status: "connected" | "pending" | "auth_required"}`; same-origin JSON `connect` starts a bounded browser ceremony and returns `{url}`, and `disconnect` fences the grant and returns `{status: "auth_required"}`. The stable callback is `${PI_ORB_APP_ORIGIN}/api/v1/mcp/oauth/callback`, with single-use hashed state, browser-cookie binding and PKCE. Success returns to the existing Config dialog at `/projects/:projectId/mcp`; callback validation failures redirect to a clean error page. Tokens and verifiers are never browser API data. The incarnation-authenticated `POST /runtime/v1/mcp/:id/token` derives the project, checks the current catalog ID/URL and reauthenticates after broker work; body `{url, rejectedGeneration?}`, response `{accessToken, expiresAt, generation}`. Authorization repair does not restart an existing orb or replay the failed MCP operation. Detailed storage, errors, safety, cleanup and provider gates: `docs/mcp.md`.
-
-### Scheduled self-sleep (decided 2026-09-17; implementation in progress)
-
-The current running incarnation may call `POST /runtime/v1/orb/sleep` with `{v:1,durationSeconds}`. A `202` returns `{v:1,sleepId,sleepUntil}` after the two-field intent and acceptance-time deadline are durable; active sleep conflicts. `POST /runtime/v1/orb/boot-context` returns `userTimeZone: string | null` independently of the frozen FIFO-head `sleep_wake` context or `null`; it never skips an older human message or acknowledges delivery. `OrbView` exposes optional `sleepUntil`; inbox views expose optional validated system provenance. Browser clients cannot forge system messages. Lifecycle cancellation, expiry, source-aware delivery, failures, and exact schemas: `docs/orb-sleep.md`.
-
-**Resource warning contract (2026-10-09; implemented and focused-test qualified locally, not deployed):** `OrbView.resourceWarnings` restores persisted snapshot warnings after reload. Only repository skill path and allowlisted code are exposed, never source content or raw parser errors. Invalid repository skills warn/skip; platform metadata and Git/read/path/integrity/required instruction failures remain fatal (`docs/pi-adapter.md`).
-
-### Send-anytime messages (decided and implemented 2026-08-10)
-
-**Presentation decision (2026-10-09; implemented and focused-test qualified locally, not deployed):** failed-orb `queued`/`delivering` rows display `blocked` without changing inbox status/identity or inventing a message failure. `delivered` rows remain delivered until their canonical record is applied.
-
-All user messages use the idempotent message resource, including messages sent while the runtime is live. This is one ingress path, not an offline fallback beside WebSocket sending. The request body contains the same validated text/image block union as the current live `message` action and deliberately has no caller-selected steer/follow-up mode or `expectedHeadId`.
-
-`PUT` returns `202` after the inbox row and lifecycle wake intent are durable. A client-generated UUID makes retries idempotent under the same identical-body/conflicting-body rule as project/orb creation. The response identifies `queued | delivering | delivered | failed`, may report `turn | steer` after runtime admission, and exposes only a sanitized failure. `failed` is written when the runtime rejects a delivery non-retryably (`docs/runtime-protocol.md`), and the sanitized reason is returned as `error`; retryable delivery failures never change the status, they are simply retried. `POST .../messages/poll` with JSON `{after: <insertion ordinal>, tracked: <UUID array>}` restores inbox state after reload; it is not conversation history. Bootstrap sends `{after: 0, tracked: []}`. Selectors travel in the body, not the URL: hundreds of retained failed/provisional IDs must not exhaust HTTP request-header limits. The no-store response is `{items, updates, cursor}`: `items` contains full rows inserted after `after`, ordered by insertion ordinal; `updates` contains content-free metadata for tracked rows at or before `after` (all `OrbMessageView` fields except immutable `content` and `system`). The store returns separate full-row and metadata-row types from one snapshot; SQL projects content/system only for new rows, avoiding repeated image transfer from PostgreSQL as well as to the browser. `cursor` is the maximum of `after` and the ordinals in that same read snapshot. Selectors are validated; failures preserve the cursor. Bootstrap downloads the full inbox once. Subsequent polls track only local provisional/failed rows, including delivered rows not yet represented in local history. Delivery classification and operation metadata can change after delivery. The cursor is insertion-only, never a status-update watermark. Per-orb admission holds the orb row lock through insertion/commit, preventing later visible insertions from overtaking an uncommitted lower ordinal. No timestamp cursor, pagination or runtime changes are introduced (decided 2026-10-02; `docs/postmortems/2026-10-02-inbox-poll-payload.md`). Actual user transcript records still enter the replica only through runtime history replication; the browser sees their `DisplayHistoryView` projections.
-
-The command is accepted for `creating`, `starting`, `running`, `stopping`, `stopped`, and recoverable `failed` orbs. It conflicts for `archiving`, `archived`, or `deleting` orbs. Acceptance requests ordinary startup when needed, but **acceptance itself never transitions the orb** (2026-08-11): the `202` means the message and its wake intent are durable, and the reconciler — nudged to run immediately by the same command — performs the one message-driven `stopped`/`failed` → `starting` transition a tick later (`docs/lifecycle.md`). A client that wants to display "starting" therefore reads the orb resource or its live updates rather than the message response. Explicit stop/message ordering and the durable wake rule are specified in `docs/lifecycle.md`. Payload limits must be enforceable before the runtime exists, so the control-plane limit is fixed at or below every enabled harness/runtime limit rather than learned only from `server.welcome`.
-
-See `docs/runtime-protocol.md` for FIFO delivery, runtime-derived steering, durable identity, and why the live socket is not used as the queue.
-
-### Orb names and first-message auto-naming (decided and implemented)
-
-An orb has a nullable, non-unique display name. A user may supply it in `CreateOrbRequest` or set/replace it through `PATCH /api/v1/orbs/:orbId`; manual naming is allowed in every lifecycle state and is idempotent. Names are trimmed, whitespace-normalized Unicode strings of 1–80 characters. Clearing a name is not initially supported. No name-source field is needed: both user and generated names occupy the same column, generation may write only while `name IS NULL`, and any later user rename is an ordinary unconditional name update. `OrbView.name` is nullable so an unnamed orb can render as “untitled orb” plus a short ID.
-
-**Decided 2026-10-06; implemented locally, undeployed:** Claude uses Luna naming like Pi, without gating startup. Only an absent Codex credential pointer returns `skipped`; the lease is released with existing durable backoff, allowing recovery after connection. The first skipped attempt logs `auto-name-skipped reason=codex_not_connected`; repeated absence is silent. Broker/store, rejected-credential, and inference failures remain errors. Pi behavior is unchanged.
-
-Generation runs in the **control plane**, not in the orb. When the runtime accepts the first user `message` request, it reads bounded project context from its checkout and starts a bounded, non-blocking call to `POST /runtime/v1/orb-name-trigger`, authenticated by the existing per-incarnation orb bearer token. The body is `{ text: string, imageOnly: boolean, readme?: string }`, has a small fixed byte limit, and carries no orb ID because authentication already identifies the orb. A successful assignment, an already-named orb, or another worker holding the naming lease is an idempotent success; transient generation/storage failure is retryable. The endpoint fetches the project, binds the credential broker to its owner, then supplies the project name and optional canonical repository URL to the control-plane model adapter invoking `openai-codex` model `gpt-6-luna`. Replicated-history fallback uses the same owner binding. The owner UUID is not model input. Keeping inference here centralizes prompt/model policy, credential use, leases, retries, and the conditional database write; the orb is only the source of checkout-local context. The request remains active until generation/assignment finishes rather than enqueueing fragile in-memory background work, but neither it nor Luna delays the agent turn.
-
-The runtime includes a root README when available. It chooses deterministically from regular, non-symlink files whose basename matches `README` or `README.*` case-insensitively, rejects a resolved path outside the checkout, decodes UTF-8 text only, and truncates it to a fixed byte budget before sending. README lookup/read failure is non-fatal and simply omits the field. Project metadata, README text, and first-message text are all quoted as untrusted prompt data. For an image-only first message, the trigger sends an explicit image-only marker rather than copying image bytes into a second inference call.
-
-Pi replays the trigger on boot from its persisted first user message and current checkout README; already-named orbs are a cheap no-op. Claude currently triggers on accepted user messages, including inbox delivery, without boot naming replay. Both use replicated-history reconciliation as fallback, including when no runtime is reachable; that path has project metadata and the first message but no README.
-
-The naming prompt treats project/message text as quoted untrusted data and asks for one short descriptive name. The shared `@pi-orb/luna` adapter package enforces no tools and minimal reasoning and omits `reasoning.summary` entirely: a real Luna request proved that the Codex endpoint rejects `"off"` even though the Pi option type accepts it (supported wire values are `auto | concise | detailed`); this policy is covered by `packages/luna/src/index.test.ts` and is reused by turn-notification summaries. The adapter validates and normalizes the result against the same name rules; malformed output is a retryable generation failure rather than a reason to alter the conversation or orb lifecycle state.
-
-This stays out of the live proxy, which remains content-agnostic: the runtime is the authority that knows a message was accepted and can read the checkout, while replicated history is the durable fallback. Generation runs asynchronously relative to the agent operation and never delays or fails the user's turn. A durable lease/backoff on the orb row prevents the immediate trigger, fallback reconciler, and rollout-overlap workers from repeatedly paying for the same generation while allowing recovery after process death or transient model/storage failure. The final write is conditional on `name IS NULL`; therefore a user rename at any point, including while Luna is running, always wins. Failures are logged without message content and retried with capped exponential backoff; they do not populate the orb's lifecycle `lastError`.
-
-The browser shows the name as the primary identity in project orb lists and the sticky orb header, keeps the short orb ID as secondary metadata, and offers inline rename. Existing orb polling makes an asynchronously generated name appear without a new push protocol.
-
-Implementation: PostgreSQL migration `005_orb_names.sql` (also exercised by the local PGlite backend); protocol schemas in `packages/protocol/src/orb-naming.ts` and `control-plane-api.ts`; lease/race domain logic in `domain/orb-naming.ts`; naming adapter `adapters/pi-name-generator.ts` over the shared `packages/luna` inference adapter; runtime trigger and replicated-history fallback in `http/runtime-routes.ts`, central agent publication, and `domain/replication.ts`. The user-wins and concurrent-trigger schedules are covered by `orb-naming.dst.test.ts`; the full-slice E2E asserts the generated name.
-
-Do not expose `host_ref`, model credentials, harness session ID, or internal replication fields in `OrbView`. `actionRequired` is synthesized from the owner's in-memory device flow and is not stored in the orb row. Every route producing an `OrbView` shapes it from the reconciler's authoritative orb-to-owner auth block and the authenticated viewer: only the matching user sees the actionable code, URI, and expiry; coworkers and ops see only `owner_login_required` and provider. View shaping does not reread the project or silently drop auth state on a secondary lookup failure. The resource-request header cannot impersonate the owner. `stateDetail` combines in-memory reconciler state with sanitized durable status: while `stopping` it reports the history-drain blocker — for example a retrying database outage — and while an incarnation-bounded discard intent exists it reports failed-compute disposal plus its persisted provider error; while the runtime reports the `setup_running` readiness phase it reports `running_setup`, and after a boot whose `.agents/setup` or `.agents/resume` did not succeed it reports `setup_failed` with the reason and the in-orb log path, relayed from the latest health report and stored nowhere (`docs/orb-setup-hook.md`). A control-plane restart therefore cannot erase the user-visible reason cleanup is blocked, and new detail variants can be added later without schema changes. For a running orb, optional `activity` is the latest `idle | busy` value observed by that control-plane process in a successful history pull; it is omitted when no observation is available and for every non-running lifecycle state. It is an advisory snapshot for ordinary resource reads, not a durable field or push subscription (decided 2026-08-13). The dedicated history response exposes only the cursor/head needed for live handoff. `OrbView` carries no workload-identity status: a denied mint is reported to the caller inside the orb as a typed error and to the operator as a deduplicated `identity-mint-denied` lifecycle edge, and nothing about it is persisted (decided 2026-08-25, `docs/workload-identity.md`).
-
-Status behavior:
-
-- project creation returns `201`;
-- project delete returns `202` with `state: "deleting"`, atomically prevents new child creation, and eventually makes the project and all child orb resources return `404` (`docs/project-deletion.md`);
-- orb creation and start/stop requests return `202` with the current `OrbView`;
-- before creating/starting the host, the backend resolves the project owner's selected harness credential and independent GitHub authentication; if interaction is required, the orb remains in `creating`/`starting` and `actionRequired` returns an actionable challenge only to that owner;
-- the browser polls only the normal orb resource, not an auth resource; when login succeeds the backend resumes lifecycle work automatically;
-- lifecycle endpoints are idempotent when already moving toward or in the requested state;
-- delete returns `202` with `state: "deleting"`, conflicts with every other orb mutation once accepted, and eventually makes the orb and history endpoints return `404` (`docs/orb-deletion.md`);
-- archive returns `202` with `state: "archiving"`; history stays readable, completion yields terminal `archived`, start is permanently rejected, and later delete remains available (`docs/orb-archival.md`);
-- lifecycle work is asynchronous and recoverable from `orbs.state`; the browser polls `GET /api/v1/orbs/:orbId`;
-- while an orb is `stopping`, or failed-compute disposal is pending, the orb resource includes `stateDetail` so the requester sees drain/cleanup progress and retryable blockers instead of an unexplained wait;
-- a process restart finds `creating`, `starting`, `stopping`, and `deleting` rows and resumes reconciliation, including restarting a required OAuth flow or destructive cleanup, so no transient job is authoritative;
-- browser history is returned as one complete projected database snapshot without pagination; opening a committed detail fetches only its addressed record, first from the replica and then from an already-running runtime if replication lags. Transient detail requires an already-running runtime. Neither read starts compute;
-- the live upgrade is accepted only for a running orb; otherwise it fails with `409`/`1013` as appropriate.
-
-All list responses use `{ items: [...] }`. Errors use one shape:
+# Control-plane API
+
+Reference for the control plane's HTTP surface. Authentication, principals and ownership:
+`docs/auth.md`. Runtime HTTP served by the orb itself: `docs/runtime-protocol.md`.
+
+## Conventions
+
+- Browser JSON API under `/api/v1`; runtime-facing routes under `/runtime/v1` (plus
+  `/runtime/previews`, `/api/runtime/initial-checkout`, `/api/runtime/alert`), authenticated by the
+  incarnation bearer (`docs/credentials.md`). Neither credential works on the other surface.
+- Fastify handlers validate TypeBox schemas (`packages/protocol/src/`), call `Result`-returning
+  services and fold each result explicitly. No exceptions for normal control flow.
+- Lists are `{items: [...]}`.
+- Missing resources return a resource-specific 404; browser HTML keeps the URL and links to the
+  dashboard. Never a redirect.
+- APIs never redirect into login; authentication failures are typed 401/403/503.
+
+### Errors
 
 ```ts
 interface ControlPlaneHttpError {
@@ -425,10 +27,293 @@ interface ControlPlaneHttpError {
 }
 ```
 
-Fastify handlers validate TypeBox schemas, call Result-returning services, and fold each result into an explicit response. They never use exceptions for normal HTTP control flow.
+`retryable` is a promise to the client. A store failure classified `invariant` (wrong SQL, an
+unencodable parameter) answers 500 `internal`, `retryable: false`; only real outages answer 503
+`unavailable`, `retryable: true` (`docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md`).
+The UI shows the message, so a deterministic bug is a visible failure, not an endless retry.
 
-`retryable` is a promise to the client, so a deterministic server-side bug must never claim it (decided 2026-08-11, from `docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md`): a store failure classified `invariant` — wrong SQL, a parameter the driver cannot encode (`docs/stack.md`) — answers `500` with code `internal` and `retryable: false`, never the `503`/`unavailable`/`retryable: true` reserved for real outages. The UI surfaces the message, so the user sees a failed action instead of an operation that silently retries forever.
+## Browser routes
 
-**Peer messaging (2026-10-14; local, undeployed):** `orb_send({orbId,message})` binds sender/request identity to the durable tool task. CLI `pi-orb send <orb-id> "message" [--request-id <id>]` uses authenticated `POST /runtime/v1/orb/send`, exact body `{v:1,orbId,message,requestId}`, no-store 202 `{v:1,orbId,messageId,requestId}`. Acceptance is queueing, not consumption/reply; ambiguous acceptance reports the request ID for explicit retry. Target UUIDs are canonicalized; invalid UUIDs return 400 before storage, missing targets 404 after sender authority checks. Nonblank messages are bounded to 64 KiB UTF-8; request IDs are nonempty strings of at most 128 characters.
+| Route | Purpose | Contract |
+| --- | --- | --- |
+| `GET /auth/login`, `GET /auth/callback`, `POST /auth/logout` | Google login | `docs/auth.md` |
+| `GET /auth/preview` | Preview login handoff | `docs/http-exposure.md` |
+| `GET /api/v1/session` | Current principal | `docs/auth.md` |
+| `GET /api/v1/system` | Deployment facts | below |
+| `GET /api/v1/usage?boundaries=<JSON ms array>` | Owner model usage | `docs/model-usage.md` |
+| `GET\|PUT /api/v1/personal-instructions` | Owner instructions | `docs/agent-context.md` |
+| `GET\|PUT /api/v1/git-identity` | Owner Git `{name, email}` | `docs/agent-context.md` |
+| `GET /api/v1/owner-secrets`, `PUT\|DELETE …/:name` | Owner secrets | `docs/agent-context.md` |
+| `GET\|POST /api/v1/owner-skills`, `PUT\|DELETE …/:name` | Owner skills | `docs/agent-context.md` |
+| `GET /api/v1/claude/auth`, `POST …/connect\|code\|cancel\|disconnect` | Claude connection | `docs/credentials.md` |
+| `POST /api/v1/issuer/signing-keys/publish\|activate` | Key rotation (ops) | `docs/workload-identity.md` |
+| `GET\|POST /api/v1/projects` | Owner's projects; create | below |
+| `GET\|PATCH\|DELETE /api/v1/projects/:projectId` | Read, update, delete | below, `docs/teardown.md` |
+| `GET\|PUT /api/v1/projects/:projectId/instructions` | Project instructions | `docs/agent-context.md` |
+| `GET …/secrets`, `PUT\|DELETE …/secrets/:name` | Project secrets | `docs/credentials.md` |
+| `GET\|PUT …/mcp`, `GET …/mcp/status`, `POST …/mcp/describe` | Project MCP | `docs/mcp.md` |
+| `GET …/mcp/:id/oauth`, `POST …/oauth/connect\|disconnect` | MCP OAuth | `docs/mcp.md` |
+| `GET /api/v1/mcp/oauth/callback`, `GET /mcp/oauth/failed` | MCP OAuth callback | `docs/mcp.md` |
+| `GET\|POST /api/v1/projects/:projectId/orbs` | List; create orb | below |
+| `GET\|PATCH\|DELETE /api/v1/orbs/:orbId` | Read, rename, delete | below, `docs/teardown.md` |
+| `POST /api/v1/orbs/:orbId/start\|stop\|archive` | Lifecycle | below, `docs/lifecycle.md`, `docs/teardown.md` |
+| `GET /api/v1/orbs/:orbId/history` | Display history | `docs/history.md` |
+| `GET …/details/:recordId/:detailKey?sessionId=` | Committed detail | `docs/history.md` |
+| `GET …/details/live/:operationId/:blockId?sessionId=` | Live detail | `docs/history.md` |
+| `GET …/images/:recordId/:detailKey/:imageIndex?sessionId=` | Image bytes | `docs/history.md` |
+| `POST …/headlines/:recordId/:detailKey?sessionId=` | Activity headline | `docs/activity-headlines.md` |
+| `PUT /api/v1/orbs/:orbId/messages/:messageId` | Send message | `docs/inbox.md` |
+| `POST /api/v1/orbs/:orbId/messages/poll` | Inbox state | `docs/inbox.md` |
+| `POST /api/v1/orbs/:orbId/alerts/ack` | Acknowledge alert | `docs/orb-alerts.md` |
+| `GET /api/v1/orbs/:orbId/hosted-files` | Hosted files | `docs/http-exposure.md` |
+| `POST /api/v1/orbs/:orbId/uploads`, `…/uploads/:id/status\|chunk\|finish\|cancel` | Workspace uploads | `docs/workspace-uploads.md` |
+| `WS /api/v1/orbs/:orbId/live` | Live agent socket | `docs/runtime-protocol.md` |
+| `WS /api/v1/orbs/:orbId/terminal` | Terminal | `docs/terminal.md` |
 
-The application service uses existing transactional inbox admission, same-owner cross-project and lifecycle/authority fences (both projects active), target-scoped dedupe and message wake. Migration `045_orb_messaging.sql` extends only the metadata CHECK with trusted `{kind:"orb_message",senderOrbId}`; one content-free `message-accepted` lifecycle edge records each new acceptance. Exact persistence, lock ordering, retry/wake semantics and rejections: `docs/orb-messaging.md`.
+Files-origin routes (`/s/…`, `/files/…`) and preview hosts: `docs/http-exposure.md`.
+
+## Runtime routes
+
+All require the caller's runtime bearer and derive the orb (and project, owner) from it; none
+accepts a caller-selected identity.
+
+| Route | Purpose | Contract |
+| --- | --- | --- |
+| `POST /runtime/v1/tokens/{model\|github}` | Brokered access tokens | `docs/credentials.md` |
+| `POST /runtime/v1/claude-subscription` | Claude token | `docs/credentials.md` |
+| `GET /runtime/v1/project-secrets` | Secret snapshot | `docs/credentials.md` |
+| `POST /runtime/v1/id-token` | Workload identity JWT | `docs/workload-identity.md` |
+| `GET /api/runtime/initial-checkout` | First checkout data | `docs/host-provider.md` |
+| `POST /api/runtime/alert` | Raise alert | `docs/orb-alerts.md` |
+| `GET /runtime/v1/project-instructions`, `/personal-instructions`, `/git-identity`, `/owner-skills` | Boot context | `docs/agent-context.md` |
+| `GET /runtime/v1/mcp`, `POST /runtime/v1/mcp/:id/token` | MCP catalog, OAuth tokens | `docs/mcp.md` |
+| `POST /runtime/v1/orb-name-trigger` | Auto-naming | below |
+| `GET /runtime/v1/orbs`, `GET /runtime/v1/orbs/:orbId/transcript` | Inspection | below |
+| `GET /runtime/v1/orb/self` | Own identity | below |
+| `POST /runtime/v1/history/search` | History search | `docs/history.md` |
+| `PUT /runtime/v1/orbs/:orbId/spawn` | Spawn orb | `docs/inbox.md` |
+| `POST /runtime/v1/orb/send` | Peer message | `docs/inbox.md` |
+| `POST /runtime/v1/orb/sleep`, `POST /runtime/v1/orb/boot-context` | Scheduled sleep | `docs/lifecycle.md` |
+| `POST /runtime/v1/orb/archive`, `POST /runtime/v1/orb/delete` | Self-archive, self-delete | `docs/teardown.md` |
+| `PUT\|DELETE /runtime/previews/:port`, `GET /runtime/previews` | Preview registration | `docs/http-exposure.md` |
+| `POST\|GET\|DELETE /runtime/v1/hosting/files?path=` | Hosted files | `docs/http-exposure.md` |
+
+Runtime mutations that accept work (spawn, send, sleep, archive, delete) return no-store 202 at
+durable acceptance and use the error envelope above. A lost response means unknown acceptance.
+
+Public: `/health`, `/.well-known/openid-configuration`, `/.well-known/jwks.json`
+(`docs/workload-identity.md`).
+
+## Projects
+
+A signed-in user creates an owned project with a name and an optional repository URL. The project
+and all children have one owner (`docs/auth.md`).
+
+```ts
+interface CreateProjectRequest { id: string; name: string; repositoryUrl?: string | null }
+interface UpdateProjectRequest { name: string; repositoryUrl?: string | null }
+
+interface ProjectView {
+  id: string;
+  name: string;
+  repositoryUrl: string | null;
+  state: "active" | "deleting";
+  deletionProgress?: { total: number; remaining: number; blocked: number };
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+- Names: NFKC-normalized, trimmed, whitespace-collapsed, 1–80 characters, unique per owner
+  (typed 409 on create or rename).
+- `repositoryUrl`: omitted, null and blank are equivalent and stored as null. No synthetic
+  repository is created; the first checkout makes an empty directory without Git.
+- `PATCH` updates name and repository in one SQL update fenced against deletion; invalid input
+  returns 400 before either changes; a deleting project conflicts. A repository change affects only
+  future fresh checkouts and not-yet-acquired central repository resources, never an existing
+  workspace or remote.
+- `DELETE` returns 202 `state: "deleting"`, is idempotent, and eventually 404s the project and
+  every child (`docs/teardown.md`).
+
+Repository URL allowlist (checked at create/update and again by the runtime before cloning):
+
+- `https` URLs, or `git@host:owner/repo.git` normalized to `https` (no SSH transport; the clone
+  sets `GIT_ALLOW_PROTOCOL=https`);
+- GitHub shorthand `owner/repo` and `github.com/owner/repo` (optional `.git`, case-insensitive
+  host), expanded to HTTPS GitHub, never a filesystem path;
+- hosts `github.com`, `gitlab.com`, `bitbucket.org`, `codeberg.org` (extending is configuration);
+- no userinfo, explicit ports or IP literals; the only scp user is `git`;
+- the path must match the host's repository shape.
+
+This forecloses local paths, `file://`, credentials in the database and SSRF. The first checkout
+clones the default branch and records `checkoutCommit`.
+
+## Orbs
+
+```ts
+interface CreateOrbRequest {
+  id: string;                    // DNS-safe; becomes provider resource names
+  harness?: "pi" | "claude";     // default "pi"
+  name?: string;
+  userTimeZone?: string;         // IANA
+}
+interface UpdateOrbRequest { name: string }
+
+interface OrbView {
+  id: string;
+  projectId: string;
+  harness: "pi" | "claude";
+  name: string | null;
+  state: "creating" | "starting" | "running" | "stopping" | "stopped" | "failed"
+    | "deleting" | "archiving" | "archived";
+  stateVersion: number;
+  spawnedByOrb?: string;          // immutable spawn caller ID; on list and single GETs, kept after
+                                  // caller archive/delete, may be omitted on mutations (docs/inbox.md)
+  centralAgent?: boolean;
+  filesBaseUrl?: string;          // derived, docs/http-exposure.md
+  activity?: "idle" | "busy";
+  previewActiveUntil?: string;    // docs/http-exposure.md
+  checkoutCommit?: string;
+  lastError?: string;
+  resourceWarnings?: Array<{
+    path: string;
+    code: "invalid_yaml" | "invalid_utf8" | "invalid_metadata" | "duplicate_name";
+  }>;
+  stateDetail?:
+    | { type: "discarding_failed_compute" | "replacing_stale_compute" | "draining_history"
+          | "deleting_resources"; retrying: boolean; message?: string }
+    | { type: "archiving_orb"; phase: "waiting_for_idle" | "sealing_history" | "deleting_resources";
+        retrying: boolean; message?: string }
+    | { type: "waiting_for_sleep"; sleepUntil: string; phase: "waiting_for_idle" | "stopping";
+        message?: string }
+    | { type: "waiting_for_runtime"; hostState: string | null;
+        secondsSinceHostRunning: number | null; probeAttempts: number; lastProbeError?: string }
+    | { type: "running_setup"; secondsRunning: number }
+    | { type: "setup_failed"; hook: "setup" | "resume";
+        reason: "failed" | "timeout" | "hook_not_executable"; logPath: string };
+  sleepUntil?: string;            // docs/lifecycle.md
+  stopReason?: "idle" | "sleep" | "manual";
+  stateChangedAt: string;
+  archivedAt?: string;
+  unreadAlertId?: string;         // docs/orb-alerts.md
+  actionRequired?:
+    | { type: "openai_codex_device_login" | "github_device_login" | "claude_subscription_login";
+        verificationUri: string; userCode: string; expiresAt: string }
+    | { type: "owner_login_required"; provider: "openai-codex" | "github" | "claude" };
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+View shaping:
+
+- `actionRequired` comes from the reconciler's in-memory owner auth block. Only the owner sees the
+  actionable variant; coworkers and ops see `owner_login_required`. No request header can
+  impersonate the owner, and shaping never silently drops auth state on a secondary lookup failure.
+- `stateDetail` combines in-memory reconciler state with sanitized durable status (drain blockers,
+  persisted discard errors) and the runtime's latest health report (setup phase/failure,
+  `docs/orb-setup-hook.md`). A control-plane restart cannot erase why cleanup is blocked.
+- `activity` is the latest `idle | busy` this process observed in a history pull, for running orbs
+  only; an advisory snapshot, not stored.
+- `resourceWarnings` restore persisted snapshot warnings: repository skill path and allowlisted
+  code only, never content or parser errors (`docs/pi.md`).
+- Never exposed: `host_ref`, credentials, harness session ID, replication internals, workload
+  identity status.
+
+### Create and idempotency
+
+The browser generates project, orb and message UUIDs with the shared `generateUuid()` helper
+(`crypto.randomUUID()` when present, else `crypto.getRandomValues()`; plain-HTTP origins lack
+`randomUUID`, `docs/postmortems/2026-08-10-send-anytime-plain-http-randomuuid.md`). Retry sends the
+identical body.
+
+The same ID, owner and normalized content returns the existing resource; a different owner or
+content returns 409. No idempotency table. Specifically:
+
+- Orb creation inherits the project owner, requests the initial start and returns 202 with the
+  orb in `creating`.
+- `harness` is immutable: a conflicting supplied value on retry is
+  409; omission keeps the accepted one. Spawned orbs inherit the caller's harness. The durable
+  `created` lifecycle edge records it.
+- `userTimeZone` must be valid IANA (else 400). It is a per-orb creation snapshot
+  (`orbs.user_time_zone`), not a preference; a different supplied zone on retry is 409, omission
+  keeps it, concurrent creates keep the first.
+
+### Status semantics
+
+- Project create 201; orb create, start, stop 202 with the current `OrbView`.
+- Lifecycle endpoints are idempotent when already moving toward or in the requested state.
+- Before creating or starting a host, the backend resolves the owner's harness credential and
+  GitHub; if a login is needed the orb stays `creating`/`starting` with `actionRequired`, and work
+  resumes automatically after login. The browser polls only `GET /api/v1/orbs/:orbId`.
+- Orb `DELETE` returns 202 `state: "deleting"` from every state and eventually 404s the orb and its
+  history; archive returns 202 `state: "archiving"`. Both are idempotent; conflicts once accepted:
+  `docs/teardown.md`. Start on an archived orb is a non-retryable 409.
+- Messages are accepted for `creating` through recoverable `failed`, and conflict for `archiving`,
+  `archived` and `deleting` (`docs/inbox.md`).
+- Work is asynchronous and recoverable from `orbs.state`; after restart the reconciler resumes
+  `creating`, `starting`, `stopping` and `deleting`, including OAuth flows and destructive cleanup.
+- History is one complete projected snapshot, no pagination. Detail reads never start compute.
+- The live upgrade is accepted only for a running orb; otherwise `409`/`1013`.
+
+## Deployment facts
+
+`GET /api/v1/system` returns `{hostProvider: "process" | "docker" | "gce", databaseKind:
+"pglite" | "postgres", version, deploymentStatus?: "awaiting-activation" |
+"activation-unavailable" | "superseded"}`. Values are resolved at boot; the route reads nothing per
+request. No connection strings, project or zone names, images, secrets or fleet counts. Requires a
+principal. The dashboard footer shows it.
+
+## In-orb inspection
+
+The `pi-orb` CLI reads siblings through runtime routes, never `/api/v1`.
+
+- `GET /runtime/v1/orbs` returns one no-store snapshot: `currentOrbId` plus each of the calling orb
+  owner's orbs (ID, nullable name, state, update time, project ID/name/repository URL), including
+  stopped and archived. `pi-orb orbs [query]` filters locally (NFKC, case-insensitive substring).
+- `GET /runtime/v1/orbs/:orbId/transcript` is company-wide: the exact consistent full replica
+  snapshot plus compact identity, no-store. It never starts the target or contacts its runtime.
+  Archived transcripts are complete; others have replication lag (`docs/history.md`). Missing →
+  typed 404; deleting → typed 409. Harness system prompt and tool state are reduced to identity.
+  The CLI omits `overflow.native` by default; `--json` returns the full response.
+- `GET /runtime/v1/orb/self` (`pi-orb self [--json]`) returns no-store
+  `{v:1, orb:{id,name,url,createdAt}, project:{id,name,repositoryUrl},
+  spawnedByOrb:{id,url}|null, children:[{id,name,url}]}`. URLs use `PI_ORB_APP_ORIGIN`. Spawn
+  provenance comes from `orb_spawns` and survives parent deletion. `children` lists existing direct
+  spawn targets in ID order (archived/deleting until removed; deleted and grandchildren omitted).
+  Native `orb_self` shares the service. The environment prompt mentions `pi-orb self [--json]`.
+
+These reads write nothing and log no lifecycle events; typed CLI errors are the observability, and
+transcript content never enters route logs.
+
+## Orb names
+
+An orb has a nullable, non-unique name: trimmed, whitespace-normalized, 1–80 characters. Users set
+it at creation or with `PATCH /api/v1/orbs/:orbId` in any state (idempotent); clearing is not
+supported. Unnamed orbs render as "untitled orb" plus a short ID.
+
+Auto-naming runs in the control plane with Luna (`gpt-6-luna` via the owner's `openai-codex`
+broker):
+
+- When the runtime accepts the first user message it calls `POST /runtime/v1/orb-name-trigger`
+  with `{text, imageOnly, readme?}` (small fixed limit, no orb ID). The README is the root
+  `README`/`README.*` regular non-symlink file inside the checkout, UTF-8, truncated; failure omits
+  it. Image-only messages send a marker, not bytes.
+- The endpoint binds the broker to the project owner and supplies project name and repository URL;
+  the owner UUID is not model input. Project, README and message text are quoted untrusted data.
+  The shared `@pi-orb/luna` adapter uses no tools, minimal reasoning and omits
+  `reasoning.summary` (the endpoint rejects `"off"`). Output is validated against the name rules;
+  malformed output is a retryable failure.
+- `orbs.auto_name_lease_until`, `auto_name_attempts` and `auto_name_next_attempt_at` are a durable
+  lease and capped exponential backoff (no job table, no DB lock across inference) that stop duplicate generation across
+  the trigger, the replicated-history fallback reconciler and overlapping releases. The write is
+  conditional on `name IS NULL`, so a user rename always wins. Failures log without content and
+  never set `lastError`. Success, already-named and lease-held are idempotent successes.
+- Pi replays the trigger at boot from its first message; Claude triggers on accepted user messages
+  without boot replay. The history fallback has the first message but no README.
+- Claude orbs use Luna too and never gate startup on it. An absent owner Codex pointer returns
+  `skipped`, releases the lease with backoff and logs `auto-name-skipped
+  reason=codex_not_connected` on the first attempt only; other failures stay errors.
+
+Code: `domain/orb-naming.ts` (DST `orb-naming.dst.test.ts`), `adapters/pi-name-generator.ts`,
+`packages/luna`, `packages/protocol/src/orb-naming.ts`. Names appear through ordinary orb polling.

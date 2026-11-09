@@ -16,15 +16,6 @@ index 9ef1da0..4d20e81 100644
          for (const tool of callable) {
              const namespace = namespaceOf(tool.name, this.options.namespaces ?? []);
              if (namespace === undefined)
-@@ -635,7 +640,7 @@ class CodemodeCall {
-         const made = input.call;
-         if (call.target === "tool" && made.name === call.name && sameJson(made.arguments, call.args ?? {}))
-             return undefined;
--        return `tools.${made.name}(${JSON.stringify(made.arguments)})`;
-+        return `tools.${made.name}(${argumentPreview(made.arguments)})`;
-     }
-     /** Run one live call and journal its result. */
-     launch(call) {
 @@ -670,7 +675,7 @@ class CodemodeCall {
      }
      async callTool(call) {
@@ -34,28 +25,6 @@ index 9ef1da0..4d20e81 100644
          const model = call.name.startsWith(CODEMODE_INTERNAL_PREFIX);
          if (model) {
              await this.modelSlot();
-@@ -699,7 +704,7 @@ class CodemodeCall {
-     started(call) {
-         if (this.rows.has(call.id))
-             return;
--        const args = call.args === undefined ? "" : (JSON.stringify(call.args) ?? "");
-+        const args = call.args === undefined ? "" : argumentPreview(call.args);
-         const name = call.name.startsWith(CODEMODE_INTERNAL_PREFIX)
-             ? call.name.slice(CODEMODE_INTERNAL_PREFIX.length)
-             : call.name;
-@@ -872,8 +877,11 @@ function countImages(value) {
-     const output = typeof value === "object" && value !== null ? value.output : undefined;
-     return Array.isArray(output) ? output.filter((item) => item?.type === "image").length : 0;
- }
-+function argumentPreview(value) {
-+    return JSON.stringify(typeof value === "object" && value !== null ? Object.keys(value).slice(0, 16) : typeof value).slice(0, 256);
-+}
- function describe(call) {
--    return `${call.target === "tool" ? "tools." : ""}${call.name}(${JSON.stringify(call.args) ?? ""})`;
-+    return `${call.target === "tool" ? "tools." : ""}${call.name}(${argumentPreview(call.args)})`;
- }
- /** Structural JSON equality; key order does not matter. */
- function sameJson(a, b) {
 diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/index.d.ts b/node_modules/@earendil-works/pi-durable/dist/codemode/index.d.ts
 index 3e1c49c..2af19e7 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/codemode/index.d.ts
@@ -259,3 +228,22 @@ index eb64e47..54cb9ff 100644
      /**
       * Admit a submission inside the caller's commit `tx` (`Harness.commit()`, `Conversation.commit()`, a task's
       * `runtime.commit()`), with the same rules, and return its ID: the admission is stored with that commit, or not at all
+diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/util.js b/node_modules/@earendil-works/pi-durable/dist/harness/util.js
+index b089b700..86582dad 100644
+--- a/node_modules/@earendil-works/pi-durable/dist/harness/util.js
++++ b/node_modules/@earendil-works/pi-durable/dist/harness/util.js
+@@ -4,8 +4,12 @@ export class Waiters {
+     #sets = new Map();
+     add(key, context) {
+         const signal = context.abortSignal;
+-        if (signal?.aborted)
+-            return Promise.reject(signal.reason);
++        if (signal?.aborted) {
++            const rejected = Promise.reject(signal.reason);
++            // Delivered later, across the Session line: handled now, so it is not reported unhandled.
++            rejected.catch(() => { });
++            return rejected;
++        }
+         const waiter = Promise.withResolvers();
+         const set = this.#sets.get(key) ?? new Set();
+         this.#sets.set(key, set.add(waiter));

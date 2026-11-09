@@ -139,8 +139,7 @@ export function createOrbTools(
     }),
     defineTool({
       name: "orb_alert",
-      description:
-        "Notify the user: append a transcript alert and flag this orb. Alerts are not sent to other agents.",
+      description: "Alert the user. Only use this if something is wrong, or they asked for it.",
       parameters: Type.Object({ message: Type.String() }, { additionalProperties: false }),
       structuredOutputSchema: resultSchema(
         Type.Object(

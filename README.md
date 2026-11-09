@@ -1,28 +1,58 @@
 # pi-orb
 
-pi-orb provides persistent Pi and Claude coding conversations with isolated execution workspaces. Pi runs centrally with PostgreSQL authority; Claude runs natively on its host. Process, Docker and GCP hosts supply execution services. The unsandboxed process provider is for trusted local testing.
+**Close the tab. Keep the work.**
 
-Design documentation starts at [DESIGN.md](DESIGN.md), which indexes the topical design docs under `docs/`. The actionable backlog is [TODO.md](TODO.md).
+Persistent coding agents, each with its own conversation and workspace. Work in a browser, disconnect, and pick up the same conversation from another device.
 
-## Install on iPhone or iPad
+**Intended deployment: Google Cloud (GCP).**
 
-Open the HTTPS app in Safari, then choose **Share → Add to Home Screen → Add**. Leave **Open as Web App** enabled if offered. Launch the icon and sign in if prompted; its session may differ from Safari's. A network connection is required.
+![pi-orb workspace with project navigation and a demo conversation](docs/assets/readme-orb.png)
+
+*Real UI, demo data.*
+
+Proof of concept. Expect breaking changes.
+
+## Features
+
+- **Pi and Claude agents.** Choose a harness for each orb. [Pi](docs/pi.md) · [Claude](docs/claude.md)
+- **Persistent context.** Workspaces survive compute restarts; read and search history while orbs are stopped. [History](docs/history.md)
+- **Browser and mobile.** Resume from another device; install on iPhone or iPad. [Web UI](docs/web-ui.md)
+- **Parallel work.** Agents spawn orbs, exchange messages and search each other's transcripts. [Messaging](docs/inbox.md)
+- **Interactive terminal.** Work directly in an orb's workspace. [Terminal](docs/terminal.md)
+- **File hosting.** Host generated files at durable authenticated URLs. [HTTP exposure](docs/http-exposure.md)
+- **HTTP port sharing.** Share running HTTP services with authenticated preview URLs. [HTTP exposure](docs/http-exposure.md)
+- **Diagrams.** Render Mermaid diagrams in the transcript. [Web UI](docs/web-ui.md)
+- **Charts.** Show charts as interactive transcript rows. [Web UI](docs/web-ui.md)
+- **Project integrations.** Connect [MCP servers](docs/mcp.md), manage [credentials and secrets](docs/credentials.md), and prepare environments with [boot hooks](docs/orb-setup-hook.md).
+
+## Deployment
+
+Cloud Run hosts the control plane, GCE hosts orbs, and Cloud SQL provides managed PostgreSQL.
+
+[Deployment instructions](infra/README.md) · [Architecture and release safety](docs/deployment.md)
 
 ## Run locally
 
-There are three development compositions: the Docker-backed full service, the Docker-free full service using the process host provider, and a frontend-only fixture. The two Docker-free commands are intentionally different: use `dev:local` when backend/runtime behavior matters, and `dev:frontend` only for isolated UI work.
+The modes below are for development/debugging, not production deployments.
 
-### Docker-backed full service
+Requires Git, Node.js and npm. Toolchain versions: [docs/stack.md](docs/stack.md); npm is pinned in [package.json](package.json). On Linux, `npm ci` also needs Python 3 and `build-essential` to compile `node-pty`; macOS uses its prebuilds.
 
-Requires Node.js 26.13.0 LTS and Docker. On Linux, root `npm ci` also requires Python 3 and the `build-essential` toolchain to compile the approved `node-pty` addon; macOS uses node-pty's bundled arm64/x64 prebuild.
+Install dependencies before choosing a mode:
 
 ```sh
 npm ci
+```
+
+### Docker-backed full service
+
+Requires Docker.
+
+```sh
 docker compose up -d
 docker build -f apps/orb-runtime/Dockerfile -t pi-orb-runtime:dev .
 ```
 
-Then run the control plane and web UI in separate terminals:
+In separate terminals:
 
 ```sh
 PI_ORB_APP_ORIGIN=http://localhost:5173 npm run dev --workspace @pi-orb/control-plane
@@ -31,36 +61,34 @@ npm run dev --workspace @pi-orb/web
 
 Open http://localhost:5173.
 
-### Docker-free full service: process host provider
+### Docker-free full service (process hosts)
 
-This is a real control plane plus real orb runtimes, not a frontend fixture. The embedded PGlite database and test-only process host provider let the control plane and orb-process supervisor run without Docker or an external PostgreSQL service. Because this backend inherits host executables rather than using the runtime image, `rustup` and Chromium are additional host prerequisites; the workspace supplies `agent-browser`, and toolchains plus home-relative browser state still live in each orb's private persistent home. The process host is Linux-only; it also needs Python 3 plus `build-essential` when running root `npm ci` so the process-hosted runtime has its native `node-pty` addon. Run the backend and normal web server in separate terminals:
+Real control plane, embedded PGlite and unsandboxed process-hosted orb runtimes. Linux only; run only trusted repositories. The runtime image is not used, so `rustup` and Chromium must be installed on the host.
 
 ```sh
-# Terminal 1: control plane + PGlite + unsandboxed orb-process supervisor
+# Terminal 1: control plane + PGlite + process supervisor
 PI_ORB_APP_ORIGIN=http://localhost:5173 npm run dev:local
 
-# Terminal 2: normal web UI, proxied to the control plane
+# Terminal 2: web UI, proxied to the control plane
 npm run dev --workspace @pi-orb/web
 ```
 
-Open http://localhost:5173. Projects, lifecycle operations, Pi sessions, runtime HTTP/WebSockets, replication, and model calls use the real application paths. State defaults to `~/.pi-orb/local`; override the independent paths with `PI_ORB_PGLITE_PATH` and `PI_ORB_PROCESS_STATE_DIR`. Orb runtimes are unsandboxed child processes and must only run trusted repositories.
+State defaults to `~/.pi-orb/local`; override with `PI_ORB_PGLITE_PATH` and `PI_ORB_PROCESS_STATE_DIR`. Provider details: [docs/host-provider.md](docs/host-provider.md).
 
-When serving a built UI with `PI_ORB_WEB_DIST`, do not rebuild that directory under the running service: static asset routes are registered at startup. Start the service against the completed build, checking active process-hosted orbs before restarting it. For iterative UI work use Vite as shown above. Verify referenced JS/CSS responses and actual browser rendering, not just the index response. Incident and rationale: [docs/postmortems/2026-09-09-live-web-rebuild.md](docs/postmortems/2026-09-09-live-web-rebuild.md).
+### Frontend-only fixture
 
-### Launch work from an orb
-
-```sh
-pi-orb spawn --prompt 'Implement parser tests and push your branch.'
-```
-
-Returns the new orb's browser URL after creation and its prompt are durably accepted. The independent orb starts in the same project with a fresh checkout; it does not inherit local files or conversation context. Use `--prompt-file <path|->`, `--name`, or `--json` as needed. On unknown acceptance, retry the same arguments with the reported `--id`. See [docs/orb-spawning.md](docs/orb-spawning.md).
-
-### Docker-free frontend-only fixture
-
-This is an alternative to the full service above, not its web-server command. For isolated UI work, run Vite with its in-process protocol fixture; Docker, PostgreSQL, the control plane, and the orb runtime are not started:
+UI work without Docker, database, control plane or runtimes:
 
 ```sh
 npm run dev:frontend
 ```
 
-Open http://localhost:5173. The seeded orb streams a simulated echo for each message, simulates the floating binary terminal and turn notifications, and keeps fixture history only in memory until Vite restarts. It does not exercise the process host provider, Pi, PostgreSQL replication, credentials, or model inference. After fixture-backend or shared-protocol changes, restart the entire frontend process and verify the changed operation on the actual shared preview; Vite reload failure can leave an old API serving HTTP 200. See [docs/web-ui.md](docs/web-ui.md).
+Fixture behavior, the restart rule and serving static builds: [docs/web-ui.md](docs/web-ui.md) ("Frontend development").
+
+## Install on iPhone or iPad
+
+Open the HTTPS app in Safari and choose **Share → Add to Home Screen → Add**, leaving **Open as Web App** enabled. Sign in again if prompted. Details: [docs/web-ui.md](docs/web-ui.md).
+
+## Development
+
+[Design & architecture](DESIGN.md) · [Backlog](TODO.md) · [Tests, E2E & DST replay](docs/testing.md)

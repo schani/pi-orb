@@ -116,8 +116,8 @@ export function IndexProject({
     const previous = previousSelection.current;
     previousSelection.current = { orbId, currentArchived, currentWorking };
     if (!currentArchived) return;
-    if (previous.orbId === orbId && previous.currentWorking && !currentDeleting && !archiveOpen) {
-      navigate("/orbs");
+    if (previous.orbId === orbId && previous.currentWorking && !archiveOpen) {
+      if (!currentDeleting) navigate("/orbs");
     } else if (previous.orbId !== orbId || !previous.currentArchived) {
       setArchiveOpen(true);
     }

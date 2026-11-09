@@ -16,7 +16,7 @@ The GCE provider checks instance absence, ensures the data disk, mints a key (re
 
 ## Why the original tests missed the race
 
-Inspected 2026-09-05: `apps/control-plane/src/adapters/gce/model.dst.test.ts` constructs the real GCE provider without Tailscale options. The scheduled GCE world therefore performs no key mint/revocation or enrollment. `docs/compute-replacement.md` explicitly scoped Tailscale outside DST.
+Inspected 2026-09-05: `apps/control-plane/src/adapters/gce/model.dst.test.ts` constructs the real GCE provider without Tailscale options. The scheduled GCE world therefore performs no key mint/revocation or enrollment. `docs/lifecycle.md` explicitly scoped Tailscale outside DST.
 
 The separate `provider.test.ts` create-conflict test uses scripted HTTP responses with Tailscale disabled and checks adoption of the winner's runtime-token hash. The original Tailscale `client.test.ts` concurrency test used one minter, two different incarnations, and real `setTimeout(1)` delays (now replaced with a deterministic microtask yield); it checks that only the newest key survives, not that the surviving VM holds that key. These isolated assertions can all pass while a competing mint invalidates the winner's enrollment authority. This is a model-composition and invariant gap, not evidence that more seeds would find the race.
 
@@ -36,7 +36,7 @@ Harness findings, also preserved rather than rerun away:
 
 Fix: `HttpTailscaleAuthKeyMinter` revokes only strictly older-incarnation keys during mint; same/newer-incarnation keys survive. Deletion-grade cleanup continues to revoke all exact-orb keys. Both list descriptions and detail-fetch descriptions use the same fence. `apps/control-plane/src/adapters/tailscale/model.dst.test.ts` also schedules an older minter after a newer mint and verifies newer enrollment plus subsequent older-key collection. Production wiring records mint/preserve/revoke decisions as sanitized `lifecycle:` events with orb, requested incarnation, and API key ID, never the secret.
 
-The previous at-most-one-outstanding-key requirement is rejected: it was not atomically enforceable by a revoke-all-before-create sequence. Same-incarnation losing attempts can leave unused non-reusable keys until expiry, higher-incarnation collection, or deletion. This trade-off preserves potentially installed authority; it does not claim a cardinality bound or distributed locking. Full rationale is in `docs/ports.md`.
+The previous at-most-one-outstanding-key requirement is rejected: it was not atomically enforceable by a revoke-all-before-create sequence. Same-incarnation losing attempts can leave unused non-reusable keys until expiry, higher-incarnation collection, or deletion. This trade-off preserves potentially installed authority; it does not claim a cardinality bound or distributed locking. Full rationale is in `docs/http-exposure.md`.
 
 Validation: focused GCE/Tailscale/model suite passed 66 tests, including 50 schedules each for forced creation, entropy creation, and delayed older mint; typecheck and repository lint passed. The initial full unit run passed 1,062 tests with five release-script failures caused by absent `jq`; after installing that prerequisite the release contract file passed all eight tests. Final repository validation passed typecheck, lint, and the complete unit suite: 1,067 passed, one intentionally skipped. No E2E or deployment was performed; runtime/protocol code is unchanged. The original failure logs and traces remain preserved.
 

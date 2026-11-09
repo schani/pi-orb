@@ -90,7 +90,7 @@ function showTooltip(spec: ChartSpec, event: MouseEvent, value: unknown) {
   let y = event.clientY + 14;
   if (x + box.width > window.innerWidth - 8) x = event.clientX - 14 - box.width;
   if (y + box.height > window.innerHeight - 8) y = event.clientY - 14 - box.height;
-  element.style.left = `${x}px`;
+  element.style.left = `${Math.max(8, x)}px`;
   element.style.top = `${y}px`;
 }
 

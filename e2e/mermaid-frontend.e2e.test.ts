@@ -124,7 +124,7 @@ it.each(["chromium", "webkit"] as const)(
       await sequence.hover();
       await sequence.getByRole("button", { name: "Open diagram" }).click();
       const dialog = page.locator("dialog.mermaid-dialog");
-      await expect(dialog.locator("svg")).toBeVisible();
+      await expect(dialog.locator(".mermaid-dialog-canvas svg")).toBeVisible();
       await page.keyboard.press("Escape");
       await expect(dialog).toBeHidden();
 
@@ -153,8 +153,8 @@ flowchart LR
   click A "javascript:globalThis.__mermaidUnsafe=true"`;
       const security = await page.evaluate(`(async () => {
         const { renderMermaid } = await import("/src/lib/mermaid-render.ts");
-        const unsafe = await renderMermaid(${JSON.stringify(source)});
-        const math = await renderMermaid('flowchart LR\\n A["$$E=mc^2$$"]');
+        const unsafe = await renderMermaid(${JSON.stringify(source)}, "light");
+        const math = await renderMermaid('flowchart LR\\n A["$$E=mc^2$$"]', "light");
         const template = document.createElement("template");
         template.innerHTML = unsafe.isOk() ? unsafe.value : "";
         const mathTemplate = document.createElement("template");

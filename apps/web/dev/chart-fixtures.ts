@@ -1,4 +1,9 @@
-import { CHART_CONTENT_TYPE, type ChartSpec, type HistoryRecord } from "@pi-orb/protocol";
+import {
+  CHART_CONTENT_TYPE,
+  type ChartSpec,
+  type HistoryRecord,
+  type LineChart,
+} from "@pi-orb/protocol";
 
 function rng(seed: number) {
   let state = seed;
@@ -223,6 +228,47 @@ export const CHART_FIXTURE_BENCHMARKS: ChartSpec = {
   ).map(([label, from, to]) => ({ label, from, to })),
 };
 
+export const CHART_FIXTURE_RECURRENCE: LineChart = {
+  kind: "line",
+  title: "Query-error recurrence — 15-minute bins, start times (PST)",
+  unit: "%",
+  series: [
+    {
+      name: "HTTP5xx",
+      points: [
+        [1794150900000, 0.008047642040882022],
+        [1794151800000, 0.008544087491455913],
+        [1794152700000, 0.7051337174305615],
+        [1794153600000, 0],
+      ],
+    },
+    {
+      name: "uncaught",
+      points: [
+        [1794150900000, 0.007372456502506636],
+        [1794151800000, 0.007920792079207921],
+        [1794152700000, 0.6789524733268671],
+      ],
+    },
+  ],
+  thresholds: [
+    { value: 0.6702665888, label: "HTTP baselineworst+0.5pp" },
+    { value: 0.6634708845, label: "uncaught baselineworst+0.5pp" },
+  ],
+};
+
+export const CHART_FIXTURE_LONG_THRESHOLDS: LineChart = {
+  ...CHART_FIXTURE_RECURRENCE,
+  title: "Long threshold annotations",
+  thresholds: [
+    {
+      value: 0.6702665888,
+      label: "2× baseline worst; count and persistence also required",
+    },
+    { value: 0.6634708845, label: "x".repeat(80) },
+  ],
+};
+
 export function chartFixtureRecords(createdAt: string): HistoryRecord[] {
   const charts = [
     CHART_FIXTURE_LATENCY,
@@ -235,6 +281,8 @@ export function chartFixtureRecords(createdAt: string): HistoryRecord[] {
     CHART_FIXTURE_FAILURES,
     CHART_FIXTURE_SERVICE_TIME,
     CHART_FIXTURE_BENCHMARKS,
+    CHART_FIXTURE_RECURRENCE,
+    CHART_FIXTURE_LONG_THRESHOLDS,
   ];
   return [
     {
