@@ -1074,11 +1074,6 @@ a.project-new-orb-icon:hover {
   border-left-style: dotted;
 }
 
-.orb-entry-busy .orb-entry-link,
-.orb-entry-failed .orb-entry-link {
-  font-weight: 700;
-}
-
 .orb-entry-stopped .orb-entry-link,
 .orb-entry-sleeping .orb-entry-link,
 .orb-entry-archived .orb-entry-link,
@@ -1799,11 +1794,6 @@ body:has(.orb-page) {
   color: var(--w);
   background: var(--k);
   border-bottom-color: var(--k);
-}
-
-.ix-row-busy > .trunc,
-.ix-row-failed > .trunc {
-  font-weight: 700;
 }
 
 .ix-row-current .glyph,

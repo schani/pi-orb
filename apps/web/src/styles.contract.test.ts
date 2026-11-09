@@ -223,6 +223,19 @@ describe("shared text fields", () => {
   });
 });
 
+it.each([
+  ["dashboard", ".orb-entry"],
+  ["OrbIndex", ".ix-row"],
+])("keeps %s orb names regular, including busy and failed", (_view, prefix) => {
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selector]) =>
+    selector?.includes(prefix),
+  );
+  expect(rules.length).toBeGreaterThan(0);
+  for (const [, selector, declarations] of rules) {
+    expect(declarations, selector).not.toMatch(/font(?:-weight)?\s*:/);
+  }
+});
+
 describe("dashboard layout contract", () => {
   it("uses icon-only creation without a bottom text action", () => {
     expect(css).not.toContain(".project-new-orb-row");
