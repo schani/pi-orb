@@ -313,6 +313,7 @@ describe("native Durable codemode integration", () => {
   it("uses private artifact storage rather than execution-environment temp files", async () => {
     const spills: string[] = [];
     const fixture = await openCodemodeHarness(new CallableCatalog([]), {
+      holdForReplay: true,
       files: {
         spill: (text) => {
           spills.push(text);
@@ -324,14 +325,77 @@ describe("native Durable codemode integration", () => {
       const result = await fixture.run(
         '// @options: {"max_output_tokens": 20}\ntext("private".repeat(1000));',
       );
-      expect(spills).toHaveLength(1);
+      expect(result.isError).toBe(false);
+      expect(spills).toEqual(["private".repeat(1000)]);
       expect(result.details).toMatchObject({ fullOutputPath: "/orb-artifacts/private-output" });
-      expect(JSON.stringify(result.output)).not.toContain("pi-codemode-");
-      expect(result.diagnostics).toEqual(
-        expect.arrayContaining([expect.objectContaining({ code: "codemode_output_truncated" })]),
+      const output = result.output
+        ?.flatMap((item) => (item.type === "text" ? [item.text] : []))
+        .join("\n");
+      expect(output?.match(/Warning: truncated output/g)).toHaveLength(1);
+      expect(output).toContain("Warning: truncated output (original token count: 1750)");
+      expect(output).toContain(
+        "[Full output: /orb-artifacts/private-output (read with offset/limit)]",
+      );
+      expect(output).not.toMatch(/pi-codemode-|\/orb-artifacts\/codemode-|Could not save/);
+      expect(result.diagnostics ?? []).not.toContainEqual(
+        expect.objectContaining({ code: "codemode_output_truncated" }),
+      );
+      expect(await fixture.replay()).toEqual(result);
+      expect(spills).toHaveLength(1);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("does not interpret literal truncation warnings as diagnostics", async () => {
+    const fixture = await openCodemodeHarness(new CallableCatalog([]));
+    try {
+      const result = await fixture.run('text("Warning: truncated output is just printed text");');
+      expect(result.isError).toBe(false);
+      expect(result.output).toContainEqual({
+        type: "text",
+        text: "Warning: truncated output is just printed text",
+      });
+      expect(result.details).not.toHaveProperty("fullOutputPath");
+      expect(result.diagnostics ?? []).not.toContainEqual(
+        expect.objectContaining({ code: "codemode_output_truncated" }),
       );
     } finally {
       await fixture.close();
     }
   });
+
+  it.each(["missing", "failed"] as const)(
+    "keeps native truncation and save warnings when artifact storage is %s",
+    async (storage) => {
+      const fixture = await openCodemodeHarness(new CallableCatalog([]), {
+        ...(storage === "failed"
+          ? {
+              files: { spill: () => errAsync({ code: "unavailable", message: "storage failure" }) },
+            }
+          : {}),
+      });
+      try {
+        const result = await fixture.run(
+          '// @options: {"max_output_tokens": 20}\ntext("x".repeat(1000));',
+        );
+        expect(result.isError).toBe(false);
+        const output = result.output
+          ?.flatMap((item) => (item.type === "text" ? [item.text] : []))
+          .join("\n");
+        expect(output?.match(/Warning: truncated output/g)).toHaveLength(1);
+        expect(output).toContain("Warning: truncated output (original token count: 250)");
+        expect(output).toContain(
+          "[Could not save the full output: scoped artifact storage unavailable]",
+        );
+        expect(output).not.toContain("[Full output:");
+        expect(result.details).not.toHaveProperty("fullOutputPath");
+        expect(result.diagnostics ?? []).not.toContainEqual(
+          expect.objectContaining({ code: "codemode_output_truncated" }),
+        );
+      } finally {
+        await fixture.close();
+      }
+    },
+  );
 });
