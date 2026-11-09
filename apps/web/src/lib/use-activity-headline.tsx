@@ -12,6 +12,10 @@ import { type ActivityHeadlineSource, HeadlineLimiter } from "./activity-headlin
 import { getActivityHeadline } from "./api.ts";
 
 export const HeadlineSlots = createContext<HeadlineLimiter | null>(null);
+export const ActivityHeadlinePreview = createContext<{
+  target: HTMLElement | null;
+  publish: (text: string | undefined, failed: boolean) => void;
+} | null>(null);
 type State = { key: string; text?: string; failed?: boolean };
 
 export function useActivityHeadline(
@@ -22,7 +26,9 @@ export function useActivityHeadline(
   const shared = useContext(HeadlineSlots);
   const local = useMemo(() => new HeadlineLimiter(), []);
   const slots = shared ?? local;
-  const [header, headerRef] = useState<HTMLElement | null>(null);
+  const preview = useContext(ActivityHeadlinePreview);
+  const [ownHeader, headerRef] = useState<HTMLElement | null>(null);
+  const header = preview?.target ?? ownHeader;
   const request = useRef<{
     seen: boolean;
     begin: () => void;
@@ -136,6 +142,10 @@ export function useActivityHeadline(
   };
   const text = typeof marker === "string" ? marker : state.key === key ? state.text : undefined;
   const failed = state.key === key && state.failed === true;
+  const publish = preview?.publish;
+  useEffect(() => {
+    publish?.(text, failed);
+  }, [publish, text, failed]);
   return {
     headerRef,
     headline: failed ? (

@@ -2,6 +2,7 @@ import { createContext, type ReactNode, type Ref, useContext } from "react";
 
 /** Opens every row rendered directly beneath it; nested rows are unaffected. */
 export const ActivityRailOpen = createContext(false);
+export const ActivityRailHidden = createContext(false);
 
 interface ActivityRailRowProps {
   label: ReactNode;
@@ -34,10 +35,12 @@ export function ActivityRailRow({
   onToggle,
 }: ActivityRailRowProps) {
   const forcedOpen = useContext(ActivityRailOpen);
+  const hidden = useContext(ActivityRailHidden);
   return (
     <details
       className={`activity-rail-row activity-rail-row-${state} ${className}`.trim()}
       open={defaultOpen || forcedOpen || undefined}
+      hidden={hidden || undefined}
       onToggle={onToggle === undefined ? undefined : (event) => onToggle(event.currentTarget.open)}
     >
       <summary ref={headerRef}>

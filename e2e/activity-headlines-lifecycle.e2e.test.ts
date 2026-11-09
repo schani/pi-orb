@@ -18,7 +18,10 @@ describe.each([
         import React from 'react';
         import {createRoot} from 'react-dom/client';
         import {flushSync} from 'react-dom';
-        import {ToolActivity} from './apps/web/src/components/ToolActivity.tsx';
+        import {ToolActivity, toolCallStep} from './apps/web/src/components/ToolActivity.tsx';
+        import {ActivityStrip} from './apps/web/src/components/ActivityStrip.tsx';
+        import {detailContext} from './apps/web/src/testkit/display-fixtures.ts';
+        const context = detailContext();
         import {HeadlineSlots} from './apps/web/src/lib/use-activity-headline.tsx';
         import {HeadlineLimiter} from './apps/web/src/lib/activity-headline.ts';
         const observers = [];
@@ -34,7 +37,8 @@ describe.each([
         const slots = new HeadlineLimiter();
         const root = createRoot(document.getElementById('root'));
         const call = n => ({callRecordId: 'record'+n, call: {
-          type:'tool_call', callId:'call'+n, name:'codemode', detailKey:'key'+n, headline:null
+          type:'tool_call', callId:'call'+n, name:'codemode', detailKey:'key'+n, headline:null,
+          code:'await tools.read({path: "file'+n+'"})'
         }});
         window.fixture = {
           render(count, sessionId = 'session', outcome = false) {
@@ -44,7 +48,25 @@ describe.each([
               isError:false, hasImages:false
             }});
             flushSync(() => root.render(<HeadlineSlots.Provider value={slots}>
-              <ToolActivity persisted={persisted} detailContext={{orbId:'orb',sessionId}} />
+              <ToolActivity persisted={persisted} detailContext={{...context,sessionId}} />
+            </HeadlineSlots.Provider>));
+          },
+          strip(count = 2, sessionId = 'session', outcome = false, raw = false) {
+            const steps = Array.from({length:count}, (_, n) => {
+              if(raw && n === count - 1) return {
+                key:'restart', identity:'restart', state:'restart', label:'restart', headline:'restart',
+                node:<div className="record-custom">restart</div>
+              };
+              const tool = call(n);
+              if(outcome && n === 0) Object.assign(tool, {resultRecordId:'outcome', result:{
+                type:'tool_result', callId:'call0', detailKey:'result', headline:null,
+                isError:false, hasImages:false
+              }});
+              const node = <ToolActivity persisted={[tool]} detailContext={{...context,sessionId}} />;
+              return {key:'step'+n, identity:'call'+n, node, ...toolCallStep(tool)};
+            });
+            flushSync(() => root.render(<HeadlineSlots.Provider value={slots}>
+              <ActivityStrip steps={steps} />
             </HeadlineSlots.Provider>));
           },
           visibility(state) {
@@ -71,7 +93,7 @@ describe.each([
           },
           settle(index, failed = false) {
             requests[index].resolve(new Response(JSON.stringify(failed ? {error:'unavailable'} :
-              {headline:'Ready first'}), {status:failed ? 503 : 200}));
+              {headline:requests[index].url.includes('/record0/') ? 'Ready first' : 'Ready second'}), {status:failed ? 503 : 200}));
           },
           snapshot() { return requests.map(r => ({url:r.url,aborted:r.signal.aborted})); },
           block() { const releases=[]; slots.enqueue(r=>releases.push(r)); slots.enqueue(r=>releases.push(r)); this.release=()=>releases[0](); },
@@ -91,10 +113,13 @@ describe.each([
 
   async function fixture(run: (page: Page) => Promise<void>) {
     const page = await browser.newPage();
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
     try {
       await page.setContent('<div id="root"></div>');
       await page.addScriptTag({ content: script });
       await run(page);
+      expect(errors).toEqual([]);
     } finally {
       await page.close();
     }
@@ -166,6 +191,112 @@ describe.each([
         }
       }),
   );
+
+  it.each(["ready", "failed", "pending", "queued"] as const)(
+    "shares the hovered strip's %s summary with its opened header",
+    async (state) =>
+      fixture(async (page) => {
+        await command(page, `fixture.strip(); ${state === "queued" ? "fixture.block();" : ""}`);
+        expect(await requests(page)).toHaveLength(0);
+        expect(await page.locator(".tool-activity-category").count()).toBe(0);
+        const dot = page.locator(".activity-strip-dot").first();
+        await dot.hover();
+        await command(page, "fixture.see('.activity-strip-tip')");
+        expect(await page.locator(".tool-activity-category").count()).toBe(1);
+        expect(await page.locator(".activity-strip-tip").textContent()).toContain(
+          "await tools.read",
+        );
+        expect(await requests(page)).toHaveLength(state === "queued" ? 0 : 1);
+        if (state !== "queued") expect((await requests(page))[0]?.url).toContain("/record0/key0");
+
+        if (state === "ready" || state === "failed") {
+          await command(page, `fixture.settle(0, ${state === "failed"})`);
+          await page
+            .locator(".activity-strip-tip")
+            .getByText(state === "failed" ? "Summary unavailable." : "Ready first")
+            .waitFor();
+        }
+        await dot.click();
+        expect(await page.locator(".activity-strip-body > .tool-activity-category").count()).toBe(
+          1,
+        );
+        expect(await requests(page)).toHaveLength(state === "queued" ? 0 : 1);
+        if (state === "queued") await command(page, "fixture.release()");
+        expect((await requests(page))[0]?.aborted).toBe(false);
+        if (state === "pending" || state === "queued") await command(page, "fixture.settle(0)");
+        const header = page.locator(".tool-activity-category > summary").first();
+        await header
+          .getByText(state === "failed" ? "Summary unavailable." : "Ready first")
+          .waitFor();
+        if (state === "failed") {
+          await page.mouse.move(500, 500);
+          await dot.hover();
+          await page.locator(".activity-strip-tip").getByText("Summary unavailable.").waitFor();
+          expect(await page.locator(".activity-strip-tip button").count()).toBe(0);
+          await command(page, "fixture.strip(); fixture.see('.activity-strip-tip')");
+          expect(await requests(page)).toHaveLength(1);
+          await header.getByRole("button", { name: "Retry" }).click();
+          expect(await requests(page)).toHaveLength(2);
+          await command(page, "fixture.settle(1)");
+          await header.getByText("Ready first").waitFor();
+        }
+        await page.mouse.move(500, 500);
+        await dot.hover();
+        await page.locator(".activity-strip-tip").getByText("Ready first").waitFor();
+        expect(await dot.getAttribute("aria-label")).toBe("codemode · Ready first");
+        expect(await requests(page)).toHaveLength(state === "failed" ? 2 : 1);
+      }),
+  );
+
+  it("retains independent owners across hover, pick and full-strip expansion", async () =>
+    fixture(async (page) => {
+      await command(page, "fixture.strip(3, 'session', false, true)");
+      const dots = page.locator(".activity-strip-dot");
+      await dots.nth(0).hover();
+      await command(page, "fixture.see('.activity-strip-tip')");
+      await dots.nth(1).hover();
+      await command(page, "fixture.see('.activity-strip-tip')");
+      expect((await requests(page)).map((request) => request.url)).toEqual([
+        expect.stringContaining("/record0/key0"),
+        expect.stringContaining("/record1/key1"),
+      ]);
+      expect((await requests(page)).every((request) => !request.aborted)).toBe(true);
+      await command(page, "fixture.settle(0)");
+      expect(await page.locator(".activity-strip-tip").textContent()).not.toContain("Ready first");
+      await command(page, "fixture.settle(1)");
+      await page.locator(".activity-strip-tip").getByText("Ready second").waitFor();
+      await dots.nth(1).click();
+      const rows = page.locator(".activity-strip-body > .tool-activity-category");
+      expect(await rows.nth(0).getAttribute("hidden")).toBe("");
+      await rows.nth(1).getByText("Ready second").waitFor();
+      const stripHeader = page.locator(".activity-strip > summary");
+      await stripHeader.click();
+      await stripHeader.click();
+      await page.locator(".record-custom").waitFor();
+      expect(await rows.nth(0).getAttribute("hidden")).toBeNull();
+      await rows.nth(0).getByText("Ready first").waitFor();
+      await dots.nth(1).click();
+      expect(await rows.nth(0).getAttribute("hidden")).toBe("");
+      expect(await page.locator(".record-custom").getAttribute("hidden")).toBe("");
+      await rows.nth(1).getByText("Ready second").waitFor();
+      expect(await requests(page)).toHaveLength(2);
+    }));
+
+  it("retains a click-only owner's failure through another selection", async () =>
+    fixture(async (page) => {
+      await command(page, "fixture.strip()");
+      const dots = page.locator(".activity-strip-dot");
+      await dots.nth(0).evaluate((node) => (node as unknown as { click: () => void }).click());
+      await command(page, `fixture.see('${category}'); fixture.settle(0, true)`);
+      const first = page.locator(".tool-activity-category").first();
+      await first.getByText("Summary unavailable.").waitFor();
+      await dots.nth(1).evaluate((node) => (node as unknown as { click: () => void }).click());
+      expect(await first.getAttribute("hidden")).toBe("");
+      expect((await requests(page))[0]?.aborted).toBe(false);
+      await dots.nth(0).evaluate((node) => (node as unknown as { click: () => void }).click());
+      await first.getByText("Summary unavailable.").waitFor();
+      expect(await requests(page)).toHaveLength(1);
+    }));
 
   it("does not qualify an unseen first child from the still-visible category header", async () =>
     fixture(async (page) => {

@@ -60,7 +60,8 @@ it("folds interleaved activity into dots that preview, open and overflow", async
     await expectPage(picked).toHaveAttribute("open", "");
     await expectPage(picked.locator(".tool-call-output-error")).toBeVisible();
     await failed.click();
-    await expectPage(picked).toHaveCount(0);
+    await expectPage(picked).toHaveCount(1);
+    await expectPage(picked).toBeHidden();
     await expectPage(first).not.toHaveAttribute("open", "");
 
     await first.locator(":scope > summary .activity-rail-label").click();
