@@ -783,7 +783,7 @@ describe("HistoryView turn structure", () => {
     expect(html).toContain('class="visually-hidden">You:</span>');
   });
 
-  it("places receipt batches once, prefers canonical content and preserves the live tail", () => {
+  it("uses canonical bodies without hydrating old receipts and preserves pending input and the live tail", () => {
     const inbox = (id: string): OrbMessageView => ({
       id,
       orbId: "orb-1",
@@ -814,14 +814,22 @@ describe("HistoryView turn structure", () => {
         ]}
         tools={[]}
         busy
-        queuedMessages={[inbox("a"), inbox("b"), inbox("c")]}
+        queuedMessages={[
+          inbox("a"),
+          inbox("b"),
+          inbox("c"),
+          { ...inbox("pending"), status: "queued" },
+        ]}
       />,
     );
-    expect(html.match(/body-[abc]/g)).toEqual(["body-b", "body-a", "body-c"]);
+    expect(html.match(/body-[abc]/g)).toEqual(["body-c"]);
+    expect(html).toContain("body-pending");
     expect(html).toContain("Live continuation.");
-    expect(html).toContain('data-history-row="batch"');
+    expect(html).not.toContain('data-history-row="batch"');
     expect(html).not.toContain('data-history-row="duplicate"');
-    expect(html.match(/class="rec rec-orb"/g)).toHaveLength(1);
+    expect(html.match(/class="rec rec-orb"/g)).toHaveLength(2);
+    expect(html.indexOf("After receipt.")).toBeLessThan(html.indexOf("body-pending"));
+    expect(html.indexOf("body-pending")).toBeLessThan(html.indexOf("Live continuation."));
   });
 
   it("shows a message the runtime rejected as failed, with its reason", () => {

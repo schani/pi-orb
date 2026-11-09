@@ -20,10 +20,13 @@ nativeIt(
     history
       .correlate(result.root.steerUuid, { messageIds: ["steer"], operationId: "operation" })
       ._unsafeUnwrap();
-    history.scan("root.jsonl")._unsafeUnwrap();
+    history
+      .scan("root.jsonl", () => [{ type: "text", text: "NATIVE_STEER_CHANGE_COURSE" }])
+      ._unsafeUnwrap();
     expect(history.view.find((record) => record.id === result.root.steerUuid)).toMatchObject({
-      type: "event",
-      eventType: "claude.input_receipt",
+      type: "message",
+      role: "user",
+      content: [{ type: "text", text: "NATIVE_STEER_CHANGE_COURSE" }],
       inboxMessageIds: ["steer"],
     });
     expect(result.steeredWhileToolBlocked).toBe(true);

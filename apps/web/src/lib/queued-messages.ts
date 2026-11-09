@@ -35,19 +35,10 @@ export function createMutationEpoch(): MutationEpoch {
   };
 }
 
-function acknowledgedInboxMessageIds(records: readonly DisplayRecord[]): Set<string> {
+export function representedInboxMessageIds(records: readonly DisplayRecord[]): Set<string> {
   return new Set(
     records.flatMap((record) =>
       record.type === "message" || record.type === "event" ? (record.inboxMessageIds ?? []) : [],
-    ),
-  );
-}
-
-/** Contentless Claude consumption receipts need the existing inbox body for presentation. */
-export function representedInboxMessageIds(records: readonly DisplayRecord[]): Set<string> {
-  return acknowledgedInboxMessageIds(
-    records.filter(
-      (record) => record.type !== "event" || record.eventType !== "claude.input_receipt",
     ),
   );
 }
@@ -57,8 +48,7 @@ export function representedInboxMessageIds(records: readonly DisplayRecord[]): S
  *
  * `delivered` is a control-plane replication fact, not proof that this browser
  * has applied the corresponding record. Retire it only at the identity-based
- * content-bearing history handoff. Failed rows remain visible; hidden Claude
- * consumption receipts retain their inbox body at the receipt position.
+ * history handoff. Failed rows remain visible.
  */
 export function messagesAwaitingHistory(
   items: readonly OrbMessageView[],
@@ -101,7 +91,7 @@ export function hasDeliveredMessageAwaitingHistory(
   items: readonly OrbMessageView[],
   records: readonly DisplayRecord[],
 ): boolean {
-  const acknowledged = acknowledgedInboxMessageIds(records);
+  const acknowledged = representedInboxMessageIds(records);
   return items.some((message) => message.status === "delivered" && !acknowledged.has(message.id));
 }
 

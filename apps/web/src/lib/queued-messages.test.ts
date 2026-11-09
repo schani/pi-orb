@@ -76,7 +76,7 @@ describe("queued message list updates", () => {
       eventType: "claude.input_receipt",
       inboxMessageIds: [delivered.id],
     });
-    expect(messagesAwaitingHistory([delivered], [receipt])).toEqual([delivered]);
+    expect(messagesAwaitingHistory([delivered], [receipt])).toEqual([]);
     expect(hasDeliveredMessageAwaitingHistory([delivered], [receipt])).toBe(false);
     expect(hasDeliveredMessageAwaitingHistory([message("other", "delivered")], [receipt])).toBe(
       true,

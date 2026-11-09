@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { projectDisplayRecord } from "@pi-orb/protocol";
+import { projectDisplayRecord, projectRecordDetail } from "@pi-orb/protocol";
 import { expect as check, chromium, webkit } from "@playwright/test";
 import { createServer } from "vite";
 import { it } from "vitest";
@@ -40,10 +40,19 @@ it.each(["chromium", "webkit"] as const)(
       createdAt: "2026-10-03T00:00:00.000Z",
       updatedAt: "2026-10-03T00:00:00.000Z",
     };
+    const canonical = {
+      id: "inbox-native",
+      parentId: null,
+      timestamp: row.createdAt,
+      type: "message" as const,
+      role: "user" as const,
+      content: row.content,
+      inboxMessageIds: [id],
+      overflow: {},
+    };
     let delivered = false,
       fail = false,
-      repairStarted = false,
-      canonical = false;
+      repairStarted = false;
     let historyReads = 0;
     const deltas: { tracked: string; bytes: number }[] = [];
     let release = () => {};
@@ -51,6 +60,7 @@ it.each(["chromium", "webkit"] as const)(
       release = resolve;
     });
     try {
+      await page.clock.install();
       await page.route(`**/api/v1/orbs/${orb}`, async (route) => {
         const response = await route.fetch();
         await route.fulfill({
@@ -65,18 +75,7 @@ it.each(["chromium", "webkit"] as const)(
         if (delivered) {
           repairStarted = true;
           await gate;
-          view.records.push(
-            projectDisplayRecord({
-              id: "inbox-native",
-              parentId: view.cursor,
-              timestamp: row.createdAt,
-              ...(canonical
-                ? { type: "message" as const, role: "user" as const, content: row.content }
-                : { type: "event" as const, eventType: "claude.input_receipt" }),
-              inboxMessageIds: [id],
-              overflow: {},
-            }),
-          );
+          view.records.push(projectDisplayRecord({ ...canonical, parentId: view.cursor }));
           view.records.push(
             projectDisplayRecord({
               id: "after-receipt",
@@ -93,6 +92,21 @@ it.each(["chromium", "webkit"] as const)(
         }
         await route.fulfill({ response, json: view });
       });
+      await page.route(`**/api/v1/orbs/${orb}/details/inbox-native/**`, (route) =>
+        route.fulfill({
+          json: {
+            v: 1,
+            state: "committed",
+            sessionId: new URL(route.request().url()).searchParams.get("sessionId"),
+            recordId: canonical.id,
+            detailKey: `${canonical.id}:1`,
+            body: projectRecordDetail(canonical, `${canonical.id}:1`),
+          },
+        }),
+      );
+      await page.route(`**/api/v1/orbs/${orb}/images/inbox-native/**`, (route) =>
+        route.fulfill({ contentType: "image/png", body: Buffer.from(image, "base64") }),
+      );
       await page.route(`**/api/v1/orbs/${orb}/messages/poll`, async (route) => {
         const query = route.request().postDataJSON() as { after: number; tracked: string[] };
         if (fail)
@@ -134,6 +148,7 @@ it.each(["chromium", "webkit"] as const)(
       await check(page.locator(".rec-q")).toContainText("INBOX_DELTA_PROMPT");
       await check(page.locator(".rec-q .rec-status")).toHaveText("paused");
       delivered = true;
+      await page.clock.runFor(2000);
       await check.poll(() => repairStarted).toBe(true);
       await check(page.locator(".rec-q .rec-status")).toHaveText("delivered");
       release();
@@ -142,7 +157,7 @@ it.each(["chromium", "webkit"] as const)(
         const receipt = page.locator('[data-history-row="inbox-native"]');
         await check(receipt).toContainText("INBOX_DELTA_PROMPT");
         await check(page.getByText("INBOX_DELTA_PROMPT", { exact: true })).toHaveCount(1);
-        await check(receipt.locator(".rec-status")).toHaveText("delivered");
+        await check(page.locator(".rec-q")).toHaveCount(0);
         await check(page.locator(".history .msg-image")).toHaveCount(1);
         await check
           .poll(() =>
@@ -158,19 +173,20 @@ it.each(["chromium", "webkit"] as const)(
         ).toEqual(["inbox-native", "after-receipt"]);
         const reads = historyReads;
         const polls = deltas.length;
-        await check.poll(() => deltas.length).toBeGreaterThanOrEqual(polls + 2);
+        for (const count of [1, 2]) {
+          await page.clock.runFor(2000);
+          await check.poll(() => deltas.length).toBeGreaterThanOrEqual(polls + count);
+        }
         check(historyReads).toBe(reads);
-        check(deltas.slice(polls).every((delta) => delta.tracked === id)).toBe(true);
+        check(deltas.slice(polls).every((delta) => delta.tracked === "")).toBe(true);
       }
-      canonical = true;
-      await page.reload();
-      await check(page.locator(".rec-q")).toHaveCount(0);
-      await check(page.locator(".history")).toContainText("INBOX_DELTA_PROMPT");
       await check.poll(() => deltas.some((delta) => delta.tracked === "")).toBe(true);
       check(deltas.every((delta) => delta.bytes < 1000)).toBe(true);
       fail = true;
+      await page.clock.runFor(2000);
       await check(page.getByText("inbox unavailable:", { exact: false })).toBeVisible();
       fail = false;
+      await page.clock.runFor(2000);
       await check(page.getByText("inbox unavailable:", { exact: false })).toHaveCount(0);
     } finally {
       release();
