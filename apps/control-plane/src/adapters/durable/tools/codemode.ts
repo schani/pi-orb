@@ -139,21 +139,6 @@ export function codemodeTool(
             code: "resource_limit",
             message: CALLBACK_LIMIT_MESSAGE,
           });
-        const spilled = object(result.details) && typeof result.details.fullOutputPath === "string";
-        if (
-          !diagnostics.some((item) => item.code === "codemode_output_truncated") &&
-          (spilled ||
-            result.output?.some(
-              (item) => item.type === "text" && item.text.includes("Warning: truncated output"),
-            ))
-        )
-          diagnostics.push({
-            severity: spilled ? "info" : "warn",
-            code: "codemode_output_truncated",
-            message: spilled
-              ? "Code-mode output spilled to a private artifact."
-              : "Code-mode output truncated; artifact storage unavailable.",
-          });
         if (resources.cpu.throttledMs >= 100 && !cached)
           result = {
             ...result,

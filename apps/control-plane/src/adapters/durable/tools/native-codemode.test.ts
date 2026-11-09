@@ -45,7 +45,7 @@ describe("native Durable codemode integration", () => {
           execute: async (args, api) => {
             expect(args).toEqual({ secret: "CANARY_SECRET" });
             identities.push(api.callId);
-            return { output: [{ type: "text", text: "recorded" }] };
+            return { output: [{ type: "text", text: "Warning: truncated output" }] };
           },
         }),
       ]),
@@ -54,8 +54,11 @@ describe("native Durable codemode integration", () => {
     try {
       const result = await fixture.run('text(await tools.record({secret:"CANARY_SECRET"}));');
       expect(result.isError).toBe(false);
+      expect(result.diagnostics ?? []).not.toContainEqual(
+        expect.objectContaining({ code: "codemode_output_truncated" }),
+      );
       expect(identities).toEqual([expect.stringMatching(/\/c1$/)]);
-      expect(result.output).toContainEqual({ type: "text", text: "recorded" });
+      expect(result.output).toContainEqual({ type: "text", text: "Warning: truncated output" });
       expect(result.details).not.toHaveProperty("calls");
       expect(result.details).not.toHaveProperty("omittedCalls");
       expect(JSON.stringify(result.details)).not.toContain("CANARY_SECRET");
@@ -327,8 +330,9 @@ describe("native Durable codemode integration", () => {
       expect(spills).toHaveLength(1);
       expect(result.details).toMatchObject({ fullOutputPath: "/orb-artifacts/private-output" });
       expect(JSON.stringify(result.output)).not.toContain("pi-codemode-");
-      expect(result.diagnostics).toEqual(
-        expect.arrayContaining([expect.objectContaining({ code: "codemode_output_truncated" })]),
+      expect(JSON.stringify(result.output)).toContain("Warning: truncated output");
+      expect(result.diagnostics ?? []).not.toContainEqual(
+        expect.objectContaining({ code: "codemode_output_truncated" }),
       );
     } finally {
       await fixture.close();
