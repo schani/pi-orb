@@ -1,5 +1,15 @@
-import { Fragment, type ReactNode, useLayoutEffect, useRef, useState } from "react";
-import { ActivityRailOpen, ActivityRailRow } from "./ActivityRailRow.tsx";
+import {
+  cloneElement,
+  Fragment,
+  isValidElement,
+  type ReactNode,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { ActivityHeadlinePreview } from "../lib/use-activity-headline.tsx";
+import { ActivityRailHidden, ActivityRailOpen, ActivityRailRow } from "./ActivityRailRow.tsx";
 
 export type ActivityStepState =
   | "thinking"
@@ -67,9 +77,39 @@ export function groupActivity(
 }
 
 interface Tip {
-  step: ActivityStep;
+  key: string;
   left: number;
   top: number;
+}
+type Preview = { text: string | undefined; failed: boolean };
+
+function StepOwner({
+  step,
+  target,
+  picked,
+  publish,
+}: {
+  step: ActivityStep;
+  target: HTMLElement | null;
+  picked: string | null;
+  publish: (key: string, text: string | undefined, failed: boolean) => void;
+}) {
+  const update = useCallback(
+    (text: string | undefined, failed: boolean) => publish(step.key, text, failed),
+    [publish, step.key],
+  );
+  const hidden = picked !== null && picked !== step.key;
+  const node =
+    isValidElement<{ hidden?: boolean }>(step.node) && typeof step.node.type === "string"
+      ? cloneElement(step.node, { hidden })
+      : step.node;
+  return (
+    <ActivityHeadlinePreview value={{ target, publish: update }}>
+      <ActivityRailHidden value={hidden}>
+        <ActivityRailOpen value={picked === step.key}>{node}</ActivityRailOpen>
+      </ActivityRailHidden>
+    </ActivityHeadlinePreview>
+  );
 }
 
 export function ActivityStrip({
@@ -95,6 +135,22 @@ export function ActivityStrip({
     }
   };
   const [tip, setTip] = useState<Tip | null>(null);
+  const [tipHeader, setTipHeader] = useState<HTMLSpanElement | null>(null);
+  const [visited, setVisited] = useState<ReadonlySet<string>>(() => new Set());
+  const visit = (key: string) =>
+    setVisited((current) => (current.has(key) ? current : new Set(current).add(key)));
+  const [previews, setPreviews] = useState<ReadonlyMap<string, Preview>>(() => new Map());
+  const publish = useCallback((key: string, text: string | undefined, failed: boolean) => {
+    setPreviews((current) => {
+      const previous = current.get(key);
+      if (previous?.text === text && (previous?.failed ?? false) === failed) return current;
+      return new Map(current).set(key, { text, failed });
+    });
+  }, []);
+  const headline = (step: ActivityStep) => {
+    const preview = previews.get(step.key);
+    return preview?.failed ? "Summary unavailable." : (preview?.text ?? step.headline);
+  };
 
   useLayoutEffect(() => {
     const element = dotsRef.current;
@@ -110,6 +166,7 @@ export function ActivityStrip({
   const hidden = steps.length - capacity;
   const shown = steps.slice(hidden);
   const pickedStep = picked === null ? undefined : steps.find((step) => step.key === picked);
+  const tipStep = tip === null ? undefined : steps.find((step) => step.key === tip.key);
 
   return (
     <ActivityRailRow
@@ -127,15 +184,17 @@ export function ActivityStrip({
                 step.key === picked ? " activity-strip-picked" : ""
               }`}
               data-step={step.state}
-              aria-label={step.headline === "" ? step.label : `${step.label} · ${step.headline}`}
+              aria-label={headline(step) === "" ? step.label : `${step.label} · ${headline(step)}`}
               aria-pressed={step.key === picked}
               onMouseLeave={() => setTip(null)}
               onMouseEnter={(event) => {
                 const rect = event.currentTarget.getBoundingClientRect();
-                setTip({ step, left: rect.left, top: rect.top });
+                visit(step.key);
+                setTip({ key: step.key, left: rect.left, top: rect.top });
               }}
               onClick={(event) => {
                 event.preventDefault();
+                visit(step.key);
                 remember(false);
                 setOpen(false);
                 setPicked((current) => (current === step.key ? null : step.key));
@@ -159,8 +218,9 @@ export function ActivityStrip({
               )}
             </button>
           ))}
-          {tip !== null && (
+          {tip !== null && tipStep !== undefined && (
             <span
+              ref={setTipHeader}
               className="activity-strip-tip"
               role="tooltip"
               style={{
@@ -169,10 +229,10 @@ export function ActivityStrip({
                 maxWidth: `min(60ch, calc(100vw - ${Math.max(4, tip.left - 16) + 8}px))`,
               }}
             >
-              <span className={`activity-strip-tip-label activity-strip-${tip.step.state}`}>
-                {tip.step.label}
+              <span className={`activity-strip-tip-label activity-strip-${tipStep.state}`}>
+                {tipStep.label}
               </span>
-              {tip.step.headline !== "" && ` · ${tip.step.headline}`}
+              {headline(tipStep) !== "" && ` · ${headline(tipStep)}`}
             </span>
           )}
         </span>
@@ -189,17 +249,19 @@ export function ActivityStrip({
         if (!value) setPicked(null);
       }}
     >
-      {(mounted || pickedStep !== undefined) && (
-        <div className="activity-strip-body">
-          {pickedStep !== undefined ? (
-            <ActivityRailOpen key={pickedStep.key} value={true}>
-              {pickedStep.node}
-            </ActivityRailOpen>
-          ) : (
-            steps.map((step) => <Fragment key={step.key}>{step.node}</Fragment>)
-          )}
-        </div>
-      )}
+      <div className="activity-strip-body">
+        {steps.map((step) =>
+          mounted || visited.has(step.key) || picked === step.key ? (
+            <StepOwner
+              key={step.key}
+              step={step}
+              target={tip?.key === step.key ? tipHeader : null}
+              picked={pickedStep?.key ?? null}
+              publish={publish}
+            />
+          ) : null,
+        )}
+      </div>
     </ActivityRailRow>
   );
 }

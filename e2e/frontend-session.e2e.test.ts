@@ -1382,7 +1382,7 @@ describe("frontend-only browser behavior", () => {
           };
         });
         const strip = page.locator(".activity-strip", {
-          has: page.locator('[aria-label="commands · npm test -- HistoryView.test.tsx"]'),
+          has: page.getByRole("button", { name: /^commands(?: ·|$)/ }),
         });
         await strip.locator(":scope > summary .activity-rail-label").click();
         const commands = strip
