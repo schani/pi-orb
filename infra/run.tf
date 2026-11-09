@@ -57,6 +57,19 @@ resource "google_cloud_run_v2_service" "issuer" {
     }
     containers {
       image = var.control_plane_image
+      liveness_probe {
+        failure_threshold = 3
+        period_seconds    = 10
+        timeout_seconds   = 2
+        http_get {
+          path = "/health"
+          port = 8080
+          http_headers {
+            name  = "Host"
+            value = trimprefix(local.app_origin, "https://")
+          }
+        }
+      }
       env {
         name  = "PI_ORB_RELEASE_ACTIVATION_BUCKET"
         value = local.foundation.state_bucket
