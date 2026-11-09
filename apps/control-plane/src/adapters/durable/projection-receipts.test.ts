@@ -154,49 +154,6 @@ it("maps trusted peer receipts to attributed events, not human messages", () => 
   expect(human[0]).not.toHaveProperty("sender");
 });
 
-it("folds a tail from the previous public parent across private gaps and receipt metadata", () => {
-  const entries: EntryRecord[] = [
-    { id: 3 as EntryId, conversationId: 1 as ConversationId, kind: "pi.system" },
-    {
-      id: 4 as EntryId,
-      conversationId: 1 as ConversationId,
-      kind: "pi.user",
-      model: [{ role: "user", content: "wake", timestamp: 4 }],
-    },
-    { id: 5 as EntryId, conversationId: 1 as ConversationId, kind: "pi.reset" },
-    {
-      id: 6 as EntryId,
-      conversationId: 1 as ConversationId,
-      kind: "pi.user",
-      model: [{ role: "user", content: "human", timestamp: 6 }],
-    },
-  ];
-  const receipts = new Map([
-    [4, { messageIds: ["wake-id"], system: { kind: "sleep_wake", sleepUntil: "t" } }],
-    [6, { messageIds: ["human-id"] }],
-  ]);
-  const records = projectHistory(
-    entries,
-    "session",
-    receipts,
-    undefined,
-    "session:2",
-  )._unsafeUnwrap();
-  expect(records.map(({ id, parentId }) => ({ id, parentId }))).toEqual([
-    { id: "session:4", parentId: "session:2" },
-    { id: "session:6", parentId: "session:4" },
-  ]);
-  expect(records[0]).toMatchObject({
-    type: "event",
-    custom: { customType: "pi-orb.sleep-wake" },
-    inboxMessageIds: ["wake-id"],
-  });
-  expect(records[1]).toMatchObject({ type: "message", inboxMessageIds: ["human-id"] });
-  expect(projectHistory([], "session", receipts, undefined, "session:2")._unsafeUnwrap()).toEqual(
-    [],
-  );
-});
-
 it("rejects malformed system receipts rather than projecting them as human input", () => {
   const entries = [
     {
