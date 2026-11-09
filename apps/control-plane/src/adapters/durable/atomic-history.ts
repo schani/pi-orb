@@ -1,7 +1,6 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import {
-  type Cursor,
-  type EntryRecord,
+  type EntryId,
   ROOT_CONVERSATION_ID,
   type StorageWrite,
   type SubmissionId,
@@ -15,7 +14,7 @@ import { arrayParam } from "../pg/client.ts";
 import { commitHistoryTransaction } from "../pg/store.ts";
 import { projectNativeInboxCommit } from "./inbox-admission.ts";
 import { NOTIFICATION_REQUEST_PREFIX, projectNotificationAdmission } from "./notifications.ts";
-import { type PublicEntryReceipt, projectHistory } from "./projection.ts";
+import { type PublicEntryReceipt, projectEntry, projectHistory } from "./projection.ts";
 
 /** Task/progress/store documents never trigger a root transcript scan. */
 export function hasPublicHistoryWrites(
@@ -47,22 +46,24 @@ export function hasPublicHistoryWrites(
   ).map((result) => result.rows.length > 0);
 }
 
-/** Reads through the caller's native commit transaction, never through live Harness state. */
+/** Complete accepted batches project through the same transaction, in native commit order. */
 export async function projectNativeCommit(
   query: Query,
   orbId: string,
-  writes?: readonly StorageWrite[],
+  writes: readonly StorageWrite[],
   admittedSubmissions: ReadonlySet<SubmissionId> = new Set(),
 ) {
-  if (writes) {
-    const notification = await projectNotificationAdmission(query, orbId, writes);
-    if (notification.isErr()) return err(notification.error);
-    const admitted = await projectNativeInboxCommit(query, orbId, writes, admittedSubmissions);
-    if (admitted.isErr()) return err(admitted.error);
-    const dirty = await hasPublicHistoryWrites(query, orbId, writes);
-    if (dirty.isErr()) return err(dirty.error);
-    if (!dirty.value) return ok(undefined);
-  }
+  const notification = await projectNotificationAdmission(query, orbId, writes);
+  if (notification.isErr()) return err(notification.error);
+  const admitted = await projectNativeInboxCommit(query, orbId, writes, admittedSubmissions);
+  if (admitted.isErr()) return err(admitted.error);
+  const dirty = await hasPublicHistoryWrites(query, orbId, writes);
+  if (dirty.isErr()) return err(dirty.error);
+  if (!dirty.value) return ok(undefined);
+  const cursor = await query("SELECT replication_cursor FROM orbs WHERE id=$1 FOR UPDATE", [orbId]);
+  if (cursor.isErr()) return err(cursor.error);
+  const stored = cursor.value.rows[0]?.replication_cursor;
+  const after = stored == null ? null : String(stored);
   const read = await ResultAsync.fromPromise(
     (async () => {
       const sql = executor(query, orbId);
@@ -89,52 +90,51 @@ export async function projectNativeCommit(
         if (typeof value.sessionId !== "string" || typeof value.timestamp !== "number") return null;
         const receipts = new Map<number, PublicEntryReceipt>();
         const notifications = new Set<number>();
-        let cursor: Cursor | undefined;
-        do {
-          const page = await storage.scanSubmissions(
-            { conversationId: root.id },
-            500,
-            cursor,
-            BACKGROUND_CONTEXT,
-          );
-          for (const submission of page.items) {
-            if (
-              submission.entry !== undefined &&
-              submission.requestId?.startsWith(NOTIFICATION_REQUEST_PREFIX)
-            )
-              notifications.add(submission.entry);
-            if (submission.entry === undefined || !submission.requestId?.startsWith("inbox:"))
-              continue;
-            const raw = value.receipts;
-            if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
-            const receipt = raw[submission.requestId.slice(6)];
-            if (
-              !receipt ||
-              typeof receipt !== "object" ||
-              Array.isArray(receipt) ||
-              !Array.isArray(receipt.messageIds)
-            )
-              continue;
-            const system = receipt.system;
-            receipts.set(submission.entry, {
-              messageIds: receipt.messageIds.filter((id): id is string => typeof id === "string"),
-              ...(system === undefined ? {} : { system }),
-            });
+        const entries = writes.flatMap((write) =>
+          write.type === "entry" && write.value.conversationId === root.id ? [write.value] : [],
+        );
+        for (const write of writes) {
+          if (write.type !== "submission" || write.value.conversationId !== root.id) continue;
+          const submission = write.value;
+          if (
+            submission.entry !== undefined &&
+            submission.requestId?.startsWith(NOTIFICATION_REQUEST_PREFIX)
+          )
+            notifications.add(submission.entry);
+          if (submission.entry === undefined || !submission.requestId?.startsWith("inbox:"))
+            continue;
+          const raw = value.receipts;
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+          const receipt = raw[submission.requestId.slice(6)];
+          if (
+            !receipt ||
+            typeof receipt !== "object" ||
+            Array.isArray(receipt) ||
+            !Array.isArray(receipt.messageIds)
+          )
+            continue;
+          const system = receipt.system;
+          receipts.set(submission.entry, {
+            messageIds: receipt.messageIds.filter((id): id is string => typeof id === "string"),
+            ...(system === undefined ? {} : { system }),
+          });
+        }
+        let cursorValid = after === null;
+        let afterId = -1;
+        if (after?.startsWith(`${value.sessionId}:`)) {
+          afterId = Number(after.slice(value.sessionId.length + 1));
+          if (
+            Number.isSafeInteger(afterId) &&
+            afterId >= 0 &&
+            after === `${value.sessionId}:${afterId}`
+          ) {
+            const source = await storage.entry(afterId as EntryId, BACKGROUND_CONTEXT);
+            if (source?.entry.conversationId === root.id) {
+              const mapped = projectEntry(source.entry, null, value.sessionId);
+              cursorValid = mapped.isOk() && mapped.value?.id === after;
+            }
           }
-          cursor = page.next;
-        } while (cursor);
-        const entries: EntryRecord[] = [];
-        cursor = undefined;
-        do {
-          const page = await storage.scanEntries(
-            { conversationId: root.id },
-            500,
-            cursor,
-            BACKGROUND_CONTEXT,
-          );
-          entries.push(...page.items);
-          cursor = page.next;
-        } while (cursor);
+        }
         entries.sort((a, b) => a.id - b.id);
         return {
           session: {
@@ -143,6 +143,8 @@ export async function projectNativeCommit(
             overflow: { harness: "pi-durable" },
           },
           entries,
+          cursorValid,
+          afterId,
           receipts,
           notifications,
         };
@@ -158,11 +160,18 @@ export async function projectNativeCommit(
   );
   if (read.isErr()) return err(read.error);
   if (!read.value) return ok(undefined);
+  if (!read.value.cursorValid)
+    return err<never, AuthorityError>({
+      type: "authority_error",
+      code: "projection",
+      message: "Public cursor absent from native history",
+    });
   const projected = projectHistory(
     read.value.entries,
     read.value.session.id,
     read.value.receipts,
     read.value.notifications,
+    after,
   );
   if (projected.isErr())
     return err<never, AuthorityError>({
@@ -170,18 +179,15 @@ export async function projectNativeCommit(
       code: "projection",
       message: "Native history mapping failed",
     });
-  const cursor = await query("SELECT replication_cursor FROM orbs WHERE id=$1 FOR UPDATE", [orbId]);
-  if (cursor.isErr()) return err(cursor.error);
-  const stored = cursor.value.rows[0]?.replication_cursor;
-  const after = stored == null ? null : String(stored);
-  const index = after === null ? -1 : projected.value.findIndex((record) => record.id === after);
-  if (after !== null && index < 0)
+  const { session, afterId } = read.value;
+  // Native entries are immutable; an older public append cannot extend this replica.
+  if (projected.value.some((record) => Number(record.id.slice(session.id.length + 1)) <= afterId))
     return err<never, AuthorityError>({
       type: "authority_error",
       code: "projection",
-      message: "Public cursor absent from native history",
+      message: "Native history batch precedes public cursor",
     });
-  const records = projected.value.slice(index + 1);
+  const records = projected.value;
   const last = records.at(-1)?.id ?? after;
   const committed = await commitHistoryTransaction(query, {
     orbId,

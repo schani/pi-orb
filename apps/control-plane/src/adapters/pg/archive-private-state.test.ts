@@ -46,7 +46,9 @@ it("seals the retained transcript and deletes private authority, resources and s
       (await db.query("SELECT count(*) AS n FROM orb_agent_artifacts"))._unsafeUnwrap().rows[0]?.n,
     ).toBe(1);
     const storage = (
-      await authority.open(owner, { project: (query) => projectNativeCommit(query, orb.id) })
+      await authority.open(owner, {
+        project: (query, writes) => projectNativeCommit(query, orb.id, writes),
+      })
     )._unsafeUnwrap();
     const harness = await Harness.open(
       storage,
