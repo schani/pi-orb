@@ -3118,13 +3118,13 @@ pre,
   font-size: 11px;
   line-height: 18px;
 }
-th.link-timeline-dot {
+td.link-timeline-dot {
   width: calc(12px + 2 * var(--link-timeline-pad));
 }
-th.link-timeline-bars {
+td.link-timeline-bars {
   width: 55%;
 }
-th.link-timeline-duration {
+td.link-timeline-duration {
   width: calc(7ch + 2 * var(--link-timeline-pad));
 }
 .link-timeline .link-timeline-duration {
@@ -3136,14 +3136,6 @@ th.link-timeline-duration {
 .link-timeline-dot > .activity-strip-dot {
   height: 18px;
   margin: 0 auto;
-}
-.link-timeline th {
-  padding: 2px var(--link-timeline-pad);
-  color: var(--g3);
-  font-weight: 400;
-  text-align: left;
-  white-space: nowrap;
-  box-shadow: inset 0 -1px 0 var(--k);
 }
 .link-timeline td {
   padding: 0 var(--link-timeline-pad);

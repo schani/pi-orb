@@ -163,14 +163,6 @@ function Waterfall({ checks, now }: { checks: readonly OrbLinkCheck[]; now: numb
   return (
     <>
       <table className="link-timeline">
-        <thead>
-          <tr>
-            <th className="link-timeline-name">check</th>
-            <th className="link-timeline-dot" />
-            <th className="link-timeline-bars" />
-            <th className="link-timeline-duration">duration</th>
-          </tr>
-        </thead>
         <tbody>
           {checks.map((check, index) => [
             row(
