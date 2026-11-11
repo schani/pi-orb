@@ -81,12 +81,7 @@ import { DEFAULT_BROKER_CONSTANTS, DEFAULT_ISSUER_CONSTANTS } from "./domain/con
 import { ControlState } from "./domain/control-state.ts";
 import { GithubAuthGate } from "./domain/github-auth.ts";
 import { HarnessAgentPlane } from "./domain/harness-agent-plane.ts";
-import {
-  readOrbBootContext,
-  requestOrbArchive,
-  requestOrbDeletion,
-  requestOrbSleep,
-} from "./domain/lifecycle.ts";
+import { readOrbBootContext, requestOrbSleep } from "./domain/lifecycle.ts";
 import { logEvent } from "./domain/log.ts";
 import {
   hostingCleanupLoop,
@@ -1047,8 +1042,6 @@ export async function main(
     sleepSelf: (task, orbId, caller, durationSeconds, sleepId) =>
       requestOrbSleep(task, deps, orbId, caller, durationSeconds, sleepId),
     readBootContext: (task, orbId, caller) => readOrbBootContext(task, deps, orbId, caller),
-    archiveSelf: (task, orbId, caller) => requestOrbArchive(task, deps, orbId, caller),
-    deleteSelf: (task, orbId, caller) => requestOrbDeletion(task, deps, orbId, caller),
     store: deps.store,
     brokerForUser,
     claudeCredential: (task, orb) => claudeAuth.grantForOrb(task, deps.store, orb),

@@ -1,5 +1,6 @@
 import {
   HistorySearchRequestSchema,
+  OrbCleanupRequestSchema,
   type OrbSpawnRequest,
   type PreviewError,
 } from "@pi-orb/protocol";
@@ -7,6 +8,7 @@ import type { SimulationTask } from "determined";
 import { err, ok, ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
 import { acceptsCentralAgentCaller } from "./agent-authorization.ts";
+import type { StoreError } from "./errors.ts";
 import { requestOrbArchive, requestOrbDeletion, requestOrbSleep } from "./lifecycle.ts";
 import type { OrbRow } from "./orb.ts";
 import { addOrbLink } from "./orb-links.ts";
@@ -30,7 +32,9 @@ export interface OrbAgentIdentity {
   readonly runtimeTokenHash: string;
 }
 export type OrbAgentRequest =
-  | { kind: "self" | "list" | "archive" | "delete" | "notification_admission" | "list_previews" }
+  | { kind: "self" | "notification_admission" | "list_previews" }
+  | { kind: "archive" | "delete"; request: unknown }
+  | { kind: "list"; descendantsOnly?: boolean }
   | { kind: "expose_port" | "unexpose_port"; port: number }
   | { kind: "transcript"; orbId: string }
   | { kind: "search"; request: unknown }
@@ -81,7 +85,11 @@ export function createOrbAgentOperations(
     runtimeTokenHash: (identity as OrbAgentIdentity).runtimeTokenHash,
     hostIncarnation: (identity as OrbAgentIdentity).incarnation,
   };
-  const unavailable = () => failure("unavailable", "orb operation unavailable");
+  const unavailable = (error?: StoreError) =>
+    failure(
+      error !== undefined && error.code !== "unavailable" ? "internal" : "unavailable",
+      "orb operation unavailable",
+    );
   const previews: PreviewRegistrationDeps | null = options.previews
     ? { store: deps.store, ...options.previews }
     : null;
@@ -102,6 +110,7 @@ export function createOrbAgentOperations(
     id: orb.id,
     name: orb.name,
     state: orb.state,
+    ...(orb.lastError === null ? {} : { stateDetail: orb.lastError }),
     updatedAt: new Date(orb.updatedAt).toISOString(),
     project: { id: project.id, name: project.name, repositoryUrl: project.repositoryUrl },
   });
@@ -110,7 +119,7 @@ export function createOrbAgentOperations(
       return new ResultAsync(
         (async () => {
           const current = await deps.store.getOrb(task, identity.orbId);
-          if (current.isErr()) return err(unavailable());
+          if (current.isErr()) return err(unavailable(current.error));
           const orb = current.value;
           if (
             !orb ||
@@ -122,7 +131,7 @@ export function createOrbAgentOperations(
           )
             return err(failure("unauthorized", "agent identity rejected"));
           const project = await deps.store.getProject(task, identity.projectId);
-          if (project.isErr()) return err(unavailable());
+          if (project.isErr()) return err(unavailable(project.error));
           if (
             !project.value ||
             (identity.ownerUserId !== undefined &&
@@ -161,12 +170,22 @@ export function createOrbAgentOperations(
               });
             }
             case "list": {
-              const projects = await deps.store.listProjectsByOwner(task, ownerUserId);
-              if (projects.isErr()) return err(unavailable());
+              const projects =
+                request.descendantsOnly === true
+                  ? ok([project.value])
+                  : await deps.store.listProjectsByOwner(task, ownerUserId);
+              if (projects.isErr()) return err(unavailable(projects.error));
               const items = [];
               for (const p of projects.value) {
-                const rows = await deps.store.listOrbsByProject(task, p.id);
-                if (rows.isErr()) return err(unavailable());
+                const rows =
+                  request.descendantsOnly === true
+                    ? await deps.store.listOrbDescendants(task, {
+                        orbId: orb.id,
+                        projectId: orb.projectId,
+                        ownerUserId,
+                      })
+                    : await deps.store.listOrbsByProject(task, p.id);
+                if (rows.isErr()) return err(unavailable(rows.error));
                 for (const row of rows.value) items.push(item(row, p));
               }
               items.sort(
@@ -304,13 +323,29 @@ export function createOrbAgentOperations(
               ).mapErr((e) => failure(e.code, e.message));
             }
             case "archive":
-              return await requestOrbArchive(task, deps, orb.id, caller)
+            case "delete": {
+              const intent = request.request;
+              if (!Check(OrbCleanupRequestSchema, intent))
+                return err(
+                  failure("invalid_request", "specify exactly {self:true} or {orbId:full UUID}"),
+                );
+              const targetId = "self" in intent ? orb.id : intent.orbId.toLowerCase();
+              if (!("self" in intent) && targetId === orb.id.toLowerCase())
+                return err(
+                  failure("invalid_request", `use {self:true} to ${request.kind} this orb`),
+                );
+              return await (request.kind === "archive" ? requestOrbArchive : requestOrbDeletion)(
+                task,
+                deps,
+                targetId,
+                "self" in intent ? caller : undefined,
+                "self" in intent
+                  ? undefined
+                  : { orbId: orb.id, projectId: orb.projectId, ownerUserId, caller },
+              )
                 .map((row) => ({ orbId: row.id, state: row.state }))
                 .mapErr((e) => failure(e.code, e.message));
-            case "delete":
-              return await requestOrbDeletion(task, deps, orb.id, caller)
-                .map((row) => ({ orbId: row.id, state: row.state }))
-                .mapErr((e) => failure(e.code, e.message));
+            }
             case "expose_port":
               if (previews === null) return err(previewsDisabled());
               return (

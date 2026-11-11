@@ -36,6 +36,7 @@ import type {
   GuestAgentCaller,
   OrbHostObservation,
   OrbHostRef,
+  OrbMessageSender,
   ProvisionedOrbHost,
 } from "./ports.ts";
 import { pollOrbUntilCaughtUp } from "./replication.ts";
@@ -3027,65 +3028,9 @@ export function requestOrbArchive(
   deps: ControlPlaneDeps,
   orbId: string,
   caller?: ArchiveCaller,
+  descendantSource?: OrbMessageSender,
 ): ResultAsync<OrbRow, CommandError> {
-  const run = async (): Promise<Result<OrbRow, CommandError>> => {
-    for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt++) {
-      const orbResult = await deps.store.getOrb(task, orbId);
-      if (orbResult.isErr()) return err(mapStoreError(orbResult.error));
-      const orb = orbResult.value;
-      if (orb === null) return err(commandError("not_found", `orb ${orbId} not found`, false));
-      if (caller?.kind === "central") {
-        const project = await deps.store.getProject(task, orb.projectId);
-        if (project.isErr()) return err(mapStoreError(project.error));
-        if (!acceptsCentralAgentCaller(orb, project.value?.ownerUserId, caller))
-          return err(commandError("conflict", "agent authority rejected", false));
-      }
-      if (
-        caller !== undefined &&
-        caller.kind !== "central" &&
-        (orb.runtimeTokenHash !== caller.runtimeTokenHash ||
-          orb.hostIncarnation !== caller.hostIncarnation ||
-          orb.hostDiscardThroughIncarnation !== null ||
-          (orb.state !== "running" && orb.state !== "archiving"))
-      ) {
-        return err(commandError("conflict", "this runtime can no longer request archival", false));
-      }
-      if (orb.state === "archiving" || orb.state === "archived") return ok(orb);
-      if (orb.state === "deleting") {
-        return err(commandError("conflict", "orb is being permanently deleted", false));
-      }
-      const now = task.wallNow();
-      const requested = await deps.store.requestOrbArchive(task, {
-        ...(caller === undefined ? {} : { caller }),
-        orbId,
-        expectedStateVersion: orb.stateVersion,
-        now,
-        cleanupAfter: now + deps.constants.deletionQuarantineMs,
-      });
-      if (requested.isOk()) {
-        if (agentPlacement(deps.agentPlane, orb) !== "central") {
-          deps.control.markStopping(orbId, requested.value.stateVersion);
-        }
-        deps.control.closeBrowserConnections(
-          orbId,
-          agentPlacement(deps.agentPlane, orb) === "central" ? "execution" : undefined,
-        );
-        logOrbEvent(task, orbId, "transition", {
-          from: orb.state,
-          to: "archiving",
-          reason: "archive_requested",
-          source: caller === undefined ? "browser" : "self",
-          ...(caller === undefined ? {} : { callerIncarnation: caller.hostIncarnation }),
-          ...(orb.sleepId === null ? {} : { cancelled_sleep_id: orb.sleepId }),
-        });
-        return ok(requested.value);
-      }
-      if (requested.error.type === "state_conflict") continue;
-      return err(mapCasError(requested.error));
-    }
-    return err(commandError("conflict", "concurrent state changes; retry", true));
-  };
-  return new ResultAsync(run());
+  return requestOrbCleanup(task, deps, "archive", orbId, caller, descendantSource);
 }
 
 export function requestOrbDeletion(
@@ -3093,7 +3038,20 @@ export function requestOrbDeletion(
   deps: ControlPlaneDeps,
   orbId: string,
   caller?: ArchiveCaller,
+  descendantSource?: OrbMessageSender,
 ): ResultAsync<OrbRow, CommandError> {
+  return requestOrbCleanup(task, deps, "delete", orbId, caller, descendantSource);
+}
+
+function requestOrbCleanup(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  kind: "archive" | "delete",
+  orbId: string,
+  caller?: ArchiveCaller,
+  descendantSource?: OrbMessageSender,
+): ResultAsync<OrbRow, CommandError> {
+  const state = kind === "archive" ? "archiving" : "deleting";
   const run = async (): Promise<Result<OrbRow, CommandError>> => {
     for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt++) {
       const orbResult = await deps.store.getOrb(task, orbId);
@@ -3112,33 +3070,63 @@ export function requestOrbDeletion(
         (orb.runtimeTokenHash !== caller.runtimeTokenHash ||
           orb.hostIncarnation !== caller.hostIncarnation ||
           orb.hostDiscardThroughIncarnation !== null ||
-          orb.state !== "running")
+          (orb.state !== "running" && !(kind === "archive" && orb.state === "archiving")))
       ) {
-        return err(commandError("conflict", "this runtime can no longer request deletion", false));
+        return err(commandError("conflict", `this runtime can no longer request ${kind}`, false));
       }
-      if (orb.state === "deleting") return ok(orb);
+      if (
+        descendantSource === undefined &&
+        (orb.state === state || (kind === "archive" && orb.state === "archived"))
+      )
+        return ok(orb);
+      if (kind === "archive" && descendantSource === undefined && orb.state === "deleting")
+        return err(commandError("conflict", "orb is being permanently deleted", false));
       const now = task.wallNow();
-      const requested = await deps.store.requestOrbDeletion(task, {
+      const method = kind === "archive" ? "requestOrbArchive" : "requestOrbDeletion";
+      const requested = await deps.store[method](task, {
         ...(caller === undefined ? {} : { caller }),
+        ...(descendantSource === undefined ? {} : { descendantSource }),
         orbId,
         expectedStateVersion: orb.stateVersion,
         now,
         cleanupAfter: now + deps.constants.deletionQuarantineMs,
       });
       if (requested.isOk()) {
-        deps.control.markStopping(orbId, requested.value.stateVersion);
-        deps.control.closeBrowserConnections(orbId);
+        if (requested.value.stateVersion === orb.stateVersion) return ok(requested.value);
+        const centralArchive =
+          kind === "archive" && agentPlacement(deps.agentPlane, orb) === "central";
+        if (!centralArchive) deps.control.markStopping(orbId, requested.value.stateVersion);
+        deps.control.closeBrowserConnections(orbId, centralArchive ? "execution" : undefined);
         logOrbEvent(task, orbId, "transition", {
           from: orb.state,
-          to: "deleting",
-          reason: "delete_requested",
-          source: caller === undefined ? "browser" : "self",
+          to: state,
+          reason: `${kind}_requested`,
+          source:
+            descendantSource !== undefined
+              ? "descendant"
+              : caller === undefined
+                ? "browser"
+                : "self",
+          ...(descendantSource === undefined
+            ? {}
+            : {
+                callerOrbId: descendantSource.orbId,
+                ...(descendantSource.caller.kind === "central"
+                  ? { callerAdmissionVersion: descendantSource.caller.agentAdmissionVersion }
+                  : { callerIncarnation: descendantSource.caller.hostIncarnation }),
+              }),
           ...(caller === undefined ? {} : { callerIncarnation: caller.hostIncarnation }),
           ...(orb.sleepId === null ? {} : { cancelled_sleep_id: orb.sleepId }),
         });
         return ok(requested.value);
       }
-      if (requested.error.type === "state_conflict") continue;
+      if (requested.error.type === "orb_cleanup_target_not_found")
+        return err(commandError("not_found", "descendant orb doesn't exist", false));
+      if (requested.error.type === "state_conflict") {
+        if (kind === "archive" && requested.error.currentState === "deleting")
+          return err(commandError("conflict", "orb is being permanently deleted", false));
+        continue;
+      }
       return err(mapCasError(requested.error));
     }
     return err(commandError("conflict", "concurrent state changes; retry", true));

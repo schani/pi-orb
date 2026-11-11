@@ -25,6 +25,7 @@ const items: OrbInspectionItem[] = [
     id: "orb-sibling",
     name: "Résumé parser",
     state: "archived",
+    stateDetail: "cleanup blocked\nretry pending",
     updatedAt: "2026-08-26T00:00:00.000Z",
     project: {
       id: "project-client",
@@ -74,21 +75,35 @@ describe("orb inspection CLI arguments", () => {
       expect(parseInspectionArgs(args).isErr()).toBe(true);
   });
 
-  it("parses list/search and transcript commands without a CLI framework", () => {
-    expect(parseInspectionArgs(["orbs"])).toEqual({
-      value: { type: "orbs", query: null, json: false },
+  it.each([
+    [["orbs"], null, false, false],
+    [["orbs", "résumé", "--json"], "résumé", true, false],
+    [["orbs", "--descendants"], null, false, true],
+    [["orbs", "--descendants", "résumé", "--json"], "résumé", true, true],
+    [["--json", "orbs", "résumé", "--descendants"], "résumé", true, true],
+  ] as const)("parses list arguments %j", (args, query, json, descendantsOnly) => {
+    expect(parseInspectionArgs(args)._unsafeUnwrap()).toEqual({
+      type: "orbs",
+      query,
+      json,
+      descendantsOnly,
     });
-    expect(parseInspectionArgs(["orbs", "résumé", "--json"])).toEqual({
-      value: { type: "orbs", query: "résumé", json: true },
-    });
-    expect(parseInspectionArgs(["transcript", "orb-sibling", "--json"])).toEqual({
-      value: { type: "transcript", orbId: "orb-sibling", json: true },
+  });
+
+  it("parses transcript arguments", () => {
+    expect(parseInspectionArgs(["transcript", "orb-sibling", "--json"])._unsafeUnwrap()).toEqual({
+      type: "transcript",
+      orbId: "orb-sibling",
+      json: true,
     });
   });
 
   it("rejects ambiguous or incomplete commands", () => {
     for (const args of [
       ["orbs", "one", "two"],
+      ["orbs", "--descendants", "--descendants"],
+      ["orbs", "--wat"],
+      ["self", "--descendants"],
       ["transcript"],
       ["transcript", "orb-a", "extra"],
       ["unknown"],
@@ -177,7 +192,9 @@ describe("orb inspection presentation", () => {
     const output = formatOrbList(items, "orb-current");
     expect(output).toContain("CURRENT\tORB ID\tNAME\tSTATE\tPROJECT");
     expect(output).toContain("*\torb-current\tRuntime auth\trunning\tpi-orb");
-    expect(output).toContain("\torb-sibling\tRésumé parser\tarchived\tClient App");
+    expect(output).toContain(
+      "\torb-sibling\tRésumé parser\tarchived (cleanup blocked retry pending)\tClient App",
+    );
   });
 
   it("renders alert text literally once without native overflow", () => {

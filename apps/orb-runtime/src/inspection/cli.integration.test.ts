@@ -46,11 +46,14 @@ function runCli(baseUrl: string, args: readonly string[]) {
 describe("pi-orb inspection CLI entry point", () => {
   let server: Server;
   let baseUrl: string;
+  let paths: string[];
   let mode: "ok" | "unauthorized" | "missing" | "unavailable" | "malformed";
 
   beforeEach(async () => {
     mode = "ok";
+    paths = [];
     server = createServer((request, response) => {
+      paths.push(request.url ?? "");
       expect(request.headers.authorization).toBe(`Bearer ${TOKEN}`);
       response.setHeader("content-type", "application/json");
       if (mode === "unauthorized") {
@@ -127,8 +130,17 @@ describe("pi-orb inspection CLI entry point", () => {
         );
         return;
       }
-      if (request.url === "/runtime/v1/orbs") {
-        response.end(JSON.stringify({ v: 1, currentOrbId: "orb-current", items: [orb] }));
+      const descendants = request.url === "/runtime/v1/orbs?descendantsOnly=true";
+      if (request.url === "/runtime/v1/orbs" || descendants) {
+        response.end(
+          JSON.stringify({
+            v: 1,
+            currentOrbId: "orb-current",
+            items: [
+              descendants ? { ...orb, state: "deleting", stateDetail: "cleanup blocked" } : orb,
+            ],
+          }),
+        );
         return;
       }
       if (request.url === "/runtime/v1/orbs/orb-sibling/transcript") {
@@ -201,6 +213,21 @@ describe("pi-orb inspection CLI entry point", () => {
     expect(result.code).toBe(0);
     expect(result.stderr).toBe("");
     expect(result.stdout).toBe("CURRENT\tORB ID\tNAME\tSTATE\tPROJECT\tREPOSITORY\n");
+  });
+
+  it("requests descendants from the backend, then applies the optional query", async () => {
+    const args = ["orbs", "--descendants", "parser"];
+    const json = await runCli(baseUrl, [...args, "--json"]);
+    expect(json).toMatchObject({ code: 0, stderr: "" });
+    expect(JSON.parse(json.stdout)).toMatchObject({
+      items: [{ id: orb.id, state: "deleting", stateDetail: "cleanup blocked" }],
+    });
+    const summary = await runCli(baseUrl, args);
+    expect(summary).toMatchObject({ code: 0, stderr: "" });
+    expect(summary.stdout).toContain("deleting (cleanup blocked)");
+    const empty = await runCli(baseUrl, ["orbs", "no-match", "--descendants", "--json"]);
+    expect(JSON.parse(empty.stdout)).toMatchObject({ items: [] });
+    expect(paths).toEqual(Array(3).fill("/runtime/v1/orbs?descendantsOnly=true"));
   });
 
   it("prints the exact lossless transcript response in JSON mode", async () => {

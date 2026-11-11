@@ -19,6 +19,7 @@ import type {
   ControlPlaneStore,
   CredentialPointerStore,
   ProjectSecretPointerStore,
+  RequestOrbDeletionParams,
   SigningKeyRow,
   SigningKeyStore,
 } from "../domain/ports.ts";
@@ -3274,6 +3275,271 @@ export function storeSemanticsContractTests(
       expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toBeNull();
       expect((await store.getOrbDeletion(task, orb.id))._unsafeUnwrap()).toBeNull();
       expect((await store.readHistorySnapshot(task, orb.id))._unsafeUnwrap().records).toEqual([]);
+    });
+
+    async function seedDescendant(
+      id: string,
+      parent = orb.id,
+      state: OrbRow["state"] = "creating",
+    ) {
+      (
+        await store.spawnOrb(task, {
+          callerOrbId: parent,
+          caller: peerCentralCaller(parent),
+          orb: { ...orb, id, state },
+          prompt: "work",
+          requestHash: id,
+        })
+      )._unsafeUnwrap();
+    }
+
+    const cleanupMethods = ["requestOrbArchive", "requestOrbDeletion"] as const;
+    it.each(cleanupMethods)("%s authorizes ancestry and idempotence", async (method) => {
+      await seed();
+      const child = "00000000-0000-4000-8000-000000000003";
+      const leaf = "00000000-0000-4000-8000-000000000004";
+      const unrelated = "00000000-0000-4000-8000-000000000005";
+      (await store.insertOrb(task, { ...orb, id: unrelated }))._unsafeUnwrap();
+      await seedDescendant(child);
+      await seedDescendant(leaf, child, "stopped");
+      const descendantSource = {
+        orbId: orb.id,
+        projectId: project.id,
+        ownerUserId: OWNER,
+        caller: peerCentralCaller(orb.id),
+      };
+      const params = {
+        orbId: leaf,
+        expectedStateVersion: 0,
+        now: 2000,
+        cleanupAfter: 3000,
+        descendantSource,
+      };
+      const request = (change: Partial<RequestOrbDeletionParams> = {}) =>
+        store[method](task, { ...params, ...change });
+      for (const orbId of [unrelated, orb.id, "00000000-0000-4000-8000-000000000095"])
+        expect((await request({ orbId }))._unsafeUnwrapErr().type).toBe(
+          "orb_cleanup_target_not_found",
+        );
+      for (const patch of [
+        { ownerUserId: "00000000-0000-4000-8000-000000000098" },
+        { projectId: "00000000-0000-4000-8000-000000000097" },
+        { caller: { ...peerCentralCaller(orb.id), agentAdmissionVersion: 1 } },
+      ])
+        expect(
+          (
+            await request({ descendantSource: { ...descendantSource, ...patch } })
+          )._unsafeUnwrapErr().type,
+        ).toBe("state_conflict");
+      expect((await request({ caller: peerCentralCaller(orb.id) }))._unsafeUnwrapErr().type).toBe(
+        "state_conflict",
+      );
+      expect(
+        (
+          await request({
+            orbId: orb.id,
+            descendantSource: {
+              ...descendantSource,
+              orbId: child,
+              caller: peerCentralCaller(child),
+            },
+          })
+        )._unsafeUnwrapErr().type,
+      ).toBe("orb_cleanup_target_not_found");
+      const otherProject = "00000000-0000-4000-8000-000000000096";
+      (
+        await store.insertProject(task, { ...project, id: otherProject, name: "other" })
+      )._unsafeUnwrap();
+      (
+        await store.insertOrb(task, { ...orb, id: otherProject, projectId: otherProject })
+      )._unsafeUnwrap();
+      expect((await request({ orbId: otherProject }))._unsafeUnwrapErr().type).toBe(
+        "orb_cleanup_target_not_found",
+      );
+      const deleting = (
+        await store.requestOrbDeletion(task, {
+          orbId: child,
+          expectedStateVersion: 0,
+          now: 2000,
+          cleanupAfter: 2000,
+        })
+      )._unsafeUnwrap();
+      (
+        await store.finalizeOrbDeletion(task, {
+          orbId: child,
+          expectedStateVersion: deleting.stateVersion,
+        })
+      )._unsafeUnwrap();
+      expect(
+        (await store.listOrbDescendants(task, descendantSource))
+          ._unsafeUnwrap()
+          .map((row) => row.id),
+      ).toEqual([leaf]);
+      const accepted = (await request())._unsafeUnwrap();
+      (
+        await store.recordOrbDeletionError(task, {
+          orbId: leaf,
+          message: "cleanup blocked",
+          now: 3500,
+        })
+      )._unsafeUnwrap();
+      if (method === "requestOrbArchive")
+        (
+          await store.sealOrbArchive(task, {
+            orbId: leaf,
+            expectedStateVersion: accepted.stateVersion,
+            now: 3501,
+            cursor: null,
+            headId: null,
+          })
+        )._unsafeUnwrap();
+      const beforeRetry = (await store.getOrb(task, leaf))._unsafeUnwrap();
+      const intent = (await store.getOrbDeletion(task, leaf))._unsafeUnwrap();
+      const retry = { expectedStateVersion: accepted.stateVersion, now: 4000, cleanupAfter: 5000 };
+      expect((await request(retry))._unsafeUnwrap()).toEqual(beforeRetry);
+      expect((await store.getOrbDeletion(task, leaf))._unsafeUnwrap()).toEqual(intent);
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.state).toBe("creating");
+      (
+        await store.requestOrbStop(task, { orbId: orb.id, expectedStateVersion: 0, now: 4001 })
+      )._unsafeUnwrap();
+      expect((await request(retry))._unsafeUnwrapErr().type).toBe("state_conflict");
+    });
+
+    it.each(
+      cleanupMethods.flatMap((method) =>
+        (
+          [
+            "creating",
+            "starting",
+            "running",
+            "stopping",
+            "stopped",
+            "failed",
+            "archiving",
+            "archived",
+            "deleting",
+          ] as const
+        ).map((state) => [method, state] as const),
+      ),
+    )("%s handles descendant target state %s without cascading", async (method, state) => {
+      await seed();
+      const child = "00000000-0000-4000-8000-000000000003";
+      const leaf = "00000000-0000-4000-8000-000000000004";
+      await seedDescendant(child);
+      await seedDescendant(leaf, child);
+      (
+        await store.casTransition(task, {
+          orbId: child,
+          expectedStateVersion: 0,
+          toState: state,
+          now: 900,
+        })
+      )._unsafeUnwrap();
+      const before = (await store.getOrb(task, child))._unsafeUnwrap();
+      const params = {
+        orbId: child,
+        expectedStateVersion: 1,
+        now: 1000,
+        cleanupAfter: 2000,
+        descendantSource: {
+          orbId: orb.id,
+          projectId: project.id,
+          ownerUserId: OWNER,
+          caller: peerCentralCaller(orb.id),
+        },
+      };
+      const result = await store[method](task, params);
+      if (method === "requestOrbArchive" && state === "deleting")
+        expect(result._unsafeUnwrapErr().type).toBe("state_conflict");
+      else if (
+        (method === "requestOrbArchive" && ["archiving", "archived"].includes(state)) ||
+        (method === "requestOrbDeletion" && state === "deleting")
+      )
+        expect(result._unsafeUnwrap()).toEqual(before);
+      else
+        expect(result._unsafeUnwrap().state).toBe(
+          method === "requestOrbArchive" ? "archiving" : "deleting",
+        );
+      if (method === "requestOrbArchive" && state === "archived")
+        expect(
+          (
+            await store[method](task, {
+              ...params,
+              descendantSource: {
+                ...params.descendantSource,
+                caller: { ...peerCentralCaller(orb.id), agentAdmissionVersion: 1 },
+              },
+            })
+          )._unsafeUnwrapErr().type,
+        ).toBe("state_conflict");
+      expect((await store.getOrb(task, leaf))._unsafeUnwrap()?.state).toBe("creating");
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.state).toBe("creating");
+    });
+
+    it.each(
+      cleanupMethods.flatMap((method) =>
+        (["token", "incarnation", "discard", "stopped"] as const).map(
+          (fence) => [method, fence] as const,
+        ),
+      ),
+    )("%s fences guest descendant source %s inside the write", async (method, fence) => {
+      (await store.insertProject(task, project))._unsafeUnwrap();
+      (
+        await store.insertOrb(task, {
+          ...orb,
+          state: "running",
+          runtimeTokenHash: "token",
+          hostIncarnation: 2,
+        })
+      )._unsafeUnwrap();
+      const child = "00000000-0000-4000-8000-000000000003";
+      await seedDescendant(child, orb.id, "creating");
+      (
+        await store[method](task, {
+          orbId: child,
+          expectedStateVersion: 0,
+          now: 1000,
+          cleanupAfter: 3000,
+        })
+      )._unsafeUnwrap();
+      const intent = (await store.getOrbDeletion(task, child))._unsafeUnwrap();
+      if (fence === "discard")
+        (
+          await store.failOrbAndRequestComputeDiscard(task, {
+            orbId: orb.id,
+            expectedStateVersion: 0,
+            now: 2000,
+            lastError: "discard",
+          })
+        )._unsafeUnwrap();
+      if (fence === "stopped")
+        (
+          await store.requestOrbStop(task, {
+            orbId: orb.id,
+            expectedStateVersion: 0,
+            now: 2000,
+          })
+        )._unsafeUnwrap();
+      expect(
+        (
+          await store[method](task, {
+            orbId: child,
+            expectedStateVersion: 1,
+            now: 2000,
+            cleanupAfter: 3000,
+            descendantSource: {
+              orbId: orb.id,
+              projectId: project.id,
+              ownerUserId: OWNER,
+              caller: {
+                runtimeTokenHash: fence === "token" ? "stale" : "token",
+                hostIncarnation: fence === "incarnation" ? 1 : 2,
+              },
+            },
+          })
+        )._unsafeUnwrapErr().type,
+      ).toBe("state_conflict");
+      expect((await store.getOrbDeletion(task, child))._unsafeUnwrap()).toEqual(intent);
     });
 
     it.each([

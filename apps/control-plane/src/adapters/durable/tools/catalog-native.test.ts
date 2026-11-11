@@ -125,7 +125,8 @@ async function nativeMetadata(
     for (const guidance of [
       "Namespace orb: discover with describeNamespace(",
       "Namespace mcp: discover with describeNamespace(",
-      "Use archive/delete only on explicit user request",
+      "Self-archive/delete only on explicit user request",
+      "descendant cleanup may be part of delegated work",
       "Stop/sleep revokes execution admission",
       "a connected browser does not override Stop",
       "Use server names from MCP namespaces",
@@ -481,7 +482,7 @@ it.each(["root", "child"] as const)(
       expect(JSON.stringify(payload.searched)).not.toContain(hidden);
       expect(JSON.stringify(payload.namespace)).not.toContain(hidden);
       expect(payload.namespace.instructions).toBe(
-        "Use archive/delete only on explicit user request. Stop/sleep revokes execution admission; a connected browser does not override Stop.",
+        "Self-archive/delete only on explicit user request; descendant cleanup may be part of delegated work. Stop/sleep revokes execution admission; a connected browser does not override Stop.",
       );
       expect(payload.own).toContain(own);
       expect(payload.accepted).toEqual(

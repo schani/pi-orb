@@ -18,19 +18,24 @@ export const INSPECTION_USAGE = `usage:
   pi-orb expose <port>
   pi-orb unexpose <port>
   pi-orb previews [--json]
-  pi-orb orbs [query] [--json]
+  pi-orb orbs [query] [--descendants] [--json]
   pi-orb transcript <orb-id> [--json]
   pi-orb search QUERY [--orb ID | --project | --all] [--limit N] [--json]
   pi-orb send <orb-id> "message" [--request-id <id>]
   pi-orb alert "message" [--request-id <id>]
   pi-orb id-token --audience <audience> [--ttl-seconds <60..3600>]
-  pi-orb archive
-  pi-orb delete`;
+  pi-orb archive <self|orb-id>
+  pi-orb delete <self|orb-id>`;
 
 export type InspectionCommand =
   | { readonly type: "search"; readonly request: HistorySearchRequest; readonly json: boolean }
   | { readonly type: "self"; readonly json: boolean }
-  | { readonly type: "orbs"; readonly query: string | null; readonly json: boolean }
+  | {
+      readonly type: "orbs";
+      readonly query: string | null;
+      readonly json: boolean;
+      readonly descendantsOnly: boolean;
+    }
   | { readonly type: "transcript"; readonly orbId: string; readonly json: boolean };
 
 export function parseInspectionArgs(argv: readonly string[]): Result<InspectionCommand, string> {
@@ -41,8 +46,20 @@ export function parseInspectionArgs(argv: readonly string[]): Result<InspectionC
   if (subcommand === "search") return parseSearchArgs(operands, jsonCount === 1);
   if (subcommand === "self" && operands.length === 0)
     return ok({ type: "self", json: jsonCount === 1 });
-  if (subcommand === "orbs" && operands.length <= 1) {
-    return ok({ type: "orbs", query: operands[0] ?? null, json: jsonCount === 1 });
+  if (subcommand === "orbs") {
+    const descendantsCount = operands.filter((argument) => argument === "--descendants").length;
+    const queries = operands.filter((argument) => argument !== "--descendants");
+    if (
+      descendantsCount <= 1 &&
+      queries.length <= 1 &&
+      !queries.some((query) => query.startsWith("-"))
+    )
+      return ok({
+        type: "orbs",
+        query: queries[0] ?? null,
+        json: jsonCount === 1,
+        descendantsOnly: descendantsCount === 1,
+      });
   }
   const transcriptOrbId = operands[0];
   if (
@@ -154,7 +171,7 @@ export function formatOrbList(items: readonly OrbInspectionItem[], currentOrbId:
         item.id === currentOrbId ? "*" : "",
         item.id,
         item.name ?? "untitled orb",
-        item.state,
+        item.stateDetail === undefined ? item.state : `${item.state} (${item.stateDetail})`,
         item.project.name,
         item.project.repositoryUrl ?? "—",
       ]

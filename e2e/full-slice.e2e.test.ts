@@ -213,8 +213,8 @@ const SCENARIO = {
           { type: "stop", status: "completed" },
         ],
       },
-      // Sender continuation, receiver inference and their summaries may interleave.
-      ...Array.from({ length: 4 }, () => ({
+      // Peer turns, descendant startup and their summaries may interleave.
+      ...Array.from({ length: 6 }, () => ({
         match: { default: true },
         steps: [
           { type: "text", content: "PEER_ROUNDTRIP_COMPLETE" },
@@ -227,7 +227,7 @@ const SCENARIO = {
           {
             type: "toolCall",
             name: "bash",
-            arguments: { command: "pi-orb delete; cat ../self-delete-hold" },
+            arguments: { command: "pi-orb delete self; cat ../self-delete-hold" },
           },
           { type: "stop", status: "completed" },
         ],
@@ -238,7 +238,7 @@ const SCENARIO = {
           {
             type: "toolCall",
             name: "bash",
-            arguments: { command: "pi-orb archive" },
+            arguments: { command: "pi-orb archive self" },
           },
           { type: "stop", status: "completed" },
         ],
@@ -2693,6 +2693,28 @@ describe("full slice E2E", () => {
       await browser.close();
     }
 
+    const grandchildOrbId = randomUUID();
+    additionalOrbIds.push(grandchildOrbId);
+    const grandchild = await terminalRun(
+      spawnedOrbId,
+      `pi-orb spawn --id ${grandchildOrbId} --prompt 'Wait for descendant deletion' --name 'Deletion descendant' --json; printf '\\107\\122\\101\\116\\104\\103\\110\\111\\114\\104\\137\\104\\117\\116\\105\\012'`,
+      "GRANDCHILD_DONE",
+    );
+    expect(grandchild).toContain(`"orbId":"${grandchildOrbId}"`);
+    await waitFor(
+      "grandchild ready before deleting its parent",
+      async () => {
+        const history = await api(base, "GET", `/api/v1/orbs/${grandchildOrbId}/history`);
+        const requests = await fakeControl(fake.sessionKey, "/requests");
+        return JSON.stringify(history.body["records"]).includes("PEER_ROUNDTRIP_COMPLETE") &&
+          Array.isArray(requests) &&
+          requests.some((request) => request.status === 200 && request.matchedRuleIndex === 18)
+          ? true
+          : null;
+      },
+      { timeoutMs: 300_000, intervalMs: 1_000 },
+    );
+
     const siblingHistoryBeforeDelete = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
     const siblingComputeBeforeDelete = await computeIdentity(secondOrbId, 0);
     const hostedObjectsBeforeDelete = readdirSync(hostingRootDirectory, {
@@ -2758,6 +2780,58 @@ describe("full slice E2E", () => {
     expect((await api(base, "GET", `/api/v1/orbs/${secondOrbId}`)).body["state"]).toBe("running");
     expect(await computeIdentity(secondOrbId, 0)).toEqual(siblingComputeBeforeDelete);
 
+    expect((await api(base, "GET", `/api/v1/orbs/${grandchildOrbId}`)).body["state"]).toBe(
+      "running",
+    );
+    const descendants = await terminalRun(
+      secondOrbId,
+      String.raw`pi-orb orbs --descendants --json; printf '\104\105\123\103\105\116\104\101\116\124\123\137\104\117\116\105\012'`,
+      "DESCENDANTS_DONE",
+    );
+    expect(descendants, descendants).toContain('{\r\n  "v"');
+    const descendantList = JSON.parse(
+      descendants.slice(descendants.indexOf('{\r\n  "v"'), descendants.indexOf("DESCENDANTS_DONE")),
+    ) as { items: { id: string }[] };
+    expect(descendantList.items.map((item) => item.id)).toEqual([grandchildOrbId]);
+
+    const descendantArchival = await terminalRun(
+      secondOrbId,
+      `pi-orb archive ${grandchildOrbId}; printf 'archive_exit=%s\\n' "$?"; printf '\\104\\105\\123\\103\\105\\116\\104\\101\\116\\124\\137\\101\\122\\103\\110\\111\\126\\105\\104\\012'`,
+      "DESCENDANT_ARCHIVED",
+    );
+    expect(descendantArchival).toContain("archive_exit=0");
+    expect(descendantArchival).toContain(`Archive requested for orb ${grandchildOrbId}`);
+    await waitFor(
+      "descendant archival through retained spawn lineage",
+      async () =>
+        (await api(base, "GET", `/api/v1/orbs/${grandchildOrbId}`)).body["state"] === "archived"
+          ? true
+          : null,
+      { timeoutMs: 240_000, intervalMs: 1_000 },
+    );
+    const descendantHistory = await api(base, "GET", `/api/v1/orbs/${grandchildOrbId}/history`);
+    expect(descendantHistory.status).toBe(200);
+    expect(JSON.stringify(descendantHistory.body["records"])).toContain("PEER_ROUNDTRIP_COMPLETE");
+    expect((await api(base, "GET", `/api/v1/orbs/${secondOrbId}`)).body["state"]).toBe("running");
+    expect(await computeIdentity(secondOrbId, 0)).toEqual(siblingComputeBeforeDelete);
+    expect((await api(base, "GET", `/api/v1/orbs/${orbId}/history`)).body).toEqual(
+      siblingHistoryBeforeDelete.body,
+    );
+
+    const descendantDeletion = await terminalRun(
+      secondOrbId,
+      `pi-orb delete ${grandchildOrbId}; printf 'delete_exit=%s\\n' "$?"; printf '\\104\\105\\123\\103\\105\\116\\104\\101\\116\\124\\137\\104\\105\\114\\105\\124\\105\\104\\012'`,
+      "DESCENDANT_DELETED",
+    );
+    expect(descendantDeletion).toContain("delete_exit=0");
+    await waitFor(
+      "descendant deletion through retained spawn lineage",
+      async () =>
+        (await api(base, "GET", `/api/v1/orbs/${grandchildOrbId}`)).status === 404 ? true : null,
+      { timeoutMs: 240_000, intervalMs: 1_000 },
+    );
+    expect((await api(base, "GET", `/api/v1/orbs/${secondOrbId}`)).body["state"]).toBe("running");
+
     await writeWorkspaceFiles(secondOrbId, 0, {
       "repo/archived.html": "archived-hosted-file",
     });
@@ -2816,7 +2890,7 @@ describe("full slice E2E", () => {
       `/api/v1/orbs/${secondOrbId}/details/${encodeURIComponent(archivedCallRecord?.id ?? "")}/${encodeURIComponent(archivedCall?.detailKey ?? "")}?sessionId=${encodeURIComponent((archiveHistory.body["session"] as { id: string }).id)}`,
     );
     expect(archivedDetail.status).toBe(200);
-    expect(JSON.stringify(archivedDetail.body)).toContain("pi-orb archive");
+    expect(JSON.stringify(archivedDetail.body)).toContain("pi-orb archive self");
     expect((await api(base, "POST", `/api/v1/orbs/${secondOrbId}/start`)).status).toBe(409);
     if (archivedHostedUrl === undefined) throw new Error("archive hosting URL was absent");
     expect(await (await fetch(archivedHostedUrl)).text()).toBe("archived-hosted-file");
@@ -2855,7 +2929,7 @@ describe("full slice E2E", () => {
         (entry) => basename(String(entry)) === "data",
       ),
     ).toEqual([]);
-    for (const deletedOrbId of [orbId, secondOrbId, spawnedOrbId]) {
+    for (const deletedOrbId of [orbId, secondOrbId, spawnedOrbId, grandchildOrbId]) {
       expect((await api(base, "GET", `/api/v1/orbs/${deletedOrbId}`)).status).toBe(404);
       expect((await api(base, "GET", `/api/v1/orbs/${deletedOrbId}/history`)).status).toBe(404);
       if (PROCESS_BACKEND) {

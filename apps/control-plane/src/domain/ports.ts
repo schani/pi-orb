@@ -123,8 +123,17 @@ export type HostSpecReplacementOutcome =
   | { readonly type: "requested"; readonly orb: OrbRow }
   | { readonly type: "declined"; readonly orb: OrbRow; readonly committedGeneration: number };
 
+export type RequestOrbCleanupError =
+  | StoreError
+  | StateConflict
+  | {
+      readonly type: "orb_cleanup_target_not_found";
+    };
+
 export interface RequestOrbDeletionParams {
   readonly caller?: ArchiveCaller;
+  /** Trusted source identity, separate from target authority; mutually exclusive with caller. */
+  readonly descendantSource?: OrbMessageSender;
   readonly orbId: string;
   readonly expectedStateVersion: number;
   readonly now: number;
@@ -186,13 +195,7 @@ export interface SpawnConflict {
   readonly reason: "unauthorized" | "conflict";
 }
 
-export interface RequestOrbArchiveParams {
-  readonly caller?: ArchiveCaller;
-  readonly orbId: string;
-  readonly expectedStateVersion: number;
-  readonly now: number;
-  readonly cleanupAfter: number;
-}
+export type RequestOrbArchiveParams = RequestOrbDeletionParams;
 
 export interface CommitPullBatchParams {
   readonly orbId: string;
@@ -281,6 +284,11 @@ export interface ControlPlaneStore extends ActivityHeadlineStore, OrbLinkStore, 
     task: SimulationTask,
     callerOrbId: string,
   ): ResultAsync<Pick<OrbRow, "id" | "name">[], StoreError>;
+  /** Existing descendants through retained provenance, scoped to the source owner/project. */
+  listOrbDescendants(
+    task: SimulationTask,
+    source: { orbId: string; projectId: string; ownerUserId: string },
+  ): ResultAsync<OrbRow[], StoreError>;
   spawnOrb(
     task: SimulationTask,
     params: SpawnOrbParams,
@@ -404,7 +412,7 @@ export interface ControlPlaneStore extends ActivityHeadlineStore, OrbLinkStore, 
   requestOrbArchive(
     task: SimulationTask,
     params: RequestOrbArchiveParams,
-  ): ResultAsync<OrbRow, StoreError | StateConflict>;
+  ): ResultAsync<OrbRow, RequestOrbCleanupError>;
   sealOrbArchive(
     task: SimulationTask,
     params: {
@@ -424,7 +432,7 @@ export interface ControlPlaneStore extends ActivityHeadlineStore, OrbLinkStore, 
   requestOrbDeletion(
     task: SimulationTask,
     params: RequestOrbDeletionParams,
-  ): ResultAsync<OrbRow, StoreError | StateConflict>;
+  ): ResultAsync<OrbRow, RequestOrbCleanupError>;
   getOrbDeletion(
     task: SimulationTask,
     orbId: string,
