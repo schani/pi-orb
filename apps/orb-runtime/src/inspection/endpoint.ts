@@ -18,7 +18,7 @@ import type { SimulationTask } from "determined";
 import { Check } from "typebox/value";
 import type { BrokerEnv } from "../broker/endpoint.ts";
 
-export const INSPECTION_REQUEST_TIMEOUT_MS = 3_000;
+export const INSPECTION_REQUEST_TIMEOUT_MS = 30_000;
 
 export type InspectionEndpointFailure =
   | { readonly kind: "unauthorized" }
@@ -109,8 +109,10 @@ export class HttpOrbInspectionEndpoint {
   }
 
   private request(path: string, body?: HistorySearchRequest): Promise<RawOutcome> {
-    const deadline = AbortSignal.timeout(INSPECTION_REQUEST_TIMEOUT_MS);
-    return fetch(`${this.env.controlPlaneUrl}${path}`, {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), INSPECTION_REQUEST_TIMEOUT_MS);
+    const deadline = controller.signal;
+    const outcome = fetch(`${this.env.controlPlaneUrl}${path}`, {
       method: body === undefined ? "GET" : "POST",
       headers: {
         authorization: `Bearer ${this.env.runtimeToken}`,
@@ -141,6 +143,7 @@ export class HttpOrbInspectionEndpoint {
                   : "history search unavailable",
             },
     );
+    return outcome.finally(() => clearTimeout(timer));
   }
 }
 
