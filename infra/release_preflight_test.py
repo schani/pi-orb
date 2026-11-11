@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from infra.release_preflight import EXCLUSION_PERMISSIONS, check_exclusion_authority
+from infra.release_preflight import LOGGING_PERMISSIONS, check_logging_authority
 from infra.release_state import Result, fail
 
 
@@ -127,27 +127,31 @@ release_run_child() { """ + child + "; }\n" + apply
                     self.assertEqual(result.stdout.splitlines(),
                                      ["--yes"] + (["--migration-timeout-30m"] if value == "true" else []))
 
+    def test_checks_metric_management_authority(self):
+        for operation in ("create", "get", "update", "delete"):
+            self.assertIn("logging.logMetrics." + operation, LOGGING_PERMISSIONS)
+
     def test_complete_authority_is_read_only(self):
-        cloud = FakeCloud(Result({"permissions": list(EXCLUSION_PERMISSIONS)}))
-        self.assertTrue(check_exclusion_authority(cloud, "example-project").value)
+        cloud = FakeCloud(Result({"permissions": list(LOGGING_PERMISSIONS)}))
+        self.assertTrue(check_logging_authority(cloud, "example-project").value)
         self.assertEqual(cloud.calls, [(
             "POST",
             "https://cloudresourcemanager.googleapis.com/v1/projects/example-project:testIamPermissions",
-            {"permissions": list(EXCLUSION_PERMISSIONS)},
+            {"permissions": list(LOGGING_PERMISSIONS)},
         )])
 
     def test_each_missing_permission_refuses_with_actionable_diagnostic(self):
-        for missing in EXCLUSION_PERMISSIONS:
-            cloud = FakeCloud(Result({"permissions": [p for p in EXCLUSION_PERMISSIONS if p != missing]}))
-            result = check_exclusion_authority(cloud, "example-project")
+        for missing in LOGGING_PERMISSIONS:
+            cloud = FakeCloud(Result({"permissions": [p for p in LOGGING_PERMISSIONS if p != missing]}))
+            result = check_logging_authority(cloud, "example-project")
             self.assertIn(missing, result.error.message)
             self.assertIn("foundation administrator", result.error.message)
 
     def test_denied_empty_malformed_and_unavailable_fail_closed(self):
         for response in [{}, None, [], {"permissions": "logging.exclusions.create"}, {"permissions": [1]}]:
-            self.assertIsNotNone(check_exclusion_authority(FakeCloud(Result(response)), "p").error)
+            self.assertIsNotNone(check_logging_authority(FakeCloud(Result(response)), "p").error)
         failure = fail("http", "cloud request HTTP 403")
-        self.assertEqual(check_exclusion_authority(FakeCloud(failure), "p"), failure)
+        self.assertEqual(check_logging_authority(FakeCloud(failure), "p"), failure)
 
     def test_artifact_uploads_share_the_pinned_node24_action(self):
         pin = "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9"
@@ -213,7 +217,7 @@ release_run_child() { """ + child + "; }\n" + apply
         import re
         iam = Path("infra/foundation/iam.tf").read_text()
         role = re.search(r'resource "google_project_iam_custom_role" "deployer_logging_exclusions" \{(.*?)\n\}', iam, re.S).group(1)
-        self.assertEqual(set(re.findall(r'"(logging\.[^"]+)"', role)), set(EXCLUSION_PERMISSIONS))
+        self.assertEqual(set(re.findall(r'"(logging\.[^"]+)"', role)), set(LOGGING_PERMISSIONS))
         binding = re.search(r'resource "google_project_iam_member" "deployer_logging_exclusions" \{(.*?)\n\}', iam, re.S).group(1)
         self.assertIn("google_service_account.deployer.email", binding)
         self.assertIn("google_project_iam_custom_role.deployer_logging_exclusions.name", binding)

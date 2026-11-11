@@ -4,6 +4,17 @@ import { describe, expect, it } from "vitest";
 const source = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
 
 describe("single control-plane composition", () => {
+  it("observes connections before database startup and HTTP requests after plugin initialization", () => {
+    const diagnostics = source.indexOf("using httpDiagnostics = new HttpDiagnostics()");
+    expect(diagnostics).toBeGreaterThan(0);
+    expect(diagnostics).toBeLessThan(
+      source.indexOf("const openedDatabase = openControlPlaneDatabase("),
+    );
+    expect(source).toContain(
+      'app.addHook("onReady", async () => httpDiagnostics.observeServer(app.server))',
+    );
+  });
+
   it("makes the development command explicitly local", () => {
     const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
     expect(manifest.scripts.dev).toContain("PI_ORB_AUTH_MODE=local");
