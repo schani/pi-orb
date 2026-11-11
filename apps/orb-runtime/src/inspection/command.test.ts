@@ -76,14 +76,41 @@ describe("orb inspection CLI arguments", () => {
 
   it("parses list/search and transcript commands without a CLI framework", () => {
     expect(parseInspectionArgs(["orbs"])).toEqual({
-      value: { type: "orbs", query: null, json: false },
+      value: { type: "orbs", query: null, json: false, descendantsOnly: false },
     });
     expect(parseInspectionArgs(["orbs", "résumé", "--json"])).toEqual({
-      value: { type: "orbs", query: "résumé", json: true },
+      value: { type: "orbs", query: "résumé", json: true, descendantsOnly: false },
     });
     expect(parseInspectionArgs(["transcript", "orb-sibling", "--json"])).toEqual({
       value: { type: "transcript", orbId: "orb-sibling", json: true },
     });
+  });
+
+  it("filters descendants with an optional query and JSON in either order", () => {
+    for (const args of [
+      ["orbs", "--descendants", "résumé", "--json"],
+      ["--json", "orbs", "résumé", "--descendants"],
+    ]) {
+      expect(parseInspectionArgs(args)._unsafeUnwrap()).toEqual({
+        type: "orbs",
+        query: "résumé",
+        json: true,
+        descendantsOnly: true,
+      });
+    }
+    expect(parseInspectionArgs(["orbs", "--descendants"])._unsafeUnwrap()).toEqual({
+      type: "orbs",
+      query: null,
+      json: false,
+      descendantsOnly: true,
+    });
+    for (const args of [
+      ["orbs", "--descendants", "--descendants"],
+      ["orbs", "--wat"],
+      ["self", "--descendants"],
+    ]) {
+      expect(parseInspectionArgs(args).isErr()).toBe(true);
+    }
   });
 
   it("rejects ambiguous or incomplete commands", () => {
@@ -171,6 +198,17 @@ describe("orb inspection presentation", () => {
       "orb-sibling",
     ]);
     expect(filterOrbs(items, "archived")).toEqual([]);
+  });
+
+  it("renders cleanup blockers in the state cell without adding table rows", () => {
+    const item = items[0];
+    if (item === undefined) return;
+    expect(
+      formatOrbList(
+        [{ ...item, state: "deleting", stateDetail: "cleanup blocked\nretry pending" }],
+        item.id,
+      ),
+    ).toContain("deleting (cleanup blocked retry pending)\tpi-orb");
   });
 
   it("marks the current orb in compact tabular output", () => {

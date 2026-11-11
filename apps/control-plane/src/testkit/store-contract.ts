@@ -3248,6 +3248,196 @@ export function storeSemanticsContractTests(
       expect((await store.readHistorySnapshot(task, orb.id))._unsafeUnwrap().records).toEqual([]);
     });
 
+    it("atomically authorizes descendant deletion through retained ancestry and preserves repeated deletion intent", async () => {
+      await seed();
+      const child = "00000000-0000-4000-8000-000000000003";
+      const leaf = "00000000-0000-4000-8000-000000000004";
+      const unrelated = "00000000-0000-4000-8000-000000000005";
+      (await store.insertOrb(task, { ...orb, id: unrelated }))._unsafeUnwrap();
+      for (const [id, parent] of [
+        [child, orb.id],
+        [leaf, child],
+      ] as const) {
+        (
+          await store.spawnOrb(task, {
+            callerOrbId: parent,
+            caller: peerCentralCaller(parent),
+            orb: { ...orb, id },
+            prompt: "work",
+            requestHash: id,
+          })
+        )._unsafeUnwrap();
+      }
+      const descendantSource = {
+        orbId: orb.id,
+        projectId: project.id,
+        ownerUserId: OWNER,
+        caller: peerCentralCaller(orb.id),
+      };
+      const params = {
+        orbId: leaf,
+        expectedStateVersion: 0,
+        now: 2000,
+        cleanupAfter: 3000,
+        descendantSource,
+      };
+      for (const bad of [
+        { ...params, orbId: unrelated },
+        { ...params, orbId: orb.id },
+        {
+          ...params,
+          descendantSource: {
+            ...descendantSource,
+            ownerUserId: "00000000-0000-4000-8000-000000000098",
+          },
+        },
+        {
+          ...params,
+          descendantSource: {
+            ...descendantSource,
+            projectId: "00000000-0000-4000-8000-000000000097",
+          },
+        },
+        {
+          ...params,
+          descendantSource: {
+            ...descendantSource,
+            caller: { ...peerCentralCaller(orb.id), agentAdmissionVersion: 1 },
+          },
+        },
+        { ...params, caller: peerCentralCaller(orb.id) },
+      ])
+        expect((await store.requestOrbDeletion(task, bad))._unsafeUnwrapErr().type).toBe(
+          "state_conflict",
+        );
+      const deleting = (
+        await store.requestOrbDeletion(task, {
+          orbId: child,
+          expectedStateVersion: 0,
+          now: 2000,
+          cleanupAfter: 2000,
+        })
+      )._unsafeUnwrap();
+      (
+        await store.finalizeOrbDeletion(task, {
+          orbId: child,
+          expectedStateVersion: deleting.stateVersion,
+        })
+      )._unsafeUnwrap();
+      expect(
+        (await store.listOrbDescendants(task, descendantSource))
+          ._unsafeUnwrap()
+          .map((row) => row.id),
+      ).toEqual([leaf]);
+      const accepted = (await store.requestOrbDeletion(task, params))._unsafeUnwrap();
+      const intent = (await store.getOrbDeletion(task, leaf))._unsafeUnwrap();
+      const repeated = (
+        await store.requestOrbDeletion(task, {
+          ...params,
+          expectedStateVersion: accepted.stateVersion,
+          now: 4000,
+          cleanupAfter: 5000,
+        })
+      )._unsafeUnwrap();
+      expect(repeated).toEqual(accepted);
+      expect((await store.getOrbDeletion(task, leaf))._unsafeUnwrap()).toEqual(intent);
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.state).toBe("creating");
+      (
+        await store.requestOrbStop(task, { orbId: orb.id, expectedStateVersion: 0, now: 4001 })
+      )._unsafeUnwrap();
+      expect(
+        (
+          await store.requestOrbDeletion(task, {
+            ...params,
+            expectedStateVersion: accepted.stateVersion,
+          })
+        )._unsafeUnwrapErr().type,
+      ).toBe("state_conflict");
+    });
+
+    it.each(["token", "incarnation", "discard", "stopped", "sleep"] as const)(
+      "fences guest descendant source %s inside the write",
+      async (fence) => {
+        (await store.insertProject(task, project))._unsafeUnwrap();
+        (
+          await store.insertOrb(task, {
+            ...orb,
+            state: "running",
+            runtimeTokenHash: "token",
+            hostIncarnation: 2,
+          })
+        )._unsafeUnwrap();
+        const child = "00000000-0000-4000-8000-000000000003";
+        (
+          await store.spawnOrb(task, {
+            callerOrbId: orb.id,
+            caller: { runtimeTokenHash: "token", hostIncarnation: 2 },
+            orb: { ...orb, id: child },
+            prompt: "work",
+            requestHash: child,
+          })
+        )._unsafeUnwrap();
+        if (fence !== "token" && fence !== "incarnation") {
+          if (fence === "discard")
+            (
+              await store.failOrbAndRequestComputeDiscard(task, {
+                orbId: orb.id,
+                expectedStateVersion: 0,
+                now: 2000,
+                lastError: "discard",
+              })
+            )._unsafeUnwrap();
+          else if (fence === "sleep") {
+            const sleeping = (
+              await store.scheduleOrbSleep(task, {
+                orbId: orb.id,
+                caller: { runtimeTokenHash: "token", hostIncarnation: 2 },
+                sleepId: child,
+                durationSeconds: 60,
+              })
+            )._unsafeUnwrap();
+            (
+              await store.casTransition(task, {
+                orbId: orb.id,
+                expectedStateVersion: sleeping.stateVersion,
+                toState: "stopping",
+                stopReason: "sleep",
+                now: 2000,
+              })
+            )._unsafeUnwrap();
+          } else
+            (
+              await store.casTransition(task, {
+                orbId: orb.id,
+                expectedStateVersion: 0,
+                toState: "stopped",
+                now: 2000,
+              })
+            )._unsafeUnwrap();
+        }
+        expect(
+          (
+            await store.requestOrbDeletion(task, {
+              orbId: child,
+              expectedStateVersion: 0,
+              now: 2000,
+              cleanupAfter: 3000,
+              descendantSource: {
+                orbId: orb.id,
+                projectId: project.id,
+                ownerUserId: OWNER,
+                caller: {
+                  runtimeTokenHash: fence === "token" ? "stale" : "token",
+                  hostIncarnation: fence === "incarnation" ? 1 : 2,
+                },
+              },
+            })
+          )._unsafeUnwrapErr().type,
+        ).toBe("state_conflict");
+        expect((await store.getOrbDeletion(task, child))._unsafeUnwrap()).toBeNull();
+      },
+    );
+
     it.each([
       { runtimeTokenHash: "stale", hostIncarnation: 2 },
       { runtimeTokenHash: "current", hostIncarnation: 1 },

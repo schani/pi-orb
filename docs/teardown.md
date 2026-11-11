@@ -38,7 +38,7 @@ Request CAS-transitions the orb to `deleting` or `archiving` and writes the inte
 - broker authorization is revoked through the lifecycle-state check (archiving keeps it only while needed to seal; see Orb archive);
 - live proxies close and are refused, local poll/reconcile/name work is cancelled and browser activity cleared;
 - any pending sleep is cancelled (`cancelled_sleep_id` on the transition edge);
-- the transition edge records `reason=archive_requested|delete_requested`, `source: self | browser` and, for self-requests, `callerIncarnation`.
+- the transition edge records `reason=archive_requested|delete_requested` and `source=self|browser`; self requests include `callerIncarnation` when available. Descendant deletion records `source=descendant`, `callerOrbId` and guest `callerIncarnation` or central `callerAdmissionVersion`.
 
 ### Resource disposal
 
@@ -105,11 +105,13 @@ A project owns its row (repository URL, name, deletion intent, timestamps), its 
 
 **Edges** (project-scoped): `deletion-requested` (child count), `deletion-fanout-repaired`, `deletion-blocked`/`deletion-recovered` (blocked and remaining counts), `deletion-retry`/`deletion-retry-recovered`, `deleted`, and `project-deletion-loop-blind`/`-recovered`. Never per pass.
 
-## Self-service CLI
+## In-orb cleanup
 
-Inside an orb, plain `pi-orb archive` and `pi-orb delete` request archival or deletion of **this** orb; central Pi exposes the same operations as `orb_archive` and `orb_delete` tools. There is no target argument, interactive prompt or `--yes`: the target derives exclusively from caller authority, and a confirmation flag would not strengthen authorization for code already holding the bearer. Agent guidance (environment prompt and tool descriptions) requires an explicit user request for this orb and pushing or exporting needed work first. This is guidance, not a security boundary.
+`pi-orb archive` (`orb_archive`) archives self. `pi-orb delete self` deletes self; `pi-orb delete <orb-id>` deletes one descendant. Delete requires literal `self` or a full UUID, never a name, prefix or implicit target. Native `orb_delete` accepts exactly `{self:true}` or `{orbId:fullUUID}`. Self-archive and self-delete require an explicit human request; descendant cleanup may be part of delegated work. Push or export needed work first. This guidance is not a security boundary. There is no interactive prompt or `--yes`.
 
-**Routes.** `POST /runtime/v1/orb/archive` and `POST /runtime/v1/orb/delete` accept no body or `{}` and reject extra fields or targets. They acknowledge with `{orbId, state: "archiving" | "deleting"}` once intent is durable, reusing the same domain operations and cleanup machinery: no new state, table, grace period or loop. Browser routes are unavailable under runtime credentials. Extra fields are `400`, invalid identity `401`, incompatible lifecycle or changed authority `409`, and store failures sanitized `503`/`500` in the standard error envelope (`docs/control-plane-api.md`).
+**Routes.** `POST /runtime/v1/orb/archive` accepts no body or `{}`; `POST /runtime/v1/orb/delete` requires the same strict union as `orb_delete`. Empty, `self:false`, both selectors and extra fields are invalid; supplying the caller's own ID as `orbId` rejects with instructions to use `self`. They acknowledge with `{orbId, state: "archiving" | "deleting"}` once intent is durable, reusing existing cleanup machinery. Browser routes are unavailable under runtime credentials. Invalid bodies are `400`, invalid identity `401`, incompatible lifecycle or changed authority `409`, and store failures sanitized `503`/`500` in the standard error envelope (`docs/control-plane-api.md`).
+
+**Descendants.** Direct and indirect spawn ancestry comes from retained `orb_spawns` (`docs/inbox.md`), traversing deleted intermediates. The caller's current authority, same owner/project, ancestry and target write are checked atomically. A target may be in any state; repeat deletion is idempotent while its row exists. Only the selected orb is deleted, never its descendants. Discovery is `docs/control-plane-api.md`.
 
 **Caller authority.** Runtime callers carry token hash and incarnation (`callerIncarnation`) into the domain CAS loop. Hash, incarnation, absence of a discard fence and lifecycle state are checked atomically at the archive/delete write in PostgreSQL and the simulation store, and revalidated on every CAS retry, so a stopped or replaced incarnation cannot authenticate before a lifecycle change and act on a newer one afterwards. Archive admits new requests from `running` and idempotent retries from `archiving`; delete admits only `running`. This deliberately does not inherit the broker's broader boot-state authorization. Central callers instead must match orb, project, owner and current `agent_admission_version`, with no manual/sleep stop inhibition and the orb not archived or deleting. Browser requests keep their every-state authority.
 

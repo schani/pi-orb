@@ -937,6 +937,27 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       );
   }
 
+  listOrbDescendants(
+    _task: SimulationTask,
+    source: { orbId: string; projectId: string; ownerUserId: string },
+  ): ResultAsync<OrbRow[], StoreError> {
+    return this.db
+      .query(
+        `WITH RECURSIVE descendants AS (
+           SELECT orb_id FROM orb_spawns WHERE caller_orb_id = $1 AND project_id = $2
+           UNION
+           SELECT s.orb_id FROM orb_spawns s JOIN descendants d ON s.caller_orb_id = d.orb_id
+           WHERE s.project_id = $2
+         )
+         SELECT o.* FROM descendants d JOIN orbs o ON o.id = d.orb_id
+         JOIN projects p ON p.id = o.project_id
+         WHERE o.project_id = $2 AND p.owner_user_id = $3 AND o.id <> $1
+         ORDER BY o.created_at, o.id`,
+        [source.orbId, source.projectId, source.ownerUserId],
+      )
+      .map((result) => result.rows.map(mapOrbRow));
+  }
+
   listOrbsInStates(
     _task: SimulationTask,
     states: readonly OrbState[],
@@ -1990,6 +2011,54 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     params: RequestOrbDeletionParams,
   ): ResultAsync<OrbRow, StoreError | StateConflict> {
     return this.db.transaction<OrbRow, StoreError | StateConflict>(async (query) => {
+      const source = params.descendantSource;
+      if (source !== undefined) {
+        if (params.caller !== undefined) return err(stateConflict());
+        const project = await query(
+          "SELECT state, owner_user_id FROM projects WHERE id = $1 FOR UPDATE",
+          [source.projectId],
+        );
+        if (project.isErr()) return err(project.error);
+        const owner = project.value.rows[0]?.["owner_user_id"];
+        if (project.value.rows[0]?.["state"] !== "active" || owner !== source.ownerUserId)
+          return err(stateConflict());
+        const locked = await query(
+          "SELECT * FROM orbs WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE",
+          [arrayParam([source.orbId, params.orbId])],
+        );
+        if (locked.isErr()) return err(locked.error);
+        const sourceRow = locked.value.rows.find((row) => row["id"] === source.orbId);
+        if (
+          sourceRow === undefined ||
+          sourceRow["project_id"] !== source.projectId ||
+          !acceptsOrbAgentCaller(mapOrbRow(sourceRow), String(owner), source.caller)
+        )
+          return err(stateConflict());
+        const target = locked.value.rows.find((row) => row["id"] === params.orbId);
+        if (
+          target === undefined ||
+          target["project_id"] !== source.projectId ||
+          params.orbId === source.orbId
+        )
+          return err(stateConflict());
+        const lineage = await query(
+          `WITH RECURSIVE descendants AS (
+             SELECT orb_id FROM orb_spawns WHERE caller_orb_id = $1 AND project_id = $2
+             UNION
+             SELECT s.orb_id FROM orb_spawns s JOIN descendants d ON s.caller_orb_id = d.orb_id
+             WHERE s.project_id = $2
+           )
+           SELECT 1 FROM descendants WHERE orb_id = $3`,
+          [source.orbId, source.projectId, params.orbId],
+        );
+        if (lineage.isErr()) return err(lineage.error);
+        if (
+          lineage.value.rows[0] === undefined ||
+          Number(target["state_version"]) !== params.expectedStateVersion
+        )
+          return err(stateConflict(target["state"] as OrbState));
+        if (target["state"] === "deleting") return ok(mapOrbRow(target));
+      }
       const updated = await query(
         `UPDATE orbs SET state = 'deleting', state_version = state_version + 1,
            agent_admission_version = agent_admission_version + 1,

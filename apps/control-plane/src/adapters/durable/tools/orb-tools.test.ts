@@ -76,7 +76,12 @@ it("uses durable child task identities and does not expose authority arguments",
   );
   expect(invoke).toHaveBeenCalledWith({ kind: "sleep", durationSeconds: 60 }, '[42,"call"]');
   for (const tool of tools) {
-    expect(tool.parameters).toHaveProperty("additionalProperties", false);
+    if (tool.name === "orb_delete") {
+      const alternatives = (tool.parameters as { anyOf: unknown[] }).anyOf;
+      expect(alternatives).toHaveLength(2);
+      for (const alternative of alternatives)
+        expect(alternative).toHaveProperty("additionalProperties", false);
+    } else expect(tool.parameters).toHaveProperty("additionalProperties", false);
     expect(JSON.stringify(tool.parameters)).not.toMatch(/ownerUserId|incarnation|runtimeTokenHash/);
   }
   expect(tools.find((t) => t.name === "orb_delete")!.replay).toBe("unsafe");
@@ -264,7 +269,7 @@ const responses = [
   ["notify_parent", { message: "hi" }, { accepted: true }],
   ["orb_sleep", { durationSeconds: 60 }, { sleepId: "sleep", sleepUntil: 123456 }],
   ["orb_archive", {}, { orbId: "orb", state: "archived" }],
-  ["orb_delete", {}, { orbId: "orb", state: "deleting" }],
+  ["orb_delete", { self: true }, { orbId: "orb", state: "deleting" }],
   ["orb_expose_port", { port: 5173 }, { port: 5173, registrationId: "registration", url: "url" }],
   ["orb_unexpose_port", { port: 5173 }, { port: 5173, revoked: true }],
   ["orb_list_previews", {}, [{ port: 5173, registrationId: "registration", url: "url" }]],
@@ -288,6 +293,13 @@ it.each(responses)(
       );
       assert.isDefined(tool);
       const result = await tool.execute(args as never, api, BACKGROUND_CONTEXT);
+      if (name === "orb_delete")
+        expect(invoke).toHaveBeenCalledExactlyOnceWith(
+          { kind: "delete", request: args },
+          '[42,"call"]',
+        );
+      if (name === "orb_list")
+        expect(invoke).toHaveBeenCalledExactlyOnceWith({ kind: "list", ...args }, '[42,"call"]');
       if (name === "orb_search_history")
         expect(invoke).toHaveBeenCalledExactlyOnceWith(
           { kind: "search", request: args },

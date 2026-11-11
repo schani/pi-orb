@@ -892,6 +892,39 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     );
   }
 
+  private descendantIds(source: { orbId: string; projectId: string }): Set<string> {
+    const ids = new Set<string>();
+    const pending = [source.orbId];
+    while (pending.length > 0) {
+      const parent = pending.pop();
+      for (const [id, spawn] of this.spawns) {
+        if (
+          id !== source.orbId &&
+          spawn.projectId === source.projectId &&
+          spawn.callerOrbId === parent &&
+          !ids.has(id)
+        ) {
+          ids.add(id);
+          pending.push(id);
+        }
+      }
+    }
+    return ids;
+  }
+
+  listOrbDescendants(
+    task: SimulationTask,
+    source: { orbId: string; projectId: string; ownerUserId: string },
+  ): ResultAsync<OrbRow[], StoreError> {
+    return this.access(task, FAILPOINTS.storeRead, "list orb descendants", () => {
+      if (this.projects.get(source.projectId)?.ownerUserId !== source.ownerUserId) return [];
+      const ids = this.descendantIds(source);
+      return [...this.orbs.values()]
+        .filter((orb) => orb.projectId === source.projectId && ids.has(orb.id))
+        .sort((a, b) => a.id.localeCompare(b.id));
+    });
+  }
+
   spawnOrb(
     task: SimulationTask,
     params: SpawnOrbParams,
@@ -1792,14 +1825,32 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   ): ResultAsync<OrbRow, StoreError | StateConflict> {
     return this.access(task, FAILPOINTS.storeWrite, "request orb deletion", () => {
       const orb = this.orbs.get(params.orbId);
+      const source = params.descendantSource;
+      const sourceOrb = source === undefined ? undefined : this.orbs.get(source.orbId);
       if (
         orb === undefined ||
         orb.stateVersion !== params.expectedStateVersion ||
         (params.caller !== undefined &&
-          !acceptsOrbAgentCaller(orb, this.projects.get(orb.projectId)?.ownerUserId, params.caller))
+          !acceptsOrbAgentCaller(
+            orb,
+            this.projects.get(orb.projectId)?.ownerUserId,
+            params.caller,
+          )) ||
+        (source !== undefined &&
+          (params.caller !== undefined ||
+            sourceOrb === undefined ||
+            this.projects.get(source.projectId)?.state !== "active" ||
+            source.orbId === orb.id ||
+            source.projectId !== sourceOrb.projectId ||
+            orb.projectId !== source.projectId ||
+            this.projects.get(source.projectId)?.ownerUserId !== source.ownerUserId ||
+            !acceptsOrbAgentCaller(sourceOrb, source.ownerUserId, source.caller) ||
+            !this.descendantIds(source).has(orb.id)))
       ) {
         return { conflict: true as const, currentState: orb?.state };
       }
+      if (source !== undefined && orb.state === "deleting")
+        return { conflict: false as const, row: orb };
       const updated: OrbRow = {
         ...orb,
         state: "deleting",

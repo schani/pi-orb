@@ -8,7 +8,9 @@ import {
 import {
   HistorySearchRequestSchema,
   HistorySearchResultSchema,
+  OrbDeleteRequestSchema,
   OrbInspectionListSchema,
+  OrbListRequestSchema,
   OrbSelfSchema,
   OrbSpawnRequestSchema,
   OrbSpawnResponseSchema,
@@ -89,11 +91,11 @@ export function createOrbTools(
     }),
     defineTool({
       name: "orb_list",
-      description: "List orbs owned by this orb's owner.",
-      parameters: empty,
+      description: "List orbs owned by this orb's owner; optionally only this orb's descendants.",
+      parameters: OrbListRequestSchema,
       structuredOutputSchema: resultSchema(Type.Omit(OrbInspectionListSchema, ["v"])),
       replay: "safe",
-      execute: async (_args, api) => output({ kind: "list" }, api),
+      execute: async (args, api) => output({ kind: "list", ...args }, api),
     }),
     defineTool({
       name: "orb_transcript",
@@ -218,11 +220,12 @@ export function createOrbTools(
     }),
     defineTool({
       name: "orb_delete",
-      description: "Permanently delete this orb only on explicit user request.",
-      parameters: empty,
+      description:
+        "Permanently delete this orb with {self:true} only on explicit user request, or a same-project descendant by full orbId for delegated cleanup. No cascade.",
+      parameters: OrbDeleteRequestSchema,
       structuredOutputSchema: lifecycleSchema,
       replay: "unsafe",
-      execute: async (_args, api) => output({ kind: "delete" }, api),
+      execute: async (args, api) => output({ kind: "delete", request: args }, api),
     }),
     defineTool({
       name: "orb_expose_port",

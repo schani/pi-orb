@@ -3093,6 +3093,7 @@ export function requestOrbDeletion(
   deps: ControlPlaneDeps,
   orbId: string,
   caller?: ArchiveCaller,
+  descendantSource?: import("./ports.ts").OrbMessageSender,
 ): ResultAsync<OrbRow, CommandError> {
   const run = async (): Promise<Result<OrbRow, CommandError>> => {
     for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt++) {
@@ -3116,23 +3117,38 @@ export function requestOrbDeletion(
       ) {
         return err(commandError("conflict", "this runtime can no longer request deletion", false));
       }
-      if (orb.state === "deleting") return ok(orb);
+      if (orb.state === "deleting" && descendantSource === undefined) return ok(orb);
       const now = task.wallNow();
       const requested = await deps.store.requestOrbDeletion(task, {
         ...(caller === undefined ? {} : { caller }),
+        ...(descendantSource === undefined ? {} : { descendantSource }),
         orbId,
         expectedStateVersion: orb.stateVersion,
         now,
         cleanupAfter: now + deps.constants.deletionQuarantineMs,
       });
       if (requested.isOk()) {
+        if (requested.value.stateVersion === orb.stateVersion) return ok(requested.value);
         deps.control.markStopping(orbId, requested.value.stateVersion);
         deps.control.closeBrowserConnections(orbId);
         logOrbEvent(task, orbId, "transition", {
           from: orb.state,
           to: "deleting",
           reason: "delete_requested",
-          source: caller === undefined ? "browser" : "self",
+          source:
+            descendantSource !== undefined
+              ? "descendant"
+              : caller === undefined
+                ? "browser"
+                : "self",
+          ...(descendantSource === undefined
+            ? {}
+            : {
+                callerOrbId: descendantSource.orbId,
+                ...(descendantSource.caller.kind === "central"
+                  ? { callerAdmissionVersion: descendantSource.caller.agentAdmissionVersion }
+                  : { callerIncarnation: descendantSource.caller.hostIncarnation }),
+              }),
           ...(caller === undefined ? {} : { callerIncarnation: caller.hostIncarnation }),
           ...(orb.sleepId === null ? {} : { cancelled_sleep_id: orb.sleepId }),
         });

@@ -1,5 +1,5 @@
 import { readBrokerEnv } from "../broker/endpoint.ts";
-import { DELETE_USAGE, deleteExitCode, parseDeleteArgs, requestSelfDelete } from "./command.ts";
+import { DELETE_USAGE, deleteExitCode, parseDeleteArgs, requestDelete } from "./command.ts";
 
 const parsed = parseDeleteArgs(process.argv.slice(2));
 const env = readBrokerEnv(process.env);
@@ -12,13 +12,15 @@ if (parsed.isErr()) {
   );
   process.exitCode = 2;
 } else {
-  const result = await requestSelfDelete(env);
+  const result = await requestDelete(env, parsed.value);
   if (result.isErr()) {
     process.stderr.write(`pi-orb: ${result.error.message}\n`);
     process.exitCode = deleteExitCode(result.error);
   } else {
     process.stdout.write(
-      "Deletion requested. Workspace, conversation, and hosted files will be permanently deleted; this turn may be interrupted.\n",
+      "self" in parsed.value
+        ? "Deletion requested. Workspace, conversation, and hosted files will be permanently deleted; this turn may be interrupted.\n"
+        : `Deletion requested for orb ${parsed.value.orbId}. Workspace, conversation, and hosted files will be permanently deleted.\n`,
     );
   }
 }

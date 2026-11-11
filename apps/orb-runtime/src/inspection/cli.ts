@@ -81,7 +81,7 @@ async function main(): Promise<number> {
     return 0;
   }
   if (parsed.value.type === "orbs") {
-    const result = await endpoint.list(task);
+    const result = await endpoint.list(task, { descendantsOnly: parsed.value.descendantsOnly });
     if (result.kind !== "list") {
       process.stderr.write(`pi-orb: ${describeFailure(result)}\n`);
       return exitCode(result);

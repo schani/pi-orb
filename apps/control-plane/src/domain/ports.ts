@@ -124,6 +124,8 @@ export type HostSpecReplacementOutcome =
 
 export interface RequestOrbDeletionParams {
   readonly caller?: ArchiveCaller;
+  /** Trusted source identity, separate from target authority; mutually exclusive with caller. */
+  readonly descendantSource?: OrbMessageSender;
   readonly orbId: string;
   readonly expectedStateVersion: number;
   readonly now: number;
@@ -280,6 +282,11 @@ export interface ControlPlaneStore extends ActivityHeadlineStore, PreviewStore {
     task: SimulationTask,
     callerOrbId: string,
   ): ResultAsync<Pick<OrbRow, "id" | "name">[], StoreError>;
+  /** Existing descendants through retained provenance, scoped to the source owner/project. */
+  listOrbDescendants(
+    task: SimulationTask,
+    source: { orbId: string; projectId: string; ownerUserId: string },
+  ): ResultAsync<OrbRow[], StoreError>;
   spawnOrb(
     task: SimulationTask,
     params: SpawnOrbParams,

@@ -7,8 +7,9 @@ import type { SimulationTask } from "determined";
 import { err, ok, ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
 import { acceptsCentralAgentCaller } from "./agent-authorization.ts";
-import { requestOrbArchive, requestOrbDeletion, requestOrbSleep } from "./lifecycle.ts";
+import { requestOrbArchive, requestOrbSleep } from "./lifecycle.ts";
 import type { OrbRow } from "./orb.ts";
+import { deleteOrbFromAgent } from "./orb-deletion.ts";
 import { sendOrbMessage } from "./orb-messaging.ts";
 import { normalizeOrbName } from "./orb-naming.ts";
 import { getOrbSpawnRelations, spawnOrb } from "./orb-spawning.ts";
@@ -29,7 +30,9 @@ export interface OrbAgentIdentity {
   readonly runtimeTokenHash: string;
 }
 export type OrbAgentRequest =
-  | { kind: "self" | "list" | "archive" | "delete" | "notification_admission" | "list_previews" }
+  | { kind: "self" | "archive" | "notification_admission" | "list_previews" }
+  | { kind: "delete"; request: unknown }
+  | { kind: "list"; descendantsOnly?: boolean }
   | { kind: "expose_port" | "unexpose_port"; port: number }
   | { kind: "transcript"; orbId: string }
   | { kind: "search"; request: unknown }
@@ -100,6 +103,7 @@ export function createOrbAgentOperations(
     id: orb.id,
     name: orb.name,
     state: orb.state,
+    ...(orb.lastError === null ? {} : { stateDetail: orb.lastError }),
     updatedAt: new Date(orb.updatedAt).toISOString(),
     project: { id: project.id, name: project.name, repositoryUrl: project.repositoryUrl },
   });
@@ -159,6 +163,20 @@ export function createOrbAgentOperations(
               });
             }
             case "list": {
+              if (request.descendantsOnly === true) {
+                const rows = await deps.store.listOrbDescendants(task, {
+                  orbId: orb.id,
+                  projectId: orb.projectId,
+                  ownerUserId,
+                });
+                if (rows.isErr()) return err(unavailable());
+                const sourceProject = project.value;
+                const items = rows.value.map((row) => item(row, sourceProject));
+                items.sort(
+                  (a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id),
+                );
+                return ok({ currentOrbId: orb.id, items });
+              }
               const projects = await deps.store.listProjectsByOwner(task, ownerUserId);
               if (projects.isErr()) return err(unavailable());
               const items = [];
@@ -306,7 +324,12 @@ export function createOrbAgentOperations(
                 .map((row) => ({ orbId: row.id, state: row.state }))
                 .mapErr((e) => failure(e.code, e.message));
             case "delete":
-              return await requestOrbDeletion(task, deps, orb.id, caller)
+              return await deleteOrbFromAgent(
+                task,
+                deps,
+                { orbId: orb.id, projectId: orb.projectId, ownerUserId, caller },
+                request.request,
+              )
                 .map((row) => ({ orbId: row.id, state: row.state }))
                 .mapErr((e) => failure(e.code, e.message));
             case "expose_port":

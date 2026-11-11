@@ -39,6 +39,18 @@ describe("orb inspection HTTP endpoint", () => {
     );
   });
 
+  it("requests only descendants without changing the default list route", async () => {
+    const fetchMock = vi.fn(async () => response(200, { v: 1, currentOrbId: "orb-a", items: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(
+      (await new HttpOrbInspectionEndpoint(env).list(task, { descendantsOnly: true })).kind,
+    ).toBe("list");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://runtime.example/runtime/v1/orbs?descendantsOnly=true",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
   it("posts search privately with bearer authentication", async () => {
     const request = { query: "sensitive needle", scope: "project" as const, limit: 10 };
     const fetchMock = vi.fn(async () => response(200, { v: 1, hits: [] }));

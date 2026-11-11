@@ -72,8 +72,13 @@ export class HttpOrbInspectionEndpoint {
     return failureOf(response.value);
   }
 
-  async list(_task: SimulationTask): Promise<OrbListEndpointResult> {
-    const response = await this.request(ORB_INSPECTION_LIST_PATH);
+  async list(
+    _task: SimulationTask,
+    options: { readonly descendantsOnly?: boolean } = {},
+  ): Promise<OrbListEndpointResult> {
+    const response = await this.request(
+      `${ORB_INSPECTION_LIST_PATH}${options.descendantsOnly === true ? "?descendantsOnly=true" : ""}`,
+    );
     if (response.kind !== "response") return response;
     if (response.value.status === 200) {
       return Check(OrbInspectionListSchema, response.value.payload)

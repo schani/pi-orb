@@ -60,12 +60,19 @@ export const OrbInspectionItemSchema = Type.Object(
     id: Type.String(),
     name: Type.Union([Type.String(), Type.Null()]),
     state: OrbStateSchema,
+    stateDetail: Type.Optional(Type.String()),
     updatedAt: Type.String(),
     project: OrbInspectionProjectSchema,
   },
   closed,
 );
 export type OrbInspectionItem = Static<typeof OrbInspectionItemSchema>;
+
+export const OrbListRequestSchema = Type.Object(
+  { descendantsOnly: Type.Optional(Type.Boolean()) },
+  closed,
+);
+export type OrbListRequest = Static<typeof OrbListRequestSchema>;
 
 export const OrbInspectionListSchema = Type.Object(
   {

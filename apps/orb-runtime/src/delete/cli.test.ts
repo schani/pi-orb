@@ -16,11 +16,13 @@ describe("pi-orb delete CLI", () => {
   let status: number;
   let payload: unknown;
   let disconnect: boolean;
+  let target: { self: true } | { orbId: string };
   beforeEach(async () => {
     requests = 0;
     status = 202;
     payload = { orbId: "self", state: "deleting" };
     disconnect = false;
+    target = { self: true };
     server = createServer((request, response) => {
       requests++;
       expect(request.method).toBe("POST");
@@ -36,7 +38,7 @@ describe("pi-orb delete CLI", () => {
         body += chunk.toString();
       });
       request.on("end", () => {
-        expect(body).toBe("{}");
+        expect(JSON.parse(body)).toEqual(target);
         response.writeHead(status, { "content-type": "application/json" });
         response.end(JSON.stringify(payload));
       });
@@ -51,7 +53,7 @@ describe("pi-orb delete CLI", () => {
   });
 
   it("acknowledges acceptance, not completion", async () => {
-    const result = await run(["delete"], url);
+    const result = await run(["delete", "self"], url);
     expect(result.code).toBe(0);
     expect(result.stderr).toBe("");
     expect(result.stdout).toContain("Deletion requested.");
@@ -59,6 +61,10 @@ describe("pi-orb delete CLI", () => {
     expect(requests).toBe(1);
   });
   it.each([
+    ["delete"],
+    ["delete", "self", "--yes"],
+    ["delete", "self", "--force"],
+    ["delete", "self", "--recursive"],
     ["delete", "sibling"],
     ["delete", "--yes"],
     ["delete", "--json"],
@@ -68,9 +74,19 @@ describe("pi-orb delete CLI", () => {
     expect(result.stdout).toBe("");
     expect(requests).toBe(0);
   });
+  it("deletes an explicit descendant ID without implying this turn is interrupted", async () => {
+    const orbId = "123e4567-e89b-42d3-a456-426614174000";
+    target = { orbId };
+    payload = { orbId, state: "deleting" };
+    const result = await run(["delete", orbId], url);
+    expect(result).toMatchObject({ code: 0, stderr: "" });
+    expect(result.stdout).toContain(orbId);
+    expect(result.stdout).not.toContain("this turn may be interrupted");
+    expect(requests).toBe(1);
+  });
   it("fails closed outside an orb", async () => {
-    expect((await run(["delete"], url, "")).code).toBe(2);
-    expect((await run(["delete"], "")).code).toBe(2);
+    expect((await run(["delete", "self"], url, "")).code).toBe(2);
+    expect((await run(["delete", "self"], "")).code).toBe(2);
     expect(requests).toBe(0);
   });
   it.each([
@@ -83,7 +99,7 @@ describe("pi-orb delete CLI", () => {
   ] as const)("reports typed HTTP %i failure", async (httpStatus, code, exit) => {
     status = httpStatus;
     payload = { error: { code, message: "safe failure", retryable: false } };
-    const result = await run(["delete"], url);
+    const result = await run(["delete", "self"], url);
     expect(result.code).toBe(exit);
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("safe failure");
@@ -94,7 +110,7 @@ describe("pi-orb delete CLI", () => {
     { error: { code: "invented", message: "private-token" } },
   ])("rejects malformed acknowledgement %j", async (body) => {
     payload = body;
-    const result = await run(["delete"], url);
+    const result = await run(["delete", "self"], url);
     expect(result.code).toBe(6);
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("acceptance is unknown");
@@ -109,7 +125,7 @@ describe("pi-orb delete CLI", () => {
   });
   it("does not turn a lost response into a false success or safe-failure claim", async () => {
     disconnect = true;
-    const result = await run(["delete"], url);
+    const result = await run(["delete", "self"], url);
     expect(result.code).toBe(6);
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("acceptance is unknown");

@@ -94,7 +94,7 @@ accepts a caller-selected identity.
 | `PUT /runtime/v1/orbs/:orbId/spawn` | Spawn orb | `docs/inbox.md` |
 | `POST /runtime/v1/orb/send` | Peer message | `docs/inbox.md` |
 | `POST /runtime/v1/orb/sleep`, `POST /runtime/v1/orb/boot-context` | Scheduled sleep | `docs/lifecycle.md` |
-| `POST /runtime/v1/orb/archive`, `POST /runtime/v1/orb/delete` | Self-archive, self-delete | `docs/teardown.md` |
+| `POST /runtime/v1/orb/archive`, `POST /runtime/v1/orb/delete` | Archive self; delete self or descendant | `docs/teardown.md` |
 | `PUT\|DELETE /runtime/previews/:port`, `GET /runtime/previews` | Preview registration | `docs/http-exposure.md` |
 | `POST\|GET\|DELETE /runtime/v1/hosting/files?path=` | Hosted files | `docs/http-exposure.md` |
 
@@ -269,8 +269,11 @@ principal. The dashboard footer shows it.
 The `pi-orb` CLI reads siblings through runtime routes, never `/api/v1`.
 
 - `GET /runtime/v1/orbs` returns one no-store snapshot: `currentOrbId` plus each of the calling orb
-  owner's orbs (ID, nullable name, state, update time, project ID/name/repository URL), including
-  stopped and archived. `pi-orb orbs [query]` filters locally (NFKC, case-insensitive substring).
+  owner's orbs (ID, nullable name, state, optional `stateDetail`, update time, project ID/name/repository URL), in all states.
+  `?descendantsOnly=true` restricts this to existing descendants, excluding self (ancestry: `docs/teardown.md`).
+  Native `orb_list({descendantsOnly?: boolean})` shares this service; omission preserves the owner-wide list.
+  `pi-orb orbs [query] [--descendants] [--json]` filters locally (NFKC, case-insensitive substring);
+  `stateDetail` exposes sanitized cleanup blockers in either output.
 - `GET /runtime/v1/orbs/:orbId/transcript` is company-wide: the exact consistent full replica
   snapshot plus compact identity, no-store. It never starts the target or contacts its runtime.
   Archived transcripts are complete; others have replication lag (`docs/history.md`). Missing →

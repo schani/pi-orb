@@ -134,11 +134,11 @@ export interface RuntimeRouteDeps {
     orbId: string,
     caller: ArchiveCaller,
   ) => ResultAsync<OrbRow, CommandError>;
-  readonly deleteSelf: (
+  readonly deleteOrb: (
     task: SimulationTask,
-    orbId: string,
-    caller: ArchiveCaller,
-  ) => ResultAsync<OrbRow, CommandError>;
+    source: OrbRow,
+    request: import("@pi-orb/protocol").OrbDeleteRequest,
+  ) => ResultAsync<OrbRow, import("../domain/orb-deletion.ts").OrbDeletionError>;
   readonly store: ControlPlaneStore;
   readonly brokerForUser: (userId: string) => BrokerDeps;
   readonly nameGenerator: OrbNameGenerator;
@@ -175,6 +175,7 @@ const inspectionItem = (
   id: orb.id,
   name: orb.name,
   state: orb.state,
+  ...(orb.lastError === null ? {} : { stateDetail: orb.lastError }),
   updatedAt: new Date(orb.updatedAt).toISOString(),
   project,
 });
@@ -605,23 +606,24 @@ export function registerRuntimeRoutes(
         },
       });
     }
-    if (!Check(OrbDeleteRequestSchema, request.body === undefined ? {} : request.body)) {
+    if (!Check(OrbDeleteRequestSchema, request.body)) {
       return reply.status(400).send({
         error: {
           code: "invalid_request",
-          message: "self-delete accepts no fields",
+          message: "specify exactly {self:true} or {orbId:full UUID}",
           retryable: false,
         },
       });
     }
-    const result = await deps.deleteSelf(task, auth.orb.id, {
-      runtimeTokenHash: auth.orb.runtimeTokenHash as string,
-      hostIncarnation: auth.orb.hostIncarnation,
-    });
+    const result = await deps.deleteOrb(task, auth.orb, request.body);
     if (result.isErr()) {
-      const status = { not_found: 404, conflict: 409, unavailable: 503, internal: 500 }[
-        result.error.code
-      ];
+      const status = {
+        invalid_request: 400,
+        not_found: 404,
+        conflict: 409,
+        unavailable: 503,
+        internal: 500,
+      }[result.error.code];
       return reply.status(status).send({
         error: {
           code: result.error.code,
@@ -934,10 +936,32 @@ export function registerRuntimeRoutes(
     }
     if (auth.kind !== "orb") return sendUnauthorized(reply);
 
+    const query = request.query as Record<string, unknown>;
+    if (
+      query.descendantsOnly !== undefined &&
+      query.descendantsOnly !== "true" &&
+      query.descendantsOnly !== "false"
+    )
+      return reply
+        .status(400)
+        .send(inspectionError("invalid_request", "descendantsOnly must be true or false", false));
     const ownerProject = await deps.store.getProject(task, auth.orb.projectId);
     if (ownerProject.isErr()) return sendInspectionStoreError(reply, ownerProject.error);
     if (ownerProject.value === null)
       return reply.status(500).send(inspectionError("internal", "orb project is missing", false));
+    if (query.descendantsOnly === "true") {
+      const descendants = await deps.store.listOrbDescendants(task, {
+        orbId: auth.orb.id,
+        projectId: auth.orb.projectId,
+        ownerUserId: ownerProject.value.ownerUserId,
+      });
+      if (descendants.isErr()) return sendInspectionStoreError(reply, descendants.error);
+      const sourceProject = ownerProject.value;
+      const items = descendants.value.map((orb) => inspectionItem(orb, sourceProject));
+      items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
+      reply.header("cache-control", "no-store");
+      return reply.send({ v: 1, currentOrbId: auth.orb.id, items });
+    }
     const projects = await deps.store.listProjectsByOwner(task, ownerProject.value.ownerUserId);
     if (projects.isErr()) return sendInspectionStoreError(reply, projects.error);
     const items: OrbInspectionItem[] = [];

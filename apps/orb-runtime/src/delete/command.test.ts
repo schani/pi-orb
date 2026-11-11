@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { requestSelfDelete } from "./command.ts";
+import { parseDeleteArgs, requestDelete } from "./command.ts";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -20,10 +20,13 @@ it("bounds the request and reports an unknown outcome when its deadline aborts",
         );
       }),
   );
-  const pending = requestSelfDelete({
-    controlPlaneUrl: "http://control-plane.test",
-    runtimeToken: "private-token",
-  });
+  const pending = requestDelete(
+    {
+      controlPlaneUrl: "http://control-plane.test",
+      runtimeToken: "private-token",
+    },
+    { self: true },
+  );
   expect(timeout).toHaveBeenCalledWith(3_000);
   controller.abort();
   const result = await pending;
@@ -41,13 +44,13 @@ it("submits once and returns on acceptance without waiting for idle or completio
       new Response(JSON.stringify({ orbId: "self", state: "deleting" }), { status: 202 }),
     );
   vi.stubGlobal("fetch", fetch);
-  const result = await requestSelfDelete(env);
+  const result = await requestDelete(env, { self: true });
   expect(result.isOk() && result.value).toEqual({ orbId: "self", state: "deleting" });
   expect(fetch).toHaveBeenCalledTimes(1);
   expect(fetch).toHaveBeenCalledWith("http://control-plane.test/runtime/v1/orb/delete", {
     method: "POST",
     headers: { authorization: "Bearer private-token", "content-type": "application/json" },
-    body: "{}",
+    body: JSON.stringify({ self: true }),
     signal: expect.any(AbortSignal),
   });
 });
@@ -62,7 +65,7 @@ it.each([
     "fetch",
     vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), { status })),
   );
-  const result = await requestSelfDelete(env);
+  const result = await requestDelete(env, { self: true });
   expect(result.isErr() && result.error.code).toBe("unknown_outcome");
   expect(result.isErr() && result.error.message).not.toContain("private-token");
 });
@@ -72,7 +75,7 @@ it("sanitizes a non-JSON response without claiming rejection", async () => {
     "fetch",
     vi.fn().mockResolvedValue(new Response("private-token sensitive failure", { status: 502 })),
   );
-  const result = await requestSelfDelete(env);
+  const result = await requestDelete(env, { self: true });
   expect(result.isErr() && result.error.code).toBe("unknown_outcome");
   expect(result.isErr() && result.error.message).not.toContain("private-token");
 });
@@ -97,10 +100,70 @@ it("keeps the deadline active while reading the response body", async () => {
         }),
     }),
   );
-  const pending = requestSelfDelete(env);
+  const pending = requestDelete(env, { self: true });
   await reading;
   controller.abort();
   const result = await pending;
   expect(result.isErr() && result.error.code).toBe("unknown_outcome");
   expect(result.isErr() && result.error.message).not.toContain("private-token");
+});
+
+const orbId = "123e4567-e89b-42d3-a456-426614174000";
+
+it("requires an explicit self or full UUID target and normalizes UUID case", () => {
+  expect(parseDeleteArgs(["self"])._unsafeUnwrap()).toEqual({ self: true });
+  expect(parseDeleteArgs([orbId.toUpperCase()])._unsafeUnwrap()).toEqual({ orbId });
+  for (const args of [
+    [],
+    ["child"],
+    ["123e4567"],
+    ["SELF"],
+    [""],
+    ["--yes"],
+    ["self", "--force"],
+    [orbId, "--recursive"],
+    ["self", orbId],
+    ["self", "--json"],
+  ]) {
+    expect(parseDeleteArgs(args).isErr(), JSON.stringify(args)).toBe(true);
+  }
+});
+
+it("submits the explicit UUID without resolving a name", async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValue(new Response(JSON.stringify({ orbId, state: "deleting" }), { status: 202 }));
+  vi.stubGlobal("fetch", fetch);
+  expect((await requestDelete(env, { orbId })).isOk()).toBe(true);
+  expect(fetch).toHaveBeenCalledOnce();
+  expect(fetch).toHaveBeenCalledWith(
+    "http://control-plane.test/runtime/v1/orb/delete",
+    expect.objectContaining({ body: JSON.stringify({ orbId }) }),
+  );
+});
+
+it.each([{ self: true } as const, { orbId }])(
+  "identifies the target after unknown acceptance: %j",
+  async (target) => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("private-token")));
+    const result = await requestDelete(env, target);
+    expect(result.isErr() && result.error.message).toContain("self" in target ? "this orb" : orbId);
+    expect(result.isErr() && result.error.message).not.toContain("private-token");
+  },
+);
+
+it("preserves the backend instruction to use self for an explicit own ID", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: { code: "invalid_request", message: "use pi-orb delete self", retryable: false },
+        }),
+        { status: 400 },
+      ),
+    ),
+  );
+  const result = await requestDelete(env, { orbId });
+  expect(result.isErr() && result.error.message).toBe("use pi-orb delete self");
 });

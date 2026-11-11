@@ -267,7 +267,11 @@ describe("central orb operations", () => {
               expect(
                 (
                   await service.invoke(
-                    kind === "sleep" ? { kind, durationSeconds: 60 } : { kind },
+                    kind === "sleep"
+                      ? { kind, durationSeconds: 60 }
+                      : kind === "delete"
+                        ? { kind, request: { self: true } }
+                        : { kind },
                     "self",
                   )
                 ).isOk(),
@@ -330,7 +334,9 @@ describe("central orb operations", () => {
                         ? { kind, durationSeconds: 60 }
                         : kind === "search"
                           ? { kind, request: { query: "needle" } }
-                          : { kind };
+                          : kind === "delete"
+                            ? { kind, request: { self: true } }
+                            : { kind };
                 const continuation =
                   revocation === "archiving" &&
                   (kind === "alert" ||
@@ -504,7 +510,14 @@ describe("central orb operations", () => {
                 appOrigin: "http://app",
                 appendAlert: () => okAsync({ recordId: "a", duplicate: false }),
               });
-              expect((await service.invoke({ kind }, "task:destructive")).isOk()).toBe(true);
+              expect(
+                (
+                  await service.invoke(
+                    kind === "delete" ? { kind, request: { self: true } } : { kind },
+                    "task:destructive",
+                  )
+                ).isOk(),
+              ).toBe(true);
               expect(h.store.orbSnapshot("caller")?.state).toBe(
                 kind === "archive" ? "archiving" : "deleting",
               );
