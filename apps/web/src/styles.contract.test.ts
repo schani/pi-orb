@@ -227,6 +227,13 @@ describe("shared text fields", () => {
   });
 });
 
+it("sets the CI waterfall on 20px rows with the 2px ring of a plot", () => {
+  expect(rule(".link-timeline")).toContain("line-height: 20px");
+  expect(rule(".link-timeline-dot > .activity-strip-dot")).toContain("height: 20px");
+  expect(rule(".link-timeline-bar")).toContain("top: 5px");
+  expect(rule(".link-timeline-unfolds:focus-visible")).toContain("outline: 2px solid var(--k)");
+});
+
 it.each([
   ["dashboard", ".orb-entry"],
   ["OrbIndex", ".ix-row"],

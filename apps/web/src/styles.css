@@ -3117,7 +3117,7 @@ pre,
   border-collapse: collapse;
   font-family: var(--mono);
   font-size: 11px;
-  line-height: 18px;
+  line-height: 20px;
 }
 td.link-timeline-dot {
   width: calc(12px + 2 * var(--link-timeline-pad));
@@ -3135,7 +3135,7 @@ td.link-timeline-duration {
   padding: 0;
 }
 .link-timeline-dot > .activity-strip-dot {
-  height: 18px;
+  height: 20px;
   margin: 0 auto;
 }
 .link-timeline td {
@@ -3150,8 +3150,8 @@ td.link-timeline-duration {
   background: var(--g1);
 }
 .link-timeline-unfolds:focus-visible {
-  outline: 1px solid var(--k);
-  outline-offset: -1px;
+  outline: 2px solid var(--k);
+  outline-offset: -2px;
 }
 .link-timeline-name {
   overflow: hidden;
@@ -3175,7 +3175,7 @@ td.link-timeline-duration {
 }
 .link-timeline-bar {
   position: absolute;
-  top: 4px;
+  top: 5px;
   height: 10px;
 }
 .link-timeline-queued {
