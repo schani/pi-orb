@@ -5434,10 +5434,19 @@ describe("frontend-only browser behavior", () => {
       await expectPage(
         links.locator(".orb-link-body").first().getByText("failed", { exact: true }),
       ).toBeVisible();
-      await expectPage(links.getByRole("link", { name: "e2e" })).toHaveAttribute(
+      const check = links.getByRole("link", { name: "e2e" });
+      await expectPage(check).toHaveAttribute(
         "href",
         "https://github.com/owner/repo/actions/runs/1/job/2",
       );
+      // Underlines span the text only, not the column.
+      expectPage(
+        await check.evaluate((a) => {
+          const range = document.createRange();
+          range.selectNodeContents(a);
+          return Math.round(a.getBoundingClientRect().width - range.getBoundingClientRect().width);
+        }),
+      ).toBe(0);
       await links.getByRole("button", { name: "remove" }).first().click();
       await expectPage(links.getByRole("link", { name: "#291" })).toHaveCount(0);
       expectPage(removed).toEqual([pr]);

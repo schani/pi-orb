@@ -3118,6 +3118,8 @@ pre,
   gap: 8px;
 }
 .orb-link-check > :nth-child(2) {
+  justify-self: start;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
