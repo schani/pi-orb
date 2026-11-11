@@ -6,13 +6,26 @@ import { describeApiError, listOrbLinks, removeOrbLink } from "../lib/api.ts";
 const POLL_INTERVAL_MS = 15_000;
 type Result = OrbLinkCheck["result"];
 
-const dot = (result: Result, key: string | number) => (
-  <span key={key} className={`activity-strip-dot orb-link-${result}`} />
-);
+/** Activity-strip dot states; `pending` is gray like a step that has not started. */
+const STATE: Record<Result, string> = {
+  passed: "",
+  failed: "activity-strip-failed",
+  running: "activity-strip-running",
+  pending: "orb-link-pending",
+};
+const dotClass = (result: Result) => `activity-strip-dot ${STATE[result]}`.trim();
+
+interface Tip {
+  readonly label: string;
+  readonly status: string;
+  readonly result: Result;
+  readonly left: number;
+  readonly top: number;
+}
 
 function overall(checks: readonly OrbLinkCheck[]): Result {
-  if (checks.some((check) => check.result === "failed")) return "failed";
-  if (checks.some((check) => check.result !== "passed")) return "running";
+  for (const result of ["failed", "running", "pending"] as const)
+    if (checks.some((check) => check.result === result)) return result;
   return checks.length > 0 ? "passed" : "pending";
 }
 
@@ -25,6 +38,7 @@ export function OrbLinksDrawer({
   error: ApiError | null;
   onRemove: (url: string) => void;
 }) {
+  const [tip, setTip] = useState<Tip | null>(null);
   if (links === null && error === null) return null;
   if (links?.items.length === 0 && links.githubError === null && error === null) return null;
   const items = links?.items ?? [];
@@ -33,14 +47,50 @@ export function OrbLinksDrawer({
     "--orb-link-ref": `${Math.max(0, ...refs.map((ref) => ref.length))}ch`,
     "--orb-link-strip": `${Math.max(0, ...items.map((link) => link.github?.checks.length ?? 0)) * 12}px`,
   } as CSSProperties;
+  const dot = (result: Result, label: string, status: string, key: string | number) => (
+    <span
+      key={key}
+      className={dotClass(result)}
+      role="img"
+      aria-label={status === "" ? label : `${label} · ${status}`}
+      onMouseEnter={(event) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        setTip({ label, status, result, left: rect.left, top: rect.top });
+      }}
+      onMouseLeave={() => setTip(null)}
+    />
+  );
   return (
     <details className="orb-links activity-rail-row" open={error !== null || undefined}>
       <summary>
         <span className="activity-rail-marker" aria-hidden="true" />
         <span className="activity-rail-summary">links</span>
         <span className="orb-link-strip">
-          {items.map((link) => dot(overall(link.github?.checks ?? []), link.url))}
+          {items.map((link, index) =>
+            dot(
+              overall(link.github?.checks ?? []),
+              refs[index] ?? link.url,
+              link.github?.status ?? "",
+              link.url,
+            ),
+          )}
         </span>
+        {tip !== null && (
+          <span
+            className="activity-strip-tip"
+            role="tooltip"
+            style={{
+              left: Math.max(4, tip.left - 16),
+              top: tip.top - 24,
+              maxWidth: `min(60ch, calc(100vw - ${Math.max(4, tip.left - 16) + 8}px))`,
+            }}
+          >
+            <span className={`activity-strip-tip-label ${STATE[tip.result]}`.trim()}>
+              {tip.label}
+            </span>
+            {tip.status !== "" && ` · ${tip.status}`}
+          </span>
+        )}
       </summary>
       <div className="orb-links-roster" style={style}>
         {error !== null && <p className="error-text">{describeApiError(error)}</p>}
@@ -53,14 +103,16 @@ export function OrbLinksDrawer({
               </a>
               <span className="orb-link-title">{link.github?.title}</span>
               <span className="orb-link-strip">
-                {link.github?.checks.map((check, i) => dot(check.result, i))}
+                {link.github?.checks.map((check, i) =>
+                  dot(check.result, check.name, check.result, i),
+                )}
               </span>
               <span className="orb-link-status">{link.github?.status}</span>
             </summary>
             <div className="orb-link-body">
               {link.github?.checks.map((check, i) => (
                 <div className="orb-link-check" key={i}>
-                  {dot(check.result, "dot")}
+                  <span className={dotClass(check.result)} />
                   <span>{check.name}</span>
                   <span className={`orb-link-result-${check.result}`}>{check.result}</span>
                 </div>

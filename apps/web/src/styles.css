@@ -3070,18 +3070,8 @@ pre,
 .orb-links > summary > .orb-link-strip {
   justify-content: flex-end;
 }
-.orb-link-failed::before {
-  background: var(--bad);
-}
 .orb-link-pending::before {
   background: var(--g2);
-}
-.orb-link-running::before {
-  background: var(--ok);
-  box-shadow:
-    0 0 0 2px var(--w),
-    0 0 0 3px var(--ok);
-  animation: activity-strip-blink 1s steps(2) infinite;
 }
 .orb-links-roster {
   padding: 0 12px;

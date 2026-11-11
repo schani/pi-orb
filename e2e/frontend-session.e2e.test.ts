@@ -5412,6 +5412,8 @@ describe("frontend-only browser behavior", () => {
         ),
       ).toBe(true);
       await links.locator(":scope > summary").click();
+      await links.getByRole("img", { name: "e2e · failed" }).hover();
+      await expectPage(page.getByRole("tooltip")).toHaveText("e2e · failed");
       await expectPage(links.getByRole("link", { name: "#291" })).toHaveAttribute("href", pr);
       await expectPage(links.getByRole("link", { name: "determined#14" })).toBeVisible();
       await links.locator(".orb-link > summary").first().click();

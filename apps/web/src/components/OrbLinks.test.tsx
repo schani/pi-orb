@@ -36,8 +36,13 @@ describe("OrbLinksDrawer", () => {
     expect(html).toContain(">determined#14</a>");
     expect(html).toContain("Add links drawer");
     expect(html).toContain("draft");
-    expect(html).toContain("orb-link-failed");
-    expect(html).toContain("orb-link-running");
+    expect(html).toContain(
+      'class="activity-strip-dot activity-strip-failed" role="img" aria-label="e2e · failed"',
+    );
+    expect(html).toContain(
+      'class="activity-strip-dot activity-strip-running" role="img" aria-label="dst · running"',
+    );
+    expect(html).toContain('class="activity-strip-dot" role="img" aria-label="build · passed"');
     expect(html.match(/>remove</g)).toHaveLength(2);
     expect(html).toContain("--orb-link-ref:13ch");
     expect(html).toContain("--orb-link-strip:36px");
@@ -45,8 +50,12 @@ describe("OrbLinksDrawer", () => {
 
   it("summarizes each link by its worst check", () => {
     const summary = render(links).split("</summary>")[0] ?? "";
-    expect(summary).toContain("orb-link-failed");
-    expect(summary).toContain("orb-link-pending");
+    expect(summary).toContain(
+      'class="activity-strip-dot activity-strip-failed" role="img" aria-label="#291 · draft"',
+    );
+    expect(summary).toContain(
+      'class="activity-strip-dot orb-link-pending" role="img" aria-label="determined#14"',
+    );
   });
 
   it("hides without links and shows GitHub failures", () => {

@@ -18,7 +18,7 @@ The control plane reads all links in one GitHub GraphQL request (`resource(url:)
 
 ## Drawer
 
-In the header stack between the subagent rails and Files (`docs/web-ui.md`), hidden without links. Summary: `links` and one dot per link, right-aligned, showing its worst check (red failed, blinking green running/pending, black passed, gray without checks). Each row: ref (opens GitHub), title, one dot per check, status word. A row expands to the named checks and `remove`. Removal is immediate, with no undo: `DELETE /api/v1/orbs/:orbId/links?url=<url>` (204, idempotent). Design and rejected alternatives: `design-prototypes/orb-links.html`.
+In the header stack between the subagent rails and Files (`docs/web-ui.md`), hidden without links. Summary: `links` and one dot per link, right-aligned, showing its worst check. Dots use the activity-strip states (`docs/web-ui.md`): red failed, blinking green running, black passed, gray pending or without checks; hovering one shows the activity-strip tooltip with name and status. Each row: ref (opens GitHub), title, one dot per check, status word. A row expands to the named checks and `remove`. Removal is immediate, with no undo: `DELETE /api/v1/orbs/:orbId/links?url=<url>` (204, idempotent). Design and rejected alternatives: `design-prototypes/orb-links.html`.
 
 ## Observability
 
