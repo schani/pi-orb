@@ -3065,6 +3065,7 @@ pre,
 .orb-link-strip {
   display: flex;
   height: var(--row);
+  overflow: hidden;
   color: var(--k);
 }
 .orb-links > summary > .orb-link-strip {
@@ -3082,7 +3083,7 @@ pre,
 }
 .orb-link > summary {
   display: grid;
-  grid-template-columns: var(--orb-link-ref) minmax(0, 1fr) var(--orb-link-strip) 8ch 20px;
+  grid-template-columns: var(--orb-link-ref) minmax(0, 1fr) minmax(0, var(--orb-link-strip)) 8ch 20px;
   gap: 8px;
   align-items: center;
   min-height: 24px;

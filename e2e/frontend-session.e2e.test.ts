@@ -5391,6 +5391,17 @@ describe("frontend-only browser behavior", () => {
       },
       { url: other, addedAt: 2, github: null },
     ];
+    // A realistic check count: the row's strip must yield before its bin does.
+    items[0]?.github?.checks.push(
+      ...Array.from({ length: 11 }, (_, index) => ({
+        name: `job ${index}`,
+        result: "passed",
+        url: null,
+        startedAt: 5_000,
+        completedAt: 6_000,
+        steps: [],
+      })),
+    );
     const removed: string[] = [];
     await page.routeWebSocket(`**/orbs/${id}/live`, () => {});
     await page.route(`**/api/v1/orbs/${id}/hosted-files`, (route) =>
@@ -5459,6 +5470,9 @@ describe("frontend-only browser behavior", () => {
       await expectPage(waterfall.getByText("2m 00s")).toBeVisible();
       await page.setViewportSize({ width: 500, height: 740 });
       await expectPage(waterfall.getByText("2m 00s")).toBeHidden();
+      await page.setViewportSize({ width: 360, height: 740 });
+      const bin = await links.getByRole("button", { name: "Remove link" }).first().boundingBox();
+      expectPage((bin?.x ?? Number.POSITIVE_INFINITY) + (bin?.width ?? 0)).toBeLessThanOrEqual(360);
       await page.setViewportSize({ width: 1280, height: 740 });
       const check = links.getByRole("link", { name: "e2e" });
       await expectPage(check).toHaveAttribute(
