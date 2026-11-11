@@ -3,6 +3,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
   type MouseEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useState,
@@ -38,142 +39,183 @@ function overall(checks: readonly OrbLinkCheck[]): Result {
 }
 
 const two = (value: number) => String(value).padStart(2, "0");
-const clock = (ms: number) => {
-  const at = new Date(ms);
-  return `${two(at.getHours())}:${two(at.getMinutes())}:${two(at.getSeconds())}`;
-};
 const duration = (ms: number) => {
   const seconds = Math.max(0, Math.round(ms / 1000));
-  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${two(seconds % 60)}s`;
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${two(seconds % 60)}s`;
+  return `${Math.floor(seconds / 3600)}h ${two(Math.floor(seconds / 60) % 60)}m`;
 };
 const percent = (value: number) => `${Number((value * 100).toFixed(3))}%`;
 
-/** CI waterfall (PR turn waterfall language): queued outline, then the run; steps unfold. */
+interface Span {
+  readonly name: string;
+  readonly result: Result;
+  /** Waiting from `queued` until `started` (or until now while pending). */
+  readonly queued: number | null;
+  readonly started: number | null;
+  readonly finished: number | null;
+}
+
+interface BarTip {
+  readonly span: Span;
+  readonly style: CSSProperties;
+}
+
+/** A check or step on the shared track; a pending check waits until now, ignoring GitHub's provisional start. */
+function checkSpan(check: OrbLinkCheck, now: number): Span {
+  const pending = check.result === "pending";
+  return {
+    name: check.name,
+    result: check.result,
+    queued: check.queuedAt ?? (pending ? null : check.startedAt),
+    started: pending ? null : check.startedAt,
+    finished: check.completedAt ?? (pending || check.result === "running" ? now : null),
+  };
+}
+
+const ran = (span: Span) =>
+  span.started === null || span.finished === null ? null : span.finished - span.started;
+
+function tipText(span: Span): string {
+  const facts = [
+    span.queued === null
+      ? null
+      : `queued ${duration((span.started ?? span.finished ?? span.queued) - span.queued)}`,
+    ran(span) === null ? null : `ran ${duration(ran(span) ?? 0)}`,
+  ].filter((fact): fact is string => fact !== null);
+  return facts.length === 0 ? "" : ` · ${facts.join(" · ")}`;
+}
+
+/** CI waterfall (Pi turn waterfall language): queued outline, then the run; steps unfold. */
 function Waterfall({ checks, now }: { checks: readonly OrbLinkCheck[]; now: number }) {
   const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
-  const begin = (check: OrbLinkCheck) => check.queuedAt ?? check.startedAt;
-  const end = (check: OrbLinkCheck) =>
-    check.completedAt ?? (check.result === "running" || check.result === "pending" ? now : null);
+  const [tip, setTip] = useState<BarTip | null>(null);
+  const spans = checks.map((check) => checkSpan(check, now));
   const from = Math.min(
-    ...checks.map(begin).filter((at): at is number => at !== null),
+    ...spans.map((span) => span.queued).filter((at): at is number => at !== null),
     Number.POSITIVE_INFINITY,
   );
-  const to = Math.max(from + 1, ...checks.map(end).filter((at): at is number => at !== null));
-  const span = to - from;
-  const at = (ms: number) => percent((ms - from) / span);
-  const width = (ms: number) => percent(Math.max(0.004, ms / span));
+  const to = Math.max(
+    from + 1,
+    ...spans.map((span) => span.finished).filter((at): at is number => at !== null),
+  );
+  const at = (ms: number) => percent((ms - from) / (to - from));
+  const width = (ms: number) => percent(Math.max(0.004, ms / (to - from)));
   const toggle = (index: number) =>
     setOpen((current) => {
       const next = new Set(current);
       if (!next.delete(index)) next.add(index);
       return next;
     });
+  const row = (span: Span, key: string, name: ReactNode, unfold?: () => void) => {
+    const onToggle = (event: MouseEvent | KeyboardEvent) => {
+      if (unfold === undefined || (event.target instanceof Element && event.target.closest("a")))
+        return;
+      if ("key" in event && event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      unfold();
+    };
+    const length = ran(span);
+    return (
+      <tr
+        key={key}
+        className={unfold === undefined ? undefined : "link-timeline-unfolds"}
+        tabIndex={unfold === undefined ? undefined : 0}
+        aria-expanded={unfold === undefined ? undefined : open.has(Number(key))}
+        onClick={onToggle}
+        onKeyDown={onToggle}
+      >
+        <td className="link-timeline-name">{name}</td>
+        <td className="link-timeline-dot">
+          <span className={dotClass(span.result)} />
+        </td>
+        <td
+          className="link-timeline-bars"
+          onMouseMove={(event) => {
+            const top = event.currentTarget.getBoundingClientRect().top;
+            const point = { left: event.clientX, right: event.clientX, top };
+            setTip({ span, style: stripTipStyle(point, document.documentElement.clientWidth) });
+          }}
+          onMouseLeave={() => setTip(null)}
+        >
+          <div className="link-timeline-track">
+            {span.queued !== null && (span.started ?? span.finished) !== null && (
+              <span
+                className="link-timeline-bar link-timeline-queued"
+                style={{
+                  left: at(span.queued),
+                  width: width((span.started ?? span.finished ?? span.queued) - span.queued),
+                }}
+              />
+            )}
+            {span.started !== null && length !== null && (
+              <span
+                className={`link-timeline-bar link-timeline-${span.result}`}
+                style={{ left: at(span.started), width: width(length) }}
+              />
+            )}
+          </div>
+        </td>
+        <td className="link-timeline-duration">{length === null ? "" : duration(length)}</td>
+      </tr>
+    );
+  };
   return (
-    <table className="link-timeline">
-      <colgroup>
-        <col className="link-timeline-start" />
-        <col className="link-timeline-check" />
-        <col />
-      </colgroup>
-      <thead>
-        <tr>
-          <th>start</th>
-          <th>check</th>
-          <th />
-        </tr>
-      </thead>
-      <tbody>
-        {checks.map((check, index) => {
-          const queued = begin(check);
-          const finish = end(check);
-          const started = check.startedAt;
-          const unfold = check.steps.length > 0;
-          const onToggle = (event: MouseEvent | KeyboardEvent) => {
-            if (!unfold || (event.target instanceof Element && event.target.closest("a"))) return;
-            if ("key" in event && event.key !== "Enter" && event.key !== " ") return;
-            event.preventDefault();
-            toggle(index);
-          };
-          return [
-            <tr
-              key={index}
-              className={unfold ? "link-timeline-unfolds" : undefined}
-              tabIndex={unfold ? 0 : undefined}
-              aria-expanded={unfold ? open.has(index) : undefined}
-              onClick={onToggle}
-              onKeyDown={onToggle}
-            >
-              <td>{started === null ? "" : clock(started)}</td>
-              <td className="link-timeline-call">
-                {check.url === null ? (
-                  <span>{check.name}</span>
-                ) : (
-                  <a href={check.url} target="_blank" rel="noreferrer">
-                    {check.name}
-                  </a>
-                )}
-                {started !== null && finish !== null && (
-                  <span className="link-timeline-arg"> {duration(finish - started)}</span>
-                )}
-              </td>
-              <td className="link-timeline-bars">
-                <div className="link-timeline-track">
-                  {queued !== null && finish !== null && (
-                    <>
-                      <span
-                        className="link-timeline-bar link-timeline-queued"
-                        style={{ left: at(queued), width: width((started ?? finish) - queued) }}
-                      />
-                      {started !== null && (
-                        <span
-                          className={`link-timeline-bar link-timeline-${check.result}`}
-                          style={{ left: at(started), width: width(finish - started) }}
-                        />
-                      )}
-                    </>
-                  )}
-                </div>
-              </td>
-            </tr>,
+    <>
+      <table className="link-timeline">
+        <thead>
+          <tr>
+            <th className="link-timeline-name">check</th>
+            <th className="link-timeline-dot" />
+            <th className="link-timeline-bars" />
+            <th className="link-timeline-duration">duration</th>
+          </tr>
+        </thead>
+        <tbody>
+          {checks.map((check, index) => [
+            row(
+              spans[index] ?? checkSpan(check, now),
+              String(index),
+              check.url === null ? (
+                check.name
+              ) : (
+                <a href={check.url} target="_blank" rel="noreferrer">
+                  {check.name}
+                </a>
+              ),
+              check.steps.length > 0 ? () => toggle(index) : undefined,
+            ),
             ...(open.has(index)
-              ? check.steps.map((step, stepIndex) => {
-                  const stepEnd = step.completedAt ?? (step.result === "running" ? now : null);
-                  return (
-                    <tr key={`${index}:${stepIndex}`} className="link-timeline-step">
-                      <td>{step.startedAt === null ? "" : clock(step.startedAt)}</td>
-                      <td className="link-timeline-call">
-                        <span className="link-timeline-indent">└</span>
-                        <span className={step.result === "failed" ? "error-text" : undefined}>
-                          {step.name}
-                        </span>
-                        {step.startedAt !== null && stepEnd !== null && (
-                          <span className="link-timeline-arg">
-                            {" "}
-                            {duration(stepEnd - step.startedAt)}
-                          </span>
-                        )}
-                      </td>
-                      <td className="link-timeline-bars">
-                        <div className="link-timeline-track">
-                          {step.startedAt !== null && stepEnd !== null && (
-                            <span
-                              className={`link-timeline-bar link-timeline-${step.result}`}
-                              style={{
-                                left: at(step.startedAt),
-                                width: width(stepEnd - step.startedAt),
-                              }}
-                            />
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
+              ? check.steps.map((step, stepIndex) =>
+                  row(
+                    {
+                      name: step.name,
+                      result: step.result,
+                      queued: null,
+                      started: step.startedAt,
+                      finished: step.completedAt ?? (step.result === "running" ? now : null),
+                    },
+                    `${index}:${stepIndex}`,
+                    <>
+                      <span className="link-timeline-indent">└</span>
+                      {step.name}
+                    </>,
+                  ),
+                )
               : []),
-          ];
-        })}
-      </tbody>
-    </table>
+          ])}
+        </tbody>
+      </table>
+      {tip !== null && (
+        <span className="activity-strip-tip" role="tooltip" style={tip.style}>
+          {tip.span.name} ·{" "}
+          <span className={`activity-strip-tip-label ${STATE[tip.span.result]}`.trim()}>
+            {tip.span.result}
+          </span>
+          {tipText(tip.span)}
+        </span>
+      )}
+    </>
   );
 }
 

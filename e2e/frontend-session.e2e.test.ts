@@ -5450,7 +5450,20 @@ describe("frontend-only browser behavior", () => {
       await expectPage(waterfall.getByText("2m 00s")).toBeVisible();
       await expectPage(waterfall.getByText("Run tests")).toHaveCount(0);
       await waterfall.getByRole("row", { name: /e2e/ }).click({ position: { x: 4, y: 4 } });
-      await expectPage(waterfall.getByText("Run tests")).toHaveClass(/error-text/);
+      await expectPage(
+        waterfall.getByRole("row", { name: /Run tests/ }).locator(".activity-strip-failed"),
+      ).toBeVisible();
+      await waterfall.getByRole("row", { name: /e2e/ }).locator(".link-timeline-bars").hover();
+      await expectPage(page.getByRole("tooltip")).toHaveText(
+        "e2e · failed · queued 9s · ran 2m 00s",
+      );
+      await page.mouse.move(0, 0);
+      await page.setViewportSize({ width: 800, height: 740 });
+      await expectPage(waterfall.locator("td.link-timeline-bars").first()).toBeHidden();
+      await expectPage(waterfall.getByText("2m 00s")).toBeVisible();
+      await page.setViewportSize({ width: 500, height: 740 });
+      await expectPage(waterfall.getByText("2m 00s")).toBeHidden();
+      await page.setViewportSize({ width: 1280, height: 740 });
       const check = links.getByRole("link", { name: "e2e" });
       await expectPage(check).toHaveAttribute(
         "href",

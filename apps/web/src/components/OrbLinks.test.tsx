@@ -58,20 +58,49 @@ describe("OrbLinksDrawer", () => {
     expect(html).toContain('class="activity-strip-dot" role="img" aria-label="build · passed"');
     expect(html.match(/aria-label="Remove link"/g)).toHaveLength(2);
     expect(html).toContain('href="https://github.com/o/r/actions/runs/1/job/1"');
-    expect(html).toContain("<span>e2e</span>");
+    expect(html).toContain('<td class="link-timeline-name">e2e</td>');
     expect(html).toContain("--orb-link-ref:13ch");
     expect(html).toContain("--orb-link-strip:36px");
   });
 
   it("lays checks out as a waterfall of queued time, then the run", () => {
     const table = render(links).split('<table class="link-timeline">')[1] ?? "";
-    expect(table).toContain(" 1m 00s</span>");
-    expect(table).toContain(" 2m 00s</span>");
+    expect(table).toContain('<td class="link-timeline-duration">1m 00s</td>');
+    expect(table).toContain('<td class="link-timeline-duration">2m 00s</td>');
+    expect(table).toContain(
+      '<td class="link-timeline-dot"><span class="activity-strip-dot activity-strip-failed"></span></td>',
+    );
+    expect(table).not.toContain("start");
     expect(table.match(/link-timeline-queued/g)).toHaveLength(3);
     expect(table).toContain("link-timeline-bar link-timeline-passed");
     expect(table).toContain("link-timeline-bar link-timeline-failed");
     expect(table).toContain("link-timeline-bar link-timeline-running");
     expect(table).not.toContain("link-timeline-unfolds");
+  });
+
+  it("draws a queued check as waiting until now, ignoring GitHub's provisional start", () => {
+    const queued: OrbLinksResponse = {
+      ...links,
+      items: [
+        {
+          url: "https://github.com/schani/pi-orb/pull/291",
+          addedAt: 1,
+          github: {
+            title: "t",
+            status: "open",
+            checks: [
+              { name: "build", result: "passed", url: null, ...times(0, 5, 65) },
+              { name: "e2e", result: "pending", url: null, ...times(0, 30, null) },
+            ],
+          },
+        },
+      ],
+    };
+    const table = render(queued).split('<table class="link-timeline">')[1] ?? "";
+    const e2e = table.split("e2e")[1] ?? "";
+    expect(e2e).toContain("link-timeline-queued");
+    expect(e2e).not.toContain("link-timeline-pending");
+    expect(e2e).toContain('<td class="link-timeline-duration"></td>');
   });
 
   it("summarizes each link by its worst check", () => {
