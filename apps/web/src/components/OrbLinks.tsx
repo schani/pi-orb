@@ -2,6 +2,7 @@ import { githubLinkRef, type OrbLinkCheck, type OrbLinksResponse } from "@pi-orb
 import { type CSSProperties, useCallback, useEffect, useState } from "react";
 import type { ApiError } from "../lib/api.ts";
 import { describeApiError, listOrbLinks, removeOrbLink } from "../lib/api.ts";
+import { stripTipStyle } from "../lib/strip-tip.ts";
 
 const POLL_INTERVAL_MS = 15_000;
 type Result = OrbLinkCheck["result"];
@@ -19,8 +20,7 @@ interface Tip {
   readonly label: string;
   readonly status: string;
   readonly result: Result;
-  readonly left: number;
-  readonly top: number;
+  readonly style: CSSProperties;
 }
 
 function overall(checks: readonly OrbLinkCheck[]): Result {
@@ -54,8 +54,11 @@ export function OrbLinksDrawer({
       role="img"
       aria-label={status === "" ? label : `${label} · ${status}`}
       onMouseEnter={(event) => {
-        const rect = event.currentTarget.getBoundingClientRect();
-        setTip({ label, status, result, left: rect.left, top: rect.top });
+        const style = stripTipStyle(
+          event.currentTarget.getBoundingClientRect(),
+          document.documentElement.clientWidth,
+        );
+        setTip({ label, status, result, style });
       }}
       onMouseLeave={() => setTip(null)}
     />
@@ -76,15 +79,7 @@ export function OrbLinksDrawer({
           )}
         </span>
         {tip !== null && (
-          <span
-            className="activity-strip-tip"
-            role="tooltip"
-            style={{
-              left: Math.max(4, tip.left - 16),
-              top: tip.top - 24,
-              maxWidth: `min(60ch, calc(100vw - ${Math.max(4, tip.left - 16) + 8}px))`,
-            }}
-          >
+          <span className="activity-strip-tip" role="tooltip" style={tip.style}>
             <span className={`activity-strip-tip-label ${STATE[tip.result]}`.trim()}>
               {tip.label}
             </span>
