@@ -73,7 +73,8 @@ Access:
 - [docs/http-exposure.md](docs/http-exposure.md) — HTTP previews, hosted files, live file links
 
 UI:
-- [docs/web-ui.md](docs/web-ui.md) — visual system, navigation, missing resources, dashboard, orb workspace, Find, mobile
+- [docs/design-system.md](docs/design-system.md) — Signal / Boards: tokens, dark mode, states, icons, component specs; mirrors the Paper file
+- [docs/web-ui.md](docs/web-ui.md) — navigation, missing resources, dashboard, orb workspace, Find, mobile, settings, frontend development
 - [docs/terminal.md](docs/terminal.md) — interactive orb terminal
 - [docs/workspace-uploads.md](docs/workspace-uploads.md) — browser uploads into orb workspaces
 - [docs/orb-alerts.md](docs/orb-alerts.md) — CLI-issued transcript alerts and unread flags

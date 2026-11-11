@@ -57,7 +57,7 @@ The only backlog: one line per item, linked to the owning doc or postmortem. Del
 
 ## Follow-ups
 
-- **Verify dark mode on the installed iPad app** (2026-11-08; `docs/web-ui.md`). Browser checks cover the live scheme switch. On the user's iPadOS 26 home-screen install, confirm the status-bar band turns black and the browser chrome follows the desktop setting.
+- **Verify dark mode on the installed iPad app** (2026-11-08; `docs/design-system.md`). Browser checks cover the live scheme switch. On the user's iPadOS 26 home-screen install, confirm the status-bar band turns black and the browser chrome follows the desktop setting.
 
 - **`orb_transcript` pagination** and byte-bounded browser/CLI history paging (`docs/history.md`; postmortems `2026-09-27-history-response-size.md`, `2026-10-02-initial-history-latency.md`).
 - **Transcript loading timings:** measure first paint/live-ready and cold/cached switches with extensions disabled; add content-free database-read, parse, projection and serialization timings (`docs/history.md`, `docs/postmortems/2026-10-03-cached-orb-navigation.md`).

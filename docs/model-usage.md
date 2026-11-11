@@ -100,7 +100,7 @@ The browser supplies local-calendar edges as epoch milliseconds. `ModelUsageRead
 
 ## Usage page
 
-The dashboard totals strip's icon-only Trend link beside the Settings gear opens `/usage`: Comparison lines with a left summary rail on wide screens. No persisted preference.
+The dashboard totals strip's Usage link opens `/usage` (look: `docs/design-system.md`). No persisted preference.
 
 | Period | Point/tick |
 |---|---|
@@ -115,9 +115,7 @@ The dashboard totals strip's icon-only Trend link beside the Settings gear opens
 - **Breakdowns:** token kind, use, provider/model and orb. Orb lines group by retained ledger ID, with names from owner-scoped orb totals and IDs after deletion; duplicate names and Other include IDs. More than six orbs/models become five volume leaders plus Other, preserving totals; ties sort by ID/model. One measure (all tokens / uncached input / output) drives both rankings. Rankings show five leading orbs and observed uses; an unnamed use (Claude auxiliary `query_source`) shows its raw value.
 - Period changes and Retry keep filters; breakdown/measure changes never refetch. Obsolete reads are aborted or ignored; failures show Retry, never stale totals or empty success.
 - **Actions.** Clicking a token-kind end label or phone key selects that Measure; clicking an orb entry follows its encoded-ID route. Aggregate Other has no action. Keyboard Enter/Space selects measures; orb links keep normal-click, new-tab and keyboard semantics. Actions stay outside persisted `ChartSpec`: the page supplies render-only `seriesActions: ReadonlyMap<string, {href} | {onSelect}>`. Desktop uses native SVG anchors (buttons for callbacks) inside Vega's named text marks; phones use React anchors/buttons. Rejected: Vega's synthetic href handling (no live native anchors).
-- **Top orbs** use one native whole-row anchor per orb (name, proportional bar, exact count), keyed and routed by encoded ID, outside Vega to keep link semantics. Rows sort by measure then ID; gray hover underlines only the name; one focus stop per row; mobile/coarse targets ≥44px. Deleted orbs land on the standard missing-orb page.
-- **Layout.** At ≤900 CSS px, overview and rankings stack with a compact summary grid; phone padding/controls apply at ≤600 px and the range shows dates only. Timeline phone keys stay compact (inline-flex, 4px row gaps); no 44px minimum for them.
+- **Top orbs** use one native whole-row anchor per orb, keyed and routed by encoded ID, outside Vega to keep link semantics. Rows sort by measure then ID; one focus stop per row. Deleted orbs land on the standard missing-orb page.
 - The timeline and Use ranking use the shared transcript chart renderer (`docs/web-ui.md`); hover shows exact values. Desktop end labels and the phone key isolate series on hover. Fonts load before Vega measures text. Optional render-only `ChartXAxis {ticks, labels, format}` controls dense ticks without changing `ChartSpec`.
-- Rejected: totals-strip meter, project inspector, replacement board, footer call ledger (access); stacked overview, separate lanes, period columns, time grid, weekly six-month buckets, separate SVG rendering (layout).
 
 `npm run dev:frontend` serves `/usage` from the mock backend: `apps/web/dev/usage-fixture.ts` generates deterministic quarter-hour events from a fixed start date with all six uses, several models and five orbs (one nameless, exercising usage after deletion); totals reconcile across views.

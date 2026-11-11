@@ -241,8 +241,8 @@ Wire: raw-byte `POST /runtime/v1/hosting/files?path=…`, `GET` lists, `DELETE` 
 the bearer to the caller orb. The CLI owns file reading, MIME hints, a five-minute deadline, typed
 errors and lost-response wording. Browser: `GET /api/v1/orbs/:orbId/hosted-files` →
 `{files: [{path, url, size, mediaType, updatedAt}], cleanupIssues: [{path|null, lastError,
-lastErrorAt}]}` for working and archived orbs. The orb header's Hosted Files disclosure (below Subagents/Shell, same
-activity-rail summary) lists path, URL, size and update time, and keeps fetch and cleanup errors
+lastErrorAt}]}` for working and archived orbs. The orb header's Hosted Files disclosure (`docs/web-ui.md`)
+lists path, URL, size and update time, and keeps fetch and cleanup errors
 visible; hashes stay internal.
 
 ### Streaming

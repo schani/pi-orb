@@ -6,11 +6,11 @@ An alert tells the user that an orb needs attention. It is a transcript record p
 
 - Root agents alert with `orb_alert({message})` (central Pi tool) or `pi-orb alert "message" [--request-id <id>]` (any harness). Only the root conversation may alert; local subagents notify their parent instead with `notify_parent` (`docs/pi.md`).
 - Alerts go to the user only. They never enqueue parent-orb messages, trigger a turn, enter model context, mutate lifecycle state, wake compute, cancel sleep or change action availability.
-- The message appears chronologically in the transcript as a red band with white text.
-- A durable orb-level unread flag replaces the orb's state icon with a red flag (no `!`) regardless of lifecycle or activity state.
+- The message appears chronologically in the transcript as an alert band (`docs/design-system.md`).
+- A durable orb-level unread flag replaces the orb's state tile with the alert flag regardless of lifecycle or activity state.
 - Explicitly selecting the orb clears the flag. The historical alert and its styling remain.
 
-No animation, sound, browser notification, unread count, snooze or severity hierarchy. The selected treatment and its unselected alternatives are in `design-prototypes/orb-alerts.html`.
+No animation, sound, browser notification, unread count, snooze or severity hierarchy.
 
 ## Writing an alert
 

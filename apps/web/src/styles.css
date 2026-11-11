@@ -2174,7 +2174,7 @@ pre,
   background: none;
 }
 
-/* Mermaid fences: the code block's board on white paper; tools on hover (docs/web-ui.md). */
+/* Mermaid fences: the code block's board on paper; tools on hover (docs/design-system.md). */
 .mermaid-diagram {
   position: relative;
   min-height: 70px;

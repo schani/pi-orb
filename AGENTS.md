@@ -27,6 +27,7 @@ When a task changes a requirement, decision or contract, update the owning doc i
 7. Incident forensics get a file in `docs/postmortems/`; the owning doc keeps only the resulting rule plus a link.
 8. Evidence links must resolve: tracked files, GitHub Actions runs or hosted-file URLs, never `.context/`, `/tmp/` or `/workspace/` paths.
 9. Reference docs by path (for example `docs/credentials.md`), never by section number. When adding or removing a doc, update the map in `DESIGN.md`.
+10. `docs/design-system.md` and the Paper file [pi-orb Design System](https://app.paper.design/file/01M6VFPKDT6AWJ8M92A517NQGH) describe the same system: a change to one updates the other in the same task, and design changes to `apps/web/src/styles.css` update both.
 
 ## Audience
 

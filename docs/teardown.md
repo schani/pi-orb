@@ -59,7 +59,7 @@ Only a live `deleting`/`archiving` row plus its intent authorizes destructive cl
 
 Delete skips the history drain and seal: the replica is being deleted. After disposal, it removes hosted files, then one transaction nulls the cursor/head if needed and deletes history, the orb row (cascading orb-keyed tables) and the intent.
 
-UI: the orb header and project list offer **Delete orb** with a confirmation naming the lost checkout and conversation. While cleanup runs the orb shows `deleting` (dotted state border on the dashboard), with the resource class and sanitized failure as a grey line when retries fail. It leaves the list only after the API reports completion. No undo. Export-before-delete is an open question (`docs/open-questions.md`).
+UI: the orb header and project list offer **Delete orb** with a confirmation naming the lost checkout and conversation. While cleanup runs the orb shows `deleting`, with the resource class and sanitized failure as a blocker line when retries fail. It leaves the list only after the API reports completion. No undo. Export-before-delete is an open question (`docs/open-questions.md`).
 
 ## Orb archive
 
@@ -101,7 +101,7 @@ A project owns its row (repository URL, name, deletion intent, timestamps), its 
 
 **Progress.** `ProjectView.deletionProgress` (`docs/control-plane-api.md`): `total` is the child count captured at acceptance, `remaining` the current child rows, `blocked` the child intents with a persisted error.
 
-**UI.** **Delete project** (red bin in the shared project header, dashboard and orb index) confirms that the project, every orb, all checkouts, files, compute and conversations are permanently deleted. The browser never deletes orb by orb. While deleting, the project is greyed in place, configuration/create/delete are disabled, its column body is replaced by the progress and sanitized child-blocker line, and the dashboard polls until the project disappears. Deleting an unrelated project from the orb index keeps the current conversation; deleting the current project returns to the dashboard (index selection effects: `docs/web-ui.md`). A deleting project keeps its first-observed ordering; only projects already deleting on first appearance rank last (`docs/web-ui.md`). A failed request leaves the project in place with feedback; no optimistic disappearance.
+**UI.** **Delete project** (bin in the shared project header, dashboard and orb index) confirms that the project, every orb, all checkouts, files, compute and conversations are permanently deleted. The browser never deletes orb by orb. While deleting, the project stays in place, configuration/create/delete are disabled, its column body is replaced by the progress and sanitized child-blocker line, and the dashboard polls until the project disappears. Deleting an unrelated project from the orb index keeps the current conversation; deleting the current project returns to the dashboard (index selection effects: `docs/web-ui.md`). A deleting project keeps its first-observed ordering; only projects already deleting on first appearance rank last (`docs/web-ui.md`). A failed request leaves the project in place with feedback; no optimistic disappearance.
 
 **Edges** (project-scoped): `deletion-requested` (child count), `deletion-fanout-repaired`, `deletion-blocked`/`deletion-recovered` (blocked and remaining counts), `deletion-retry`/`deletion-retry-recovered`, `deleted`, and `project-deletion-loop-blind`/`-recovered`. Never per pass.
 

@@ -4,7 +4,7 @@ Users upload arbitrary files from the browser into a running orb's workspace. Fi
 
 ## Browser UI
 
-**Picker.** The header's tray-arrow Upload icon (`Upload files`) appears only while the orb is running. It opens the native multiple-file picker; chosen files start uploading immediately and cancelling the picker does nothing. Rejected: an "Upload to orb" dialog with a second confirmation (no decision to make), a composer clip (confuses files with model attachments), a workspace drawer, `/upload` and a drop-only entry.
+**Picker.** The header's Upload icon (`Upload files`) appears only while the orb is running. It opens the native multiple-file picker; chosen files start uploading immediately and cancelling the picker does nothing. Rejected: an "Upload to orb" dialog with a second confirmation (no decision to make), a composer clip (confuses files with model attachments), a workspace drawer, `/upload` and a drop-only entry.
 
 **Progress.** A compact strip in the orb header stack (`File transfers`, polite live region) shows only unfinished transfers, pending notifications and errors, with per-file controls. It stays pinned on desktop and outside the phone transcript scroller, so scrolling cannot hide an active outcome. Finished and cancelled rows disappear; the inbox/transcript message is the only lasting receipt. The composer draft is never touched.
 
@@ -13,7 +13,7 @@ Users upload arbitrary files from the browser into a running orb's workspace. Fi
 - Dropping images on the composer attaches them to the unsent draft, through the same validation path as paste. Non-images there show `Non-images can only be uploaded as files to the orb.`; mixed drops attach the images and reject the rest. Nothing is ever silently uploaded elsewhere.
 - A non-running orb rejects every file drop with `Uploads need a running orb.` anywhere in the orb view; dropping never starts compute.
 - Files dropped outside a destination never navigate the browser. Native text and link drags are unaffected; file-drag cancellation clears feedback without intercepting them.
-- **Fine inset:** during a file drag only, a dashed 1px boundary 8px inside the receiving surface, a translucent white wash and a centred white-backed caption (`Upload files to orb`, `Attach images to message`). It clears on exit or drop. The transcript inset is fixed and out of flow: on desktop it covers the bounded transcript pane between header stack and composer; on phones, the scroll pane. Blank desktop transcript space hit-tests as the transcript; header and sidebar are not drop targets.
+- **Fine inset:** during a file drag only, the drop target (`docs/design-system.md`) with caption `Upload files to orb` or `Attach images to message`. It clears on exit or drop. The transcript inset is fixed and out of flow: on desktop it covers the bounded transcript pane between header stack and composer; on phones, the scroll pane. Blank desktop transcript space hit-tests as the transcript; header and sidebar are not drop targets.
 - Browser-local rejections create no upload record; admitted drops use the normal durable outcomes.
 
 **Controls and ownership.** The page keeps the original immutable `File` objects for retry while mounted.
