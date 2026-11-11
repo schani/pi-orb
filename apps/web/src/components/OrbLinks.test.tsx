@@ -4,8 +4,7 @@ import { describe, expect, it } from "vitest";
 import { OrbLinksDrawer } from "./OrbLinks.tsx";
 
 const T = Date.UTC(2026, 10, 11, 17, 0, 0);
-const times = (queued: number, started: number | null, completed: number | null) => ({
-  queuedAt: T + queued * 1000,
+const times = (_queued: number, started: number | null, completed: number | null) => ({
   startedAt: started === null ? null : T + started * 1000,
   completedAt: completed === null ? null : T + completed * 1000,
   steps: [],
@@ -63,7 +62,7 @@ describe("OrbLinksDrawer", () => {
     expect(html).toContain("--orb-link-strip:36px");
   });
 
-  it("lays checks out as a waterfall of queued time, then the run", () => {
+  it("lays started checks out as runs on one track", () => {
     const table = render(links).split('<table class="link-timeline">')[1] ?? "";
     expect(table).toContain('<td class="link-timeline-duration">1m 00s</td>');
     expect(table).toContain('<td class="link-timeline-duration">2m 00s</td>');
@@ -71,14 +70,14 @@ describe("OrbLinksDrawer", () => {
       '<td class="link-timeline-dot"><span class="activity-strip-dot activity-strip-failed"></span></td>',
     );
     expect(table).not.toContain("start");
-    expect(table.match(/link-timeline-queued/g)).toHaveLength(3);
+    expect(table).not.toContain("link-timeline-queued");
     expect(table).toContain("link-timeline-bar link-timeline-passed");
     expect(table).toContain("link-timeline-bar link-timeline-failed");
     expect(table).toContain("link-timeline-bar link-timeline-running");
     expect(table).not.toContain("link-timeline-unfolds");
   });
 
-  it("draws a queued check as waiting until now, ignoring GitHub's provisional start", () => {
+  it("draws a pending check as waiting for a runner from when it became ready until now", () => {
     const queued: OrbLinksResponse = {
       ...links,
       items: [

@@ -3190,17 +3190,13 @@ th.link-timeline-duration {
   background: var(--w);
 }
 .link-timeline-passed {
-  background: var(--g1x);
+  background: var(--k);
 }
 .link-timeline-failed {
   background: var(--bad);
 }
 .link-timeline-running {
   background: var(--ok);
-}
-.link-timeline-step .link-timeline-passed {
-  border: 1px solid var(--g1x);
-  background: var(--g1);
 }
 @media (max-width: 900px) {
   .link-timeline .link-timeline-bars {

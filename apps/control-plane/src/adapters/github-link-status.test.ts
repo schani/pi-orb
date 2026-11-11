@@ -9,11 +9,9 @@ const GONE = "https://github.com/o/r/pull/4";
 const TIMES = {
   startedAt: null,
   completedAt: null,
-  checkSuite: { createdAt: "2026-11-11T17:00:00Z" },
   steps: { nodes: [] },
 };
 const NO_TIMES = {
-  queuedAt: Date.parse("2026-11-11T17:00:00Z"),
   startedAt: null,
   completedAt: null,
   steps: [],
@@ -129,7 +127,6 @@ it("maps pull requests, issues and Actions runs from one GraphQL request", async
           name: "ci/legacy",
           result: "pending",
           url: null,
-          queuedAt: null,
           startedAt: null,
           completedAt: null,
           steps: [],
@@ -230,7 +227,6 @@ it("maps check and step times, dropping skipped steps", async () => {
                 url: "https://github.com/o/r/runs/1",
                 startedAt: "2026-11-11T17:00:05Z",
                 completedAt: null,
-                checkSuite: { createdAt: "2026-11-11T17:00:00Z" },
                 steps: {
                   nodes: [
                     {
@@ -266,7 +262,6 @@ it("maps check and step times, dropping skipped steps", async () => {
   const [check] =
     (await readGithubLinkStatuses(fetcher, "tok", [RUN]))._unsafeUnwrap()[0]?.checks ?? [];
   expect(check).toMatchObject({
-    queuedAt: Date.parse("2026-11-11T17:00:00Z"),
     startedAt: Date.parse("2026-11-11T17:00:05Z"),
     completedAt: null,
     steps: [

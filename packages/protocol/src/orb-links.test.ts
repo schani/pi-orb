@@ -80,7 +80,6 @@ describe("links response", () => {
                   name: "e2e",
                   result: "running",
                   url: null,
-                  queuedAt: 1,
                   startedAt: 2,
                   completedAt: null,
                   steps: [

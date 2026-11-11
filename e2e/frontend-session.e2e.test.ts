@@ -5371,7 +5371,6 @@ describe("frontend-only browser behavior", () => {
               name: "build",
               result: "passed",
               url: null,
-              queuedAt: 1_000,
               startedAt: 5_000,
               completedAt: 65_000,
               steps: [],
@@ -5380,7 +5379,6 @@ describe("frontend-only browser behavior", () => {
               name: "e2e",
               result: "failed",
               url: "https://github.com/owner/repo/actions/runs/1/job/2",
-              queuedAt: 1_000,
               startedAt: 10_000,
               completedAt: 130_000,
               steps: [
@@ -5454,9 +5452,7 @@ describe("frontend-only browser behavior", () => {
         waterfall.getByRole("row", { name: /Run tests/ }).locator(".activity-strip-failed"),
       ).toBeVisible();
       await waterfall.getByRole("row", { name: /e2e/ }).locator(".link-timeline-bars").hover();
-      await expectPage(page.getByRole("tooltip")).toHaveText(
-        "e2e · failed · queued 9s · ran 2m 00s",
-      );
+      await expectPage(page.getByRole("tooltip")).toHaveText("e2e · failed · ran 2m 00s");
       await page.mouse.move(0, 0);
       await page.setViewportSize({ width: 800, height: 740 });
       await expectPage(waterfall.locator("td.link-timeline-bars").first()).toBeHidden();

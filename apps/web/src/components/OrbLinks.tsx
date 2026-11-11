@@ -50,7 +50,7 @@ const percent = (value: number) => `${Number((value * 100).toFixed(3))}%`;
 interface Span {
   readonly name: string;
   readonly result: Result;
-  /** Waiting from `queued` until `started` (or until now while pending). */
+  /** Ready to run but waiting for a runner, from `queued` until now; only known while pending. */
   readonly queued: number | null;
   readonly started: number | null;
   readonly finished: number | null;
@@ -61,13 +61,16 @@ interface BarTip {
   readonly style: CSSProperties;
 }
 
-/** A check or step on the shared track; a pending check waits until now, ignoring GitHub's provisional start. */
+/**
+ * A check on the shared track. While pending, GitHub's `startedAt` is when the job became ready, so
+ * it waits for a runner from then until now; once started, that wait is no longer reported.
+ */
 function checkSpan(check: OrbLinkCheck, now: number): Span {
   const pending = check.result === "pending";
   return {
     name: check.name,
     result: check.result,
-    queued: check.queuedAt ?? (pending ? null : check.startedAt),
+    queued: pending ? check.startedAt : null,
     started: pending ? null : check.startedAt,
     finished: check.completedAt ?? (pending || check.result === "running" ? now : null),
   };
@@ -80,19 +83,19 @@ function tipText(span: Span): string {
   const facts = [
     span.queued === null
       ? null
-      : `queued ${duration((span.started ?? span.finished ?? span.queued) - span.queued)}`,
+      : `waiting for a runner ${duration((span.finished ?? span.queued) - span.queued)}`,
     ran(span) === null ? null : `ran ${duration(ran(span) ?? 0)}`,
   ].filter((fact): fact is string => fact !== null);
   return facts.length === 0 ? "" : ` · ${facts.join(" · ")}`;
 }
 
-/** CI waterfall (Pi turn waterfall language): queued outline, then the run; steps unfold. */
+/** CI waterfall (Pi turn waterfall language): runner wait outlined, then the run; steps unfold. */
 function Waterfall({ checks, now }: { checks: readonly OrbLinkCheck[]; now: number }) {
   const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
   const [tip, setTip] = useState<BarTip | null>(null);
   const spans = checks.map((check) => checkSpan(check, now));
   const from = Math.min(
-    ...spans.map((span) => span.queued).filter((at): at is number => at !== null),
+    ...spans.map((span) => span.queued ?? span.started).filter((at): at is number => at !== null),
     Number.POSITIVE_INFINITY,
   );
   const to = Math.max(
@@ -139,13 +142,10 @@ function Waterfall({ checks, now }: { checks: readonly OrbLinkCheck[]; now: numb
           onMouseLeave={() => setTip(null)}
         >
           <div className="link-timeline-track">
-            {span.queued !== null && (span.started ?? span.finished) !== null && (
+            {span.queued !== null && span.finished !== null && (
               <span
                 className="link-timeline-bar link-timeline-queued"
-                style={{
-                  left: at(span.queued),
-                  width: width((span.started ?? span.finished ?? span.queued) - span.queued),
-                }}
+                style={{ left: at(span.queued), width: width(span.finished - span.queued) }}
               />
             )}
             {span.started !== null && length !== null && (

@@ -60,8 +60,7 @@ export const OrbLinkCheckSchema = Type.Object(
     result: OrbLinkResultSchema,
     /** The check's GitHub page (an Actions job for workflow checks). */
     url: Type.Union([Type.String({ pattern: "^https://" }), Type.Null()]),
-    /** Epoch ms; `queuedAt` is when its check suite was created. */
-    queuedAt: Time,
+    /** Epoch ms. While pending, GitHub's `startedAt` is when the job became ready to run. */
     startedAt: Time,
     completedAt: Time,
     steps: Type.Array(OrbLinkStepSchema),

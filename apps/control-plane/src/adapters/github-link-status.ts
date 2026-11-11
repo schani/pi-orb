@@ -5,7 +5,7 @@ import { Check } from "typebox/value";
 
 const QUERY_FRAGMENTS = `
 fragment C on CheckRun {
-  name status conclusion detailsUrl url startedAt completedAt checkSuite { createdAt }
+  name status conclusion detailsUrl url startedAt completedAt
   steps(first: 50) { nodes { name status conclusion startedAt completedAt } }
 }
 fragment L on UniformResourceLocatable {
@@ -33,7 +33,6 @@ const CheckRun = Type.Object({
   url: Type.String(),
   startedAt: nullable(Type.String()),
   completedAt: nullable(Type.String()),
-  checkSuite: Type.Object({ createdAt: Type.String() }),
   steps: Type.Object({
     nodes: Type.Array(
       Type.Object({
@@ -120,7 +119,6 @@ function checkRun(run: Static<typeof CheckRun>): OrbLinkCheck {
     name: run.name,
     result: runResult(run),
     url: https(run.detailsUrl ?? run.url),
-    queuedAt: time(run.checkSuite.createdAt),
     startedAt: time(run.startedAt),
     completedAt: time(run.completedAt),
     steps: run.steps.nodes
@@ -146,7 +144,6 @@ function context(node: Static<typeof Context>): OrbLinkCheck {
     name: node.context,
     result,
     url: https(node.targetUrl),
-    queuedAt: null,
     startedAt: null,
     completedAt: null,
     steps: [],
