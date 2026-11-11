@@ -24,7 +24,7 @@ export const INSPECTION_USAGE = `usage:
   pi-orb send <orb-id> "message" [--request-id <id>]
   pi-orb alert "message" [--request-id <id>]
   pi-orb id-token --audience <audience> [--ttl-seconds <60..3600>]
-  pi-orb archive
+  pi-orb archive <self|orb-id>
   pi-orb delete <self|orb-id>`;
 
 export type InspectionCommand =

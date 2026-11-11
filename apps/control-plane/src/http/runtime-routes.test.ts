@@ -29,9 +29,11 @@ import { PGliteClient } from "../adapters/pg/pglite-client.ts";
 import { PgResourceGate } from "../adapters/pg/resource-gate.ts";
 import { DEFAULT_BROKER_CONSTANTS } from "../domain/constants.ts";
 import type { StoreError } from "../domain/errors.ts";
-import { readOrbBootContext, requestOrbArchive, requestOrbSleep } from "../domain/lifecycle.ts";
-import type { OrbAgentOperations } from "../domain/orb-agent-operations.ts";
-import { deleteGuestOrb } from "../domain/orb-deletion.ts";
+import { readOrbBootContext, requestOrbSleep } from "../domain/lifecycle.ts";
+import {
+  createOrbAgentOperations,
+  type OrbAgentOperations,
+} from "../domain/orb-agent-operations.ts";
 import { sendGuestOrbMessage } from "../domain/orb-messaging.ts";
 import { spawnOrb } from "../domain/orb-spawning.ts";
 import type { BrokerDeps, ControlPlaneStore, OrbNameGenerator } from "../domain/ports.ts";
@@ -478,14 +480,33 @@ describe("runtime broker routes", () => {
       );
     registerRuntimeRoutes(app, task, {
       appOrigin: "https://browser.test",
-      agentOperations,
+      agentOperations: (t, source) => {
+        const service = createOrbAgentOperations(
+          t,
+          spawnDeps,
+          {
+            projectId: source.projectId,
+            orbId: source.id,
+            incarnation: source.hostIncarnation,
+            runtimeTokenHash: source.runtimeTokenHash ?? "",
+          },
+          {
+            appOrigin: "https://browser.test",
+            appendAlert: () => okAsync({ recordId: "a", duplicate: false }),
+          },
+        );
+        return {
+          invoke: (request, id) =>
+            request.kind === "search"
+              ? agentOperations(t, source).invoke(request, id)
+              : service.invoke(request, id),
+        };
+      },
       send: (task, caller, request) => sendGuestOrbMessage(task, spawnDeps, caller, request),
       spawn: (task, caller, orbId, request) => spawnOrb(task, spawnDeps, caller, orbId, request),
       sleepSelf: (task, orbId, caller, durationSeconds, sleepId) =>
         requestOrbSleep(task, spawnDeps, orbId, caller, durationSeconds, sleepId),
       readBootContext: (task, orbId, caller) => readOrbBootContext(task, spawnDeps, orbId, caller),
-      archiveSelf: (task, orbId, caller) => requestOrbArchive(task, spawnDeps, orbId, caller),
-      deleteOrb: (task, source, request) => deleteGuestOrb(task, spawnDeps, source, request),
       store: routeStore,
       claudeCredential: (_task, orb) => {
         expect(orb.id).toBe(ORB);
@@ -1248,71 +1269,90 @@ describe("runtime broker routes", () => {
       expect(store.orbSnapshot(ORB)?.state).toBe("running");
     });
 
-    it("deletes a descendant without cascading and reports it in filtered discovery", async () => {
-      store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
-      const child = "00000000-0000-4000-8000-000000000003";
-      const grandchild = "00000000-0000-4000-8000-000000000004";
-      for (const [id, parent] of [
-        [child, ORB],
-        [grandchild, child],
-      ] as const) {
+    it.each(["archive", "delete"] as const)(
+      "%s descendant with schema-valid cleanup blockers",
+      async (operation) => {
+        const cleanup = (payload: unknown) =>
+          app.inject({
+            method: "POST",
+            url: `/runtime/v1/orb/${operation}`,
+            headers: { authorization: `Bearer ${TOKEN}` },
+            payload,
+          });
+        store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+        const child = "00000000-0000-4000-8000-000000000003";
+        const unrelated = "00000000-0000-4000-8000-000000000004";
+        store.seedOrb(makeOrbRow(unrelated, PROJECT, "archived"));
         (
           await store.spawnOrb(task, {
-            callerOrbId: parent,
-            caller:
-              parent === ORB
-                ? { runtimeTokenHash: sha256(TOKEN), hostIncarnation: 0 }
-                : {
-                    kind: "central",
-                    orbId: parent,
-                    projectId: PROJECT,
-                    ownerUserId: TEST_USER_ID,
-                    agentAdmissionVersion: 0,
-                  },
-            orb: makeOrbRow(id, PROJECT, "creating"),
+            callerOrbId: ORB,
+            caller: { runtimeTokenHash: sha256(TOKEN), hostIncarnation: 0 },
+            orb: makeOrbRow(child, PROJECT, "creating"),
             prompt: "work",
-            requestHash: id,
+            requestHash: child,
           })
         )._unsafeUnwrap();
-      }
-      const response = await deleteSelf({ orbId: child });
-      expect(response.statusCode).toBe(202);
-      expect(response.json()).toEqual({ orbId: child, state: "deleting" });
-      expect((await deleteSelf({ orbId: child })).statusCode).toBe(202);
-      expect(store.orbSnapshot(ORB)?.state).toBe("running");
-      expect(store.orbSnapshot(grandchild)?.state).toBe("creating");
-      (
-        await store.recordOrbDeletionError(task, {
+        expect((await cleanup({ orbId: unrelated })).statusCode).toBe(404);
+        expect(store.orbSnapshot(unrelated)?.state).toBe("archived");
+        store.seedOrb(makeOrbRow(unrelated, PROJECT, "deleting"));
+        expect((await cleanup({ orbId: unrelated })).statusCode).toBe(404);
+        const response = await cleanup({ orbId: child });
+        expect(response.statusCode).toBe(202);
+        expect(response.json()).toEqual({
           orbId: child,
-          message: "host cleanup blocked",
-          now: 2000,
-        })
-      )._unsafeUnwrap();
-      const listed = await app.inject({
-        method: "GET",
-        url: "/runtime/v1/orbs?descendantsOnly=true",
-        headers: { authorization: `Bearer ${TOKEN}` },
-      });
-      expect(listed.statusCode).toBe(200);
-      expect(
-        listed
-          .json()
-          .items.map((item: { id: string }) => item.id)
-          .sort(),
-      ).toEqual([child, grandchild]);
-      expect(
-        listed.json().items.find((item: { id: string }) => item.id === child).stateDetail,
-      ).toBe("host cleanup blocked");
-      expect(
+          state: operation === "archive" ? "archiving" : "deleting",
+        });
+        expect((await cleanup({ orbId: child })).statusCode).toBe(202);
+        if (operation === "archive") {
+          const archived = store.orbSnapshot(child);
+          expect(archived).not.toBeNull();
+          if (archived === null) return;
+          store.seedOrb({ ...archived, state: "archived" });
+          expect((await cleanup({ orbId: child })).json()).toEqual({
+            orbId: child,
+            state: "archiving",
+          });
+          store.seedOrb({ ...archived, state: "deleting" });
+          const rejected = await cleanup({ orbId: child });
+          expect(rejected.statusCode).toBe(409);
+          expect(rejected.json().error.retryable).toBe(false);
+          store.seedOrb(archived);
+        }
+        expect(store.orbSnapshot(ORB)?.state).toBe("running");
         (
-          await app.inject({
-            method: "GET",
-            url: "/runtime/v1/orbs?descendantsOnly=yes",
-            headers: { authorization: `Bearer ${TOKEN}` },
+          await store.recordOrbDeletionError(task, {
+            orbId: child,
+            message: "host cleanup blocked",
+            now: 2000,
           })
-        ).statusCode,
-      ).toBe(400);
-    });
+        )._unsafeUnwrap();
+        const listed = await app.inject({
+          method: "GET",
+          url: "/runtime/v1/orbs?descendantsOnly=true",
+          headers: { authorization: `Bearer ${TOKEN}` },
+        });
+        expect(listed.statusCode).toBe(200);
+        expect(Check(OrbInspectionListSchema, listed.json())).toBe(true);
+        expect(
+          listed
+            .json()
+            .items.map((item: { id: string }) => item.id)
+            .sort(),
+        ).toEqual([child]);
+        expect(
+          listed.json().items.find((item: { id: string }) => item.id === child).stateDetail,
+        ).toBe("host cleanup blocked");
+        expect(
+          (
+            await app.inject({
+              method: "GET",
+              url: "/runtime/v1/orbs?descendantsOnly=yes",
+              headers: { authorization: `Bearer ${TOKEN}` },
+            })
+          ).statusCode,
+        ).toBe(400);
+      },
+    );
 
     it.each([
       "creating",
@@ -1362,7 +1402,7 @@ describe("runtime broker routes", () => {
   });
 
   describe("self-archive", () => {
-    const archive = (payload: unknown = {}) =>
+    const archive = (payload: unknown = { self: true }) =>
       app.inject({
         method: "POST",
         url: "/runtime/v1/orb/archive",

@@ -8,7 +8,7 @@ import {
 import {
   HistorySearchRequestSchema,
   HistorySearchResultSchema,
-  OrbDeleteRequestSchema,
+  OrbCleanupRequestSchema,
   OrbInspectionListSchema,
   OrbListRequestSchema,
   OrbSelfSchema,
@@ -212,17 +212,18 @@ export function createOrbTools(
     }),
     defineTool({
       name: "orb_archive",
-      description: "Archive this orb only on explicit user request; keep its transcript.",
-      parameters: empty,
+      description:
+        "Archive this orb with {self:true} only on explicit user request, or a same-project descendant by full orbId for delegated cleanup. Keep its transcript. No cascade.",
+      parameters: OrbCleanupRequestSchema,
       structuredOutputSchema: lifecycleSchema,
       replay: "unsafe",
-      execute: async (_args, api) => output({ kind: "archive" }, api),
+      execute: async (args, api) => output({ kind: "archive", request: args }, api),
     }),
     defineTool({
       name: "orb_delete",
       description:
         "Permanently delete this orb with {self:true} only on explicit user request, or a same-project descendant by full orbId for delegated cleanup. No cascade.",
-      parameters: OrbDeleteRequestSchema,
+      parameters: OrbCleanupRequestSchema,
       structuredOutputSchema: lifecycleSchema,
       replay: "unsafe",
       execute: async (args, api) => output({ kind: "delete", request: args }, api),

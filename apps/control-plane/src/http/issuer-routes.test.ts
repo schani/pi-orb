@@ -12,8 +12,7 @@ import {
 } from "../adapters/oidc/signer.ts";
 import { DEFAULT_BROKER_CONSTANTS, DEFAULT_ISSUER_CONSTANTS } from "../domain/constants.ts";
 import type { StoreError } from "../domain/errors.ts";
-import { readOrbBootContext, requestOrbArchive, requestOrbSleep } from "../domain/lifecycle.ts";
-import { deleteGuestOrb } from "../domain/orb-deletion.ts";
+import { readOrbBootContext, requestOrbSleep } from "../domain/lifecycle.ts";
 import { sendGuestOrbMessage } from "../domain/orb-messaging.ts";
 import type { OrbNameGenerator, SigningKeyRow, SigningKeyStore } from "../domain/ports.ts";
 import { createSigningKeyBootstrapState, ensureActiveSigningKey } from "../domain/signing-keys.ts";
@@ -325,10 +324,6 @@ describe("minted tokens verify against the served JWKS", () => {
         ),
       readBootContext: (task, orbId, caller) =>
         readOrbBootContext(task, { ...makeHarness().deps, store }, orbId, caller),
-      archiveSelf: (task, orbId, caller) =>
-        requestOrbArchive(task, { ...makeHarness().deps, store }, orbId, caller),
-      deleteOrb: (task, source, request) =>
-        deleteGuestOrb(task, { ...makeHarness().deps, store }, source, request),
       store,
       brokerForUser: () => ({
         pointers: new FakePointerStore(),

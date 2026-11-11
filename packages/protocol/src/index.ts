@@ -16,6 +16,7 @@ export * from "./mcp.ts";
 export * from "./model-usage.ts";
 export * from "./orb-alert.ts";
 export * from "./orb-archive.ts";
+export * from "./orb-cleanup.ts";
 export * from "./orb-delete.ts";
 export * from "./orb-inspection.ts";
 export * from "./orb-message-context.ts";

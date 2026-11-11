@@ -21,11 +21,12 @@ import {
   ORB_SPAWN_MAX_BYTES,
   ORB_SPAWN_PATH,
   ORB_SPAWN_UUID,
-  OrbArchiveRequestSchema,
+  OrbArchiveResponseSchema,
   OrbBootContextRequestSchema,
-  OrbDeleteRequestSchema,
+  OrbDeleteResponseSchema,
   type OrbInspectionError,
   type OrbInspectionItem,
+  OrbInspectionListSchema,
   type OrbNameTriggerResponse,
   OrbNameTriggerSchema,
   type OrbSendRequest,
@@ -45,7 +46,7 @@ import {
   TokenRequestSchema,
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, RouteHandlerMethod } from "fastify";
 import { err, type ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
 import type { AgentAlertWriter } from "../domain/agent-ports.ts";
@@ -129,16 +130,6 @@ export interface RuntimeRouteDeps {
     orbId: string,
     caller: GuestAgentCaller,
   ) => ResultAsync<import("@pi-orb/protocol").OrbBootContext | null, CommandError>;
-  readonly archiveSelf: (
-    task: SimulationTask,
-    orbId: string,
-    caller: ArchiveCaller,
-  ) => ResultAsync<OrbRow, CommandError>;
-  readonly deleteOrb: (
-    task: SimulationTask,
-    source: OrbRow,
-    request: import("@pi-orb/protocol").OrbDeleteRequest,
-  ) => ResultAsync<OrbRow, import("../domain/orb-deletion.ts").OrbDeletionError>;
   readonly store: ControlPlaneStore;
   readonly brokerForUser: (userId: string) => BrokerDeps;
   readonly nameGenerator: OrbNameGenerator;
@@ -548,7 +539,9 @@ export function registerRuntimeRoutes(
     });
   });
 
-  app.post(ORB_SELF_ARCHIVE_PATH, async (request, reply) => {
+  const cleanup: RouteHandlerMethod = async (request, reply) => {
+    const kind = request.routeOptions.url === ORB_SELF_ARCHIVE_PATH ? "archive" : "delete";
+    const operation = kind === "archive" ? "archival" : "deletion";
     reply.header("cache-control", "no-store");
     const auth = await authenticate(request.headers.authorization);
     if (auth.kind !== "orb") {
@@ -556,68 +549,17 @@ export function registerRuntimeRoutes(
       return reply.status(unavailable ? 503 : 401).send({
         error: {
           code: unavailable ? "unavailable" : "unauthorized",
-          message: unavailable ? "archival unavailable" : "runtime identity rejected",
+          message: unavailable ? `${operation} unavailable` : "runtime identity rejected",
           retryable: unavailable,
         },
       });
     }
-    if (!Check(OrbArchiveRequestSchema, request.body === undefined ? {} : request.body)) {
-      return reply.status(400).send({
-        error: {
-          code: "invalid_request",
-          message: "self-archive accepts no fields",
-          retryable: false,
-        },
-      });
-    }
-    const result = await deps.archiveSelf(task, auth.orb.id, {
-      runtimeTokenHash: auth.orb.runtimeTokenHash as string,
-      hostIncarnation: auth.orb.hostIncarnation,
-    });
-    if (result.isErr()) {
-      const status = { not_found: 404, conflict: 409, unavailable: 503, internal: 500 }[
-        result.error.code
-      ];
-      return reply.status(status).send({
-        error: {
-          code: result.error.code,
-          message:
-            result.error.code === "internal"
-              ? "archival failed"
-              : result.error.code === "unavailable"
-                ? "archival unavailable; acceptance may be unknown"
-                : result.error.message,
-          retryable: result.error.retryable,
-        },
-      });
-    }
-    return reply.status(202).send({ orbId: result.value.id, state: "archiving" });
-  });
-  app.post(ORB_SELF_DELETE_PATH, async (request, reply) => {
-    reply.header("cache-control", "no-store");
-    const auth = await authenticate(request.headers.authorization);
-    if (auth.kind !== "orb") {
-      const unavailable = auth.kind === "unavailable";
-      return reply.status(unavailable ? 503 : 401).send({
-        error: {
-          code: unavailable ? "unavailable" : "unauthorized",
-          message: unavailable ? "deletion unavailable" : "runtime identity rejected",
-          retryable: unavailable,
-        },
-      });
-    }
-    if (!Check(OrbDeleteRequestSchema, request.body)) {
-      return reply.status(400).send({
-        error: {
-          code: "invalid_request",
-          message: "specify exactly {self:true} or {orbId:full UUID}",
-          retryable: false,
-        },
-      });
-    }
-    const result = await deps.deleteOrb(task, auth.orb, request.body);
+    const result = await deps
+      .agentOperations(task, auth.orb)
+      .invoke({ kind, request: request.body }, request.id);
     if (result.isErr()) {
       const status = {
+        unauthorized: 401,
         invalid_request: 400,
         not_found: 404,
         conflict: 409,
@@ -629,16 +571,30 @@ export function registerRuntimeRoutes(
           code: result.error.code,
           message:
             result.error.code === "internal"
-              ? "deletion failed"
+              ? `${operation} failed`
               : result.error.code === "unavailable"
-                ? "deletion unavailable; acceptance may be unknown"
+                ? `${operation} unavailable; acceptance may be unknown`
                 : result.error.message,
-          retryable: result.error.retryable,
+          retryable: result.error.code === "unavailable",
         },
       });
     }
-    return reply.status(202).send({ orbId: result.value.id, state: "deleting" });
-  });
+    const body =
+      kind === "archive" &&
+      result.value !== null &&
+      typeof result.value === "object" &&
+      "state" in result.value &&
+      result.value.state === "archived"
+        ? { ...result.value, state: "archiving" }
+        : result.value;
+    if (!Check(kind === "archive" ? OrbArchiveResponseSchema : OrbDeleteResponseSchema, body))
+      return reply.status(500).send({
+        error: { code: "internal", message: `malformed ${operation} result`, retryable: false },
+      });
+    return reply.status(202).send(body);
+  };
+  app.post(ORB_SELF_ARCHIVE_PATH, cleanup);
+  app.post(ORB_SELF_DELETE_PATH, cleanup);
 
   if (deps.mcp) {
     const mcp = deps.mcp;
@@ -945,42 +901,35 @@ export function registerRuntimeRoutes(
       return reply
         .status(400)
         .send(inspectionError("invalid_request", "descendantsOnly must be true or false", false));
-    const ownerProject = await deps.store.getProject(task, auth.orb.projectId);
-    if (ownerProject.isErr()) return sendInspectionStoreError(reply, ownerProject.error);
-    if (ownerProject.value === null)
-      return reply.status(500).send(inspectionError("internal", "orb project is missing", false));
-    if (query.descendantsOnly === "true") {
-      const descendants = await deps.store.listOrbDescendants(task, {
-        orbId: auth.orb.id,
-        projectId: auth.orb.projectId,
-        ownerUserId: ownerProject.value.ownerUserId,
-      });
-      if (descendants.isErr()) return sendInspectionStoreError(reply, descendants.error);
-      const sourceProject = ownerProject.value;
-      const items = descendants.value.map((orb) => inspectionItem(orb, sourceProject));
-      items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
-      reply.header("cache-control", "no-store");
-      return reply.send({ v: 1, currentOrbId: auth.orb.id, items });
+    const result = await deps
+      .agentOperations(task, auth.orb)
+      .invoke({ kind: "list", descendantsOnly: query.descendantsOnly === "true" }, request.id);
+    if (result.isErr()) {
+      if (result.error.code === "unauthorized") return sendUnauthorized(reply);
+      const status = {
+        invalid_request: 400,
+        not_found: 404,
+        conflict: 409,
+        unavailable: 503,
+        internal: 500,
+      }[result.error.code];
+      return reply
+        .status(status)
+        .send(
+          inspectionError(
+            result.error.code,
+            result.error.code === "unavailable"
+              ? "orb inspection unavailable"
+              : "orb inspection failed",
+            result.error.code === "unavailable",
+          ),
+        );
     }
-    const projects = await deps.store.listProjectsByOwner(task, ownerProject.value.ownerUserId);
-    if (projects.isErr()) return sendInspectionStoreError(reply, projects.error);
-    const items: OrbInspectionItem[] = [];
-    for (const project of projects.value) {
-      const orbs = await deps.store.listOrbsByProject(task, project.id);
-      if (orbs.isErr()) return sendInspectionStoreError(reply, orbs.error);
-      const projectIdentity = {
-        id: project.id,
-        name: project.name,
-        repositoryUrl: project.repositoryUrl,
-      };
-      for (const orb of orbs.value) items.push(inspectionItem(orb, projectIdentity));
-    }
-    items.sort(
-      (left, right) =>
-        right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id),
-    );
+    const body = { v: 1, ...(result.value as object) };
+    if (!Check(OrbInspectionListSchema, body))
+      return reply.status(500).send(inspectionError("internal", "malformed orb list", false));
     reply.header("cache-control", "no-store");
-    return reply.send({ v: 1, currentOrbId: auth.orb.id, items });
+    return reply.send(body);
   });
 
   app.get<{ Params: { orbId: string } }>(

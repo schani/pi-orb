@@ -130,18 +130,17 @@ describe("pi-orb inspection CLI entry point", () => {
         );
         return;
       }
-      if (request.url === "/runtime/v1/orbs?descendantsOnly=true") {
+      const descendants = request.url === "/runtime/v1/orbs?descendantsOnly=true";
+      if (request.url === "/runtime/v1/orbs" || descendants) {
         response.end(
           JSON.stringify({
             v: 1,
             currentOrbId: "orb-current",
-            items: [{ ...orb, state: "deleting", stateDetail: "cleanup blocked" }],
+            items: [
+              descendants ? { ...orb, state: "deleting", stateDetail: "cleanup blocked" } : orb,
+            ],
           }),
         );
-        return;
-      }
-      if (request.url === "/runtime/v1/orbs") {
-        response.end(JSON.stringify({ v: 1, currentOrbId: "orb-current", items: [orb] }));
         return;
       }
       if (request.url === "/runtime/v1/orbs/orb-sibling/transcript") {

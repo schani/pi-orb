@@ -76,7 +76,7 @@ it("uses durable child task identities and does not expose authority arguments",
   );
   expect(invoke).toHaveBeenCalledWith({ kind: "sleep", durationSeconds: 60 }, '[42,"call"]');
   for (const tool of tools) {
-    if (tool.name === "orb_delete") {
+    if (tool.name === "orb_delete" || tool.name === "orb_archive") {
       const alternatives = (tool.parameters as { anyOf: unknown[] }).anyOf;
       expect(alternatives).toHaveLength(2);
       for (const alternative of alternatives)
@@ -268,7 +268,7 @@ const responses = [
   ["orb_alert", { message: "hi" }, { recordId: "record", duplicate: false }],
   ["notify_parent", { message: "hi" }, { accepted: true }],
   ["orb_sleep", { durationSeconds: 60 }, { sleepId: "sleep", sleepUntil: 123456 }],
-  ["orb_archive", {}, { orbId: "orb", state: "archived" }],
+  ["orb_archive", { self: true }, { orbId: "orb", state: "archived" }],
   ["orb_delete", { self: true }, { orbId: "orb", state: "deleting" }],
   ["orb_expose_port", { port: 5173 }, { port: 5173, registrationId: "registration", url: "url" }],
   ["orb_unexpose_port", { port: 5173 }, { port: 5173, revoked: true }],
@@ -293,9 +293,9 @@ it.each(responses)(
       );
       assert.isDefined(tool);
       const result = await tool.execute(args as never, api, BACKGROUND_CONTEXT);
-      if (name === "orb_delete")
+      if (name === "orb_delete" || name === "orb_archive")
         expect(invoke).toHaveBeenCalledExactlyOnceWith(
-          { kind: "delete", request: args },
+          { kind: name === "orb_archive" ? "archive" : "delete", request: args },
           '[42,"call"]',
         );
       if (name === "orb_list")

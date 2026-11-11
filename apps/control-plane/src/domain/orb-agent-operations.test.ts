@@ -269,7 +269,7 @@ describe("central orb operations", () => {
                   await service.invoke(
                     kind === "sleep"
                       ? { kind, durationSeconds: 60 }
-                      : kind === "delete"
+                      : kind === "delete" || kind === "archive"
                         ? { kind, request: { self: true } }
                         : { kind },
                     "self",
@@ -334,7 +334,7 @@ describe("central orb operations", () => {
                         ? { kind, durationSeconds: 60 }
                         : kind === "search"
                           ? { kind, request: { query: "needle" } }
-                          : kind === "delete"
+                          : kind === "delete" || kind === "archive"
                             ? { kind, request: { self: true } }
                             : { kind };
                 const continuation =
@@ -512,10 +512,7 @@ describe("central orb operations", () => {
               });
               expect(
                 (
-                  await service.invoke(
-                    kind === "delete" ? { kind, request: { self: true } } : { kind },
-                    "task:destructive",
-                  )
+                  await service.invoke({ kind, request: { self: true } }, "task:destructive")
                 ).isOk(),
               ).toBe(true);
               expect(h.store.orbSnapshot("caller")?.state).toBe(

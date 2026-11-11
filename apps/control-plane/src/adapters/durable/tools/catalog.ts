@@ -172,7 +172,7 @@ export class CallableCatalog {
           name: "orb",
           description: "Orb lifecycle and conversation operations",
           instructions:
-            "Archive and self-delete only on explicit user request; descendant cleanup may be part of delegated work. Stop/sleep revokes execution admission; a connected browser does not override Stop.",
+            "Self-archive/delete only on explicit user request; descendant cleanup may be part of delegated work. Stop/sleep revokes execution admission; a connected browser does not override Stop.",
         },
       });
   }

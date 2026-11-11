@@ -94,7 +94,7 @@ accepts a caller-selected identity.
 | `PUT /runtime/v1/orbs/:orbId/spawn` | Spawn orb | `docs/inbox.md` |
 | `POST /runtime/v1/orb/send` | Peer message | `docs/inbox.md` |
 | `POST /runtime/v1/orb/sleep`, `POST /runtime/v1/orb/boot-context` | Scheduled sleep | `docs/lifecycle.md` |
-| `POST /runtime/v1/orb/archive`, `POST /runtime/v1/orb/delete` | Archive self; delete self or descendant | `docs/teardown.md` |
+| `POST /runtime/v1/orb/archive`, `POST /runtime/v1/orb/delete` | Orb cleanup | `docs/teardown.md` (In-orb cleanup) |
 | `PUT\|DELETE /runtime/previews/:port`, `GET /runtime/previews` | Preview registration | `docs/http-exposure.md` |
 | `POST\|GET\|DELETE /runtime/v1/hosting/files?path=` | Hosted files | `docs/http-exposure.md` |
 

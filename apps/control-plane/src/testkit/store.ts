@@ -5,7 +5,7 @@ import {
   UPLOAD_LEASE_MS,
 } from "@pi-orb/protocol";
 import { ApplicationFailure, type SimulationTask } from "determined";
-import { errAsync, ok, okAsync, ResultAsync } from "neverthrow";
+import { err, errAsync, ok, okAsync, type Result, ResultAsync } from "neverthrow";
 import type {
   ActivityHeadlineRef,
   StoredActivityHeadline,
@@ -43,6 +43,7 @@ import type {
   RecordHostDiscardStatusParams,
   RequestHostSpecReplacementParams,
   RequestOrbArchiveParams,
+  RequestOrbCleanupError,
   RequestOrbDeletionParams,
   SpawnConflict,
   SpawnOrbParams,
@@ -1685,11 +1686,41 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     });
   }
 
+  private authorizeDescendantCleanup(
+    params: RequestOrbDeletionParams,
+  ): Result<void, RequestOrbCleanupError> {
+    const orb = this.orbs.get(params.orbId);
+    const source = params.descendantSource;
+    if (source !== undefined) {
+      const sourceOrb = this.orbs.get(source.orbId);
+      const project = this.projects.get(source.projectId);
+      if (
+        params.caller !== undefined ||
+        sourceOrb === undefined ||
+        sourceOrb.projectId !== source.projectId ||
+        project?.state !== "active" ||
+        project.ownerUserId !== source.ownerUserId ||
+        !acceptsOrbAgentCaller(sourceOrb, source.ownerUserId, source.caller)
+      )
+        return err({ type: "state_conflict" });
+      if (
+        orb === undefined ||
+        orb.projectId !== source.projectId ||
+        source.orbId === orb.id ||
+        !this.descendantIds(source).has(orb.id)
+      )
+        return err({ type: "orb_cleanup_target_not_found" });
+    }
+    return ok(undefined);
+  }
+
   requestOrbArchive(
     task: SimulationTask,
     params: RequestOrbArchiveParams,
-  ): ResultAsync<OrbRow, StoreError | StateConflict> {
-    return this.access(task, FAILPOINTS.storeWrite, "request orb archive", () => {
+  ): ResultAsync<OrbRow, RequestOrbCleanupError> {
+    const request = (): Result<OrbRow, RequestOrbCleanupError> => {
+      const authorized = this.authorizeDescendantCleanup(params);
+      if (authorized.isErr()) return err(authorized.error);
       const orb = this.orbs.get(params.orbId);
       if (
         orb === undefined ||
@@ -1697,8 +1728,18 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         (params.caller !== undefined &&
           !acceptsOrbAgentCaller(orb, this.projects.get(orb.projectId)?.ownerUserId, params.caller))
       ) {
-        return { conflict: true as const, currentState: orb?.state };
+        return err({
+          type: "state_conflict",
+          ...(orb === undefined ? {} : { currentState: orb.state }),
+        });
       }
+      if (
+        params.descendantSource !== undefined &&
+        (orb.state === "archiving" || orb.state === "archived")
+      )
+        return ok(orb);
+      if (["archiving", "archived", "deleting"].includes(orb.state))
+        return err({ type: "state_conflict", currentState: orb.state });
       const updated: OrbRow = {
         ...orb,
         state: "archiving",
@@ -1725,14 +1766,10 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         lastError: null,
         updatedAt: params.now,
       });
-      return { conflict: false as const, row: updated };
-    }).andThen((outcome) =>
-      outcome.conflict
-        ? errAsync<OrbRow, StateConflict>({
-            type: "state_conflict",
-            ...(outcome.currentState !== undefined ? { currentState: outcome.currentState } : {}),
-          })
-        : okAsync(outcome.row),
+      return ok(updated);
+    };
+    return this.access(task, FAILPOINTS.storeWrite, "request orb archive", request).andThen(
+      (outcome) => outcome,
     );
   }
 
@@ -1822,35 +1859,22 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   requestOrbDeletion(
     task: SimulationTask,
     params: RequestOrbDeletionParams,
-  ): ResultAsync<OrbRow, StoreError | StateConflict> {
-    return this.access(task, FAILPOINTS.storeWrite, "request orb deletion", () => {
+  ): ResultAsync<OrbRow, RequestOrbCleanupError> {
+    const request = (): Result<OrbRow, RequestOrbCleanupError> => {
       const orb = this.orbs.get(params.orbId);
-      const source = params.descendantSource;
-      const sourceOrb = source === undefined ? undefined : this.orbs.get(source.orbId);
+      const authorized = this.authorizeDescendantCleanup(params);
+      if (authorized.isErr()) return err(authorized.error);
       if (
         orb === undefined ||
         orb.stateVersion !== params.expectedStateVersion ||
         (params.caller !== undefined &&
-          !acceptsOrbAgentCaller(
-            orb,
-            this.projects.get(orb.projectId)?.ownerUserId,
-            params.caller,
-          )) ||
-        (source !== undefined &&
-          (params.caller !== undefined ||
-            sourceOrb === undefined ||
-            this.projects.get(source.projectId)?.state !== "active" ||
-            source.orbId === orb.id ||
-            source.projectId !== sourceOrb.projectId ||
-            orb.projectId !== source.projectId ||
-            this.projects.get(source.projectId)?.ownerUserId !== source.ownerUserId ||
-            !acceptsOrbAgentCaller(sourceOrb, source.ownerUserId, source.caller) ||
-            !this.descendantIds(source).has(orb.id)))
-      ) {
-        return { conflict: true as const, currentState: orb?.state };
-      }
-      if (source !== undefined && orb.state === "deleting")
-        return { conflict: false as const, row: orb };
+          !acceptsOrbAgentCaller(orb, this.projects.get(orb.projectId)?.ownerUserId, params.caller))
+      )
+        return err({
+          type: "state_conflict",
+          ...(orb === undefined ? {} : { currentState: orb.state }),
+        });
+      if (params.descendantSource !== undefined && orb.state === "deleting") return ok(orb);
       const updated: OrbRow = {
         ...orb,
         state: "deleting",
@@ -1876,14 +1900,10 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         lastError: null,
         updatedAt: params.now,
       });
-      return { conflict: false as const, row: updated };
-    }).andThen((outcome) =>
-      outcome.conflict
-        ? errAsync<OrbRow, StateConflict>({
-            type: "state_conflict",
-            ...(outcome.currentState !== undefined ? { currentState: outcome.currentState } : {}),
-          })
-        : okAsync(outcome.row),
+      return ok(updated);
+    };
+    return this.access(task, FAILPOINTS.storeWrite, "request orb deletion", request).andThen(
+      (outcome) => outcome,
     );
   }
 

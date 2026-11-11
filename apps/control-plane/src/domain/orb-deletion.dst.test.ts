@@ -1,7 +1,13 @@
 import { err, ok, okAsync, ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { FAILPOINTS } from "../testkit/failpoints.ts";
-import { makeHarness, restartControlPlane, seedRunningOrb } from "../testkit/fixtures.ts";
+import {
+  makeHarness,
+  makeOrbRow,
+  restartControlPlane,
+  seedRunningOrb,
+  TEST_USER_ID,
+} from "../testkit/fixtures.ts";
 import { LogCapture, runDst, waitUntil } from "../testkit/sim.ts";
 import { publishHostedFile } from "./hosting.ts";
 import {
@@ -13,17 +19,29 @@ import {
 import { reconcileLoop } from "./loops.ts";
 
 const ORB = "orb-delete";
+const CHILD = "descendant-delete";
+
+const authorityRaces = (["stop", "replacement", "discard", "archive", "delete"] as const).flatMap(
+  (race) =>
+    (["self", "descendant"] as const).flatMap((mode) =>
+      (["archive", "delete"] as const)
+        .filter((operation) => !(operation === "archive" && mode === "self" && race === "archive"))
+        .map((operation) => [race, mode, operation] as const),
+    ),
+);
 
 describe("orb deletion (DST)", () => {
-  it.each(["stop", "replacement", "discard", "archive", "delete"] as const)(
-    "revalidates self authority when %s wins the delete write",
-    async (race) => {
-      await runDst({ name: `self-delete-race-${race}`, iterations: 20 }, async (sim) => {
+  it.each(authorityRaces)(
+    "revalidates source authority when %s wins the %s %s boundary",
+    async (race, mode, operation) => {
+      await runDst({ name: `${mode}-${operation}-race-${race}`, iterations: 20 }, async (sim) => {
         const harness = makeHarness();
         let intercepted = false;
         const store = new Proxy(harness.store, {
           get(target, property, receiver) {
-            if (property === "requestOrbDeletion") {
+            if (
+              property === (operation === "archive" ? "requestOrbArchive" : "requestOrbDeletion")
+            ) {
               return (
                 task: Parameters<typeof target.requestOrbDeletion>[0],
                 params: Parameters<typeof target.requestOrbDeletion>[1],
@@ -53,7 +71,9 @@ describe("orb deletion (DST)", () => {
                         });
                       }
                     }
-                    return await target.requestOrbDeletion(task, params);
+                    return await target[
+                      operation === "archive" ? "requestOrbArchive" : "requestOrbDeletion"
+                    ](task, params);
                   })(),
                 );
             }
@@ -67,10 +87,40 @@ describe("orb deletion (DST)", () => {
             f: async (task) => {
               seedRunningOrb(task, harness, ORB);
               const orb = harness.store.orbSnapshot(ORB);
-              const requested = await requestOrbDeletion(task, { ...harness.deps, store }, ORB, {
+              const caller = {
                 runtimeTokenHash: orb?.runtimeTokenHash ?? "",
                 hostIncarnation: orb?.hostIncarnation ?? -1,
-              });
+              };
+              if (mode === "descendant")
+                (
+                  await harness.store.spawnOrb(task, {
+                    callerOrbId: ORB,
+                    caller,
+                    orb: makeOrbRow(CHILD, orb?.projectId ?? "", "creating"),
+                    prompt: "work",
+                    requestHash: CHILD,
+                  })
+                )._unsafeUnwrap();
+              const requested = await (operation === "archive"
+                ? requestOrbArchive
+                : requestOrbDeletion)(
+                task,
+                { ...harness.deps, store },
+                mode === "self" ? ORB : CHILD,
+                mode === "self" ? caller : undefined,
+                mode === "self"
+                  ? undefined
+                  : {
+                      orbId: ORB,
+                      projectId: orb?.projectId ?? "",
+                      ownerUserId: TEST_USER_ID,
+                      caller,
+                    },
+              );
+              if (mode === "descendant") {
+                expect(harness.store.orbSnapshot(CHILD)?.state).toBe("creating");
+                expect(harness.store.deletionSnapshot(CHILD)).toBeNull();
+              }
               expect(requested.isErr() && requested.error.code).toBe("conflict");
               expect(harness.store.orbSnapshot(ORB)?.state).toBe(
                 race === "stop"
@@ -90,10 +140,14 @@ describe("orb deletion (DST)", () => {
     },
   );
 
-  it("accepts exactly one competing self request", async () => {
+  it.each(
+    (["self", "descendant"] as const).flatMap((mode) =>
+      (["archive", "delete"] as const).map((operation) => [mode, operation] as const),
+    ),
+  )("coalesces competing %s %s requests", async (mode, operation) => {
     const log = new LogCapture();
     await runDst(
-      { name: "self-delete-duplicates", iterations: 30, logCapture: log },
+      { name: `${mode}-${operation}-duplicates`, iterations: 30, logCapture: log },
       async (sim) => {
         const harness = makeHarness();
         let caller: { runtimeTokenHash: string; hostIncarnation: number } | undefined;
@@ -104,27 +158,55 @@ describe("orb deletion (DST)", () => {
             f: async (task) => {
               seedRunningOrb(task, harness, ORB);
               const orb = harness.store.orbSnapshot(ORB);
-              caller = {
+              const authority = {
                 runtimeTokenHash: orb?.runtimeTokenHash ?? "",
                 hostIncarnation: orb?.hostIncarnation ?? -1,
               };
+              if (mode === "descendant")
+                (
+                  await harness.store.spawnOrb(task, {
+                    callerOrbId: ORB,
+                    caller: authority,
+                    orb: makeOrbRow(CHILD, orb?.projectId ?? "", "creating"),
+                    prompt: "work",
+                    requestHash: CHILD,
+                  })
+                )._unsafeUnwrap();
+              caller = authority;
             },
           },
           ...["first", "second"].map((name) => ({
             name,
             f: async (task: Parameters<typeof requestOrbDeletion>[0]) => {
               await waitUntil(task, "caller ready", () => caller !== undefined);
-              const requested = await requestOrbDeletion(task, harness.deps, ORB, caller);
+              const requested = await (operation === "archive"
+                ? requestOrbArchive
+                : requestOrbDeletion)(
+                task,
+                harness.deps,
+                mode === "self" ? ORB : CHILD,
+                mode === "self" ? caller : undefined,
+                mode === "self"
+                  ? undefined
+                  : {
+                      orbId: ORB,
+                      projectId: `project-of-${ORB}`,
+                      ownerUserId: TEST_USER_ID,
+                      caller: caller as NonNullable<typeof caller>,
+                    },
+              );
               if (requested.isOk()) accepted++;
               else expect(requested.error.code).toBe("conflict");
             },
           })),
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-        expect(accepted).toBe(1);
-        expect(harness.store.orbSnapshot(ORB)?.stateVersion).toBe(1);
-        expect(log.matching("delete_requested")).toHaveLength(1);
-        expect(log.matching("delete_requested")[0]).toContain("source=self");
+        expect(accepted).toBe(mode === "self" && operation === "delete" ? 1 : 2);
+        expect(harness.store.orbSnapshot(mode === "self" ? ORB : CHILD)?.stateVersion).toBe(1);
+        expect(log.matching(`${operation}_requested`)).toHaveLength(1);
+        expect(log.matching(`${operation}_requested`)[0]).toContain(`source=${mode}`);
+        if (mode === "descendant")
+          expect(log.matching(`${operation}_requested`)[0]).toContain(`callerOrbId=${ORB}`);
       },
     );
   });
