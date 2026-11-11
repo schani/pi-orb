@@ -80,7 +80,7 @@ it("appends the shared environment then Claude suffix exactly once before existi
       type: "preset",
       preset: "claude_code",
       append: [
-        environmentPrompt(),
+        environmentPrompt("pi-orb link"),
         claudeEnvironmentPrompt,
         "PERSONAL",
         "PROJECT",
@@ -89,7 +89,7 @@ it("appends the shared environment then Claude suffix exactly once before existi
       ].join("\n\n"),
     });
     const append = typeof system === "object" && "append" in system ? (system.append ?? "") : "";
-    expect(append.split(environmentPrompt())).toHaveLength(2);
+    expect(append.split(environmentPrompt("pi-orb link"))).toHaveLength(2);
     expect(append.split(claudeEnvironmentPrompt)).toHaveLength(2);
     expect(claudePortExposurePrompt).toBe(
       "## Port exposure\n\nTo expose a port on this VM to the user, use the `pi-orb expose` CLI command",

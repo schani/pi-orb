@@ -202,6 +202,34 @@ export function storeSemanticsContractTests(
       };
     }
 
+    it("orb links are unique per orb, ordered by addition and removed idempotently", async () => {
+      await seed();
+      const pr = "https://github.com/owner/repo/pull/1";
+      const run = "https://github.com/owner/repo/actions/runs/2";
+      expect(
+        (await store.addOrbLink(task, { orbId: orb.id, url: pr, now: 1_000 }))._unsafeUnwrap(),
+      ).toBe(true);
+      expect(
+        (await store.addOrbLink(task, { orbId: orb.id, url: run, now: 2_000 }))._unsafeUnwrap(),
+      ).toBe(true);
+      expect(
+        (await store.addOrbLink(task, { orbId: orb.id, url: pr, now: 3_000 }))._unsafeUnwrap(),
+      ).toBe(false);
+      expect((await store.listOrbLinks(task, orb.id))._unsafeUnwrap()).toEqual([
+        { url: pr, addedAt: 1_000 },
+        { url: run, addedAt: 2_000 },
+      ]);
+      expect((await store.removeOrbLink(task, { orbId: orb.id, url: pr }))._unsafeUnwrap()).toBe(
+        true,
+      );
+      expect((await store.removeOrbLink(task, { orbId: orb.id, url: pr }))._unsafeUnwrap()).toBe(
+        false,
+      );
+      expect((await store.listOrbLinks(task, orb.id))._unsafeUnwrap()).toEqual([
+        { url: run, addedAt: 2_000 },
+      ]);
+    });
+
     it("preview registration is idempotent and re-registration fences old admissions", async () => {
       const request = await seedPreview();
       const first = (await store.registerPreview(task, request))._unsafeUnwrap();

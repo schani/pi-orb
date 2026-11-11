@@ -2117,6 +2117,19 @@ async function handleApi(
     return true;
   }
 
+  const linksRoute = /^\/api\/v1\/orbs\/([^/]+)\/links$/.exec(path);
+  if (linksRoute !== null && method === "GET") {
+    const orbId = decodeURIComponent(linksRoute[1] ?? "");
+    if (!state.orbs.has(orbId)) {
+      sendJson(response, 404, {
+        error: { code: "not_found", message: `orb ${orbId} does not exist`, retryable: false },
+      });
+      return true;
+    }
+    sendJson(response, 200, { repository: null, githubError: null, items: [] });
+    return true;
+  }
+
   const hostedFilesRoute = /^\/api\/v1\/orbs\/([^/]+)\/hosted-files$/.exec(path);
   if (hostedFilesRoute !== null && method === "GET") {
     const orbId = decodeURIComponent(hostedFilesRoute[1] ?? "");

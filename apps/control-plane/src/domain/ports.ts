@@ -35,6 +35,7 @@ import type {
   ProjectDeletionProgress,
   ProjectRow,
 } from "./orb.ts";
+import type { OrbLinkStore } from "./orb-link-ports.ts";
 import type { PreviewStore } from "./preview-ports.ts";
 import type { WorkspaceUploadStore } from "./workspace-uploads.ts";
 
@@ -223,7 +224,7 @@ export interface HistorySearchPage {
  * `state_version` CAS; replication writes use cursor CAS; the two never touch
  * each other's correctness fields.
  */
-export interface ControlPlaneStore extends ActivityHeadlineStore, PreviewStore {
+export interface ControlPlaneStore extends ActivityHeadlineStore, OrbLinkStore, PreviewStore {
   readonly uploads: WorkspaceUploadStore;
   getProject(task: SimulationTask, projectId: string): ResultAsync<ProjectRow | null, StoreError>;
   listProjects(task: SimulationTask): ResultAsync<ProjectRow[], StoreError>;

@@ -5,6 +5,7 @@ import {
   IdTokenResponseSchema,
   MCP_RUNTIME_PATH,
   ORB_INSPECTION_LIST_PATH,
+  ORB_LINKS_RUNTIME_PATH,
   ORB_NAME_TRIGGER_PATH,
   ORB_SELF_PATH,
   ORB_SEND_PATH,
@@ -1751,6 +1752,30 @@ describe("runtime broker routes", () => {
     const response = await request({ reason: "startup" });
     expect(response.statusCode).toBe(200);
     expect(response.body).not.toContain("refresh");
+  });
+
+  describe("orb links", () => {
+    const put = (payload: object, token: string | null = TOKEN) =>
+      app.inject({
+        method: "PUT",
+        url: ORB_LINKS_RUNTIME_PATH,
+        payload,
+        ...(token === null ? {} : { headers: { authorization: `Bearer ${token}` } }),
+      });
+
+    it("saves canonical GitHub links for the authenticated orb only", async () => {
+      seedOrb("running");
+      const response = await put({ url: "https://github.com/o/r/pull/3/files" });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ url: "https://github.com/o/r/pull/3" });
+      expect((await store.listOrbLinks(task, ORB))._unsafeUnwrap().map((row) => row.url)).toEqual([
+        "https://github.com/o/r/pull/3",
+      ]);
+      expect((await put({ url: "https://example.com" })).statusCode).toBe(400);
+      expect((await put({})).statusCode).toBe(400);
+      expect((await put({ url: "https://github.com/o/r/pull/4" }, null)).statusCode).toBe(401);
+      expect((await put({ url: "https://github.com/o/r/pull/4" }, "wrong")).statusCode).toBe(401);
+    });
   });
 
   describe("cross-orb inspection", () => {
