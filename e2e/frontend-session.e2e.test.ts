@@ -5354,7 +5354,7 @@ describe("frontend-only browser behavior", () => {
     await page.close();
   });
 
-  it("shows GitHub links above files and removes one from its expanded row", async () => {
+  it("shows GitHub links above files with a CI waterfall and removes one with its bin", async () => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 740 } });
     const id = "frontend-long-history";
     const pr = "https://github.com/owner/repo/pull/291";
@@ -5367,11 +5367,26 @@ describe("frontend-only browser behavior", () => {
           title: "Add links drawer",
           status: "draft",
           checks: [
-            { name: "build", result: "passed", url: null },
+            {
+              name: "build",
+              result: "passed",
+              url: null,
+              queuedAt: 1_000,
+              startedAt: 5_000,
+              completedAt: 65_000,
+              steps: [],
+            },
             {
               name: "e2e",
               result: "failed",
               url: "https://github.com/owner/repo/actions/runs/1/job/2",
+              queuedAt: 1_000,
+              startedAt: 10_000,
+              completedAt: 130_000,
+              steps: [
+                { name: "Set up job", result: "passed", startedAt: 11_000, completedAt: 12_000 },
+                { name: "Run tests", result: "failed", startedAt: 12_000, completedAt: 128_000 },
+              ],
             },
           ],
         },
@@ -5431,9 +5446,11 @@ describe("frontend-only browser behavior", () => {
       await expectPage(links.getByRole("link", { name: "#291" })).toHaveAttribute("href", pr);
       await expectPage(links.getByRole("link", { name: "determined#14" })).toBeVisible();
       await links.locator(".orb-link > summary").first().click();
-      await expectPage(
-        links.locator(".orb-link-body").first().getByText("failed", { exact: true }),
-      ).toBeVisible();
+      const waterfall = links.locator(".link-timeline");
+      await expectPage(waterfall.getByText("2m 00s")).toBeVisible();
+      await expectPage(waterfall.getByText("Run tests")).toHaveCount(0);
+      await waterfall.getByRole("row", { name: /e2e/ }).click({ position: { x: 4, y: 4 } });
+      await expectPage(waterfall.getByText("Run tests")).toHaveClass(/error-text/);
       const check = links.getByRole("link", { name: "e2e" });
       await expectPage(check).toHaveAttribute(
         "href",
@@ -5442,12 +5459,12 @@ describe("frontend-only browser behavior", () => {
       // Underlines span the text only, not the column.
       expectPage(
         await check.evaluate((a) => {
-          const range = document.createRange();
+          const range = a.ownerDocument.createRange();
           range.selectNodeContents(a);
           return Math.round(a.getBoundingClientRect().width - range.getBoundingClientRect().width);
         }),
       ).toBe(0);
-      await links.getByRole("button", { name: "remove" }).first().click();
+      await links.getByRole("button", { name: "Remove link" }).first().click();
       await expectPage(links.getByRole("link", { name: "#291" })).toHaveCount(0);
       expectPage(removed).toEqual([pr]);
       await expectPage(links.getByRole("link", { name: "determined#14" })).toBeVisible();

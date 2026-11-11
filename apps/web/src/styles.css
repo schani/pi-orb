@@ -3082,7 +3082,7 @@ pre,
 }
 .orb-link > summary {
   display: grid;
-  grid-template-columns: var(--orb-link-ref) minmax(0, 1fr) var(--orb-link-strip) 8ch;
+  grid-template-columns: var(--orb-link-ref) minmax(0, 1fr) var(--orb-link-strip) 8ch 20px;
   gap: 8px;
   align-items: center;
   min-height: 24px;
@@ -3108,39 +3108,97 @@ pre,
   color: var(--g3);
   text-align: right;
 }
-.orb-link-body {
-  padding: 0 0 4px 4ch;
+.link-timeline {
+  --link-timeline-pad: 8px;
+  width: 100%;
+  margin-bottom: 4px;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 18px;
+}
+.link-timeline-start {
+  width: calc(8ch + 2 * var(--link-timeline-pad));
+}
+.link-timeline-check {
+  width: min(32ch, 30vw);
+}
+.link-timeline th {
+  padding: 2px var(--link-timeline-pad);
   color: var(--g3);
+  font-weight: 400;
+  text-align: left;
+  white-space: nowrap;
+  box-shadow: inset 0 -1px 0 var(--k);
 }
-.orb-link-check {
-  display: grid;
-  grid-template-columns: 12px minmax(0, 24ch) auto;
-  gap: 8px;
+.link-timeline td {
+  padding: 0 var(--link-timeline-pad);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--g1);
 }
-.orb-link-check > :nth-child(2) {
-  justify-self: start;
-  max-width: 100%;
+.link-timeline-unfolds {
+  cursor: pointer;
+}
+.link-timeline-unfolds:hover > td {
+  background: var(--g1);
+}
+.link-timeline-unfolds:focus-visible {
+  outline: 1px solid var(--k);
+  outline-offset: -1px;
+}
+.link-timeline-call {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.orb-link-result-failed {
-  color: var(--bad);
+.link-timeline-arg {
+  color: var(--g3);
 }
-.orb-link-result-running {
-  color: var(--ok);
+.link-timeline-indent {
+  display: inline-block;
+  width: 2ch;
+  color: var(--g2);
 }
-.orb-link-remove {
-  display: block;
-  margin-left: auto;
-  padding: 0 4px;
-  border: 0;
-  color: var(--bad);
-  background: transparent;
+.link-timeline td.link-timeline-bars {
+  position: relative;
+  padding: 0;
 }
-.orb-link-remove:hover:not(:disabled) {
-  color: var(--w);
+.link-timeline-track {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--link-timeline-pad);
+  right: calc(var(--link-timeline-pad) + 4px);
+}
+.link-timeline-bar {
+  position: absolute;
+  top: 4px;
+  height: 10px;
+}
+.link-timeline-queued {
+  border: 1px solid var(--g2);
+  background: var(--w);
+}
+.link-timeline-passed {
+  background: var(--g1x);
+}
+.link-timeline-failed {
   background: var(--bad);
+}
+.link-timeline-running {
+  background: var(--ok);
+}
+.link-timeline-step .link-timeline-passed {
+  border: 1px solid var(--g1x);
+  background: var(--g1);
+}
+@media (max-width: 600px) {
+  .link-timeline {
+    --link-timeline-pad: 4px;
+  }
+  .link-timeline-check {
+    width: calc(15ch + 8px);
+  }
 }
 .subagent-counts {
   display: flex;

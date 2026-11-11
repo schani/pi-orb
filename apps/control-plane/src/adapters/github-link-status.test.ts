@@ -6,6 +6,19 @@ const ISSUE = "https://github.com/o/r/issues/2";
 const RUN = "https://github.com/o/r/actions/runs/3";
 const GONE = "https://github.com/o/r/pull/4";
 
+const TIMES = {
+  startedAt: null,
+  completedAt: null,
+  checkSuite: { createdAt: "2026-11-11T17:00:00Z" },
+  steps: { nodes: [] },
+};
+const NO_TIMES = {
+  queuedAt: Date.parse("2026-11-11T17:00:00Z"),
+  startedAt: null,
+  completedAt: null,
+  steps: [],
+};
+
 function respond(body: unknown, status = 200) {
   const requests: { url: string; init: RequestInit }[] = [];
   const fetcher = (async (url: string, init: RequestInit) => {
@@ -38,6 +51,7 @@ it("maps pull requests, issues and Actions runs from one GraphQL request", async
                         conclusion: "SUCCESS",
                         detailsUrl: "https://github.com/o/r/actions/runs/1/job/1",
                         url: "https://github.com/o/r/runs/1",
+                        ...TIMES,
                       },
                       {
                         __typename: "CheckRun",
@@ -46,6 +60,7 @@ it("maps pull requests, issues and Actions runs from one GraphQL request", async
                         conclusion: "FAILURE",
                         detailsUrl: null,
                         url: "https://github.com/o/r/runs/2",
+                        ...TIMES,
                       },
                       {
                         __typename: "CheckRun",
@@ -54,6 +69,7 @@ it("maps pull requests, issues and Actions runs from one GraphQL request", async
                         conclusion: null,
                         detailsUrl: "javascript:alert(1)",
                         url: "https://github.com/o/r/runs/3",
+                        ...TIMES,
                       },
                       {
                         __typename: "StatusContext",
@@ -85,6 +101,7 @@ it("maps pull requests, issues and Actions runs from one GraphQL request", async
                 conclusion: null,
                 detailsUrl: "https://github.com/o/r/actions/runs/1/job/9",
                 url: "https://github.com/o/r/runs/9",
+                ...TIMES,
               },
             ],
           },
@@ -100,10 +117,23 @@ it("maps pull requests, issues and Actions runs from one GraphQL request", async
       title: "Add links",
       status: "approved",
       checks: [
-        { name: "build", result: "passed", url: "https://github.com/o/r/actions/runs/1/job/1" },
-        { name: "e2e", result: "failed", url: "https://github.com/o/r/runs/2" },
-        { name: "dst", result: "running", url: null },
-        { name: "ci/legacy", result: "pending", url: null },
+        {
+          name: "build",
+          result: "passed",
+          url: "https://github.com/o/r/actions/runs/1/job/1",
+          ...NO_TIMES,
+        },
+        { name: "e2e", result: "failed", url: "https://github.com/o/r/runs/2", ...NO_TIMES },
+        { name: "dst", result: "running", url: null, ...NO_TIMES },
+        {
+          name: "ci/legacy",
+          result: "pending",
+          url: null,
+          queuedAt: null,
+          startedAt: null,
+          completedAt: null,
+          steps: [],
+        },
       ],
     },
     { title: "Bug", status: "closed", checks: [] },
@@ -111,7 +141,12 @@ it("maps pull requests, issues and Actions runs from one GraphQL request", async
       title: "e2e · links",
       status: "running",
       checks: [
-        { name: "qualify", result: "pending", url: "https://github.com/o/r/actions/runs/1/job/9" },
+        {
+          name: "qualify",
+          result: "pending",
+          url: "https://github.com/o/r/actions/runs/1/job/9",
+          ...NO_TIMES,
+        },
       ],
     },
     null,
@@ -173,4 +208,80 @@ it("fails with a message when GitHub rejects the request", async () => {
   expect((await readGithubLinkStatuses(failing, "tok", [PR]))._unsafeUnwrapErr()).toBe(
     "GitHub status unavailable",
   );
+});
+
+it("maps check and step times, dropping skipped steps", async () => {
+  const { fetcher } = respond({
+    data: {
+      l0: {
+        __typename: "WorkflowRun",
+        workflow: { name: "CI" },
+        checkSuite: {
+          status: "IN_PROGRESS",
+          conclusion: null,
+          branch: null,
+          checkRuns: {
+            nodes: [
+              {
+                name: "e2e",
+                status: "IN_PROGRESS",
+                conclusion: null,
+                detailsUrl: null,
+                url: "https://github.com/o/r/runs/1",
+                startedAt: "2026-11-11T17:00:05Z",
+                completedAt: null,
+                checkSuite: { createdAt: "2026-11-11T17:00:00Z" },
+                steps: {
+                  nodes: [
+                    {
+                      name: "Set up job",
+                      status: "COMPLETED",
+                      conclusion: "SUCCESS",
+                      startedAt: "2026-11-11T17:00:06Z",
+                      completedAt: "2026-11-11T17:00:07Z",
+                    },
+                    {
+                      name: "Upload evidence",
+                      status: "COMPLETED",
+                      conclusion: "SKIPPED",
+                      startedAt: "2026-11-11T17:00:07Z",
+                      completedAt: "2026-11-11T17:00:07Z",
+                    },
+                    {
+                      name: "Run tests",
+                      status: "IN_PROGRESS",
+                      conclusion: null,
+                      startedAt: "2026-11-11T17:00:07Z",
+                      completedAt: null,
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      },
+    },
+  });
+  const [check] =
+    (await readGithubLinkStatuses(fetcher, "tok", [RUN]))._unsafeUnwrap()[0]?.checks ?? [];
+  expect(check).toMatchObject({
+    queuedAt: Date.parse("2026-11-11T17:00:00Z"),
+    startedAt: Date.parse("2026-11-11T17:00:05Z"),
+    completedAt: null,
+    steps: [
+      {
+        name: "Set up job",
+        result: "passed",
+        startedAt: Date.parse("2026-11-11T17:00:06Z"),
+        completedAt: Date.parse("2026-11-11T17:00:07Z"),
+      },
+      {
+        name: "Run tests",
+        result: "running",
+        startedAt: Date.parse("2026-11-11T17:00:07Z"),
+        completedAt: null,
+      },
+    ],
+  });
 });

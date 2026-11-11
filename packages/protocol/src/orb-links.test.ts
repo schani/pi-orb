@@ -75,7 +75,19 @@ describe("links response", () => {
             github: {
               title: "Add links",
               status: "draft",
-              checks: [{ name: "e2e", result: "running", url: null }],
+              checks: [
+                {
+                  name: "e2e",
+                  result: "running",
+                  url: null,
+                  queuedAt: 1,
+                  startedAt: 2,
+                  completedAt: null,
+                  steps: [
+                    { name: "Run tests", result: "running", startedAt: 3, completedAt: null },
+                  ],
+                },
+              ],
             },
           },
           { url: "https://github.com/schani/pi-orb/issues/285", addedAt: 2, github: null },

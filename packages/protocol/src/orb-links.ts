@@ -39,17 +39,32 @@ export const OrbLinkRequestSchema = Type.Object(
 );
 export type OrbLinkRequest = Static<typeof OrbLinkRequestSchema>;
 
+const OrbLinkResultSchema = Type.Union([
+  Type.Literal("passed"),
+  Type.Literal("failed"),
+  Type.Literal("running"),
+  Type.Literal("pending"),
+]);
+const Time = Type.Union([Type.Number(), Type.Null()]);
+
+/** One Actions job step; times are epoch ms. */
+export const OrbLinkStepSchema = Type.Object(
+  { name: Type.String(), result: OrbLinkResultSchema, startedAt: Time, completedAt: Time },
+  closed,
+);
+export type OrbLinkStep = Static<typeof OrbLinkStepSchema>;
+
 export const OrbLinkCheckSchema = Type.Object(
   {
     name: Type.String(),
-    result: Type.Union([
-      Type.Literal("passed"),
-      Type.Literal("failed"),
-      Type.Literal("running"),
-      Type.Literal("pending"),
-    ]),
+    result: OrbLinkResultSchema,
     /** The check's GitHub page (an Actions job for workflow checks). */
     url: Type.Union([Type.String({ pattern: "^https://" }), Type.Null()]),
+    /** Epoch ms; `queuedAt` is when its check suite was created. */
+    queuedAt: Time,
+    startedAt: Time,
+    completedAt: Time,
+    steps: Type.Array(OrbLinkStepSchema),
   },
   closed,
 );

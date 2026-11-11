@@ -4,7 +4,10 @@ import { type Static, Type } from "typebox";
 import { Check } from "typebox/value";
 
 const QUERY_FRAGMENTS = `
-fragment C on CheckRun { name status conclusion detailsUrl url }
+fragment C on CheckRun {
+  name status conclusion detailsUrl url startedAt completedAt checkSuite { createdAt }
+  steps(first: 50) { nodes { name status conclusion startedAt completedAt } }
+}
 fragment L on UniformResourceLocatable {
   __typename
   ... on PullRequest {
@@ -28,6 +31,20 @@ const CheckRun = Type.Object({
   conclusion: nullable(Type.String()),
   detailsUrl: nullable(Type.String()),
   url: Type.String(),
+  startedAt: nullable(Type.String()),
+  completedAt: nullable(Type.String()),
+  checkSuite: Type.Object({ createdAt: Type.String() }),
+  steps: Type.Object({
+    nodes: Type.Array(
+      Type.Object({
+        name: Type.String(),
+        status: Type.String(),
+        conclusion: nullable(Type.String()),
+        startedAt: nullable(Type.String()),
+        completedAt: nullable(Type.String()),
+      }),
+    ),
+  }),
 });
 const Context = Type.Union([
   Type.Intersect([Type.Object({ __typename: Type.Literal("CheckRun") }), CheckRun]),
@@ -82,16 +99,39 @@ const https = (url: string | null): string | null => (url?.startsWith("https://"
 
 const PASSED = new Set(["SUCCESS", "NEUTRAL", "SKIPPED"]);
 
+function runResult(run: { status: string; conclusion: string | null }): OrbLinkCheck["result"] {
+  return run.status === "COMPLETED"
+    ? PASSED.has(run.conclusion ?? "")
+      ? "passed"
+      : "failed"
+    : run.status === "IN_PROGRESS"
+      ? "running"
+      : "pending";
+}
+
+/** Epoch ms, or null for absent or unparsable times. */
+function time(value: string | null): number | null {
+  const ms = value === null ? Number.NaN : Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
 function checkRun(run: Static<typeof CheckRun>): OrbLinkCheck {
-  const result =
-    run.status === "COMPLETED"
-      ? PASSED.has(run.conclusion ?? "")
-        ? "passed"
-        : "failed"
-      : run.status === "IN_PROGRESS"
-        ? "running"
-        : "pending";
-  return { name: run.name, result, url: https(run.detailsUrl ?? run.url) };
+  return {
+    name: run.name,
+    result: runResult(run),
+    url: https(run.detailsUrl ?? run.url),
+    queuedAt: time(run.checkSuite.createdAt),
+    startedAt: time(run.startedAt),
+    completedAt: time(run.completedAt),
+    steps: run.steps.nodes
+      .filter((step) => step.conclusion !== "SKIPPED")
+      .map((step) => ({
+        name: step.name,
+        result: runResult(step),
+        startedAt: time(step.startedAt),
+        completedAt: time(step.completedAt),
+      })),
+  };
 }
 
 function context(node: Static<typeof Context>): OrbLinkCheck {
@@ -102,7 +142,15 @@ function context(node: Static<typeof Context>): OrbLinkCheck {
       : node.state === "FAILURE" || node.state === "ERROR"
         ? "failed"
         : "pending";
-  return { name: node.context, result, url: https(node.targetUrl) };
+  return {
+    name: node.context,
+    result,
+    url: https(node.targetUrl),
+    queuedAt: null,
+    startedAt: null,
+    completedAt: null,
+    steps: [],
+  };
 }
 
 function status(resource: Static<typeof Resource>): OrbLinkStatus {
