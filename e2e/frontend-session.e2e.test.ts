@@ -5414,14 +5414,22 @@ describe("frontend-only browser behavior", () => {
       await links.locator(":scope > summary").click();
       await links.getByRole("img", { name: "e2e · failed" }).hover();
       await expectPage(page.getByRole("tooltip")).toHaveText("e2e · failed");
+      await expectPage(page.getByRole("tooltip").getByText("failed")).toHaveClass(
+        /activity-strip-failed/,
+      );
       const tip = await page.getByRole("tooltip").boundingBox();
       expectPage((tip?.x ?? 0) + (tip?.width ?? Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(
         1280,
       );
+      // Leave the dot explicitly: click() suppresses hover events while checking its target.
+      await page.mouse.move(0, 0);
+      await expectPage(page.getByRole("tooltip")).toHaveCount(0);
       await expectPage(links.getByRole("link", { name: "#291" })).toHaveAttribute("href", pr);
       await expectPage(links.getByRole("link", { name: "determined#14" })).toBeVisible();
       await links.locator(".orb-link > summary").first().click();
-      await expectPage(links.getByText("failed", { exact: true })).toBeVisible();
+      await expectPage(
+        links.locator(".orb-link-body").first().getByText("failed", { exact: true }),
+      ).toBeVisible();
       await links.getByRole("button", { name: "remove" }).first().click();
       await expectPage(links.getByRole("link", { name: "#291" })).toHaveCount(0);
       expectPage(removed).toEqual([pr]);

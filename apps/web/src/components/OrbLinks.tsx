@@ -80,10 +80,15 @@ export function OrbLinksDrawer({
         </span>
         {tip !== null && (
           <span className="activity-strip-tip" role="tooltip" style={tip.style}>
-            <span className={`activity-strip-tip-label ${STATE[tip.result]}`.trim()}>
-              {tip.label}
-            </span>
-            {tip.status !== "" && ` · ${tip.status}`}
+            {tip.label}
+            {tip.status !== "" && (
+              <>
+                {" · "}
+                <span className={`activity-strip-tip-label ${STATE[tip.result]}`.trim()}>
+                  {tip.status}
+                </span>
+              </>
+            )}
           </span>
         )}
       </summary>
