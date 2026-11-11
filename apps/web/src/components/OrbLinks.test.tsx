@@ -14,9 +14,9 @@ const links: OrbLinksResponse = {
         title: "Add links drawer",
         status: "draft",
         checks: [
-          { name: "build", result: "passed" },
-          { name: "e2e", result: "failed" },
-          { name: "dst", result: "running" },
+          { name: "build", result: "passed", url: "https://github.com/o/r/actions/runs/1/job/1" },
+          { name: "e2e", result: "failed", url: null },
+          { name: "dst", result: "running", url: null },
         ],
       },
     },
@@ -44,6 +44,8 @@ describe("OrbLinksDrawer", () => {
     );
     expect(html).toContain('class="activity-strip-dot" role="img" aria-label="build · passed"');
     expect(html.match(/>remove</g)).toHaveLength(2);
+    expect(html).toContain('href="https://github.com/o/r/actions/runs/1/job/1"');
+    expect(html).toContain("<span>e2e</span>");
     expect(html).toContain("--orb-link-ref:13ch");
     expect(html).toContain("--orb-link-strip:36px");
   });

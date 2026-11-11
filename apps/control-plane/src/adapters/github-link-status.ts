@@ -4,13 +4,13 @@ import { type Static, Type } from "typebox";
 import { Check } from "typebox/value";
 
 const QUERY_FRAGMENTS = `
-fragment C on CheckRun { name status conclusion }
+fragment C on CheckRun { name status conclusion detailsUrl url }
 fragment L on UniformResourceLocatable {
   __typename
   ... on PullRequest {
     title state isDraft reviewDecision
     commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
-      __typename ... on CheckRun { ...C } ... on StatusContext { context state }
+      __typename ... on CheckRun { ...C } ... on StatusContext { context state targetUrl }
     } } } } } }
   }
   ... on Issue { title state }
@@ -26,6 +26,8 @@ const CheckRun = Type.Object({
   name: Type.String(),
   status: Type.String(),
   conclusion: nullable(Type.String()),
+  detailsUrl: nullable(Type.String()),
+  url: Type.String(),
 });
 const Context = Type.Union([
   Type.Intersect([Type.Object({ __typename: Type.Literal("CheckRun") }), CheckRun]),
@@ -33,6 +35,7 @@ const Context = Type.Union([
     __typename: Type.Literal("StatusContext"),
     context: Type.String(),
     state: Type.String(),
+    targetUrl: nullable(Type.String()),
   }),
 ]);
 const PullRequest = Type.Object({
@@ -74,6 +77,9 @@ const ResponseSchema = Type.Object({
   errors: Type.Optional(Type.Array(Type.Object({ message: Type.String() }))),
 });
 
+/** Only https URLs reach the browser as links. */
+const https = (url: string | null): string | null => (url?.startsWith("https://") ? url : null);
+
 const PASSED = new Set(["SUCCESS", "NEUTRAL", "SKIPPED"]);
 
 function checkRun(run: Static<typeof CheckRun>): OrbLinkCheck {
@@ -85,7 +91,7 @@ function checkRun(run: Static<typeof CheckRun>): OrbLinkCheck {
       : run.status === "IN_PROGRESS"
         ? "running"
         : "pending";
-  return { name: run.name, result };
+  return { name: run.name, result, url: https(run.detailsUrl ?? run.url) };
 }
 
 function context(node: Static<typeof Context>): OrbLinkCheck {
@@ -96,7 +102,7 @@ function context(node: Static<typeof Context>): OrbLinkCheck {
       : node.state === "FAILURE" || node.state === "ERROR"
         ? "failed"
         : "pending";
-  return { name: node.context, result };
+  return { name: node.context, result, url: https(node.targetUrl) };
 }
 
 function status(resource: Static<typeof Resource>): OrbLinkStatus {

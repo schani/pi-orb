@@ -5367,8 +5367,12 @@ describe("frontend-only browser behavior", () => {
           title: "Add links drawer",
           status: "draft",
           checks: [
-            { name: "build", result: "passed" },
-            { name: "e2e", result: "failed" },
+            { name: "build", result: "passed", url: null },
+            {
+              name: "e2e",
+              result: "failed",
+              url: "https://github.com/owner/repo/actions/runs/1/job/2",
+            },
           ],
         },
       },
@@ -5430,6 +5434,10 @@ describe("frontend-only browser behavior", () => {
       await expectPage(
         links.locator(".orb-link-body").first().getByText("failed", { exact: true }),
       ).toBeVisible();
+      await expectPage(links.getByRole("link", { name: "e2e" })).toHaveAttribute(
+        "href",
+        "https://github.com/owner/repo/actions/runs/1/job/2",
+      );
       await links.getByRole("button", { name: "remove" }).first().click();
       await expectPage(links.getByRole("link", { name: "#291" })).toHaveCount(0);
       expectPage(removed).toEqual([pr]);

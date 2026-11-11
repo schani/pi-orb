@@ -113,7 +113,13 @@ export function OrbLinksDrawer({
               {link.github?.checks.map((check, i) => (
                 <div className="orb-link-check" key={i}>
                   <span className={dotClass(check.result)} />
-                  <span>{check.name}</span>
+                  {check.url === null ? (
+                    <span>{check.name}</span>
+                  ) : (
+                    <a href={check.url} target="_blank" rel="noreferrer">
+                      {check.name}
+                    </a>
+                  )}
                   <span className={`orb-link-result-${check.result}`}>{check.result}</span>
                 </div>
               ))}

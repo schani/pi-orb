@@ -48,6 +48,8 @@ export const OrbLinkCheckSchema = Type.Object(
       Type.Literal("running"),
       Type.Literal("pending"),
     ]),
+    /** The check's GitHub page (an Actions job for workflow checks). */
+    url: Type.Union([Type.String({ pattern: "^https://" }), Type.Null()]),
   },
   closed,
 );
