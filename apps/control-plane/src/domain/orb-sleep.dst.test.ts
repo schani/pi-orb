@@ -382,7 +382,8 @@ describe("scheduled sleep lifecycle (DST)", () => {
   it("explicit Stop takes over an overdue busy sleep drain without losing final history", async () => {
     const capture = new LogCapture();
     await runDst(
-      { name: "sleep-stop-override", iterations: 20, logCapture: capture },
+      // The invariant is the Stop/sleep override, not observation deadlines (docs/testing.md).
+      { name: "sleep-stop-override", iterations: 20, lateTimerProbability: 0, logCapture: capture },
       async (sim) => {
         const harness = makeHarness({ constants: { createStartDeadlineMs: 60_000 } });
         const stop = new AbortController();
