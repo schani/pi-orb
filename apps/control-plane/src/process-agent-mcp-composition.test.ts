@@ -37,7 +37,7 @@ import { FakeSecretStore } from "./testkit/broker.ts";
 import { makeHarness, makeOrbRow, makeProjectRow, seedTestUser } from "./testkit/fixtures.ts";
 
 it.each(["typed-boundary", "typed-unavailable", "pglite"] as const)(
-  "publishes OAuth grant edges through production composition (%s)",
+  "alerts on OAuth failures but keeps recovery inspectable without alerts (%s)",
   async (boundary) => {
     let acceptedCalls = 0;
     let requests = 0;
@@ -471,12 +471,22 @@ it.each(["typed-boundary", "typed-unavailable", "pglite"] as const)(
         .filter((record) => record.type === "message")
         .filter((record) => record.role === "tool");
       expect(
-        JSON.stringify(
-          third.records.filter(
-            (record) => record.type === "event" && record.eventType === "orb.alert",
-          ),
-        ).match(/MCP fixture: connected\./g),
-      ).toHaveLength(1);
+        third.records.some(
+          (record) =>
+            record.type === "event" &&
+            record.eventType === "orb.alert" &&
+            record.alert?.message === "MCP fixture: connected.",
+        ),
+      ).toBe(false);
+      const statusTool = options.registry
+        .snapshot()
+        .tools()
+        .find(({ tool }) => tool.name === "mcp_status")?.tool;
+      expect(statusTool?.description).toContain("MCP fixture: available");
+      const status = await statusTool?.execute({}, {} as never, BACKGROUND_CONTEXT);
+      expect(status?.output).toEqual([
+        { type: "text", text: JSON.stringify([{ name: "fixture", status: "available" }]) },
+      ]);
       expect(
         JSON.stringify(publicToolHistory.map((record) => record.content)).split(
           `MCP fixture: ${unavailableStatus}.`,
@@ -486,7 +496,7 @@ it.each(["typed-boundary", "typed-unavailable", "pglite"] as const)(
         third.records.filter(
           (record) => record.type === "event" && record.eventType === "orb.alert",
         ),
-      ).toHaveLength(2);
+      ).toHaveLength(1);
       expect(logs.filter((line) => line.includes("durable.mcp_unavailable"))).toHaveLength(1);
       expect(JSON.stringify(third.records)).not.toContain("TEST-ACCESS");
       expect(JSON.stringify(third.records)).not.toContain("TEST-REFRESH");

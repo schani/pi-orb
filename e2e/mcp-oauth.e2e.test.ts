@@ -544,18 +544,26 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
           ).status,
         ).toBe(202);
         await waitFor(
-          "connected recovery history",
+          "completed retry and recovered MCP registry",
           async () => {
             const history = (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`))
               .body as unknown as DisplayHistoryView;
-            return hasMcpAlert(history, "connected") &&
-              JSON.stringify(history).includes("OAUTH_RETRY_DONE")
+            return cp.logs
+              .join("")
+              .includes(
+                `lifecycle: orb=${orb} test_registry_published server=fixture status=available`,
+              ) && JSON.stringify(history).includes("OAUTH_RETRY_DONE")
               ? true
               : null;
           },
           { timeoutMs: 60_000 },
         );
         await message(orb, index);
+        const recoveryHistory = (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`))
+          .body as unknown as DisplayHistoryView;
+        expect(acceptedCalls).toBe(1);
+        expect(hasMcpAlert(recoveryHistory, "connected")).toBe(false);
+        expect(hasMcpAlert(recoveryHistory, "needs-auth")).toBe(true);
         const recovered = await health();
         expect(recovered).toMatchObject({
           status: "ready",

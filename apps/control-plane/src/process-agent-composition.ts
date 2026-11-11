@@ -472,16 +472,12 @@ export function createProcessAgentContext(
             });
           if (
             status.status === "pending" ||
-            (status.status === "available" &&
-              (previous?.status === "pending" || previous === undefined)) ||
+            status.status === "available" ||
             status.status === previous?.status ||
             !appendMcpAlert
           )
             return okAsync(undefined);
-          return appendMcpAlert(
-            randomUUID(),
-            `MCP ${status.name}: ${status.status === "available" ? "connected" : status.status}.`,
-          )
+          return appendMcpAlert(randomUUID(), `MCP ${status.name}: ${status.status}.`)
             .map(() => undefined)
             .orElse(() => {
               if (!resourcesAbort.signal.aborted)
