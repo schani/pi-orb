@@ -2,6 +2,7 @@ import { channel } from "node:diagnostics_channel";
 import { errorMonitor, once } from "node:events";
 import { createServer, get, ServerResponse } from "node:http";
 import { Socket } from "node:net";
+import websocket from "@fastify/websocket";
 import Fastify from "fastify";
 import { err, ok } from "neverthrow";
 import { expect, it } from "vitest";
@@ -222,4 +223,36 @@ it("reports an unavailable descriptor sample without inventing a zero", () => {
     fd_sample_status: "unavailable",
     last_public_request_age_ms: -1,
   });
+});
+
+it("detaches upgrade observation before Fastify removes its protocol handler", async () => {
+  const f = fixture();
+  const app = Fastify();
+  app.addHook("onReady", async () => f.diagnostics.observeServer(app.server));
+  app.addHook("preClose", async () => f.diagnostics.stopObservingUpgrades());
+  await app.register(websocket);
+  let markReached!: () => void;
+  const reached = new Promise<void>((resolve) => {
+    markReached = resolve;
+  });
+  let continueClose!: () => void;
+  const release = new Promise<void>((resolve) => {
+    continueClose = resolve;
+  });
+  app.addHook("preClose", async () => {
+    markReached();
+    await release;
+  });
+  let closing: Promise<void> | undefined;
+  try {
+    await app.ready();
+    expect(app.server.listenerCount("upgrade")).toBe(2);
+    closing = app.close();
+    await Promise.race([reached, closing]);
+    expect(app.server.listenerCount("upgrade")).toBe(0);
+  } finally {
+    continueClose();
+    f.diagnostics[Symbol.dispose]();
+    await (closing ?? app.close());
+  }
 });

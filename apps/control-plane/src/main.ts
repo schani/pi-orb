@@ -639,6 +639,7 @@ export async function main(
     rewriteUrl: (request) => previewRoutingUrl(previewHosts, request),
   });
   app.addHook("onReady", async () => httpDiagnostics.observeServer(app.server));
+  app.addHook("preClose", async () => httpDiagnostics.stopObservingUpgrades());
   const filesBaseUrl = (orbId: string): string | null =>
     orbFilesBaseUrl(hostingOrigin, deps.hostProvider.kind, orbId);
   registerOrbFilesBoundary(app, { filesOrigin: hostingOrigin, appOrigin });

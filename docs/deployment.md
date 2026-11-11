@@ -46,7 +46,7 @@ Decisions and rationale for where pi-orb runs and how releases are made safe. Op
 
 ## HTTP diagnostics
 
-The control-plane process emits one `control-plane.http` JSON sample every 30 seconds, including while idle, and a final sample at shutdown. Query `jsonPayload.message="control-plane.http"` scoped to the Cloud Run revision and instance. The sampler starts before database and outbound client initialization; HTTP observation starts after routing plugins initialize.
+The control-plane process emits one `control-plane.http` JSON sample every 30 seconds, including while idle, and a final sample at shutdown. Query `jsonPayload.message="control-plane.http"` scoped to the Cloud Run revision and instance. The sampler starts before database and outbound client initialization; HTTP observation starts after routing plugins initialize. Upgrade observation stops in the first `preClose` hook, before protocol handlers are removed.
 
 - Current levels: `fd_count`, `listening` (0/1), `inbound_connections`, `upgraded_connections` (a subset of inbound), `outbound_connections`, `requests_in_flight`, `oldest_request_ms` (0 when none), `last_public_request_age_ms` (-1 before the first non-health request).
 - Interval deltas: `connections_accepted`, `public_requests_started` (all non-health HTTP requests), `health_requests_started`, `responses_finished`, `responses_closed_early`, `server_errors`, `client_errors` (HTTP parser failures), `socket_errors`. `interval_ms` records elapsed monotonic time, including delayed scheduling. Requests remain in flight until response finish or premature close; upgrades remain in socket counts until close.

@@ -83,6 +83,9 @@ export class HttpDiagnostics {
     // Fastify already owns parser-error handling. Do not replace Node's default on a bare server.
     if (server.listenerCount("clientError") > 0) server.on("clientError", this.onClientError);
   }
+  stopObservingUpgrades(): void {
+    this.server?.off("upgrade", this.onUpgrade);
+  }
   private readonly onOutbound = (message: unknown): void => {
     if (
       typeof message === "object" &&
@@ -187,7 +190,7 @@ export class HttpDiagnostics {
     this.outbound.unsubscribe(this.onOutbound);
     this.server?.off("request", this.onRequest);
     this.server?.off("connection", this.onConnection);
-    this.server?.off("upgrade", this.onUpgrade);
+    this.stopObservingUpgrades();
     this.server?.off(errorMonitor, this.onServerError);
     this.server?.off("clientError", this.onClientError);
     for (const request of this.requests.values()) request.cleanup();

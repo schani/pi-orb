@@ -13,6 +13,11 @@ describe("single control-plane composition", () => {
     expect(source).toContain(
       'app.addHook("onReady", async () => httpDiagnostics.observeServer(app.server))',
     );
+    const stopUpgrades = source.indexOf(
+      'app.addHook("preClose", async () => httpDiagnostics.stopObservingUpgrades())',
+    );
+    expect(stopUpgrades).toBeGreaterThan(0);
+    expect(stopUpgrades).toBeLessThan(source.indexOf("registerResponseDrain(app,"));
   });
 
   it("makes the development command explicitly local", () => {
