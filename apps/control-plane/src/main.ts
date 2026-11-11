@@ -36,6 +36,7 @@ import {
 } from "./adapters/google-application-auth.ts";
 import { createFilesystemHostedByteStore } from "./adapters/hosting/filesystem.ts";
 import { createGcsHostedByteStore, createGcsTokenProvider } from "./adapters/hosting/gcs.ts";
+import { HttpDiagnostics } from "./adapters/http-diagnostics.ts";
 import { createMcpOAuthFetch, SdkMcpOAuth } from "./adapters/mcp-oauth.ts";
 import { checkMcp, probeMcp } from "./adapters/mcp-probe.ts";
 import { OAuthUpstreamRefresher } from "./adapters/oauth/refresher.ts";
@@ -232,6 +233,7 @@ export async function main(
   } = {},
 ): Promise<void> {
   startupPhase("main.enter");
+  using httpDiagnostics = new HttpDiagnostics();
   const bootTask = new NoSimulationTask("boot", true);
   const databaseUrl = env("DATABASE_URL", "postgres://pi-orb:pi-orb@127.0.0.1:5433/pi_orb");
   const databaseKind = env("PI_ORB_DATABASE_KIND", "postgresql");
@@ -638,6 +640,8 @@ export async function main(
     logger: false,
     rewriteUrl: (request) => previewRoutingUrl(previewHosts, request),
   });
+  app.addHook("onReady", async () => httpDiagnostics.observeServer(app.server));
+  app.addHook("preClose", async () => httpDiagnostics.stopObservingUpgrades());
   const filesBaseUrl = (orbId: string): string | null =>
     orbFilesBaseUrl(hostingOrigin, deps.hostProvider.kind, orbId);
   registerOrbFilesBoundary(app, { filesOrigin: hostingOrigin, appOrigin });

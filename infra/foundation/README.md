@@ -96,10 +96,10 @@ never administers its own grants.
   the project; it can create other buckets but not manage existing ones. Neither
   grants object access. Managing that bucket's IAM is still high trust. The
   application owns the bucket and its control-plane access policy.
-- **Logging exclusions:** custom role `deployer_logging_exclusions` grants only
-  `logging.exclusions.create/get/update/delete`, project-wide (not limited to
-  `mcp-oauth-callback`). No sinks, buckets, log deletion or IAM. Do not substitute
-  `roles/logging.admin`. The application service depends on the actual callback
+- **Logging configuration:** custom role `deployer_logging_exclusions` grants only
+  `logging.exclusions.create/get/update/delete` and
+  `logging.logMetrics.create/get/update/delete`, project-wide. No sinks, buckets,
+  log deletion or IAM. Do not substitute `roles/logging.admin`. The application service depends on the actual callback
   exclusion and OAuth secret IAM, so a failed creation cannot publish a revision
   ahead of them.
 - **Foundation plan reads:** custom role `piOrbFoundationPlanReader` grants
