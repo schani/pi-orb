@@ -32,9 +32,10 @@ export function HostedFiles({
     <details className="hosted-files activity-rail-row" open={hasIssue}>
       <summary>
         <span className="activity-rail-marker" aria-hidden="true" />
-        <span className="activity-rail-summary">
-          files{inventory === null ? "" : ` (${inventory.files.length})`}
-        </span>
+        <span className="activity-rail-summary">files</span>
+        {inventory !== null && (
+          <span className="activity-rail-metric">{inventory.files.length}</span>
+        )}
       </summary>
       <div className="hosted-files-inventory">
         {error !== null && <p className="error-text">{describeApiError(error)}</p>}

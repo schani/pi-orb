@@ -56,6 +56,7 @@ describe("startControlPlane", () => {
         hostingRoot: join(directory, "hosting"),
       });
       expect(cp.port).toBeGreaterThan(0);
+      expect((await fetch(`${cp.baseUrl}/health`)).status).toBe(200);
       expect((await fetch(`${cp.baseUrl}/api/v1/projects`)).status).toBe(200);
       const discovery = await fetch(`${cp.baseUrl}/.well-known/openid-configuration`);
       expect(discovery.status).toBe(200);
@@ -81,6 +82,16 @@ describe("startControlPlane", () => {
     } finally {
       await cp?.stop();
       rmSync(directory, { recursive: true, force: true });
+    }
+    const samples = cp?.logs
+      .join("")
+      .split("\n")
+      .filter((line) => line.startsWith('{"message":"control-plane.http"'))
+      .map((line) => JSON.parse(line));
+    const final = samples?.at(-1);
+    expect(final).toMatchObject({ listening: 0, requests_in_flight: 0 });
+    for (const field of ["public_requests_started", "health_requests_started"]) {
+      expect(samples?.reduce((total, sample) => total + sample[field], 0)).toBeGreaterThan(0);
     }
   });
 

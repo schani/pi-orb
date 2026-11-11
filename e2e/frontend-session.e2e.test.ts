@@ -5354,6 +5354,148 @@ describe("frontend-only browser behavior", () => {
     await page.close();
   });
 
+  it("shows GitHub links above files with a CI waterfall and removes one with its bin", async () => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 740 } });
+    const id = "frontend-long-history";
+    const pr = "https://github.com/owner/repo/pull/291";
+    const other = "https://github.com/owner/determined/pull/14";
+    let items = [
+      {
+        url: pr,
+        addedAt: 1,
+        github: {
+          title: "Add links drawer",
+          status: "draft",
+          checks: [
+            {
+              name: "build",
+              result: "passed",
+              url: null,
+              startedAt: 5_000,
+              completedAt: 65_000,
+              steps: [],
+            },
+            {
+              name: "e2e",
+              result: "failed",
+              url: "https://github.com/owner/repo/actions/runs/1/job/2",
+              startedAt: 10_000,
+              completedAt: 130_000,
+              steps: [
+                { name: "Set up job", result: "passed", startedAt: 11_000, completedAt: 12_000 },
+                { name: "Run tests", result: "failed", startedAt: 12_000, completedAt: 128_000 },
+              ],
+            },
+          ],
+        },
+      },
+      { url: other, addedAt: 2, github: null },
+    ];
+    // A realistic check count: the row's strip must yield before its bin does.
+    items[0]?.github?.checks.push(
+      ...Array.from({ length: 11 }, (_, index) => ({
+        name: `job ${index}`,
+        result: "passed",
+        url: null,
+        startedAt: 5_000,
+        completedAt: 6_000,
+        steps: [],
+      })),
+    );
+    const removed: string[] = [];
+    await page.routeWebSocket(`**/orbs/${id}/live`, () => {});
+    await page.route(`**/api/v1/orbs/${id}/hosted-files`, (route) =>
+      route.fulfill({
+        json: {
+          files: [
+            {
+              path: "chart.html",
+              url: "https://files.example.test/chart.html",
+              mediaType: "text/html",
+              size: 1,
+              updatedAt: 1,
+            },
+          ],
+          cleanupIssues: [],
+        },
+      }),
+    );
+    await page.route(`**/api/v1/orbs/${id}/links**`, (route) => {
+      const request = route.request();
+      if (request.method() === "DELETE") {
+        const url = new URL(request.url()).searchParams.get("url") ?? "";
+        removed.push(url);
+        items = items.filter((item) => item.url !== url);
+        return route.fulfill({ status: 204, body: "" });
+      }
+      return route.fulfill({ json: { repository: "owner/repo", githubError: null, items } });
+    });
+    try {
+      await gotoFrontendHistory(page, `${origin}/orbs/${id}`, id);
+      const links = page.locator(".orb-links");
+      await expectPage(links.locator(":scope > summary")).toHaveText("links");
+      expectPage(
+        await links.evaluate(
+          (element) => element.nextElementSibling?.classList.contains("hosted-files") === true,
+        ),
+      ).toBe(true);
+      await links.locator(":scope > summary").click();
+      await links.getByRole("img", { name: "e2e · failed" }).hover();
+      await expectPage(page.getByRole("tooltip")).toHaveText("e2e · failed");
+      await expectPage(page.getByRole("tooltip").getByText("failed")).toHaveClass(
+        /activity-strip-failed/,
+      );
+      const tip = await page.getByRole("tooltip").boundingBox();
+      expectPage((tip?.x ?? 0) + (tip?.width ?? Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(
+        1280,
+      );
+      // Leave the dot explicitly: click() suppresses hover events while checking its target.
+      await page.mouse.move(0, 0);
+      await expectPage(page.getByRole("tooltip")).toHaveCount(0);
+      await expectPage(links.getByRole("link", { name: "#291" })).toHaveAttribute("href", pr);
+      await expectPage(links.getByRole("link", { name: "determined#14" })).toBeVisible();
+      await links.locator(".orb-link > summary").first().click();
+      const waterfall = links.locator(".link-timeline");
+      await expectPage(waterfall.getByText("2m 00s")).toBeVisible();
+      await expectPage(waterfall.getByText("Run tests")).toHaveCount(0);
+      await waterfall.getByRole("row", { name: /e2e/ }).click({ position: { x: 4, y: 4 } });
+      await expectPage(
+        waterfall.getByRole("row", { name: /Run tests/ }).locator(".activity-strip-failed"),
+      ).toBeVisible();
+      await waterfall.getByRole("row", { name: /e2e/ }).locator(".link-timeline-bars").hover();
+      await expectPage(page.getByRole("tooltip")).toHaveText("e2e · failed · ran 2m 00s");
+      await page.mouse.move(0, 0);
+      await page.setViewportSize({ width: 800, height: 740 });
+      await expectPage(waterfall.locator("td.link-timeline-bars").first()).toBeHidden();
+      await expectPage(waterfall.getByText("2m 00s")).toBeVisible();
+      await page.setViewportSize({ width: 500, height: 740 });
+      await expectPage(waterfall.getByText("2m 00s")).toBeHidden();
+      await page.setViewportSize({ width: 360, height: 740 });
+      const bin = await links.getByRole("button", { name: "Remove link" }).first().boundingBox();
+      expectPage((bin?.x ?? Number.POSITIVE_INFINITY) + (bin?.width ?? 0)).toBeLessThanOrEqual(360);
+      await page.setViewportSize({ width: 1280, height: 740 });
+      const check = links.getByRole("link", { name: "e2e" });
+      await expectPage(check).toHaveAttribute(
+        "href",
+        "https://github.com/owner/repo/actions/runs/1/job/2",
+      );
+      // Underlines span the text only, not the column.
+      expectPage(
+        await check.evaluate((a) => {
+          const range = a.ownerDocument.createRange();
+          range.selectNodeContents(a);
+          return Math.round(a.getBoundingClientRect().width - range.getBoundingClientRect().width);
+        }),
+      ).toBe(0);
+      await links.getByRole("button", { name: "Remove link" }).first().click();
+      await expectPage(links.getByRole("link", { name: "#291" })).toHaveCount(0);
+      expectPage(removed).toEqual([pr]);
+      await expectPage(links.getByRole("link", { name: "determined#14" })).toBeVisible();
+    } finally {
+      await page.close();
+    }
+  });
+
   it.each([
     { engine: chromium, name: "Chromium desktop", width: 1280 },
     { engine: chromium, name: "Chromium phone", width: 390 },
@@ -5384,7 +5526,7 @@ describe("frontend-only browser behavior", () => {
       await gotoFrontendHistory(page, `${origin}/orbs/${id}`, id);
       const files = page.locator(".hosted-files");
       const summary = files.locator(":scope > summary");
-      await expectPage(summary).toHaveText("files (1)");
+      await expectPage(summary).toHaveText(/^files\s*1$/);
       expectPage(
         await files.evaluate((element) =>
           element.parentElement?.classList.contains("orb-header-scroll"),
@@ -5430,7 +5572,7 @@ describe("frontend-only browser behavior", () => {
         await gotoFrontendHistory(page, `${origin}/orbs/${id}`, id);
         const files = page.locator(".hosted-files");
         const agents = page.locator(".subagent-live-rail");
-        await expectPage(files.locator("summary")).toHaveText("files (1)");
+        await expectPage(files.locator("summary")).toHaveText(/^files\s*1$/);
         await expectPage(agents).toContainText("1 running");
         await expectPage(agents).toContainText("1 queued");
         await expectPage(agents).toContainText("1 finishing");
@@ -5478,8 +5620,9 @@ describe("frontend-only browser behavior", () => {
   it("shows hosted files on an archived orb and preserves a missing orb URL", async () => {
     const page = await browser.newPage();
     await page.goto(`${origin}/orbs/frontend-archived-orb`);
-    await expectPage(page.getByText("files (1)")).toBeVisible();
-    await page.getByText("files (1)").click();
+    const files = page.locator(".hosted-files > summary");
+    await expectPage(files).toHaveText(/^files\s*1$/);
+    await files.click();
     const file = page.getByRole("link", { name: "index.html" });
     await expectPage(file).toHaveAttribute(
       "href",

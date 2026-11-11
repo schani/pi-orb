@@ -23,6 +23,7 @@ import { readGceImageIdentity } from "./adapters/gce/image-pin.ts";
 import { GceOrbHostProvider } from "./adapters/gce/provider.ts";
 import { authenticatedGitCredentials } from "./adapters/git-resources/credentials.ts";
 import { GitResourceSource } from "./adapters/git-resources/git.ts";
+import { readGithubLinkStatuses } from "./adapters/github-link-status.ts";
 import {
   type GithubOAuthConfig,
   GithubOAuthHttpClient,
@@ -35,6 +36,7 @@ import {
 } from "./adapters/google-application-auth.ts";
 import { createFilesystemHostedByteStore } from "./adapters/hosting/filesystem.ts";
 import { createGcsHostedByteStore, createGcsTokenProvider } from "./adapters/hosting/gcs.ts";
+import { HttpDiagnostics } from "./adapters/http-diagnostics.ts";
 import { createMcpOAuthFetch, SdkMcpOAuth } from "./adapters/mcp-oauth.ts";
 import { checkMcp, probeMcp } from "./adapters/mcp-probe.ts";
 import { OAuthUpstreamRefresher } from "./adapters/oauth/refresher.ts";
@@ -132,6 +134,7 @@ import { MCP_OAUTH_CALLBACK, registerMcpOAuthRoutes } from "./http/mcp-oauth-rou
 import { registerMcpRoutes, registerProjectMcpStatusRoute } from "./http/mcp-routes.ts";
 import { registerOrbFilesBoundary, registerOrbFilesGateway } from "./http/orb-files-gateway.ts";
 import { orbFilesBaseUrl } from "./http/orb-files-url.ts";
+import { registerOrbLinkRoutes } from "./http/orb-links-routes.ts";
 import { registerPreviewAuth } from "./http/preview-auth-routes.ts";
 import { previewRoutingUrl, registerPreviewGateway } from "./http/preview-gateway.ts";
 import { createPreviewHosts, type PreviewHosts } from "./http/preview-host.ts";
@@ -225,6 +228,7 @@ export async function main(
   } = {},
 ): Promise<void> {
   startupPhase("main.enter");
+  using httpDiagnostics = new HttpDiagnostics();
   const bootTask = new NoSimulationTask("boot", true);
   const databaseUrl = env("DATABASE_URL", "postgres://pi-orb:pi-orb@127.0.0.1:5433/pi_orb");
   const databaseKind = env("PI_ORB_DATABASE_KIND", "postgresql");
@@ -631,6 +635,8 @@ export async function main(
     logger: false,
     rewriteUrl: (request) => previewRoutingUrl(previewHosts, request),
   });
+  app.addHook("onReady", async () => httpDiagnostics.observeServer(app.server));
+  app.addHook("preClose", async () => httpDiagnostics.stopObservingUpgrades());
   const filesBaseUrl = (orbId: string): string | null =>
     orbFilesBaseUrl(hostingOrigin, deps.hostProvider.kind, orbId);
   registerOrbFilesBoundary(app, { filesOrigin: hostingOrigin, appOrigin });
@@ -957,6 +963,18 @@ export async function main(
         hosting: deps.hosting,
         filesOrigin: hostingOrigin,
         appOrigin,
+      });
+      registerOrbLinkRoutes(browser, httpTask, {
+        store: deps.store,
+        github: (task, ownerUserId, urls) =>
+          ResultAsync.fromSafePromise(
+            getToken(task, brokerForUser(ownerUserId), GITHUB_PROVIDER, { reason: "startup" }),
+          )
+            .andThen((grant) => grant)
+            .mapErr((error) =>
+              error.type === "auth_required" ? "GitHub login required" : "GitHub token unavailable",
+            )
+            .andThen((grant) => readGithubLinkStatuses(fetch, grant.accessToken, urls)),
       });
       startupPhase("websocket.start");
       await registerLiveProxy(browser, httpTask, deps);

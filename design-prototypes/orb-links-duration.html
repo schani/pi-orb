@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Links drawer — check durations, five proposals</title>
+<link rel="stylesheet" href="../apps/web/src/styles.css">
+<style>
+body { display: block; }
+.study { padding: 12px; border-bottom: 1px solid var(--k); }
+.study h1, .study h2 { font-size: 13px; line-height: 20px; margin: 0; }
+.study p { margin: 4px 0 0; color: var(--g3); max-width: 80ch; }
+.pair { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; align-items: flex-start; }
+.preview { width: 680px; max-width: 100%; border: 1px solid var(--k); }
+.preview.touch { width: 390px; }
+.preview .orb-header { padding: 0 12px; gap: 8px; }
+.preview .orb-name { flex: 1; }
+.preview .orb-life { color: var(--g3); }
+.dot-ok { width: 8px; height: 8px; background: var(--ok); display: inline-block; }
+.preview .transcript { height: 52px; overflow: hidden; }
+.preview .composer { position: static; color: var(--g3); }
+.reset { margin-top: 8px; }
+
+/* Bin always visible at the row's right edge. */
+.orb-link > summary { grid-template-columns: var(--orb-link-ref) minmax(0, 1fr) var(--orb-link-strip) 8ch 20px; }
+.dur { color: var(--g3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* D1: own right-aligned column after the result. */
+.d1 .orb-link-check { grid-template-columns: 12px minmax(0, 24ch) 8ch auto; }
+.d1 .dur { text-align: right; }
+
+/* D2: appended to the result word. */
+.d2 .orb-link-check { grid-template-columns: 12px minmax(0, 24ch) auto; }
+
+/* D3: clock column before the name. */
+.d3 .orb-link-check { grid-template-columns: 12px 6ch minmax(0, 24ch) auto; }
+.d3 .orb-link-check > :nth-child(2) { justify-self: end; max-width: none; overflow: visible; }
+.d3 .orb-link-check > :nth-child(3) { justify-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* D4: name with duration in its tooltip only; the row summary shows the longest. */
+.d4 .orb-link-check { grid-template-columns: 12px minmax(0, 24ch) auto; }
+.d4 .orb-link > summary { grid-template-columns: var(--orb-link-ref) minmax(0, 1fr) var(--orb-link-strip) auto 20px; }
+.d4 .orb-link-status { white-space: nowrap; }
+
+/* D5: timeline bars on a shared axis from the first start. */
+.d5 .orb-link-check { grid-template-columns: 12px minmax(0, 24ch) 8ch minmax(48px, 1fr) 6ch; }
+.d5 .orb-link-body { padding-right: 28px; }
+.bar { position: relative; height: 6px; align-self: center; background: var(--g1); }
+.bar > span { position: absolute; top: 0; bottom: 0; background: var(--g2); }
+.bar > span.failed { background: var(--bad); }
+.bar > span.running { background: var(--ok); }
+.d5 .dur { text-align: right; }
+
+/* D6: waterfall in the language of PR #194 (Pi turn waterfall). */
+.timeline-table {
+  --timeline-pad: 8px;
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.timeline-start-column {
+  width: calc(8ch + 2 * var(--timeline-pad));
+}
+
+.timeline-call-column {
+  width: min(32ch, 22vw);
+}
+
+.timeline-table th {
+  padding: 2px var(--timeline-pad);
+  color: var(--g3);
+  font-weight: 400;
+  text-align: left;
+  white-space: nowrap;
+  box-shadow: inset 0 -1px 0 var(--k);
+}
+
+.timeline-table tbody td {
+  padding: 0 var(--timeline-pad);
+  vertical-align: top;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--g1);
+}
+
+.timeline-row {
+  cursor: pointer;
+}
+
+.timeline-row:focus-visible {
+  outline: 1px solid var(--k);
+  outline-offset: -1px;
+}
+
+.timeline-row:hover > td {
+  background: var(--g1);
+}
+
+.timeline-arg,
+.timeline-row.timeline-side > td {
+  color: var(--g3);
+}
+
+.timeline-call {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.timeline-indent {
+  display: inline-block;
+  width: 2ch;
+  color: var(--g2);
+}
+
+.timeline-alert > td:not(.timeline-bars) {
+  background: #b21f2d;
+  color: #fff;
+}
+
+.timeline-alert .timeline-arg {
+  color: #fff;
+}
+
+.timeline-open > td:not(.timeline-bars) {
+  background: var(--k);
+  color: var(--w);
+}
+
+.timeline-open > .timeline-call {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.timeline-open .timeline-arg,
+.timeline-open .error-text {
+  color: var(--w);
+}
+
+.timeline-table .timeline-detail > td {
+  padding: 2px var(--timeline-pad) 6px;
+  background: var(--g1);
+  white-space: normal;
+}
+
+.timeline-table tbody td.timeline-bars {
+  position: relative;
+  padding: 0;
+}
+
+.timeline-track {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--timeline-pad);
+  right: calc(var(--timeline-pad) + 4px);
+}
+
+.timeline-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0 16px;
+  margin: 0;
+}
+
+.timeline-facts dt {
+  color: var(--g3);
+}
+
+.timeline-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.timeline-bar {
+  position: absolute;
+  top: 4px;
+  height: 10px;
+}
+
+.timeline-instant {
+  width: 2px;
+  background: var(--k);
+}
+
+.timeline-instant.timeline-failed {
+  background: var(--bad);
+}
+
+.timeline-llm > span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.timeline-wait {
+  border: 1px solid var(--k);
+  background: var(--w);
+}
+
+.timeline-think {
+  background: repeating-conic-gradient(var(--k) 0 25%, var(--w) 0 50%) 0 0 / 4px 4px;
+}
+
+.timeline-stream {
+  background: var(--k);
+}
+
+.timeline-failed > .timeline-wait {
+  border-color: var(--bad);
+  background: var(--bad-bg);
+}
+
+.timeline-failed > .timeline-think {
+  background: repeating-conic-gradient(var(--bad) 0 25%, var(--bad-bg) 0 50%) 0 0 / 4px 4px;
+}
+
+.timeline-tool {
+  background: #d9d9d9;
+}
+
+.timeline-tool.timeline-nested {
+  border: 1px solid #d9d9d9;
+  background: var(--g1);
+}
+
+.timeline-tool.timeline-failed {
+  border: 0;
+  background: var(--bad);
+}
+
+.timeline-tool.timeline-stopped {
+  border: 1px solid var(--bad);
+  background: var(--w);
+}
+
+.timeline-aux {
+  background: var(--g2);
+}
+
+.timeline-compaction {
+  border: 1px solid var(--g2);
+  background: repeating-linear-gradient(135deg, var(--g2) 0 1px, var(--w) 1px 4px);
+}
+
+.timeline-failure {
+  margin: 0;
+  padding: 4px 12px;
+}
+
+.timeline-tip {
+  position: fixed;
+  z-index: 50;
+  max-width: min(380px, calc(100vw - 16px));
+  padding: 2px 8px;
+  color: var(--k);
+  background: var(--w);
+  border: 1px solid var(--k);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 16px;
+  pointer-events: none;
+}
+
+.timeline-tip b {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.d6 .orb-link-body { padding: 0 0 4px; }
+.d6 .timeline-call-column { width: 26ch; }
+.d6.touch .timeline-call-column { width: 15ch; }
+.timeline-queue { position: absolute; top: 0; bottom: 0; border: 1px solid var(--g2); background: var(--w); }
+.timeline-run { position: absolute; top: 0; bottom: 0; background: #d9d9d9; }
+.timeline-run.failed { background: var(--bad); }
+.timeline-run.running { background: var(--ok); }
+.timeline-call a { border-bottom: 1px solid currentcolor; }
+.timeline-step .timeline-tool { border: 1px solid #d9d9d9; background: var(--g1); }
+.timeline-step .timeline-tool.failed { border: 0; background: var(--bad); }
+.timeline-step .timeline-tool.running { border: 0; background: var(--ok); }
+</style>
+</head>
+<body>
+<svg style="display:none" aria-hidden="true"><symbol id="i-bin" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M2 4h12M6 4V2h4v2M4 6v8h8V6M6.5 7v4M9.5 7v4"/></symbol></svg>
+
+<section class="study">
+<h1>LINKS DRAWER · CHECK DURATIONS</h1>
+<p>Bin always visible at the row's right edge. Durations come from each check's <code>startedAt</code>/<code>completedAt</code>; running checks tick live from <code>startedAt</code>; pending checks show none. #291 starts expanded. Right column: 390px.</p>
+</section>
+
+<template id="screen">
+<div class="preview">
+  <header class="orb-header"><span class="orb-name">Links drawer</span><span class="orb-life"><span class="dot-ok"></span>running · busy</span></header>
+  <div class="orb-header-scroll">
+    LINKS
+    <details class="hosted-files activity-rail-row"><summary><span class="activity-rail-marker"></span><span class="activity-rail-summary">files</span><span class="activity-rail-metric">3</span></summary></details>
+  </div>
+  <div class="transcript"><div class="rec rec-orb"><div class="rec-bd">Opened the draft PR; CI is running.</div></div></div>
+  <div class="composer">&gt; Message the orb…</div>
+</div>
+</template>
+
+<main id="proposals"></main>
+
+<script>
+const T0 = Date.now();
+const min = 60_000;
+// [name, result, start offset (ms before now), duration ms or null while running/pending]
+const links = [
+  { ref: "#291", title: "Add agent-registered GitHub links drawer", status: "open", checks: [
+    ["control-plane-image", "passed", 14 * min, 3 * min + 41_000],
+    ["Central process (1/4)", "passed", 14 * min, 9 * min + 5_000],
+    ["E2E (1/4)", "failed", 14 * min, 6 * min + 12_000],
+    ["checks", "running", 14 * min, null],
+    ["deploy-preview", "pending", null, null],
+  ] },
+  { ref: "determined#14", title: "Expose scheduler checkpoints to callers", status: "review", checks: [
+    ["build", "passed", 50 * min, 1 * min + 30_000], ["test", "passed", 48 * min, 2 * min + 4_000],
+  ] },
+  { ref: "#285", title: "Hosted files lose mtime on restart", status: "open", checks: [] },
+];
+const STATE = { passed: "", failed: "activity-strip-failed", running: "activity-strip-running", pending: "orb-link-pending" };
+const dot = (r) => `<span class="activity-strip-dot ${STATE[r]}"></span>`;
+const bin = `<button type="button" class="icon-button danger" aria-label="Remove link" title="remove" data-remove><svg class="ic" aria-hidden="true"><use href="#i-bin"/></svg></button>`;
+const elapsed = ([, r, start, dur]) => start === null ? null : r === "running" ? Date.now() - (T0 - start) : dur;
+const compact = (ms) => { const s = Math.floor(ms / 1000); return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${Math.floor(s / 3600)}h`; };
+const precise = (ms) => { const s = Math.floor(ms / 1000); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`; };
+const clock = (ms) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+const name = (c) => `<a href="#">${c[0]}</a>`;
+const result = (c, extra = "") => `<span class="orb-link-result-${c[1]}">${c[1]}${extra}</span>`;
+const dur = (text) => `<span class="dur" data-live>${text}</span>`;
+
+
+// D6 data: real job shapes from PR #291's CI (offsets in seconds from the suite's creation).
+const SUITE = Date.now() - 14 * min;
+const steps = (list) => list.map(([name, from, to, r = "passed"]) => ({ name, from, to, r }));
+const jobs = [
+  { name: "control-plane-image", r: "passed", queued: 4, from: 4, to: 225, steps: steps([["Set up job",5,6],["Check out repository",6,7],["Reclaim unused runner Android tools",7,102],["Build control-plane image",102,178],["Set up Node.js",178,187],["Install smoke controller dependencies",189,200],["Boot default control-plane image command",200,213],["Upload image proof",222,223],["Complete job",223,223]]) },
+  { name: "Central process (1/4)", r: "passed", queued: 3, from: 3, to: 280, steps: steps([["Set up job",4,5],["Check out repository",5,10],["Set up Node.js",10,19],["Install native addon prerequisites",21,39],["Install dependencies",39,65],["Install pinned browser engines",65,104],["Run central process end-to-end tests",104,277],["Complete job",278,278]]) },
+  { name: "E2E (1/4)", r: "failed", queued: 5, from: 41, to: 413, steps: steps([["Set up job",42,43],["Check out repository",43,47],["Install dependencies",47,80],["Install pinned browser engines",80,121],["Run end-to-end tests",121,409,"failed"],["Upload failure evidence",409,412],["Complete job",412,412]]) },
+  { name: "checks", r: "running", queued: 4, from: 4, to: null, steps: steps([["Set up job",5,6],["Check out repository",6,9],["Install dependencies",9,40],["Typecheck",40,95],["Unit tests",95,null,"running"]]) },
+  { name: "deploy-preview", r: "pending", queued: 0, from: null, to: null, steps: [] },
+];
+const hms = (ms) => new Date(ms).toTimeString().slice(0, 8);
+const nowS = () => (Date.now() - SUITE) / 1000;
+const waterfall = () => {
+  const span = Math.max(nowS(), ...jobs.map((j) => j.to ?? 0));
+  const pct = (sec) => `${(sec / span) * 100}%`;
+  const rows = jobs.map((j, k) => {
+    const end = j.to ?? (j.from === null ? null : nowS());
+    const at = j.from === null ? 0 : j.from - j.queued;
+    const share = end === null ? 0 : (j.queued / (end - at)) * 100;
+    const bar = j.from === null ? "" : `<div class="timeline-bar" style="left:${pct(at)};width:${pct(end - at)}"><span class="timeline-queue" style="left:0;width:${share}%"></span><span class="timeline-run ${j.r}" style="left:${share}%;right:0"></span></div>`;
+    const dur = end === null ? "" : precise((end - j.from) * 1000);
+    const head = `<tr class="timeline-row" data-job="${k}" title="${j.name} · ${j.r}${dur ? ` · ${dur}` : ""}${j.queued ? ` · queued ${j.queued}s` : ""}"><td>${j.from === null ? "" : hms(SUITE + j.from * 1000)}</td><td class="timeline-call"><a href="#">${j.name}</a> <span class="timeline-arg">${dur}</span></td><td class="timeline-bars"><div class="timeline-track">${bar}</div></td></tr>`;
+    const open = openJobs.has(k) ? j.steps.map((st) => {
+      const to = st.to ?? nowS();
+      return `<tr class="timeline-row timeline-step" title="${st.name} · ${st.r} · ${precise((to - st.from) * 1000)}"><td>${hms(SUITE + st.from * 1000)}</td><td class="timeline-call"><span class="timeline-indent">└</span><span class="${st.r === "failed" ? "error-text" : ""}">${st.name}</span> <span class="timeline-arg">${precise((to - st.from) * 1000)}</span></td><td class="timeline-bars"><div class="timeline-track"><div class="timeline-bar timeline-tool ${st.r}" style="left:${pct(st.from)};width:${pct(Math.max(span * 0.004, to - st.from))}"></div></div></td></tr>`;
+    }).join("") : "";
+    return head + open;
+  }).join("");
+  return `<table class="timeline-table"><colgroup><col class="timeline-start-column"><col class="timeline-call-column"><col></colgroup><thead><tr><th>start</th><th>check</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+};
+const openJobs = new Set([2]);
+
+const proposals = [
+  { name: "Own column", text: "A right-aligned column after the result, minutes and seconds. Scans as a table; costs one column on phones.",
+    check: (c) => { const e = elapsed(c); return `${dot(c[1])}${name(c)}${result(c)}${dur(e === null ? "" : precise(e))}`; } },
+  { name: "Joined to the result", text: "<code>failed · 6m</code>, <code>running · 14m</code>: one compact number, same unit rule as orb ages. No new column.",
+    check: (c) => { const e = elapsed(c); return `${dot(c[1])}${name(c)}<span>${result(c)}${e === null ? "" : `<span class="dur" data-live> · ${compact(e)}</span>`}</span>`; } },
+  { name: "Clock before the name", text: "A tabular <code>m:ss</code> column between dot and name, like a CI log. Durations line up and compare at a glance.",
+    check: (c) => { const e = elapsed(c); return `${dot(c[1])}${dur(e === null ? "" : clock(e))}${name(c)}${result(c)}`; } },
+  { name: "Tooltip only", text: "The list stays as it is; hovering a dot or name adds the duration (<code>E2E (1/4) · failed · 6m 12s</code>). The row status gains the longest running check.",
+    summaryExtra: (l) => { const r = l.checks.filter((c) => c[1] === "running"); return r.length ? ` · ${compact(Math.max(...r.map(elapsed)))}` : ""; },
+    check: (c) => { const e = elapsed(c); return `${dot(c[1])}<a href="#" title="${c[0]} · ${c[1]}${e === null ? "" : ` · ${precise(e)}`}">${c[0]}</a>${result(c)}`; } },
+  { name: "Timeline", text: "Each check gets a bar on a shared axis from the first start to now, so parallelism and the slow job are visible; the number sits at the end. Running bars grow green, failed ones are red.",
+    check: (c, l) => {
+      const e = elapsed(c);
+      const starts = l.checks.filter((x) => x[2] !== null).map((x) => T0 - x[2]);
+      const first = Math.min(...starts), span = Math.max(1, Date.now() - first);
+      const bar = c[2] === null ? "" : `<span class="${c[1]}" style="left:${((T0 - c[2] - first) / span) * 100}%;width:${(e / span) * 100}%"></span>`;
+      return `${dot(c[1])}${name(c)}${result(c)}<span class="bar">${bar}</span>${dur(e === null ? "" : compact(e))}`;
+    } },
+  { name: "Waterfall", text: "The Pi turn waterfall (PR #194) applied to CI: start clock, check and duration, then bars on one track. The outlined head is time queued before a runner picked it up; the run is pale, red when failed, green while running. Click a check to unfold its job steps as nested rows.",
+    body: () => waterfall() },
+];
+
+const drawer = (p, i) => {
+  const refWidth = Math.max(...links.map((l) => l.ref.length));
+  const stripWidth = Math.max(...links.map((l) => l.checks.length)) * 12;
+  const rows = links.map((l, k) => `<details class="orb-link"${k === 0 ? " open" : ""}><summary><a href="#">${l.ref}</a><span class="orb-link-title">${l.title}</span><span class="orb-link-strip">${l.checks.map((c) => dot(c[1])).join("")}</span><span class="orb-link-status">${l.status}${p.summaryExtra ? p.summaryExtra(l) : ""}</span>${bin}</summary><div class="orb-link-body">${p.body && k === 0 ? p.body() : l.checks.map((c) => `<div class="orb-link-check">${p.check ? p.check(c, l) : ""}</div>`).join("")}</div></details>`).join("");
+  return `<details class="orb-links activity-rail-row" open><summary><span class="activity-rail-marker"></span><span class="activity-rail-summary">links</span><span class="orb-link-strip">${dot("failed")}${dot("passed")}${dot("pending")}</span></summary><div class="orb-links-roster" style="--orb-link-ref:${refWidth}ch;--orb-link-strip:${stripWidth}px">${rows}</div></details>`;
+};
+const screen = (p, i, touch) => document.getElementById("screen").innerHTML
+  .replace("LINKS", drawer(p, i))
+  .replace('class="preview"', `class="preview d${i + 1}${touch ? " touch" : ""}"`);
+const render = (section) => {
+  const i = Number(section.dataset.i);
+  const open = [...section.querySelectorAll(".orb-link")].map((d) => d.open);
+  section.querySelector(".pair").innerHTML = screen(proposals[i], i, false) + screen(proposals[i], i, true);
+  if (open.length) section.querySelectorAll(".orb-link").forEach((d, k) => { d.open = open[k] ?? false; });
+};
+document.getElementById("proposals").innerHTML = proposals.map((p, i) => `
+<section class="study" data-i="${i}">
+  <h2>D${i + 1} · ${p.name.toUpperCase()}</h2>
+  <p>${p.text}</p>
+  <button class="reset">reset</button>
+  <div class="pair"></div>
+</section>`).join("");
+document.querySelectorAll("section[data-i]").forEach(render);
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("button");
+  if (!t) return;
+  if (t.classList.contains("reset")) return render(t.closest("section"));
+  if (t.dataset.remove !== undefined) { e.preventDefault(); t.closest(".orb-link").remove(); }
+});
+document.addEventListener("click", (e) => {
+  const row = e.target.closest("tr[data-job]");
+  if (!row || e.target.closest("a")) return;
+  const k = Number(row.dataset.job);
+  openJobs.has(k) ? openJobs.delete(k) : openJobs.add(k);
+  render(row.closest("section"));
+});
+// Live ticking: re-render sections whose rows are intact, preserving open state.
+setInterval(() => document.querySelectorAll("section[data-i]").forEach((s) => {
+  if (s.querySelectorAll(".orb-link").length === links.length * 2) render(s);
+}), 1000);
+</script>
+</body>
+</html>

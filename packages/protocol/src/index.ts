@@ -19,6 +19,7 @@ export * from "./orb-archive.ts";
 export * from "./orb-cleanup.ts";
 export * from "./orb-delete.ts";
 export * from "./orb-inspection.ts";
+export * from "./orb-links.ts";
 export * from "./orb-message-context.ts";
 export * from "./orb-messaging.ts";
 export * from "./orb-naming.ts";

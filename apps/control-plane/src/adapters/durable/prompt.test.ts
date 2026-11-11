@@ -27,15 +27,15 @@ it.each([
   (snapshot) => {
     const prompt = renderPrompt({ ...snapshot, appendSystem: "APPEND" });
     expect(piEnvironmentPrompt).toBe("");
-    expect(prompt.split(environmentPrompt())).toHaveLength(2);
+    expect(prompt.split(environmentPrompt("orb_link"))).toHaveLength(2);
     expect(
       prompt.startsWith(
-        `You are a coding assistant. Use tools to inspect and change the project. Be concise. Produce Markdown. Mermaid is supported.\n\n${environmentPrompt()}\n\n`,
+        `You are a coding assistant. Use tools to inspect and change the project. Be concise. Produce Markdown. Mermaid is supported.\n\n${environmentPrompt("orb_link")}\n\n`,
       ),
     ).toBe(true);
-    expect(prompt.indexOf(environmentPrompt())).toBeLessThan(prompt.indexOf("APPEND"));
+    expect(prompt.indexOf(environmentPrompt("orb_link"))).toBeLessThan(prompt.indexOf("APPEND"));
     if (snapshot.repository.length)
-      expect(prompt.indexOf(environmentPrompt())).toBeLessThan(
+      expect(prompt.indexOf(environmentPrompt("orb_link"))).toBeLessThan(
         prompt.indexOf("<project_instructions>"),
       );
     expect(prompt).not.toContain("## Orb CLI");

@@ -18,6 +18,8 @@ import {
   ListResponseSchema,
   type LiveDisplayDetail,
   LiveDisplayDetailSchema,
+  type OrbLinksResponse,
+  OrbLinksResponseSchema,
   OrbMessageListViewSchema,
   type OrbMessageView,
   OrbMessageViewSchema,
@@ -523,6 +525,20 @@ export function listHostedFiles(orbId: string): Promise<Result<HostedFilesRespon
     HostedFilesResponseSchema,
     `/api/v1/orbs/${encodeURIComponent(orbId)}/hosted-files`,
     { cache: "no-store" },
+  );
+}
+
+export function listOrbLinks(orbId: string): Promise<Result<OrbLinksResponse, ApiError>> {
+  return apiFetch(OrbLinksResponseSchema, `/api/v1/orbs/${encodeURIComponent(orbId)}/links`, {
+    cache: "no-store",
+  });
+}
+
+export function removeOrbLink(orbId: string, url: string): Promise<Result<null, ApiError>> {
+  return apiFetch(
+    Type.Null(),
+    `/api/v1/orbs/${encodeURIComponent(orbId)}/links?url=${encodeURIComponent(url)}`,
+    { method: "DELETE" },
   );
 }
 

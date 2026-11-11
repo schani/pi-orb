@@ -1,4 +1,5 @@
 import {
+  type CSSProperties,
   cloneElement,
   Fragment,
   isValidElement,
@@ -8,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { stripTipStyle } from "../lib/strip-tip.ts";
 import { ActivityHeadlinePreview } from "../lib/use-activity-headline.tsx";
 import { ActivityRailHidden, ActivityRailOpen, ActivityRailRow } from "./ActivityRailRow.tsx";
 
@@ -78,8 +80,7 @@ export function groupActivity(
 
 interface Tip {
   key: string;
-  left: number;
-  top: number;
+  style: CSSProperties;
 }
 type Preview = { text: string | undefined; failed: boolean };
 
@@ -188,9 +189,12 @@ export function ActivityStrip({
               aria-pressed={step.key === picked}
               onMouseLeave={() => setTip(null)}
               onMouseEnter={(event) => {
-                const rect = event.currentTarget.getBoundingClientRect();
+                const style = stripTipStyle(
+                  event.currentTarget.getBoundingClientRect(),
+                  document.documentElement.clientWidth,
+                );
                 visit(step.key);
-                setTip({ key: step.key, left: rect.left, top: rect.top });
+                setTip({ key: step.key, style });
               }}
               onClick={(event) => {
                 event.preventDefault();
@@ -223,11 +227,7 @@ export function ActivityStrip({
               ref={setTipHeader}
               className="activity-strip-tip"
               role="tooltip"
-              style={{
-                left: Math.max(4, tip.left - 16),
-                top: tip.top - 24,
-                maxWidth: `min(60ch, calc(100vw - ${Math.max(4, tip.left - 16) + 8}px))`,
-              }}
+              style={tip.style}
             >
               <span className={`activity-strip-tip-label activity-strip-${tipStep.state}`}>
                 {tipStep.label}

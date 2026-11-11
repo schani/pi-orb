@@ -67,6 +67,7 @@ it("uses durable child task identities and does not expose authority arguments",
     "orb_expose_port",
     "orb_unexpose_port",
     "orb_list_previews",
+    "orb_link",
   ]);
   const sleep = tools.find((t) => t.name === "orb_sleep")!;
   await sleep.execute(
@@ -273,6 +274,7 @@ const responses = [
   ["orb_expose_port", { port: 5173 }, { port: 5173, registrationId: "registration", url: "url" }],
   ["orb_unexpose_port", { port: 5173 }, { port: 5173, revoked: true }],
   ["orb_list_previews", {}, [{ port: 5173, registrationId: "registration", url: "url" }]],
+  ["orb_link", { url: "https://github.com/o/r/pull/1" }, { url: "https://github.com/o/r/pull/1" }],
 ] as const;
 
 it.each(responses)(
@@ -328,6 +330,11 @@ it("maps preview tools to idempotent preview requests", async () => {
     ["orb_expose_port", { port: 5173 }, { kind: "expose_port", port: 5173 }],
     ["orb_unexpose_port", { port: 5173 }, { kind: "unexpose_port", port: 5173 }],
     ["orb_list_previews", {}, { kind: "list_previews" }],
+    [
+      "orb_link",
+      { url: "https://github.com/o/r/pull/1" },
+      { kind: "link", url: "https://github.com/o/r/pull/1" },
+    ],
   ] as const) {
     const tool = tools.find((t) => t.name === name)!;
     expect(tool.replay).toBe("safe");

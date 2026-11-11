@@ -6,6 +6,7 @@ import { DELETE_USAGE } from "./delete/command.ts";
 import { HOSTING_USAGE } from "./hosting/command.ts";
 import { USAGE as ID_TOKEN_USAGE } from "./id-token/token.ts";
 import { INSPECTION_USAGE } from "./inspection/command.ts";
+import { LINK_USAGE } from "./links/command.ts";
 import { SEND_USAGE } from "./send/command.ts";
 import { SLEEP_USAGE } from "./sleep/command.ts";
 import { SPAWN_USAGE } from "./spawn/command.ts";
@@ -27,6 +28,7 @@ const commands = [
   "expose",
   "unexpose",
   "previews",
+  "link",
   "id-token",
 ];
 
@@ -59,6 +61,7 @@ describe("public pi-orb help", () => {
       HOSTING_USAGE,
       ID_TOKEN_USAGE,
       INSPECTION_USAGE,
+      LINK_USAGE,
     ];
     for (const usage of usages) {
       for (const line of usage.split("\n")) {

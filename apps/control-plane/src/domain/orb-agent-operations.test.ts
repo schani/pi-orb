@@ -608,6 +608,32 @@ describe("central orb operations", () => {
       ]);
     });
   });
+  it("saves central links canonically and rejects non-GitHub URLs", async () => {
+    const h = seed();
+    h.store.seedOrb(
+      makeOrbRow("caller", "project", "stopped", { hostRef: null, runtimeTokenHash: null }),
+    );
+    const task = new NoSimulationTask("central link", false);
+    const service = createCentralOrbAgentOperations(
+      task,
+      h.deps,
+      { ownerUserId: "owner", projectId: "project", orbId: "caller", agentAdmissionVersion: 0 },
+      { appOrigin: "http://app", appendAlert: () => okAsync({ recordId: "a", duplicate: false }) },
+    );
+    expect(
+      (
+        await service.invoke({ kind: "link", url: "https://github.com/o/r/issues/5#x" }, "link")
+      )._unsafeUnwrap(),
+    ).toEqual({ url: "https://github.com/o/r/issues/5" });
+    expect(
+      (await service.invoke({ kind: "link", url: "https://example.com" }, "bad"))._unsafeUnwrapErr()
+        .code,
+    ).toBe("invalid_request");
+    expect((await h.store.listOrbLinks(task, "caller"))._unsafeUnwrap()).toEqual([
+      { url: "https://github.com/o/r/issues/5", addedAt: expect.any(Number) },
+    ]);
+  });
+
   it("passes alert request IDs to the authoritative append port", async () => {
     await runDst({ name: "native-orb-alert", iterations: 5 }, async (sim) => {
       const h = seed();

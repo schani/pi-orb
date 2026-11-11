@@ -89,6 +89,37 @@ const invariant = (message: string): StoreError => ({
  * from named failpoints, so schedules and outages replay exactly.
  */
 export class InMemoryControlPlaneStore implements ControlPlaneStore {
+  private readonly linkRows = new Map<string, import("../domain/orb-link-ports.ts").OrbLinkRow[]>();
+
+  addOrbLink(task: SimulationTask, input: { orbId: string; url: string; now: number }) {
+    return this.access(task, FAILPOINTS.storeWrite, "add orb link", () => {
+      if (!this.orbs.has(input.orbId)) return null;
+      const rows = this.linkRows.get(input.orbId) ?? [];
+      if (rows.some((row) => row.url === input.url)) return false;
+      this.linkRows.set(input.orbId, [...rows, { url: input.url, addedAt: input.now }]);
+      return true;
+    }).andThen((added) =>
+      added === null ? errAsync(invariant("orb_links foreign key violation")) : okAsync(added),
+    );
+  }
+
+  removeOrbLink(task: SimulationTask, input: { orbId: string; url: string }) {
+    return this.access(task, FAILPOINTS.storeWrite, "remove orb link", () => {
+      const rows = this.linkRows.get(input.orbId) ?? [];
+      const kept = rows.filter((row) => row.url !== input.url);
+      this.linkRows.set(input.orbId, kept);
+      return kept.length < rows.length;
+    });
+  }
+
+  listOrbLinks(task: SimulationTask, orbId: string) {
+    return this.access(task, FAILPOINTS.storeRead, "list orb links", () =>
+      [...(this.linkRows.get(orbId) ?? [])].sort(
+        (a, b) => a.addedAt - b.addedAt || (a.url < b.url ? -1 : a.url > b.url ? 1 : 0),
+      ),
+    );
+  }
+
   private readonly previewRows = new Map<
     string,
     import("../domain/preview-ports.ts").PreviewRegistrationRow
@@ -1960,6 +1991,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       this.deleteActivityHeadlines(params.orbId);
       this.replicas.delete(params.orbId);
       this.orbs.delete(params.orbId);
+      this.linkRows.delete(params.orbId);
       for (const key of this.previewRows.keys())
         if (key.startsWith(`${params.orbId}:`)) this.previewRows.delete(key);
       this.deletions.delete(params.orbId);

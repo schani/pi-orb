@@ -63,7 +63,7 @@ UI: the orb header and project list offer **Delete orb** with a confirmation nam
 
 ## Orb archive
 
-Archival removes everything deletion removes except the orb row, replicated transcript, descriptive/session metadata and hosted files. An archived orb stays in project lists, opens read-only with the complete transcript and no composer or start/stop controls, can be renamed, and can never start again. It is irreversible: no unarchive, restore, clone or reconstruction of a runnable orb from the replica, which lacks the checkout and workspace files.
+Archival removes everything deletion removes except the orb row, replicated transcript, descriptive/session metadata, hosted files and links. An archived orb stays in project lists, opens read-only with the complete transcript and no composer or start/stop controls, can be renamed, and can never start again. It is irreversible: no unarchive, restore, clone or reconstruction of a runnable orb from the replica, which lacks the checkout and workspace files.
 
 `POST /api/v1/orbs/:orbId/archive` enters `archiving`; repeats in `archiving`/`archived` are idempotent; `deleting` conflicts. `archiving` conflicts with start, stop, message and naming work; history reads stay available; rename waits for completion. Start on an archived orb is a permanent conflict. Delete may upgrade an in-progress archive (atomically converting the intent to `delete`, which skips sealing) or remove an archived orb; this is the escape hatch when a complete archive cannot be produced.
 

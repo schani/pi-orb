@@ -555,7 +555,7 @@ export class ClaudeOrbAgent implements OrbAgent {
     await this.hooks.runResume();
     await this.hooks.applyHookEnv(process.env);
     this.prompt = [
-      environmentPrompt(),
+      environmentPrompt("pi-orb link"),
       claudeEnvironmentPrompt,
       personal.value.content,
       project.value.content,
