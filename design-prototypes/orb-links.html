@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Links drawer — removing a link, five proposals</title>
+<link rel="stylesheet" href="../apps/web/src/styles.css">
+<style>
+body { display: block; }
+.study { padding: 12px; border-bottom: 1px solid var(--k); }
+.study h1, .study h2 { font-size: 13px; line-height: 20px; margin: 0; }
+.study p { margin: 4px 0 0; color: var(--g3); max-width: 80ch; }
+.pair { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; align-items: flex-start; }
+.preview { width: 680px; max-width: 100%; border: 1px solid var(--k); }
+.preview.touch { width: 390px; }
+.preview .orb-header { padding: 0 12px; gap: 8px; }
+.preview .orb-name { flex: 1; }
+.preview .orb-life { color: var(--g3); }
+.dot-ok { width: 8px; height: 8px; background: var(--ok); display: inline-block; }
+.preview .transcript { height: 52px; overflow: hidden; }
+.preview .composer { position: static; color: var(--g3); }
+.preview .orb-header-scroll .activity-rail-row { margin: 0; }
+.reset { margin-top: 8px; }
+
+/* check-strip drawer (design-prototypes/github-links-drawer.html) */
+.drawer-count { color: var(--g3); }
+.links-drawer > summary { grid-template-columns: 2ch auto minmax(0, 1fr) auto; }
+.links-drawer .strip { display: flex; height: var(--row); }
+.links-drawer > summary .strip { justify-content: flex-end; }
+.links-drawer .subagent-roster { display: grid; grid-template-columns: max-content minmax(0, 1fr) auto auto auto; column-gap: 8px; }
+.links-drawer .subagent-roster > li { grid-column: 1 / -1; grid-template-columns: subgrid; }
+.links-drawer .subagent-roster a { justify-self: start; white-space: nowrap; }
+.links-drawer .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.links-drawer .metric-cell { min-width: 8ch; text-align: right; }
+.links-drawer .metric { color: var(--g3); }
+.activity-strip-dot.pass::before { background: var(--k); }
+.activity-strip-dot.idle::before { background: var(--g2); }
+.activity-strip-dot.fail::before { background: var(--bad); }
+
+.rm { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 0; color: var(--g3); background: transparent; }
+.rm svg { width: 12px; height: 12px; }
+.rm:hover { color: var(--w); background: var(--k); }
+.txt-btn { padding: 0 4px; border: 0; color: var(--g3); background: transparent; font: inherit; line-height: var(--row); }
+.txt-btn:hover { color: var(--w); background: var(--k); }
+
+/* P1 hover × */
+.p1 li .rm { visibility: hidden; }
+.p1 li:hover .rm, .p1 li:focus-within .rm, .touch .p1 li .rm { visibility: visible; }
+
+/* P2 status turns into remove */
+.p2 li .txt-btn { display: none; color: var(--bad); }
+.p2 li:hover .metric, .p2 li:focus-within .metric { display: none; }
+.p2 li:hover .txt-btn, .p2 li:focus-within .txt-btn { display: inline; }
+.touch .p2 li .metric { display: inline; }
+.touch .p2 li .txt-btn { display: none; }
+.touch .p2 li.armed .metric { display: none; }
+.touch .p2 li.armed .txt-btn { display: inline; }
+
+/* P3 two-click confirm */
+.p3 li .rm { color: var(--g2); }
+.p3 li.armed .rm { width: auto; padding: 0 4px; color: var(--w); background: var(--bad); }
+.p3 li.armed .rm svg { display: none; }
+.p3 li:not(.armed) .rm .confirm { display: none; }
+
+/* P4 edit mode */
+.p4 .edit { visibility: hidden; }
+.p4[open] .edit { visibility: visible; }
+.p4 li .rm { display: none; }
+.p4.editing li .rm { display: inline-flex; color: var(--bad); }
+.p4.editing li .strip, .p4.editing li .metric { visibility: hidden; }
+.p4.editing .edit { color: var(--w); background: var(--k); }
+
+/* P5 row disclosure */
+.p5 .subagent-roster { display: block; }
+.p5 .subagent-roster > li { display: block; }
+.p5 li > details > summary { display: grid; grid-template-columns: 14ch minmax(0, 1fr) 84px 8ch; gap: 8px; list-style: none; cursor: pointer; align-items: center; min-height: 24px; }
+.p5 li > details > summary::-webkit-details-marker { display: none; }
+.p5 li > details > summary:hover { background: var(--g1); }
+.p5 .checks { grid-column: 1 / -1; padding: 0 0 4px 4ch; color: var(--g3); }
+.p5 .check { display: grid; grid-template-columns: 12px 16ch auto; gap: 8px; }
+.p5 .check .st-fail { color: var(--bad); }
+.p5 .check .st-run { color: var(--ok); }
+.p5 .row-actions { text-align: right; }
+.p5 .row-actions .txt-btn { color: var(--bad); }
+</style>
+</head>
+<body>
+<svg style="display:none" aria-hidden="true"><symbol id="i-x" viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol><symbol id="i-pen" viewBox="0 0 16 16"><path d="M3 10 10 3l3 3-7 7H3z M8 5l3 3" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol></svg>
+
+<section class="study">
+<h1>LINKS DRAWER · REMOVING A LINK</h1>
+<p>Selected: P5 (docs/orb-links.md). Only you remove links. Removing drops the link from this orb; the PR, issue or run on GitHub is untouched. Every proposal works in the mocks; the right column assumes touch (no hover).</p>
+</section>
+
+<template id="screen">
+<div class="preview">
+  <header class="orb-header"><span class="orb-name">Links drawer</span><span class="orb-life"><span class="dot-ok"></span>running · busy</span></header>
+  <div class="orb-header-scroll">
+    LINKS
+    <details class="hosted-files activity-rail-row"><summary><span class="activity-rail-marker"></span><span class="activity-rail-summary">files</span><span class="drawer-count">3</span></summary></details>
+  </div>
+  <div class="transcript"><div class="rec rec-orb"><div class="rec-bd">Opened the draft PR; CI is running. #288 is failing on <code>e2e</code>.</div></div></div>
+  <div class="composer">&gt; Message the orb…</div>
+</div>
+</template>
+
+<main id="proposals"></main>
+
+<script>
+const links = [
+  { ref: "#291", title: "Add in-progress links drawer", state: "run", status: "draft", checks: [["build","pass"],["lint","pass"],["unit","pass"],["e2e","run"],["dst","run"],["deploy-preview","idle"],["smoke","idle"]] },
+  { ref: "#288", title: "Restart unresponsive control-plane HTTP servers", state: "fail", status: "approved", checks: [["build","pass"],["lint","pass"],["e2e","fail"],["unit","pass"],["dst","pass"],["deploy-preview","pass"],["smoke","pass"]] },
+  { ref: "determined#14", title: "Expose scheduler checkpoints to callers", state: "pass", status: "review", checks: [["build","pass"],["test","pass"],["lint","pass"]] },
+  { ref: "#285", title: "Hosted files lose mtime on restart", state: "open", status: "open", checks: [] },
+  { ref: "run 1187", title: "e2e · fix/links-drawer", state: "run", status: "running", checks: [["setup","pass"],["build","pass"],["e2e","run"],["upload","idle"]] },
+];
+const x = `<svg><use href="#i-x"/></svg>`;
+const dot = c => `<span class="activity-strip-dot ${c === "run" ? "activity-strip-running" : c}"></span>`;
+const strip = l => `<span class="strip">${l.checks.map(([, s]) => dot(s)).join("")}</span>`;
+const cells = (l, extra = "") => `<a href="#">${l.ref}</a><span class="title">${l.title}</span>${strip(l)}<span class="metric-cell"><span class="metric">${l.status}</span>${extra}</span>`;
+const word = { pass: "passed", fail: "failed", run: "running", idle: "queued" };
+
+const proposals = [
+  { name: "Hover ×", text: "An × appears at the row's right edge on hover and removes at once. On touch it is always visible.",
+    row: l => `${cells(l)}<button class="rm" data-remove title="remove">${x}</button>` },
+  { name: "Status becomes remove", text: "No new column: on hover the status word turns into a red <em>remove</em>. On touch, tapping the status arms it, a second tap removes.",
+    row: l => `${cells(l, `<button class="txt-btn" data-remove>remove</button>`)}<span></span>` },
+  { name: "Two-click ×", text: "A quiet × is always visible. The first click turns it into a red <em>remove</em>; the second removes. Moving away disarms it. Same on touch.",
+    row: l => `${cells(l)}<button class="rm" data-arm>${x}<span class="confirm">remove</span></button>` },
+  { name: "Edit mode", text: "A pen in the open drawer's summary switches the rows to edit: dots and status hide, a red × per row removes at once. The pen toggles back.",
+    summaryExtra: `<button class="rm edit" data-edit title="edit">${'<svg><use href="#i-pen"/></svg>'}</button>`,
+    row: l => `${cells(l)}<button class="rm" data-remove title="remove">${x}</button>` },
+  { name: "Row disclosure", text: "Each row expands to its check names, with <em>remove</em> at the bottom. Removal sits one step away, next to the detail you inspect before deciding.",
+    row: l => `<details><summary>${cells(l)}</summary><div class="checks">${l.checks.map(([n, s]) => `<div class="check">${dot(s)}<span>${n}</span><span class="st-${s}">${word[s]}</span></div>`).join("")}<div class="row-actions"><button class="txt-btn" data-remove>remove</button></div></div></details>` },
+];
+
+const drawer = (p, i) => `<details class="subagent-live-rail activity-rail-row links-drawer p${i + 1}" open><summary><span class="activity-rail-marker"></span><span class="activity-rail-summary">links</span><span class="strip">${links.map(l => dot(l.state === "open" ? "idle" : l.state)).join("")}</span>${p.summaryExtra ?? "<span></span>"}</summary><ul class="subagent-roster">${links.map(l => `<li>${p.row(l)}</li>`).join("")}</ul></details>`;
+const screen = (p, i, touch) => {
+  const html = document.getElementById("screen").innerHTML.replace("LINKS", drawer(p, i));
+  return touch ? html.replace('class="preview"', 'class="preview touch"') : html;
+};
+const render = (section, i) => {
+  section.querySelector(".pair").innerHTML = screen(proposals[i], i, false) + screen(proposals[i], i, true);
+};
+document.getElementById("proposals").innerHTML = proposals.map((p, i) => `
+<section class="study" data-i="${i}">
+  <h2>P${i + 1} · ${p.name.toUpperCase()}</h2>
+  <p>${p.text}</p>
+  <button class="reset">reset</button>
+  <div class="pair"></div>
+</section>`).join("");
+document.querySelectorAll("section[data-i]").forEach(s => render(s, Number(s.dataset.i)));
+
+document.addEventListener("click", e => {
+  const t = e.target.closest("button");
+  if (!t) return;
+  const li = t.closest("li");
+  if (t.classList.contains("reset")) { const s = t.closest("section"); render(s, Number(s.dataset.i)); return; }
+  if (t.dataset.edit !== undefined) { e.preventDefault(); t.closest(".links-drawer").classList.toggle("editing"); return; }
+  if (t.dataset.arm !== undefined) { if (li.classList.contains("armed")) li.remove(); else li.classList.add("armed"); return; }
+  if (t.dataset.remove !== undefined) li.remove();
+});
+document.addEventListener("mouseout", e => {
+  const li = e.target.closest?.(".p3 li.armed");
+  if (li && !li.contains(e.relatedTarget)) li.classList.remove("armed");
+});
+// P2 on touch: tap the status to arm.
+document.addEventListener("click", e => {
+  const m = e.target.closest(".touch .p2 .metric");
+  if (m) m.closest("li").classList.add("armed");
+});
+</script>
+</body>
+</html>

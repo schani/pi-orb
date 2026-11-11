@@ -9,6 +9,7 @@ import { Check } from "typebox/value";
 import { acceptsCentralAgentCaller } from "./agent-authorization.ts";
 import { requestOrbArchive, requestOrbDeletion, requestOrbSleep } from "./lifecycle.ts";
 import type { OrbRow } from "./orb.ts";
+import { addOrbLink } from "./orb-links.ts";
 import { sendOrbMessage } from "./orb-messaging.ts";
 import { normalizeOrbName } from "./orb-naming.ts";
 import { getOrbSpawnRelations, spawnOrb } from "./orb-spawning.ts";
@@ -36,7 +37,8 @@ export type OrbAgentRequest =
   | ({ kind: "spawn" } & OrbSpawnRequest)
   | { kind: "alert"; message: string }
   | { kind: "send"; orbId: string; message: string }
-  | { kind: "sleep"; durationSeconds: number };
+  | { kind: "sleep"; durationSeconds: number }
+  | { kind: "link"; url: string };
 export interface OrbAgentError {
   readonly code:
     | "unauthorized"
@@ -321,6 +323,17 @@ export function createOrbAgentOperations(
               )
                 .map(() => ({ port: request.port, revoked: true }))
                 .mapErr(previewFailure);
+            case "link":
+              return (await addOrbLink(task, deps.store, orb.id, request.url))
+                .map((saved) => ({ url: saved }))
+                .mapErr((e) =>
+                  e.type === "invalid_link"
+                    ? failure(
+                        "invalid_request",
+                        "expected a GitHub pull request, issue or Actions run URL",
+                      )
+                    : unavailable(),
+                );
             case "list_previews":
               if (previews === null) return err(previewsDisabled());
               return (

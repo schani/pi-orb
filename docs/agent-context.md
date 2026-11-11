@@ -36,7 +36,7 @@ Native Claude Code adds the rest: repository `CLAUDE.md`/`CLAUDE.local.md`, othe
 
 ### Shared rules
 
-- The shared environment prompt holds facts common to both harnesses (VM tooling, browser use, MCP setup pointer, boot hooks, `orb:` file links, `Do not send progress updates to other orbs unless explicitly asked.`). Pi's suffix is empty because code-mode documents orb tools; Claude's points at CLI `--help` instead of repeating command contracts. Tests pin exact bullets, suffixes, order and exactly-once composition.
+- The shared environment prompt holds facts common to both harnesses (VM tooling, browser use, MCP setup pointer, boot hooks, `orb:` file links, `Do not send progress updates to other orbs unless explicitly asked.`, and when to register GitHub links with the harness's link tool, `orb_link` or `pi-orb link` (`docs/orb-links.md`)). Pi's suffix is empty because code-mode documents orb tools; Claude's points at CLI `--help` instead of repeating command contracts. Tests pin exact bullets, suffixes, order and exactly-once composition.
 - Prompt text changes need user approval.
 - Composition order is not a priority mechanism; conflicting instructions are ordinary instruction interpretation.
 - No instruction file in the guest or repository is ever rewritten.

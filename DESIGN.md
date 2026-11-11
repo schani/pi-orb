@@ -13,7 +13,7 @@ pi-orb runs an AI coding agent in an isolated, remotely managed environment call
 - One root conversation per orb: linear, with compaction. No branching, session switching, cloning or forking.
 - A fixed runtime image and prescribed base environment, extended per project by secrets, boot hooks, instructions, skills and MCP servers.
 - Process (trusted local testing), Docker and GCE hosts behind one host-provider abstraction.
-- An in-orb `pi-orb` CLI lets the agent inspect and search sibling transcripts, spawn and message orbs, alert the user, sleep, expose ports, publish files, mint workload-identity tokens, and archive or delete itself when the user asks.
+- An in-orb `pi-orb` CLI lets the agent inspect and search sibling transcripts, spawn and message orbs, alert the user, sleep, expose ports, publish files, register GitHub links, mint workload-identity tokens, and archive or delete itself when the user asks.
 - Trusted coworkers at one company; no collaboration, presence, transfer or permissions framework (`docs/auth.md`).
 - Deterministic simulation testing with [`determined`](https://www.npmjs.com/package/determined) is built into concurrency-critical code from the start (`docs/testing.md`).
 - Not a generic VM configurator or remote development platform.
@@ -77,6 +77,7 @@ UI:
 - [docs/terminal.md](docs/terminal.md) — interactive orb terminal
 - [docs/workspace-uploads.md](docs/workspace-uploads.md) — browser uploads into orb workspaces
 - [docs/orb-alerts.md](docs/orb-alerts.md) — CLI-issued transcript alerts and unread flags
+- [docs/orb-links.md](docs/orb-links.md) — agent-registered GitHub links drawer
 
 Operations:
 - [docs/deployment.md](docs/deployment.md) — Cloud Run/GCE deployment, release transaction, rollout monitor (procedures: `infra/README.md`)

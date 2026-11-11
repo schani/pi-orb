@@ -10,6 +10,7 @@ import {
   MCP_RUNTIME_PATH,
   ORB_BOOT_CONTEXT_PATH,
   ORB_INSPECTION_LIST_PATH,
+  ORB_LINKS_RUNTIME_PATH,
   ORB_NAME_MESSAGE_MAX_BYTES,
   ORB_NAME_README_MAX_BYTES,
   ORB_NAME_TRIGGER_PATH,
@@ -26,6 +27,7 @@ import {
   OrbDeleteRequestSchema,
   type OrbInspectionError,
   type OrbInspectionItem,
+  OrbLinkRequestSchema,
   type OrbNameTriggerResponse,
   OrbNameTriggerSchema,
   type OrbSendRequest,
@@ -62,6 +64,7 @@ import type { McpStore } from "../domain/mcp.ts";
 import type { McpOAuth } from "../domain/mcp-oauth.ts";
 import type { OrbRow } from "../domain/orb.ts";
 import type { OrbAgentOperations } from "../domain/orb-agent-operations.ts";
+import { addOrbLink } from "../domain/orb-links.ts";
 import { generateOrbName, normalizeOrbName } from "../domain/orb-naming.ts";
 import { getOrbSpawnRelations } from "../domain/orb-spawning.ts";
 import { type OwnerSkillStore, readOwnerSkillsSnapshot } from "../domain/owner-skills.ts";
@@ -458,6 +461,32 @@ export function registerRuntimeRoutes(
       });
     },
   );
+
+  app.put(ORB_LINKS_RUNTIME_PATH, async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const auth = await authenticate(request.headers.authorization);
+    if (auth.kind === "unavailable")
+      return reply.status(503).send(inspectionError("unavailable", "links unavailable", true));
+    if (auth.kind !== "orb") return sendUnauthorized(reply);
+    if (!Check(OrbLinkRequestSchema, request.body))
+      return reply.status(400).send(inspectionError("invalid_request", "url is required", false));
+    const added = await addOrbLink(task, deps.store, auth.orb.id, request.body.url);
+    if (added.isErr())
+      return added.error.type === "store_error"
+        ? added.error.code === "unavailable"
+          ? reply.status(503).send(inspectionError("unavailable", "links unavailable", true))
+          : reply.status(500).send(inspectionError("internal", "link not saved", false))
+        : reply
+            .status(400)
+            .send(
+              inspectionError(
+                "invalid_request",
+                "expected a GitHub pull request, issue or Actions run URL",
+                false,
+              ),
+            );
+    return reply.send({ url: added.value });
+  });
 
   app.post(ORB_SELF_SLEEP_PATH, async (request, reply) => {
     reply.header("cache-control", "no-store");

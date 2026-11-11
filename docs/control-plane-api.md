@@ -66,6 +66,7 @@ The UI shows the message, so a deterministic bug is a visible failure, not an en
 | `POST /api/v1/orbs/:orbId/messages/poll` | Inbox state | `docs/inbox.md` |
 | `POST /api/v1/orbs/:orbId/alerts/ack` | Acknowledge alert | `docs/orb-alerts.md` |
 | `GET /api/v1/orbs/:orbId/hosted-files` | Hosted files | `docs/http-exposure.md` |
+| `GET\|DELETE /api/v1/orbs/:orbId/links` | GitHub links | `docs/orb-links.md` |
 | `POST /api/v1/orbs/:orbId/uploads`, `…/uploads/:id/status\|chunk\|finish\|cancel` | Workspace uploads | `docs/workspace-uploads.md` |
 | `WS /api/v1/orbs/:orbId/live` | Live agent socket | `docs/runtime-protocol.md` |
 | `WS /api/v1/orbs/:orbId/terminal` | Terminal | `docs/terminal.md` |
@@ -97,6 +98,7 @@ accepts a caller-selected identity.
 | `POST /runtime/v1/orb/archive`, `POST /runtime/v1/orb/delete` | Self-archive, self-delete | `docs/teardown.md` |
 | `PUT\|DELETE /runtime/previews/:port`, `GET /runtime/previews` | Preview registration | `docs/http-exposure.md` |
 | `POST\|GET\|DELETE /runtime/v1/hosting/files?path=` | Hosted files | `docs/http-exposure.md` |
+| `PUT /runtime/v1/orb/links` | Register GitHub link | `docs/orb-links.md` |
 
 Runtime mutations that accept work (spawn, send, sleep, archive, delete) return no-store 202 at
 durable acceptance and use the error envelope above. A lost response means unknown acceptance.

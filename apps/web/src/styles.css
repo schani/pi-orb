@@ -3036,12 +3036,14 @@ pre,
   color: var(--g3);
 }
 .subagent-live-rail.activity-rail-row,
+.orb-links.activity-rail-row,
 .hosted-files.activity-rail-row {
   margin: 0;
   border: 0;
   border-bottom: 1px solid var(--g2);
 }
 .subagent-live-rail > summary,
+.orb-links > summary,
 .hosted-files > summary {
   min-height: 20px;
   padding: 0 12px;
@@ -3059,6 +3061,94 @@ pre,
 }
 .hosted-file + .hosted-file {
   border-top: 1px solid var(--g2);
+}
+.orb-link-strip {
+  display: flex;
+  height: var(--row);
+  color: var(--k);
+}
+.orb-links > summary > .orb-link-strip {
+  justify-content: flex-end;
+}
+.orb-link-failed::before {
+  background: var(--bad);
+}
+.orb-link-pending::before {
+  background: var(--g2);
+}
+.orb-link-running::before {
+  background: var(--ok);
+  box-shadow:
+    0 0 0 2px var(--w),
+    0 0 0 3px var(--ok);
+  animation: activity-strip-blink 1s steps(2) infinite;
+}
+.orb-links-roster {
+  padding: 0 12px;
+  border-top: 1px solid var(--g2);
+}
+.orb-link + .orb-link {
+  border-top: 1px solid var(--g2);
+}
+.orb-link > summary {
+  display: grid;
+  grid-template-columns: var(--orb-link-ref) minmax(0, 1fr) var(--orb-link-strip) 8ch;
+  gap: 8px;
+  align-items: center;
+  min-height: 24px;
+  cursor: pointer;
+  list-style: none;
+}
+.orb-link > summary::-webkit-details-marker {
+  display: none;
+}
+.orb-link > summary:hover {
+  background: var(--g1);
+}
+.orb-link > summary > a {
+  justify-self: start;
+  white-space: nowrap;
+}
+.orb-link-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.orb-link-status {
+  color: var(--g3);
+  text-align: right;
+}
+.orb-link-body {
+  padding: 0 0 4px 4ch;
+  color: var(--g3);
+}
+.orb-link-check {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 24ch) auto;
+  gap: 8px;
+}
+.orb-link-check > :nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.orb-link-result-failed {
+  color: var(--bad);
+}
+.orb-link-result-running {
+  color: var(--ok);
+}
+.orb-link-remove {
+  display: block;
+  margin-left: auto;
+  padding: 0 4px;
+  border: 0;
+  color: var(--bad);
+  background: transparent;
+}
+.orb-link-remove:hover:not(:disabled) {
+  color: var(--w);
+  background: var(--bad);
 }
 .subagent-counts {
   display: flex;
@@ -3441,6 +3531,8 @@ button.orb-phone-menu {
   }
 
   .subagent-live-rail > summary,
+  .orb-links > summary,
+  .orb-link > summary,
   .hosted-files > summary,
   .subagent-roster > li,
   .subagent-notice:not(.subagent-message-notice) > summary {
@@ -3453,6 +3545,7 @@ button.orb-phone-menu {
     white-space: nowrap;
   }
   .subagent-live-rail > summary,
+  .orb-links > summary,
   .hosted-files > summary {
     grid-template-columns: 1ch auto minmax(0, 1fr);
   }

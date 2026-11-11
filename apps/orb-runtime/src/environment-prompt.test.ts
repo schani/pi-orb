@@ -5,13 +5,13 @@ import { environmentPrompt } from "./environment-prompt.ts";
 describe("shared runtime environment prompt", () => {
   it("requires an explicit request for progress updates to other orbs", () => {
     const rule = "Do not send progress updates to other orbs unless explicitly asked.";
-    expect(environmentPrompt().split(rule)).toHaveLength(2);
+    expect(environmentPrompt("orb_link").split(rule)).toHaveLength(2);
     expect(claudeEnvironmentPrompt).not.toContain(rule);
   });
 
   it("introduces pi-orb before the runtime tools", () => {
     expect(
-      environmentPrompt().startsWith(
+      environmentPrompt("orb_link").startsWith(
         "## pi-orb\n\nYou're running on a VM in the cloud via pi-orb: https://github.com/schani/pi-orb\n\n- Python 3",
       ),
     ).toBe(true);
@@ -19,7 +19,7 @@ describe("shared runtime environment prompt", () => {
 
   it("preserves the exact user-edited runtime bullets", () => {
     expect(
-      environmentPrompt()
+      environmentPrompt("orb_link")
         .split("\n")
         .filter((line) => line.startsWith("- ")),
     ).toEqual([
@@ -29,6 +29,7 @@ describe("shared runtime environment prompt", () => {
       "- Do not send progress updates to other orbs unless explicitly asked.",
       "- For MCP servers, ask the user to open the project's config gear: MCPs (OAuth Connect) or Secrets (static keys). Catalog changes apply next start; OAuth reauthorization needs no restart.",
       "- Executable repo-root hooks: `.agents/setup` runs once per compute incarnation before the agent, without identity; install toolchains there. `.agents/resume` runs every start with identity to authenticate credentials. Both idempotent; logs: `$HOME/.cache/pi-orb/logs`.",
+      "- Use `orb_link` whenever you open a GitHub PR/issue/action run.",
       "- When referring to an orb-local file in prose, use a Markdown link with `orb:<repository-relative-path>` (for example, `orb:README.md`) or `orb:/absolute/path`. Percent-encode each path segment. Keep filesystem paths unchanged inside code and commands. Resolve absolute paths with `pwd`/`realpath`; do not assume a workspace root.",
     ]);
   });
@@ -36,17 +37,25 @@ describe("shared runtime environment prompt", () => {
   it("always uses the exact compact file-link rule without deployment metadata", () => {
     const rule =
       "When referring to an orb-local file in prose, use a Markdown link with `orb:<repository-relative-path>` (for example, `orb:README.md`) or `orb:/absolute/path`. Percent-encode each path segment. Keep filesystem paths unchanged inside code and commands. Resolve absolute paths with `pwd`/`realpath`; do not assume a workspace root.";
-    expect(environmentPrompt().split(rule)).toHaveLength(2);
-    expect(environmentPrompt()).not.toContain("https://files.");
-    expect(environmentPrompt()).not.toContain("/files/");
-    expect(environmentPrompt()).not.toContain("orb://");
-    expect(environmentPrompt()).not.toContain("/workspace");
+    expect(environmentPrompt("orb_link").split(rule)).toHaveLength(2);
+    expect(environmentPrompt("orb_link")).not.toContain("https://files.");
+    expect(environmentPrompt("orb_link")).not.toContain("/files/");
+    expect(environmentPrompt("orb_link")).not.toContain("orb://");
+    expect(environmentPrompt("orb_link")).not.toContain("/workspace");
     expect(claudeEnvironmentPrompt).not.toContain("When referring to an orb-local file");
   });
 
+  it("names each harness's link tool", () => {
+    const rule = (tool: string) =>
+      `- Use \`${tool}\` whenever you open a GitHub PR/issue/action run.`;
+    expect(environmentPrompt("orb_link").split(rule("orb_link"))).toHaveLength(2);
+    expect(environmentPrompt("pi-orb link").split(rule("pi-orb link"))).toHaveLength(2);
+    expect(environmentPrompt("pi-orb link")).not.toContain("orb_link");
+  });
+
   it("keeps harness-specific CLI guidance out of the shared base", () => {
-    expect(environmentPrompt()).not.toContain("pi-orb mcp add");
-    expect(environmentPrompt()).not.toMatch(/`pi-orb /);
-    expect(environmentPrompt()).not.toContain("## Orb tools");
+    expect(environmentPrompt("orb_link")).not.toContain("pi-orb mcp add");
+    expect(environmentPrompt("orb_link")).not.toMatch(/`pi-orb /);
+    expect(environmentPrompt("orb_link")).not.toContain("## Orb tools");
   });
 });

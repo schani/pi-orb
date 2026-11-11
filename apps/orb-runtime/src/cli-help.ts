@@ -254,6 +254,20 @@ const commands = {
     ],
     examples: ["pi-orb previews", "pi-orb previews --json"],
   },
+  link: {
+    usage: "pi-orb link <github-url>",
+    summary:
+      "Show a GitHub pull request, issue or Actions run you are working on in the orb's links drawer.",
+    details: [
+      "github-url is https://github.com/<owner>/<repo>/{pull|issues|actions/runs}/<number>;",
+      "extra path segments, query and fragment are dropped.",
+      "The user sees its title, status and checks, and removes the link; the agent cannot remove it.",
+      "Output: the saved canonical URL.",
+      "Retry: idempotent; saving the same link again changes nothing.",
+      "Exit: 0 saved; 2 usage/environment; 6 any other failure.",
+    ],
+    examples: ["pi-orb link https://github.com/owner/repo/pull/12"],
+  },
   "id-token": {
     usage: "pi-orb id-token --audience <audience> [--ttl-seconds <60..3600>]",
     summary: "Mint a fresh short-lived OIDC identity token.",

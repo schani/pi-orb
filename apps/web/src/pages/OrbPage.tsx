@@ -32,6 +32,7 @@ import { Icon } from "../components/Icons.tsx";
 import { OrbFailureBanner } from "../components/OrbFailureBanner.tsx";
 import { OrbFilesBaseUrl } from "../components/OrbFilesBaseUrl.ts";
 import { OrbIndex } from "../components/OrbIndex.tsx";
+import { OrbLinks } from "../components/OrbLinks.tsx";
 import { OrbNotice } from "../components/OrbNotice.tsx";
 import { OrbResourceWarnings } from "../components/OrbResourceWarnings.tsx";
 import { OrbShareButton, type ShareNotice } from "../components/OrbShareButton.tsx";
@@ -2154,6 +2155,7 @@ function OrbConversation({
               <SubagentRail agents={state.subagents} context={detailContext} kind="shell" />
             </>
           )}
+          {!orbNotFound && metadataAvailable && <OrbLinks orbId={orbId} />}
           <HostedFiles inventory={hostedFiles} error={hostedFilesError} />
           {uploads.progress}
           <OrbFailureBanner message={orb?.lastError} />

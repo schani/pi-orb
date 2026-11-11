@@ -428,6 +428,32 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     });
   }
 
+  addOrbLink(_task: SimulationTask, input: { orbId: string; url: string; now: number }) {
+    return this.db
+      .query(
+        "INSERT INTO orb_links (orb_id,url,added_at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING RETURNING url",
+        [input.orbId, input.url, new Date(input.now)],
+      )
+      .map((result) => result.rows.length > 0);
+  }
+
+  removeOrbLink(_task: SimulationTask, input: { orbId: string; url: string }) {
+    return this.db
+      .query("DELETE FROM orb_links WHERE orb_id=$1 AND url=$2 RETURNING url", [
+        input.orbId,
+        input.url,
+      ])
+      .map((result) => result.rows.length > 0);
+  }
+
+  listOrbLinks(_task: SimulationTask, orbId: string) {
+    return this.db
+      .query("SELECT url, added_at FROM orb_links WHERE orb_id=$1 ORDER BY added_at, url", [orbId])
+      .map((result) =>
+        result.rows.map((row) => ({ url: String(row.url), addedAt: toMs(row.added_at) })),
+      );
+  }
+
   private previewMutation<T>(
     input: { orbId: string; caller: import("../../domain/ports.ts").ArchiveCaller },
     denied: T,

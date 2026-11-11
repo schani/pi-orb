@@ -5354,6 +5354,77 @@ describe("frontend-only browser behavior", () => {
     await page.close();
   });
 
+  it("shows GitHub links above files and removes one from its expanded row", async () => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 740 } });
+    const id = "frontend-long-history";
+    const pr = "https://github.com/owner/repo/pull/291";
+    const other = "https://github.com/owner/determined/pull/14";
+    let items = [
+      {
+        url: pr,
+        addedAt: 1,
+        github: {
+          title: "Add links drawer",
+          status: "draft",
+          checks: [
+            { name: "build", result: "passed" },
+            { name: "e2e", result: "failed" },
+          ],
+        },
+      },
+      { url: other, addedAt: 2, github: null },
+    ];
+    const removed: string[] = [];
+    await page.routeWebSocket(`**/orbs/${id}/live`, () => {});
+    await page.route(`**/api/v1/orbs/${id}/hosted-files`, (route) =>
+      route.fulfill({
+        json: {
+          files: [
+            {
+              path: "chart.html",
+              url: "https://files.example.test/chart.html",
+              mediaType: "text/html",
+              size: 1,
+              updatedAt: 1,
+            },
+          ],
+          cleanupIssues: [],
+        },
+      }),
+    );
+    await page.route(`**/api/v1/orbs/${id}/links**`, (route) => {
+      const request = route.request();
+      if (request.method() === "DELETE") {
+        const url = new URL(request.url()).searchParams.get("url") ?? "";
+        removed.push(url);
+        items = items.filter((item) => item.url !== url);
+        return route.fulfill({ status: 204, body: "" });
+      }
+      return route.fulfill({ json: { repository: "owner/repo", githubError: null, items } });
+    });
+    try {
+      await gotoFrontendHistory(page, `${origin}/orbs/${id}`, id);
+      const links = page.locator(".orb-links");
+      await expectPage(links.locator(":scope > summary")).toHaveText("links");
+      expectPage(
+        await links.evaluate(
+          (element) => element.nextElementSibling?.classList.contains("hosted-files") === true,
+        ),
+      ).toBe(true);
+      await links.locator(":scope > summary").click();
+      await expectPage(links.getByRole("link", { name: "#291" })).toHaveAttribute("href", pr);
+      await expectPage(links.getByRole("link", { name: "determined#14" })).toBeVisible();
+      await links.locator(".orb-link > summary").first().click();
+      await expectPage(links.getByText("failed", { exact: true })).toBeVisible();
+      await links.getByRole("button", { name: "remove" }).first().click();
+      await expectPage(links.getByRole("link", { name: "#291" })).toHaveCount(0);
+      expectPage(removed).toEqual([pr]);
+      await expectPage(links.getByRole("link", { name: "determined#14" })).toBeVisible();
+    } finally {
+      await page.close();
+    }
+  });
+
   it.each([
     { engine: chromium, name: "Chromium desktop", width: 1280 },
     { engine: chromium, name: "Chromium phone", width: 390 },
@@ -5384,7 +5455,7 @@ describe("frontend-only browser behavior", () => {
       await gotoFrontendHistory(page, `${origin}/orbs/${id}`, id);
       const files = page.locator(".hosted-files");
       const summary = files.locator(":scope > summary");
-      await expectPage(summary).toHaveText("files (1)");
+      await expectPage(summary).toHaveText(/^files\s*1$/);
       expectPage(
         await files.evaluate((element) =>
           element.parentElement?.classList.contains("orb-header-scroll"),
@@ -5430,7 +5501,7 @@ describe("frontend-only browser behavior", () => {
         await gotoFrontendHistory(page, `${origin}/orbs/${id}`, id);
         const files = page.locator(".hosted-files");
         const agents = page.locator(".subagent-live-rail");
-        await expectPage(files.locator("summary")).toHaveText("files (1)");
+        await expectPage(files.locator("summary")).toHaveText(/^files\s*1$/);
         await expectPage(agents).toContainText("1 running");
         await expectPage(agents).toContainText("1 queued");
         await expectPage(agents).toContainText("1 finishing");
@@ -5478,8 +5549,9 @@ describe("frontend-only browser behavior", () => {
   it("shows hosted files on an archived orb and preserves a missing orb URL", async () => {
     const page = await browser.newPage();
     await page.goto(`${origin}/orbs/frontend-archived-orb`);
-    await expectPage(page.getByText("files (1)")).toBeVisible();
-    await page.getByText("files (1)").click();
+    const files = page.locator(".hosted-files > summary");
+    await expectPage(files).toHaveText(/^files\s*1$/);
+    await files.click();
     const file = page.getByRole("link", { name: "index.html" });
     await expectPage(file).toHaveAttribute(
       "href",

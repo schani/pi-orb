@@ -254,5 +254,16 @@ export function createOrbTools(
       replay: "safe",
       execute: async (_args, api) => output({ kind: "list_previews" }, api),
     }),
+    defineTool({
+      name: "orb_link",
+      description:
+        "Show a GitHub pull request, issue or Actions run URL you are working on in this orb's links drawer, with live status. Only the user removes links.",
+      parameters: Type.Object({ url: Type.String() }, { additionalProperties: false }),
+      structuredOutputSchema: resultSchema(
+        Type.Object({ url: Type.String() }, { additionalProperties: false }),
+      ),
+      replay: "safe",
+      execute: async (args, api) => output({ kind: "link", ...args }, api),
+    }),
   ];
 }
