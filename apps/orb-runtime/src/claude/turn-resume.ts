@@ -57,6 +57,7 @@ export type TurnResumeDecision =
 
 type TailEntry =
   | { readonly kind: "user"; readonly id: string | null }
+  | { readonly kind: "delivery"; readonly id: string | null }
   | {
       readonly kind: "assistant";
       readonly id: string | null;
@@ -84,7 +85,7 @@ function classify(entry: unknown): TailEntry | null {
       if (!isRecordObject(message)) return { kind: "other", id };
       switch (message["role"]) {
         case "user":
-          return { kind: "user", id };
+          return { kind: message["humanAuthority"] === false ? "delivery" : "user", id };
         case "assistant": {
           const content = message["content"];
           const hasToolCall =
@@ -168,7 +169,7 @@ function interruptedTail(tail: readonly TailEntry[]): InterruptedTail | null {
     return null;
   }
   if (stoppedOnToolUse(last)) return { shape: "dangling_tool_calls", headRecordId: last.id };
-  if (last.kind === "user" || last.kind === "boot_marker")
+  if (last.kind === "user" || last.kind === "delivery" || last.kind === "boot_marker")
     return { shape: "unanswered_user_message", headRecordId: last.id };
   return null;
 }
