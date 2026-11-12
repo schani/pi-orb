@@ -2939,9 +2939,9 @@ export class ClaudeOrbAgent implements OrbAgent {
   appendAlert(
     request: RuntimeAlertRequest,
   ): Result<RuntimeAlertResponse, { code: "unavailable" | "conflict"; message: string }> {
-    if (!this.accepting || this.health.status !== "ready")
+    if (!this.accepting || this.health.status !== "ready" || this.history === null)
       return err({ code: "unavailable", message: "Claude runtime is not accepting alerts." });
-    const existing = this.history?.view.find(
+    const existing = this.history.view.find(
       (record) => record.overflow.requestId === request.requestId,
     );
     if (existing !== undefined)
@@ -2949,12 +2949,19 @@ export class ClaudeOrbAgent implements OrbAgent {
         ? ok({ v: 1, id: existing.id, duplicate: true })
         : err({ code: "conflict", message: "Alert request id conflicts." });
     const id = randomUUID();
-    return this.platformEvent(
-      "pi-orb.alert",
-      request.message,
-      { requestId: request.requestId, message: request.message },
-      id,
-    )
+    return this.history
+      .appendPlatform({
+        id,
+        parentId: this.history.view.at(-1)?.id ?? null,
+        timestamp: new Date().toISOString(),
+        type: "event",
+        eventType: "pi-orb.alert",
+        content: [{ type: "text", text: request.message }],
+        custom: { customType: "pi-orb.alert", display: true },
+        alert: { requestId: request.requestId, message: request.message },
+        overflow: { requestId: request.requestId, message: request.message },
+      })
+      .andThen(() => this.flushHistory())
       .map(() => ({ v: 1 as const, id, duplicate: false }))
       .mapErr((error) => ({ code: "unavailable" as const, message: error.message }));
   }

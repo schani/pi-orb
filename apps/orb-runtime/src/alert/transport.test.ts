@@ -36,6 +36,7 @@ it("sends authenticated CLI alerts through the loopback listener, including maxi
           id: response.id,
           type: "event",
           eventType: "pi-orb.alert",
+          alert: { message, requestId },
           content: [{ type: "text", text: message }],
           overflow: { message, requestId },
         }),
@@ -81,7 +82,7 @@ it("replays the CLI identity after a lost successful response without appending 
         .records.filter(
           (record) => record.type === "event" && record.overflow.requestId === input.requestId,
         ),
-    ).toHaveLength(1);
+    ).toMatchObject([{ alert: { message: input.message, requestId: input.requestId } }]);
   } finally {
     await app.close();
     f.dispose();

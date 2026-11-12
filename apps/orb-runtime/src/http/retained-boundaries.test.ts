@@ -91,6 +91,7 @@ it("authenticates and deduplicates Claude alerts before fencing late work for id
       {
         type: "event",
         eventType: "pi-orb.alert",
+        alert: { message: "attention", requestId: "alert" },
         content: [{ type: "text", text: "attention" }],
         overflow: { message: "attention", requestId: "alert" },
       },
