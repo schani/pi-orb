@@ -66,6 +66,9 @@ export function claudeBootEntries(records: readonly HistoryRecord[]): unknown[] 
           id: record.id,
           message: {
             role: record.role === "tool" ? "toolResult" : record.role,
+            ...(record.role === "user"
+              ? { humanAuthority: record.inboxMessageIds !== undefined }
+              : {}),
             content,
             stopReason: record.finishReason === "tool_use" ? "toolUse" : record.finishReason,
           },

@@ -16,6 +16,7 @@ const human: HistoryRecord = {
   id: "human",
   type: "message",
   role: "user",
+  inboxMessageIds: ["human-inbox"],
   content: [{ type: "text", text: "work" }],
 };
 const assistant: HistoryRecord = {
@@ -150,6 +151,87 @@ describe("Claude uses Pi's boot decision", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  it.each(
+    (["task", "scheduled", "unknown", "human"] as const).flatMap((kind) =>
+      [0, 2, 3].map((claims) => ({ kind, claims })),
+    ),
+  )(
+    "native $kind input after $claims boot claims preserves the human budget",
+    ({ kind, claims }) => {
+      const dir = mkdtempSync(join(tmpdir(), "claude-boot-delivery-"));
+      try {
+        const path = join(dir, "native.jsonl");
+        const history = new ClaudeHistory(dir, "session", base.timestamp);
+        const first = { type: "user", uuid: "first", message: { role: "user", content: "work" } };
+        history
+          .correlate(first.uuid, { messageIds: ["first"], operationId: "first" })
+          ._unsafeUnwrap();
+        writeFileSync(path, `${JSON.stringify(first)}\n`);
+        history.scan(path)._unsafeUnwrap();
+        history
+          .appendPlatform({
+            ...assistant,
+            content: [{ type: "text", text: "done" }],
+            finishReason: "end_turn",
+          })
+          ._unsafeUnwrap();
+        for (let index = 0; index < claims; index++)
+          history.appendPlatform(boot(`claim-${index}`))._unsafeUnwrap();
+        const input = {
+          type: "user",
+          uuid: "input",
+          ...(kind === "task" || kind === "human"
+            ? { origin: { kind: "task-notification" } }
+            : kind === "scheduled"
+              ? { origin: { kind: "task-notification", subkind: "scheduled-trigger" } }
+              : {}),
+          message: { role: "user", content: "continue" },
+        };
+        if (kind === "human")
+          history
+            .correlate(input.uuid, { messageIds: ["next"], operationId: "next" })
+            ._unsafeUnwrap();
+        writeFileSync(path, `${JSON.stringify(first)}\n${JSON.stringify(input)}\n`);
+        const records = [...history.scan(path)._unsafeUnwrap()];
+        expect(records.at(-1)).toMatchObject({
+          id: input.uuid,
+          type: "message",
+          role: "user",
+          ...(kind === "human" ? { inboxMessageIds: ["next"] } : {}),
+        });
+        if (kind !== "human") expect(records.at(-1)).not.toHaveProperty("inboxMessageIds");
+        const resume = claims < 3 || kind === "human";
+        expect(plan(records)).toMatchObject({
+          triggerTurn: resume,
+          marker: {
+            customType: resume ? "pi-orb.turn-resume" : "pi-orb.turn-resume-declined",
+            ...(resume
+              ? { details: { headRecordId: input.uuid, shape: "unanswered_user_message" } }
+              : {}),
+          },
+        });
+        for (const outcome of ["completed", "aborted", "failed"]) {
+          expect(
+            plan([
+              ...records,
+              {
+                ...base,
+                id: "terminal",
+                type: "event",
+                eventType: "claude.operation_finished",
+                overflow: { outcome },
+              },
+            ]),
+          ).toMatchObject({
+            triggerTurn: false,
+            marker: { customType: "pi-orb.host-restarted" },
+          });
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
   it.each([false, true])(
     "projects consumed human authority at its attachment, never at the appended tail (canonical=%s)",
     (canonical) => {
