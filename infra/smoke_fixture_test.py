@@ -84,7 +84,7 @@ class FixtureIoTest(unittest.TestCase):
         self.assertIn('outcome=deadline', log)
 
     def test_platform_faults_return_private_results_without_replay(self):
-        from infra import smoke_fixture
+        from infra import release_state, smoke_fixture
         faults = [('tempfile.TemporaryDirectory', OSError('secret-path')),
                   ('Path.touch', OSError('secret-path')),
                   ('Path.write_text', ValueError('secret-config')),
@@ -92,16 +92,16 @@ class FixtureIoTest(unittest.TestCase):
                   ('Path.read_bytes', OSError('secret-response'))]
         for target, fault in faults:
             with self.subTest(target=target), \
-                 patch.object(smoke_fixture, 'bounded_process', return_value=subprocess.CompletedProcess([], 0, b'secret-token', b'')) as auth, \
-                 patch.object(smoke_fixture, 'config_request', return_value='200'), \
-                 patch('infra.smoke_fixture.' + target, side_effect=fault) as failed, \
+                 patch.object(release_state, 'bounded_process', return_value=subprocess.CompletedProcess([], 0, b'secret-token', b'')) as auth, \
+                 patch.object(release_state, 'config_request', return_value='200'), \
+                 patch('infra.release_state.' + target, side_effect=fault) as failed, \
                  patch('sys.stderr', io.StringIO()) as log:
                 result = smoke_fixture.FixtureCloud().http('GET', 'https://storage.googleapis.com/secret')
                 self.assertIsNotNone(result.error)
                 self.assertNotIn('secret', result.error.message)
                 self.assertNotIn('secret', log.getvalue())
                 self.assertEqual((auth.call_count, failed.call_count), (1, 1))
-        with patch.object(smoke_fixture, 'bounded_process', return_value=subprocess.CompletedProcess([], 0, b'\xffsecret-token', b'')) as auth:
+        with patch.object(release_state, 'bounded_process', return_value=subprocess.CompletedProcess([], 0, b'\xffsecret-token', b'')) as auth:
             result = smoke_fixture.FixtureCloud().http('GET', 'https://storage.googleapis.com/secret')
             self.assertIsNotNone(result.error)
             self.assertNotIn('secret', result.error.message)

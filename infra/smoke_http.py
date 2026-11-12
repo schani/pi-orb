@@ -11,7 +11,6 @@ import sys
 import tempfile
 import time
 
-MONITOR_READS = {"gcs-metadata", "gcs-body", "monitoring-series"}
 RETRY_HTTP = {"408", "429", "500", "502", "503", "504"}
 RETRY_CURL = {5, 6, 7, 16, 18, 28, 35, 52, 55, 56, 92, 95}
 UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}"
@@ -241,11 +240,10 @@ def http_category(code, status, body, stderr=b""):
 
 
 def config_request(operation, config, output, deadline):
-    monitor = operation in MONITOR_READS
-    if not monitor and operation not in {"sts", "sts-negative", "impersonate", "read", "fixture-get", "fixture-cas"}:
+    if operation not in {"sts", "sts-negative", "impersonate", "read", "fixture-get", "fixture-cas", "monitor-read"}:
         print("smoke-http: operation=invalid phase=http error=config outcome=terminal", file=sys.stderr)
         return "000"
-    started = deadline - 60 if monitor else time.monotonic()
+    started = deadline - 60 if operation == "monitor-read" else time.monotonic()
     with tempfile.TemporaryDirectory(prefix="pi-orb-smoke-federation-") as directory:
         headers = Path(directory) / "headers"
         for attempt in range(1, 6):
@@ -270,12 +268,6 @@ def config_request(operation, config, output, deadline):
                 result = subprocess.CompletedProcess([], code, b"", error.stderr or b"")
             except OSError:
                 code, status = 2, "000"
-            except Exception:
-                # Unknown process-adapter failures must not replay monitor reads.
-                if not monitor:
-                    raise
-                code, status = 2, "000"
-                result = subprocess.CompletedProcess([], code, b"", b"")
             data = Path(output).read_bytes()
             status = observed_status(status, headers.read_text(errors="replace"))
             negative = False
@@ -284,18 +276,8 @@ def config_request(operation, config, output, deadline):
                     negative = json.loads(data).get("error") in {"invalid_target", "invalid_grant"}
                 except (ValueError, AttributeError, TypeError):
                     pass
-            success = code == 0 and (status == "200" or negative or monitor and status == "404")
-            try:
-                category, can_retry = http_category(code, status, data, result.stderr if code != 2 else b"")
-            except RecursionError:
-                if not monitor:
-                    raise
-                success, category, can_retry = False, "json", False
-            if monitor and code == 0 and status == "200":
-                try:
-                    json.loads(data)
-                except (ValueError, UnicodeError, RecursionError):
-                    success, category, can_retry = False, "json", False
+            success = code == 0 and (status == "200" or negative)
+            category, can_retry = http_category(code, status, data, result.stderr if code != 2 else b"")
             delay = max(2 ** (attempt - 1), retry_after(headers.read_text(errors="replace")))
             remaining = max(0, deadline - time.monotonic())
             outcome = ("deadline" if remaining <= 0 else
@@ -307,7 +289,7 @@ def config_request(operation, config, output, deadline):
                       f"error={category} elapsed_s={time.monotonic() - started:.3f} "
                       f"remaining_s={remaining:g} delay_s={delay if outcome == 'retry' else 0:g} outcome={outcome}", file=sys.stderr)
             if outcome != "retry":
-                return status if outcome in {"ok", "recovered"} or (monitor or operation.startswith("fixture-")) and code == 0 and outcome != "deadline" else "000"
+                return status if outcome in {"ok", "recovered"} or (operation.startswith("fixture-") or operation == "monitor-read") and code == 0 and outcome != "deadline" else "000"
             time.sleep(delay)
     return "000"
 
