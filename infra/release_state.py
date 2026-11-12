@@ -11,11 +11,14 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
+import time
 from typing import Any, Literal
 import urllib.error
 import urllib.parse
 import urllib.request
 from infra.ci_qualification import valid_evidence
+from infra.smoke_http import bounded_process, config_request
 
 
 @dataclass(frozen=True)
@@ -129,7 +132,8 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class Cloud:
-    def __init__(self, run=command, request=None):
+    def __init__(self, run=command, request=None, *, retry_reads=False):
+        self.retry_reads = retry_reads
         self.run = run
         self.request = request or urllib.request.build_opener(NoRedirect()).open
 
@@ -138,6 +142,8 @@ class Cloud:
         return result if result.error else parse_json(result.value)
 
     def http(self, method, url, body=None):
+        if self.retry_reads and method == "GET":
+            return self.bounded_http(method, url, body, time.monotonic() + 60, "monitor-read")
         token = self.run(["gcloud", "auth", "print-access-token"])
         if token.error:
             return token
@@ -155,6 +161,38 @@ class Cloud:
             return fail("conflict" if error.code == 412 else "http", f"cloud request HTTP {error.code}")
         except (OSError, ValueError, urllib.error.URLError):
             return fail("http", "cloud request unavailable")
+
+    def bounded_http(self, method, url, body, deadline, operation):
+        try:
+            token = bounded_process("fixture-auth", ["gcloud", "auth", "print-access-token"], deadline)
+            if token.returncode:
+                category = token.stderr.decode()
+                suffix = f" ({category.upper()})" if category in {
+                    "permission_denied", "unauthenticated", "resource_exhausted", "unavailable",
+                    "deadline_exceeded", "invalid_grant", "invalid_target", "unauthorized_client",
+                } else ""
+                return fail("command", f"gcloud auth print-access-token exited {token.returncode}{suffix}")
+            with tempfile.TemporaryDirectory(prefix="pi-orb-smoke-fixture-") as directory:
+                config, output = Path(directory) / "request", Path(directory) / "response"
+                fields = {"url": url, "request": method,
+                          "header": "Authorization: Bearer " + token.stdout.decode().strip()}
+                text = "".join(f"{key} = {json.dumps(value)}\n" for key, value in fields.items())
+                if body is not None:
+                    text += 'header = "Content-Type: application/json"\n'
+                    text += "data = " + json.dumps(json.dumps(body)) + "\n"
+                config.touch(mode=0o600)
+                config.write_text(text)
+                status = config_request(operation, str(config), str(output), deadline)
+                if status == "404":
+                    return Result(None)
+                if status != "200":
+                    return fail("conflict" if status == "412" else "http", f"cloud request HTTP {status}")
+                result = parse_json(output.read_bytes())
+                return fail("timeout", "cloud IO deadline exceeded") if time.monotonic() >= deadline else result
+        except OSError:
+            return fail("io", "cloud IO unavailable")
+        except (UnicodeError, ValueError):
+            return fail("invalid", "invalid cloud IO data")
 
     def object(self, bucket, key):
         url = f"https://storage.googleapis.com/storage/v1/b/{urllib.parse.quote(bucket, safe='')}/o/{urllib.parse.quote(key, safe='')}"

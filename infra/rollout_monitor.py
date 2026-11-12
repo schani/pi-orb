@@ -329,7 +329,7 @@ def sample(cloud, record, start):
 
 
 def observe(record, output, cloud=None, clock=time.monotonic, sleep=time.sleep):
-    cloud = cloud or Cloud()
+    cloud = cloud or Cloud(retry_reads=True)
     began = clock()
     evidence = {'releaseId': record.get('releaseId'), 'commit': record.get('commit'),
                 'generation': record.get('artifacts', {}).get('deploy_generation'),

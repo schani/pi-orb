@@ -240,10 +240,10 @@ def http_category(code, status, body, stderr=b""):
 
 
 def config_request(operation, config, output, deadline):
-    if operation not in {"sts", "sts-negative", "impersonate", "read", "fixture-get", "fixture-cas"}:
+    if operation not in {"sts", "sts-negative", "impersonate", "read", "fixture-get", "fixture-cas", "monitor-read"}:
         print("smoke-http: operation=invalid phase=http error=config outcome=terminal", file=sys.stderr)
         return "000"
-    started = time.monotonic()
+    started = deadline - 60 if operation == "monitor-read" else time.monotonic()
     with tempfile.TemporaryDirectory(prefix="pi-orb-smoke-federation-") as directory:
         headers = Path(directory) / "headers"
         for attempt in range(1, 6):
@@ -289,7 +289,7 @@ def config_request(operation, config, output, deadline):
                       f"error={category} elapsed_s={time.monotonic() - started:.3f} "
                       f"remaining_s={remaining:g} delay_s={delay if outcome == 'retry' else 0:g} outcome={outcome}", file=sys.stderr)
             if outcome != "retry":
-                return status if outcome in {"ok", "recovered"} or operation.startswith("fixture-") and code == 0 and outcome != "deadline" else "000"
+                return status if outcome in {"ok", "recovered"} or (operation.startswith("fixture-") or operation == "monitor-read") and code == 0 and outcome != "deadline" else "000"
             time.sleep(delay)
     return "000"
 

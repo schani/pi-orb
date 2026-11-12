@@ -345,5 +345,54 @@ class MonitorTest(unittest.TestCase):
         self.assertIsNotNone(monitor.placement(service, 'wrong').error)
 
 
+class MonitorReadRetryTest(unittest.TestCase):
+    def test_recovered_reads_observe_but_exhaustion_stays_incomplete(self):
+        import subprocess
+        from infra import smoke_http
+        for exhausted in (False, True):
+            with self.subTest(exhausted=exhausted), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / 'monitor.json'
+                elapsed, calls = [0.0], []
+                def sleep(seconds):
+                    elapsed[0] += seconds
+                def run(args, **kwargs):
+                    if args[0] == 'gcloud':
+                        return subprocess.CompletedProcess(args, 0, b'secret-token', b'')
+                    calls.append(args)
+                    failed = len(calls) <= (5 if exhausted else 1)
+                    Path(args[args.index('--output') + 1]).write_bytes(b'{}' if failed else
+                        b'{"timeSeries":[{"points":[{"interval":{"endTime":"stamp"},"value":{"doubleValue":1}}]}]}')
+                    return subprocess.CompletedProcess(args, 0, b'503' if failed else b'200', b'')
+                def capture(cloud, *_):
+                    self.assertTrue(output.exists())
+                    return monitor.metric_coverage(cloud, 'project', 'sql', 'cpu', 'start', 'end')
+                with patch.object(monitor, 'sample', side_effect=capture), \
+                        patch.object(smoke_http.subprocess, 'run', side_effect=run), \
+                        patch.object(smoke_http.time, 'monotonic', side_effect=lambda: elapsed[0]), \
+                        patch.object(smoke_http.time, 'sleep', side_effect=sleep), patch('sys.stderr', io.StringIO()) as log:
+                    result = monitor.observe({}, output, clock=lambda: elapsed[0], sleep=sleep)
+                evidence = json.loads(output.read_text())
+                self.assertEqual(result.error is not None, exhausted)
+                self.assertEqual(evidence['outcome'], 'incomplete' if exhausted else 'observed')
+                self.assertEqual(evidence['samples'][0]['outcome'], 'unavailable' if exhausted else 'observed')
+                self.assertEqual(evidence['samples'][-1]['outcome'], 'observed')
+                self.assertGreaterEqual(evidence['durationSeconds'], 1090)
+                self.assertIn('operation=monitor-read', log.getvalue())
+                self.assertNotIn('secret', log.getvalue())
+
+    def test_default_reads_and_all_mutations_stay_single_shot(self):
+        import urllib.error
+        for retry_reads, methods in ((False, ('GET', 'POST', 'PUT', 'DELETE')),
+                                     (True, ('POST', 'PUT', 'DELETE'))):
+            cloud = monitor.Cloud(retry_reads=retry_reads)
+            for method in methods:
+                with self.subTest(retry_reads=retry_reads, method=method), \
+                        patch.object(cloud, 'run', return_value=Result(b'secret-token')) as token, \
+                        patch.object(cloud, 'request', side_effect=urllib.error.HTTPError('https://example.test', 503, 'secret', {}, None)) as request:
+                    self.assertIsNotNone(cloud.http(method, 'https://example.test').error)
+                    self.assertEqual(request.call_count, 1)
+                    token.assert_called_once_with(['gcloud', 'auth', 'print-access-token'])
+
+
 if __name__ == '__main__':
     unittest.main()
