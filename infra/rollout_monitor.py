@@ -7,15 +7,74 @@ import os
 from pathlib import Path
 import re
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from infra.release_state import Cloud, Result, fail, load, now, parse_json, save, valid_id
+from infra.smoke_http import config_request
 
 WINDOW_SECONDS = 900
 METRIC_LAG_SECONDS = 180
 ID_TOKEN_RETRY_SECONDS = 10
+
+
+class MonitorCloud(Cloud):
+    """Per-read budgets; release and mutation IO retain Cloud's single-shot path."""
+
+    def http(self, method, url, body=None):
+        if method != 'GET':
+            return super().http(method, url, body)
+        parsed = urllib.parse.urlsplit(url)
+        if parsed.scheme == 'https' and parsed.netloc == 'storage.googleapis.com' and parsed.path.startswith('/storage/v1/b/'):
+            operation = 'gcs-body' if urllib.parse.parse_qs(parsed.query).get('alt') == ['media'] else 'gcs-metadata'
+        elif parsed.scheme == 'https' and parsed.netloc == 'monitoring.googleapis.com' and parsed.path.endswith('/timeSeries'):
+            operation = 'monitoring-series'
+        else:
+            return fail('invalid', 'unsupported monitor read')
+        started = time.monotonic()
+        deadline = started + 60
+        try:
+            token = self.run(['gcloud', 'auth', 'print-access-token'], timeout=min(30, deadline - time.monotonic()))
+        except Exception:
+            # The injected command runner is the process adapter boundary.
+            category, token = 'unknown', fail('command', 'monitor authentication unavailable')
+        else:
+            if token.error:
+                category = 'timeout' if token.error.kind == 'timeout' else 'auth'
+                token = fail(token.error.kind, 'monitor authentication unavailable')
+            elif not isinstance(token.value, bytes) or not re.fullmatch(rb'[A-Za-z0-9._~+/-]+=*', token.value.strip()):
+                category, token = 'invalid', fail('invalid', 'invalid monitor credential')
+            else:
+                category = 'ok'
+        remaining = max(0, deadline - time.monotonic())
+        if token.error or remaining <= 0:
+            print(f'rollout-read: operation={operation} phase=auth attempt=1 http=000 error={category} '
+                  f'elapsed_s={time.monotonic() - started:g} remaining_s={remaining:g} delay_s=0 '
+                  f'outcome={"deadline" if remaining <= 0 else "terminal"}', file=sys.stderr)
+            return token if token.error else fail('timeout', 'monitor read deadline exceeded')
+        try:
+            with tempfile.TemporaryDirectory(prefix='pi-orb-monitor-read-') as directory:
+                config, output = Path(directory) / 'request', Path(directory) / 'response'
+                fields = {'url': url, 'request': 'GET',
+                          'header': 'Authorization: Bearer ' + token.value.decode().strip()}
+                config.touch(mode=0o600)
+                config.write_text(''.join(f'{key} = {json.dumps(value)}\n' for key, value in fields.items()))
+                status = config_request(operation, str(config), str(output), deadline)
+                if status == '404':
+                    return Result(None)
+                if status != '200':
+                    return fail('conflict' if status == '412' else 'http', f'cloud request HTTP {status}')
+                result = parse_json(output.read_bytes())
+                return fail('timeout', 'monitor read deadline exceeded') if time.monotonic() >= deadline else result
+        except RecursionError:
+            return fail('invalid', 'invalid JSON at adapter boundary')
+        except (OSError, ValueError, UnicodeError):
+            print(f'rollout-read: operation={operation} phase=http attempt=1 http=000 error=adapter '
+                  f'elapsed_s={time.monotonic() - started:g} remaining_s={max(0, deadline - time.monotonic()):g} '
+                  'delay_s=0 outcome=terminal', file=sys.stderr)
+            return fail('io', 'monitor read unavailable')
 
 
 def placement(service, image):
@@ -329,7 +388,7 @@ def sample(cloud, record, start):
 
 
 def observe(record, output, cloud=None, clock=time.monotonic, sleep=time.sleep):
-    cloud = cloud or Cloud()
+    cloud = cloud or MonitorCloud()
     began = clock()
     evidence = {'releaseId': record.get('releaseId'), 'commit': record.get('commit'),
                 'generation': record.get('artifacts', {}).get('deploy_generation'),
