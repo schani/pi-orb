@@ -5366,6 +5366,8 @@ describe("frontend-only browser behavior", () => {
         github: {
           title: "Add links drawer",
           status: "draft",
+          diff: { additions: 525, deletions: 38 },
+          comments: null,
           checks: [
             {
               name: "build",
@@ -5454,6 +5456,7 @@ describe("frontend-only browser behavior", () => {
       await expectPage(page.getByRole("tooltip")).toHaveCount(0);
       await expectPage(links.getByRole("link", { name: "#291" })).toHaveAttribute("href", pr);
       await expectPage(links.getByRole("link", { name: "determined#14" })).toBeVisible();
+      await expectPage(links.locator(".orb-link-metric").first()).toHaveText("+525 -38");
       await links.locator(".orb-link > summary").first().click();
       const waterfall = links.locator(".link-timeline");
       await expectPage(waterfall.getByText("2m 00s")).toBeVisible();

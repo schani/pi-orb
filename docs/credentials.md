@@ -208,7 +208,8 @@ so the same fenced CAS and loss window apply.
 - The App is only the OAuth client registration. Refresh requires its client secret, a second
   control-plane-only secret (`pi-orb-github-client-secret`). Config: `PI_ORB_GITHUB_CLIENT_ID`,
   `PI_ORB_GITHUB_CLIENT_SECRET`; unset means `tokens/github` answers `auth_required` and no gate
-  is wired.
+  is wired. The control plane's `npm run dev` (also behind `npm run dev:local`) falls back to
+  `DEV_GITHUB_CLIENT_ID` / `DEV_GITHUB_CLIENT_SECRET`.
 - `GithubUpstreamRefresher` maps `bad_refresh_token` to `invalid_grant`. GitHub reports OAuth
   errors as HTTP 200 with an `error` field; adapters inspect the body.
 - `GithubAuthGate` advances each ceremony at most one poll per `ensureAuth`, honoring interval and

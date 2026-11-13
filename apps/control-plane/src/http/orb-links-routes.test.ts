@@ -10,7 +10,8 @@ const ORB = "00000000-0000-4000-8000-0000000000a1";
 const PR = "https://github.com/owner/repo/pull/7";
 
 async function setup(
-  github: GithubLinkReader = () => okAsync([{ title: "T", status: "open", checks: [] }]),
+  github: GithubLinkReader = () =>
+    okAsync([{ title: "T", status: "open", diff: null, comments: null, checks: [] }]),
 ) {
   const task = new NoSimulationTask("orb link routes", false);
   const h = makeHarness();
@@ -35,7 +36,7 @@ it("lists links with status and removes them", async () => {
         {
           url: PR,
           addedAt: expect.any(Number),
-          github: { title: "T", status: "open", checks: [] },
+          github: { title: "T", status: "open", diff: null, comments: null, checks: [] },
         },
       ],
     });

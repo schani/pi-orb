@@ -77,7 +77,18 @@ export const OrbLinkCheckSchema = Type.Object(
 export type OrbLinkCheck = Static<typeof OrbLinkCheckSchema>;
 
 export const OrbLinkStatusSchema = Type.Object(
-  { title: Type.String(), status: Type.String(), checks: Type.Array(OrbLinkCheckSchema) },
+  {
+    title: Type.String(),
+    status: Type.String(),
+    /** Pull requests' changed lines. */
+    diff: Type.Union([
+      Type.Object({ additions: Type.Number(), deletions: Type.Number() }, closed),
+      Type.Null(),
+    ]),
+    /** Issues' comment count. */
+    comments: Type.Union([Type.Number(), Type.Null()]),
+    checks: Type.Array(OrbLinkCheckSchema),
+  },
   closed,
 );
 export type OrbLinkStatus = Static<typeof OrbLinkStatusSchema>;

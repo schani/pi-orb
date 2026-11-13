@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Links drawer — PR line diff, five proposals</title>
+<link rel="stylesheet" href="../apps/web/src/styles.css">
+<style>
+body { display: block; }
+.study { padding: 12px; border-bottom: 1px solid var(--k); }
+.study h1, .study h2 { font-size: 13px; line-height: 20px; margin: 0; }
+.study p { margin: 4px 0 0; color: var(--g3); max-width: 80ch; }
+.pair { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; align-items: flex-start; }
+.preview { width: 720px; max-width: 100%; border: 1px solid var(--k); }
+.preview.touch { width: 390px; }
+.preview .orb-links-roster { max-height: none; }
+.touch .orb-links > summary, .touch .orb-link > summary { min-height: 44px; }
+.preview .orb-link > summary { grid-template-columns: var(--cols); }
+
+.add { color: var(--ok); }
+.del { color: var(--bad); }
+.diff { white-space: nowrap; text-align: right; font-family: var(--mono); font-size: 12px; }
+.metric { white-space: nowrap; text-align: right; color: var(--g3); }
+.blocks { display: flex; gap: 1px; }
+.blocks i { width: 8px; height: 8px; background: var(--g1x); }
+.blocks i.add { background: var(--ok); }
+.blocks i.del { background: var(--bad); }
+.d .orb-link > summary { padding: 2px 0; }
+.d .lines { min-width: 0; }
+.d .lines > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d .lines > div + div { color: var(--g3); }
+.e .diff { text-align: left; }
+</style>
+</head>
+<body>
+<svg style="display:none" aria-hidden="true">
+  <symbol id="i-pull" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M2.5 3.5a1.5 1.5 0 1 0 3 0 1.5 1.5 0 1 0-3 0 M2.5 12.5a1.5 1.5 0 1 0 3 0 1.5 1.5 0 1 0-3 0 M10.5 12.5a1.5 1.5 0 1 0 3 0 1.5 1.5 0 1 0-3 0 M4 5v6 M12 11V6a2 2 0 0 0-2-2H7 M9 2 7 4l2 2"/></symbol>
+  <symbol id="i-issue" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M2 8a6 6 0 1 0 12 0 6 6 0 1 0-12 0 M7.25 8a.75.75 0 1 0 1.5 0 .75.75 0 1 0-1.5 0"/></symbol>
+  <symbol id="i-run" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M2 8a6 6 0 1 0 12 0 6 6 0 1 0-12 0 M6.5 5.5v5l4-2.5z"/></symbol>
+  <symbol id="i-bin" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M2 4h12M6 4V2h4v2M4 6v8h8V6M6.5 7v4M9.5 7v4"/></symbol>
+</svg>
+
+<section class="study">
+  <h1>Links drawer — PR line diff</h1>
+  <p>Five placements for GitHub's <span class="add">+added</span> <span class="del">-deleted</span> line counts, in a drawer that mixes pull requests, issues and runs. Desktop 720px and phone 390px. Phones drop the status word in every proposal; the kind icon's colour carries it.</p>
+</section>
+
+<div id="studies"></div>
+
+<script>
+const LINKS = [
+  { kind: "pull", ref: "#39185", title: "Batch GBT row decoding", status: "review", tone: "ok", add: 525, del: 38, files: 14, checks: ["passed", "passed"] },
+  { kind: "pull", ref: "#39191", title: "Retry GBT reads", status: "draft", tone: "muted", add: 42, del: 7, files: 3, checks: ["running"] },
+  { kind: "pull", ref: "determined#14", title: "Expose scheduler hooks", status: "approved", tone: "ok", add: 1204, del: 611, files: 22, checks: ["passed", "passed"] },
+  { kind: "issue", ref: "#39180", title: "GBT stream stalls on large results", status: "open", tone: "ok", comments: 4 },
+  { kind: "run", ref: "43259913883", title: "CI · gbt-batch", status: "running", tone: "warn", duration: "3m 20s", checks: ["passed", "running"] },
+  { kind: "pull", ref: "#39179", title: "Stream GBT query results", status: "merged", tone: "done", add: 2310, del: 95, files: 31, checks: ["passed", "passed"] },
+  { kind: "issue", ref: "#39101", title: "Flaky GBT fixture", status: "closed", tone: "done", comments: 9 },
+  { kind: "run", ref: "43249587078", title: "CI · stream-gbt", status: "failed", tone: "bad", duration: "6m 40s", checks: ["passed", "failed"] },
+];
+
+const DOT = { passed: "", failed: "activity-strip-failed", running: "activity-strip-running", pending: "orb-link-pending" };
+const dots = (checks = []) => `<span class="orb-link-strip">${checks.map((c) => `<span class="activity-strip-dot ${DOT[c]}"></span>`).join("")}</span>`;
+const worst = (checks = []) => ["failed", "running", "pending"].find((r) => checks.includes(r)) ?? (checks.length ? "passed" : "pending");
+const icon = (l) => `<span class="orb-link-kind orb-link-${l.tone}"><svg class="ic"><use href="#i-${l.kind}"/></svg></span>`;
+const ref = (l) => `<a href="#">${l.ref}</a>`;
+const title = (l) => `<span class="orb-link-title">${l.title}</span>`;
+const status = (l) => `<span class="orb-link-status">${l.status}</span>`;
+const bin = `<button type="button" class="icon-button danger" title="remove"><svg class="ic"><use href="#i-bin"/></svg></button>`;
+const diff = (l) => (l.kind === "pull" ? `<span class="diff"><span class="add">+${l.add}</span> <span class="del">-${l.del}</span></span>` : `<span></span>`);
+const blocks = (l) => {
+  if (l.kind !== "pull") return "<span></span>";
+  const add = Math.round((5 * l.add) / (l.add + l.del));
+  return `<span class="blocks">${[0, 1, 2, 3, 4].map((i) => `<i class="${i < add ? "add" : "del"}"></i>`).join("")}</span>`;
+};
+const metric = (l) =>
+  l.kind === "pull" ? diff(l) : `<span class="metric">${l.kind === "issue" ? `${l.comments} comments` : l.duration}</span>`;
+const second = (l) =>
+  l.kind === "pull"
+    ? `${diff(l).replace('class="diff"', 'class="diff" style="text-align:left"')} · ${l.files} files`
+    : l.kind === "issue"
+      ? `${l.comments} comments`
+      : l.duration;
+
+const tail = (l, touch) => [dots(l.checks), ...(touch ? [] : [status(l)]), bin];
+const tailCols = (touch) => `minmax(0, var(--orb-link-strip))${touch ? "" : " 8ch"} 20px`;
+const ROWS = {
+  a: {
+    cols: (touch) => `16px var(--orb-link-ref) minmax(0, 1fr) ${touch ? "11ch" : "13ch"} ${tailCols(touch)}`,
+    cells: (l, touch) => [icon(l), ref(l), title(l), diff(l), ...tail(l, touch)],
+  },
+  b: {
+    cols: (touch) => (touch ? `16px var(--orb-link-ref) minmax(0, 1fr) 44px ${tailCols(touch)}` : `16px var(--orb-link-ref) minmax(0, 1fr) 13ch 44px ${tailCols(touch)}`),
+    cells: (l, touch) => [icon(l), ref(l), title(l), ...(touch ? [] : [diff(l)]), blocks(l), ...tail(l, touch)],
+  },
+  c: {
+    cols: (touch) => `16px var(--orb-link-ref) minmax(0, 1fr) ${touch ? "11ch" : "13ch"} ${tailCols(touch)}`,
+    cells: (l, touch) => [icon(l), ref(l), title(l), metric(l), ...tail(l, touch)],
+  },
+  d: {
+    cols: (touch) => `16px minmax(0, 1fr) ${tailCols(touch)}`,
+    cells: (l, touch) => [icon(l), `<span class="lines"><div>${ref(l)} ${title(l)}</div><div>${second(l)}</div></span>`, ...tail(l, touch)],
+  },
+  e: {
+    cols: (touch) => `16px var(--orb-link-ref) ${touch ? "11ch" : "13ch"} minmax(0, 1fr) ${tailCols(touch)}`,
+    cells: (l, touch) => [icon(l), ref(l), diff(l), title(l), ...tail(l, touch)],
+  },
+};
+
+const STUDIES = [
+  ["a", "A · Diff column", "Its own right-aligned column before the check dots, as on GitHub's PR header. Blank for issues and runs."],
+  ["b", "B · Diff column with diffstat blocks", "A plus GitHub's five blocks, green to red by share of added lines. Size reads at a glance; the blocks repeat the numbers. Phones keep only the blocks."],
+  ["c", "C · One metric per kind", "The same column carries a kind's size: PR line diff, issue comments, run duration. No blank cells."],
+  ["d", "D · Two-line rows", "Ref and title on top, a grey detail line below: diff and file count, comments, duration. Doubles row height."],
+  ["e", "E · Beside the ref", "The diff joins the identity on the left, before the title. Titles get the least room, worst on phones."],
+];
+
+const drawer = (key, touch) => {
+  const refs = LINKS.map((l) => l.ref.length);
+  const strip = Math.max(...LINKS.map((l) => (l.checks ?? []).length)) * 12;
+  return `<div class="preview ${key}${touch ? " touch" : ""}">
+    <details class="orb-links activity-rail-row" open>
+      <summary>
+        <span class="activity-rail-marker" aria-hidden="true"></span>
+        <span class="activity-rail-summary">links</span>
+        <span class="orb-link-strip">${LINKS.map((l) => `<span class="activity-strip-dot ${DOT[worst(l.checks)]}"></span>`).join("")}</span>
+      </summary>
+      <div class="orb-links-roster" style="--orb-link-ref:${Math.max(...refs)}ch;--orb-link-strip:${strip}px;--cols:${ROWS[key].cols(touch)}">
+        ${LINKS.map((l) => `<details class="orb-link"><summary>${ROWS[key].cells(l, touch).join("")}</summary></details>`).join("")}
+      </div>
+    </details>
+  </div>`;
+};
+
+document.getElementById("studies").innerHTML = STUDIES.map(
+  ([key, name, note]) => `<section class="study"><h2>${name}</h2><p>${note}</p><div class="pair">${drawer(key, false)}${drawer(key, true)}</div></section>`,
+).join("");
+</script>
+</body>
+</html>

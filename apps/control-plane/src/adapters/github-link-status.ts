@@ -11,12 +11,12 @@ fragment C on CheckRun {
 fragment L on UniformResourceLocatable {
   __typename
   ... on PullRequest {
-    title state isDraft reviewDecision
+    title state isDraft reviewDecision additions deletions
     commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
       __typename ... on CheckRun { ...C } ... on StatusContext { context state targetUrl }
     } } } } } }
   }
-  ... on Issue { title state }
+  ... on Issue { title state comments { totalCount } }
   ... on WorkflowRun {
     workflow { name }
     checkSuite { status conclusion branch { name } checkRuns(first: 100) { nodes { ...C } } }
@@ -60,6 +60,8 @@ const PullRequest = Type.Object({
   state: Type.String(),
   isDraft: Type.Boolean(),
   reviewDecision: nullable(Type.String()),
+  additions: Type.Number(),
+  deletions: Type.Number(),
   commits: Type.Object({
     nodes: Type.Array(
       Type.Object({
@@ -76,6 +78,7 @@ const Issue = Type.Object({
   __typename: Type.Literal("Issue"),
   title: Type.String(),
   state: Type.String(),
+  comments: Type.Object({ totalCount: Type.Number() }),
 });
 const WorkflowRun = Type.Object({
   __typename: Type.Literal("WorkflowRun"),
@@ -167,10 +170,22 @@ function status(resource: Static<typeof Resource>): OrbLinkStatus {
                 : resource.reviewDecision === "REVIEW_REQUIRED"
                   ? "review"
                   : "open";
-      return { title: resource.title, status: word, checks: contexts };
+      return {
+        title: resource.title,
+        status: word,
+        diff: { additions: resource.additions, deletions: resource.deletions },
+        comments: null,
+        checks: contexts,
+      };
     }
     case "Issue":
-      return { title: resource.title, status: resource.state.toLowerCase(), checks: [] };
+      return {
+        title: resource.title,
+        status: resource.state.toLowerCase(),
+        diff: null,
+        comments: resource.comments.totalCount,
+        checks: [],
+      };
     case "WorkflowRun": {
       const suite = resource.checkSuite;
       const word =
@@ -184,6 +199,8 @@ function status(resource: Static<typeof Resource>): OrbLinkStatus {
       return {
         title: [resource.workflow.name, suite.branch?.name].filter(Boolean).join(" · "),
         status: word,
+        diff: null,
+        comments: null,
         checks: suite.checkRuns.nodes.map(checkRun),
       };
     }

@@ -72,6 +72,26 @@ const duration = (ms: number) => {
 };
 const percent = (value: number) => `${Number((value * 100).toFixed(3))}%`;
 
+/** A link's size: PR line diff, issue comments, run duration. */
+function metric(link: Link, now: number): ReactNode {
+  const github = link.github;
+  if (github === null) return null;
+  if (github.diff !== null)
+    return (
+      <>
+        <span className="orb-link-ok">+{github.diff.additions}</span>{" "}
+        <span className="orb-link-bad">-{github.diff.deletions}</span>
+      </>
+    );
+  if (github.comments !== null)
+    return `${github.comments} comment${github.comments === 1 ? "" : "s"}`;
+  if (githubLinkKind(link.url) !== "run") return null;
+  const starts = github.checks.flatMap((check) => check.startedAt ?? []);
+  if (starts.length === 0) return null;
+  const ends = github.checks.map((check) => check.completedAt ?? now);
+  return duration(Math.max(...ends) - Math.min(...starts));
+}
+
 interface Span {
   readonly name: string;
   readonly result: Result;
@@ -317,6 +337,7 @@ export function OrbLinksDrawer({
                 {refs[index]}
               </a>
               <span className="orb-link-title">{link.github?.title}</span>
+              <span className="orb-link-metric">{metric(link, now)}</span>
               <span className="orb-link-strip">
                 {link.github?.checks.map((check, i) =>
                   dot(check.result, check.name, check.result, i),
