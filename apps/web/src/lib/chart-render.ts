@@ -41,6 +41,20 @@ function tooltipElement(): HTMLDivElement {
     tip.className = "chart-tip";
     tip.hidden = true;
     document.body.append(tip);
+    // The tip is fixed and touch browsers rarely send mouseout: dismiss on any scroll or a press
+    // outside a chart.
+    const element = tip;
+    const hide = () => {
+      element.hidden = true;
+    };
+    window.addEventListener("scroll", hide, { capture: true, passive: true });
+    window.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (!(event.target instanceof Element && event.target.closest(".vega-embed"))) hide();
+      },
+      { capture: true, passive: true },
+    );
   }
   return tip;
 }

@@ -17,6 +17,12 @@ async function hover(page: Page, target: Locator, xFraction: number, yFraction: 
   await page.mouse.move(box.x + box.width * xFraction, box.y + box.height * yFraction);
 }
 
+/** Scroll events fire before the next frame's callbacks; a late one would hide a fresh tooltip. */
+async function scrollTo(target: Locator) {
+  await target.scrollIntoViewIfNeeded();
+  await target.page().evaluate("new Promise(requestAnimationFrame)");
+}
+
 async function dimmedLines(chart: Locator): Promise<number> {
   return chart.evaluate(
     (node) =>
@@ -131,7 +137,7 @@ it.each(["chromium", "webkit"] as const)(
 
       // Before the rollback eu-central > us-east > us-west; the tooltip lists them highest first.
       const regions = row(page, "checkout-api p95 by region").locator(".chart-canvas svg");
-      await regions.scrollIntoViewIfNeeded();
+      await scrollTo(regions);
       await hover(page, regions, 0.2, 0.5);
       const tip = page.locator(".chart-tip");
       await expect(tip).toBeVisible();
@@ -146,6 +152,25 @@ it.each(["chromium", "webkit"] as const)(
       expect([...values].sort((a, b) => b - a)).toEqual(values);
       await page.mouse.move(0, 0);
       await expect(tip).toBeHidden();
+
+      // Touch browsers rarely send mouseout: a press outside the chart or any scroll dismisses.
+      const press = (target: Locator) =>
+        target.evaluate((node) =>
+          node.dispatchEvent(
+            new (Reflect.get(globalThis, "PointerEvent"))("pointerdown", { bubbles: true }),
+          ),
+        );
+      await hover(page, regions, 0.2, 0.5);
+      await expect(tip).toBeVisible();
+      await press(regions);
+      await expect(tip).toBeVisible();
+      await press(page.locator("body"));
+      await expect(tip).toBeHidden();
+      await hover(page, regions, 0.25, 0.5);
+      await expect(tip).toBeVisible();
+      await regions.evaluate((node) => node.parentElement?.dispatchEvent(new Event("scroll")));
+      await expect(tip).toBeHidden();
+      await page.mouse.move(0, 0);
 
       const zones = row(page, "checkout-api p95 by zone").locator(".chart-canvas svg");
       await zones.scrollIntoViewIfNeeded();
@@ -197,7 +222,7 @@ it.each(["chromium", "webkit"] as const)(
         "x".repeat(80),
       ].entries()) {
         const target = long.locator(`g.threshold_label_${index}_marks text`);
-        await target.scrollIntoViewIfNeeded();
+        await scrollTo(target);
         await hover(page, target, 0.5, 0.5);
         await expect(page.locator(".chart-tip")).toContainText(label);
         const tipBox = await page.locator(".chart-tip").boundingBox();
