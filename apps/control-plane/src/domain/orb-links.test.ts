@@ -7,22 +7,27 @@ import { addOrbLink, type GithubLinkReader, readOrbLinks, removeOrbLink } from "
 const PR = "https://github.com/owner/repo/pull/7";
 const RUN = "https://github.com/other/tool/actions/runs/9";
 
-function setup(github: GithubLinkReader = () => okAsync([])) {
+function setup(github: GithubLinkReader = () => okAsync({ statuses: [], githubError: null })) {
   const task = new NoSimulationTask("orb links", false);
   const h = makeHarness();
   seedRunningOrb(task, h, "orb-a");
-  return { task, h, deps: { store: h.store, github } };
+  return {
+    task,
+    h,
+    deps: { store: h.store, github, githubSteps: () => okAsync({ steps: [], githubError: null }) },
+  };
 }
 
 it("adds canonical links once and lists them with GitHub status", async () => {
   const seen: string[][] = [];
   const { task, h, deps } = setup((_task, owner, urls) => {
     seen.push([owner, ...urls]);
-    return okAsync(
-      urls.map((url) =>
+    return okAsync({
+      githubError: null,
+      statuses: urls.map((url) =>
         url === PR ? { title: "T", status: "open", diff: null, comments: null, checks: [] } : null,
       ),
-    );
+    });
   });
   expect((await addOrbLink(task, h.store, "orb-a", `${PR}/files#x`))._unsafeUnwrap()).toBe(PR);
   expect((await addOrbLink(task, h.store, "orb-a", PR))._unsafeUnwrap()).toBe(PR);

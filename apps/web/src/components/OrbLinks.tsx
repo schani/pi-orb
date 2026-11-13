@@ -2,6 +2,7 @@ import {
   githubLinkKind,
   githubLinkRef,
   type OrbLinkCheck,
+  type OrbLinkStep,
   type OrbLinksResponse,
 } from "@pi-orb/protocol";
 import {
@@ -9,16 +10,15 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
-  useCallback,
   useEffect,
   useState,
 } from "react";
 import type { ApiError } from "../lib/api.ts";
-import { describeApiError, listOrbLinks, removeOrbLink } from "../lib/api.ts";
+import { describeApiError, listOrbLinks, readOrbLinkSteps, removeOrbLink } from "../lib/api.ts";
+import { pollVisible } from "../lib/orb-links-poll.ts";
 import { stripTipStyle } from "../lib/strip-tip.ts";
 import { Icon } from "./Icons.tsx";
 
-const POLL_INTERVAL_MS = 15_000;
 type Result = OrbLinkCheck["result"];
 
 /** Activity-strip dot states; `pending` is gray like a step that has not started. */
@@ -60,7 +60,7 @@ function tone(link: Link): string | null {
     return "done";
   if (status === "closed" || status === "failed") return "bad";
   if (status === "running" || status === "queued") return "warn";
-  return status === "draft" ? "muted" : "ok";
+  return status === "draft" || status === "unknown" ? "muted" : "ok";
 }
 
 const two = (value: number) => String(value).padStart(2, "0");
@@ -134,9 +134,79 @@ function tipText(span: Span): string {
   return facts.length === 0 ? "" : ` · ${facts.join(" · ")}`;
 }
 
+function CheckSteps({
+  orbId,
+  url,
+  checkId,
+  now,
+  row,
+}: {
+  orbId: string;
+  url: string;
+  checkId: string;
+  now: number;
+  row: (span: Span, key: string, name: ReactNode) => ReactNode;
+}) {
+  const [steps, setSteps] = useState<readonly OrbLinkStep[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(
+    () =>
+      pollVisible(
+        (signal) => readOrbLinkSteps(orbId, url, checkId, signal),
+        (result) => {
+          if (result.isOk()) {
+            setSteps(result.value.steps);
+            setError(result.value.githubError);
+          } else setError(describeApiError(result.error));
+        },
+        document,
+      ),
+    [orbId, url, checkId],
+  );
+  return (
+    <>
+      {error !== null && (
+        <tr>
+          <td colSpan={4} className="error-text">
+            {error}
+          </td>
+        </tr>
+      )}
+      {steps.map((step, index) =>
+        row(
+          {
+            name: step.name,
+            result: step.result,
+            queued: null,
+            started: step.startedAt,
+            finished: step.completedAt ?? (step.result === "running" ? now : null),
+          },
+          `${checkId}:${index}`,
+          <>
+            <span className="link-timeline-indent">└</span>
+            {step.name}
+          </>,
+        ),
+      )}
+    </>
+  );
+}
+
 /** CI waterfall (Pi turn waterfall language): runner wait outlined, then the run; steps unfold. */
-function Waterfall({ checks, now }: { checks: readonly OrbLinkCheck[]; now: number }) {
-  const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
+function Waterfall({
+  checks,
+  now,
+  orbId,
+  url,
+  active,
+}: {
+  checks: readonly OrbLinkCheck[];
+  now: number;
+  orbId: string;
+  url: string;
+  active: boolean;
+}) {
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [tip, setTip] = useState<BarTip | null>(null);
   const spans = checks.map((check) => checkSpan(check, now));
   const from = Math.min(
@@ -149,10 +219,10 @@ function Waterfall({ checks, now }: { checks: readonly OrbLinkCheck[]; now: numb
   );
   const at = (ms: number) => percent((ms - from) / (to - from));
   const width = (ms: number) => percent(Math.max(0.004, ms / (to - from)));
-  const toggle = (index: number) =>
+  const toggle = (id: string) =>
     setOpen((current) => {
       const next = new Set(current);
-      if (!next.delete(index)) next.add(index);
+      if (!next.delete(id)) next.add(id);
       return next;
     });
   const row = (span: Span, key: string, name: ReactNode, unfold?: () => void) => {
@@ -169,7 +239,7 @@ function Waterfall({ checks, now }: { checks: readonly OrbLinkCheck[]; now: numb
         key={key}
         className={unfold === undefined ? undefined : "link-timeline-unfolds"}
         tabIndex={unfold === undefined ? undefined : 0}
-        aria-expanded={unfold === undefined ? undefined : open.has(Number(key))}
+        aria-expanded={unfold === undefined ? undefined : open.has(key)}
         onClick={onToggle}
         onKeyDown={onToggle}
       >
@@ -212,7 +282,7 @@ function Waterfall({ checks, now }: { checks: readonly OrbLinkCheck[]; now: numb
           {checks.map((check, index) => [
             row(
               spans[index] ?? checkSpan(check, now),
-              String(index),
+              check.id ?? String(index),
               check.url === null ? (
                 check.name
               ) : (
@@ -220,26 +290,22 @@ function Waterfall({ checks, now }: { checks: readonly OrbLinkCheck[]; now: numb
                   {check.name}
                 </a>
               ),
-              check.steps.length > 0 ? () => toggle(index) : undefined,
+              check.id === null
+                ? undefined
+                : () => {
+                    if (check.id !== null) toggle(check.id);
+                  },
             ),
-            ...(open.has(index)
-              ? check.steps.map((step, stepIndex) =>
-                  row(
-                    {
-                      name: step.name,
-                      result: step.result,
-                      queued: null,
-                      started: step.startedAt,
-                      finished: step.completedAt ?? (step.result === "running" ? now : null),
-                    },
-                    `${index}:${stepIndex}`,
-                    <>
-                      <span className="link-timeline-indent">└</span>
-                      {step.name}
-                    </>,
-                  ),
-                )
-              : []),
+            active && check.id !== null && open.has(check.id) && (
+              <CheckSteps
+                key={`steps:${check.id}`}
+                orbId={orbId}
+                url={url}
+                checkId={check.id}
+                now={now}
+                row={row}
+              />
+            ),
           ])}
         </tbody>
       </table>
@@ -257,15 +323,19 @@ function Waterfall({ checks, now }: { checks: readonly OrbLinkCheck[]; now: numb
 }
 
 export function OrbLinksDrawer({
+  orbId,
   links,
   error,
   onRemove,
 }: {
+  orbId: string;
   links: OrbLinksResponse | null;
   error: ApiError | null;
   onRemove: (url: string) => void;
 }) {
   const [tip, setTip] = useState<Tip | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [openLinks, setOpenLinks] = useState<ReadonlySet<string>>(new Set());
   const now = Date.now();
   if (links === null && error === null) return null;
   if (links?.items.length === 0 && links.githubError === null && error === null) return null;
@@ -292,7 +362,13 @@ export function OrbLinksDrawer({
     />
   );
   return (
-    <details className="orb-links activity-rail-row" open={error !== null || undefined}>
+    <details
+      className="orb-links activity-rail-row"
+      open={error !== null || undefined}
+      onToggle={(event) => {
+        if (event.target === event.currentTarget) setExpanded(event.currentTarget.open);
+      }}
+    >
       <summary>
         <span className="activity-rail-marker" aria-hidden="true" />
         <span className="activity-rail-summary">links</span>
@@ -324,7 +400,20 @@ export function OrbLinksDrawer({
         {error !== null && <p className="error-text">{describeApiError(error)}</p>}
         {links?.githubError != null && <p className="error-text">{links.githubError}</p>}
         {items.map((link, index) => (
-          <details className="orb-link" key={link.url}>
+          <details
+            className="orb-link"
+            key={link.url}
+            onToggle={(event) => {
+              if (event.target !== event.currentTarget) return;
+              const open = event.currentTarget.open;
+              setOpenLinks((current) => {
+                const next = new Set(current);
+                if (open) next.add(link.url);
+                else next.delete(link.url);
+                return next;
+              });
+            }}
+          >
             <summary>
               <span
                 className={["orb-link-kind", tone(link) && `orb-link-${tone(link)}`]
@@ -358,7 +447,13 @@ export function OrbLinksDrawer({
               </button>
             </summary>
             {(link.github?.checks.length ?? 0) > 0 && (
-              <Waterfall checks={link.github?.checks ?? []} now={now} />
+              <Waterfall
+                checks={link.github?.checks ?? []}
+                now={now}
+                orbId={orbId}
+                url={link.url}
+                active={expanded && openLinks.has(link.url)}
+              />
             )}
           </details>
         ))}
@@ -369,35 +464,49 @@ export function OrbLinksDrawer({
 
 /** The orb's in-progress GitHub links (docs/orb-links.md). */
 export function OrbLinks({ orbId }: { orbId: string }) {
+  return <OrbLinksState key={orbId} orbId={orbId} />;
+}
+
+function OrbLinksState({ orbId }: { orbId: string }) {
   const [links, setLinks] = useState<OrbLinksResponse | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [generation, setGeneration] = useState(0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: generation forces an immediate re-read
-  useEffect(() => {
-    let cancelled = false;
-    const poll = async () => {
-      const result = await listOrbLinks(orbId);
-      if (cancelled) return;
-      if (result.isOk()) {
-        setLinks(result.value);
-        setError(null);
-      } else if (!(result.error.type === "http" && result.error.status === 404))
-        setError(result.error);
-    };
-    void poll();
-    const timer = window.setInterval(poll, POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [orbId, generation]);
-  const remove = useCallback(
-    async (url: string) => {
-      const result = await removeOrbLink(orbId, url);
-      if (result.isErr()) setError(result.error);
-      else setGeneration((value) => value + 1);
-    },
-    [orbId],
+  useEffect(
+    () =>
+      pollVisible(
+        (signal) => listOrbLinks(orbId, signal),
+        (result) => {
+          if (result.isOk()) {
+            setLinks(result.value);
+            setError(null);
+          } else setError(result.error);
+        },
+        document,
+      ),
+    [orbId, generation],
   );
-  return <OrbLinksDrawer links={links} error={error} onRemove={(url) => void remove(url)} />;
+  const remove = async (url: string) => {
+    const result = await removeOrbLink(orbId, url);
+    if (result.isErr()) setError(result.error);
+    else {
+      setLinks((current) =>
+        current === null
+          ? null
+          : {
+              ...current,
+              items: current.items.filter((item) => item.url !== url),
+            },
+      );
+      setGeneration((value) => value + 1);
+    }
+  };
+  return (
+    <OrbLinksDrawer
+      orbId={orbId}
+      links={links}
+      error={error}
+      onRemove={(url) => void remove(url)}
+    />
+  );
 }

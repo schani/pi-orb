@@ -5,9 +5,11 @@ import {
   getOrbHistory,
   getSystem,
   listHostedFiles,
+  listOrbLinks,
   listOrbMessages,
   logout,
   probeSession,
+  readOrbLinkSteps,
 } from "./api.ts";
 import { readBrowserSession, readSessionPrincipal, resetBrowserSessionForTest } from "./session.ts";
 
@@ -546,5 +548,42 @@ describe("API session handling", () => {
     );
     const result = await listHostedFiles("orb/archived");
     expect(result.isOk() && result.value).toEqual(inventory);
+  });
+});
+
+describe("orb link requests", () => {
+  beforeEach(resetBrowserSessionForTest);
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("encodes the selected check and keeps partial-data diagnostics", async () => {
+    const signal = new AbortController().signal;
+    const url = "https://github.com/o/r/pull/1";
+    const fetch = vi.fn(async (path: string, init?: RequestInit) => {
+      expect(path).toBe(
+        `/api/v1/orbs/orb%2F1/links/steps?url=${encodeURIComponent(url)}&checkId=check%2F1`,
+      );
+      expect(init?.cache).toBe("no-store");
+      expect(init?.signal).toBeDefined();
+      return new Response(JSON.stringify({ steps: [], githubError: "GitHub: check unavailable" }));
+    });
+    vi.stubGlobal("fetch", fetch);
+    expect((await readOrbLinkSteps("orb/1", url, "check/1", signal))._unsafeUnwrap()).toEqual({
+      steps: [],
+      githubError: "GitHub: check unavailable",
+    });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("cancels summary reads with their owner", async () => {
+    const controller = new AbortController();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_path: string, init?: RequestInit) => {
+        controller.abort();
+        expect(init?.signal?.aborted).toBe(true);
+        return new Response(JSON.stringify({ repository: null, items: [], githubError: null }));
+      }),
+    );
+    await listOrbLinks("orb", controller.signal);
   });
 });

@@ -87,14 +87,12 @@ describe("links response", () => {
               comments: null,
               checks: [
                 {
+                  id: "CR_1",
                   name: "e2e",
                   result: "running",
                   url: null,
                   startedAt: 2,
                   completedAt: null,
-                  steps: [
-                    { name: "Run tests", result: "running", startedAt: 3, completedAt: null },
-                  ],
                 },
               ],
             },

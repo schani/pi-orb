@@ -5370,23 +5370,20 @@ describe("frontend-only browser behavior", () => {
           comments: null,
           checks: [
             {
+              id: null,
               name: "build",
               result: "passed",
               url: null,
               startedAt: 5_000,
               completedAt: 65_000,
-              steps: [],
             },
             {
+              id: "e2e-check",
               name: "e2e",
               result: "failed",
               url: "https://github.com/owner/repo/actions/runs/1/job/2",
               startedAt: 10_000,
               completedAt: 130_000,
-              steps: [
-                { name: "Set up job", result: "passed", startedAt: 11_000, completedAt: 12_000 },
-                { name: "Run tests", result: "failed", startedAt: 12_000, completedAt: 128_000 },
-              ],
             },
           ],
         },
@@ -5396,12 +5393,12 @@ describe("frontend-only browser behavior", () => {
     // A realistic check count: the row's strip must yield before its bin does.
     items[0]?.github?.checks.push(
       ...Array.from({ length: 11 }, (_, index) => ({
+        id: null,
         name: `job ${index}`,
         result: "passed",
         url: null,
         startedAt: 5_000,
         completedAt: 6_000,
-        steps: [],
       })),
     );
     const removed: string[] = [];
@@ -5424,6 +5421,17 @@ describe("frontend-only browser behavior", () => {
     );
     await page.route(`**/api/v1/orbs/${id}/links**`, (route) => {
       const request = route.request();
+      if (new URL(request.url()).pathname.endsWith("/steps")) {
+        return route.fulfill({
+          json: {
+            githubError: null,
+            steps: [
+              { name: "Set up job", result: "passed", startedAt: 11_000, completedAt: 12_000 },
+              { name: "Run tests", result: "failed", startedAt: 12_000, completedAt: 128_000 },
+            ],
+          },
+        });
+      }
       if (request.method() === "DELETE") {
         const url = new URL(request.url()).searchParams.get("url") ?? "";
         removed.push(url);
