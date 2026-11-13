@@ -1,4 +1,9 @@
-import { githubLinkRef, type OrbLinkCheck, type OrbLinksResponse } from "@pi-orb/protocol";
+import {
+  githubLinkKind,
+  githubLinkRef,
+  type OrbLinkCheck,
+  type OrbLinksResponse,
+} from "@pi-orb/protocol";
 import {
   type CSSProperties,
   type KeyboardEvent,
@@ -36,6 +41,26 @@ function overall(checks: readonly OrbLinkCheck[]): Result {
   for (const result of ["failed", "running", "pending"] as const)
     if (checks.some((check) => check.result === result)) return result;
   return checks.length > 0 ? "passed" : "pending";
+}
+
+const CLOSED = new Set(["merged", "closed", "passed", "failed"]);
+const KIND_ORDER = ["pull", "issue", "run"];
+type Link = OrbLinksResponse["items"][number];
+
+/** Open or running first, then closed; within each, pull requests, issues, runs; then oldest first. */
+const rank = (link: Link) =>
+  (CLOSED.has(link.github?.status ?? "") ? KIND_ORDER.length : 0) +
+  KIND_ORDER.indexOf(githubLinkKind(link.url) ?? "run");
+
+/** GitHub's state colours: open green, draft grey, merged or completed purple, closed red. */
+function tone(link: Link): string | null {
+  const status = link.github?.status;
+  if (status === undefined) return null;
+  if (status === "merged" || (status === "closed" && githubLinkKind(link.url) === "issue"))
+    return "done";
+  if (status === "closed" || status === "failed") return "bad";
+  if (status === "running" || status === "queued") return "warn";
+  return status === "draft" ? "muted" : "ok";
 }
 
 const two = (value: number) => String(value).padStart(2, "0");
@@ -224,7 +249,7 @@ export function OrbLinksDrawer({
   const now = Date.now();
   if (links === null && error === null) return null;
   if (links?.items.length === 0 && links.githubError === null && error === null) return null;
-  const items = links?.items ?? [];
+  const items = [...(links?.items ?? [])].sort((a, b) => rank(a) - rank(b));
   const refs = items.map((link) => githubLinkRef(link.url, links?.repository ?? null));
   const style = {
     "--orb-link-ref": `${Math.max(0, ...refs.map((ref) => ref.length))}ch`,
@@ -281,6 +306,13 @@ export function OrbLinksDrawer({
         {items.map((link, index) => (
           <details className="orb-link" key={link.url}>
             <summary>
+              <span
+                className={["orb-link-kind", tone(link) && `orb-link-${tone(link)}`]
+                  .filter(Boolean)
+                  .join(" ")}
+              >
+                <Icon name={githubLinkKind(link.url) ?? "pull"} />
+              </span>
               <a href={link.url} target="_blank" rel="noreferrer">
                 {refs[index]}
               </a>

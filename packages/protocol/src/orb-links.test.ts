@@ -2,6 +2,7 @@ import { Check } from "typebox/value";
 import { describe, expect, it } from "vitest";
 import {
   canonicalGithubLink,
+  githubLinkKind,
   githubLinkRef,
   githubRepository,
   OrbLinksResponseSchema,
@@ -50,15 +51,22 @@ describe("githubLinkRef", () => {
     const own = "schani/pi-orb";
     expect(githubLinkRef("https://github.com/schani/pi-orb/pull/291", own)).toBe("#291");
     expect(githubLinkRef("https://github.com/Schani/Pi-Orb/issues/285", own)).toBe("#285");
-    expect(githubLinkRef("https://github.com/schani/pi-orb/actions/runs/1187", own)).toBe(
-      "run 1187",
-    );
+    expect(githubLinkRef("https://github.com/schani/pi-orb/actions/runs/1187", own)).toBe("1187");
     expect(githubLinkRef("https://github.com/schani/determined/pull/14", own)).toBe(
       "determined#14",
     );
     expect(githubLinkRef("https://github.com/schani/determined/actions/runs/52", null)).toBe(
-      "determined run 52",
+      "determined 52",
     );
+  });
+});
+
+describe("githubLinkKind", () => {
+  it("names pull requests, issues and Actions runs", () => {
+    expect(githubLinkKind("https://github.com/schani/pi-orb/pull/291")).toBe("pull");
+    expect(githubLinkKind("https://github.com/schani/pi-orb/issues/285")).toBe("issue");
+    expect(githubLinkKind("https://github.com/schani/pi-orb/actions/runs/1187")).toBe("run");
+    expect(githubLinkKind("not a url")).toBeNull();
   });
 });
 

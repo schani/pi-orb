@@ -27,6 +27,7 @@ Literals live only in the `:root` block of `apps/web/src/styles.css` and its dar
 | `--warn` | `#966100` | `#e3a33b` | in transition, restart |
 | `--bad` | `#b42318` | `#ff7a6b` | the one red: gone wrong, every delete |
 | `--bad-bg` | `#fdecea` | `#3a1612` | pale ground under `--bad` |
+| `--done` | `#8250df` | `#ab7df8` | GitHub merged or completed |
 | `--you` / `--on-you` | `--k` / `--w` | `#2b2b2b` / `--k` | user turn |
 | `--alert` / `--on-alert` | `--bad` / `--w` | `#b42318` / `--k` | alert band |
 | `--tile-gray` | `#555` | `#555` | grey state tiles |
@@ -106,7 +107,7 @@ Glyphs are white 1.5px strokes with round caps on a 2px-radius tile. Tiles keep 
 
 ## Icons
 
-- One inline sprite (`apps/web/src/components/Icons.tsx`, rendered once by the app shell) draws every icon on one 16px grid with square-ended 1.5px strokes: plus, pen, archive, bin, x, copy, gear, upload (tray arrow), share (three connected nodes), start and stop (solid play and square), terminal (`>_`), fold, send, back, more, trend, source, expand, refresh, key. Pi and Claude creation icons are `HarnessIcon.tsx`.
+- One inline sprite (`apps/web/src/components/Icons.tsx`, rendered once by the app shell) draws every icon on one 16px grid with square-ended 1.5px strokes: plus, pen, archive, bin, x, copy, gear, upload (tray arrow), share (three connected nodes), start and stop (solid play and square), terminal (`>_`), fold, send, back, more, trend, source, expand, refresh, key, and the link kinds pull (branch merge), issue (dotted ring) and run (ringed play). Pi and Claude creation icons are `HarnessIcon.tsx`.
 - Icon-only buttons are 20px with `aria-label` and `title`; icon buttons never carry text; text actions never carry icons. A pressed icon is inverted.
 - Delete is the "crisp utility" bin. **Every delete is red** and inverts to a red ground on hover. Stop stays neutral, never red.
 - Markdown code blocks, responses and device codes share the copy icon. Copy feedback is colour plus the accessible label, never visible text.
@@ -147,7 +148,7 @@ Glyphs are white 1.5px strokes with round caps on a 2px-radius tile. Tiles keep 
 
 - **Orb header:** one 24px line over a black rule: `name · rename · share | state tile + word · start/stop | model | thinking/effort | terminal · upload | archive | delete`. On desktop full-height 1px rules divide the cells, Start/Stop sitting beside the state. The name cell flexes and truncates; the settings cells take at most 40% and the model name ellipsizes. Action icons are 20px with 8px spacing. Phone: actions fold behind `more` into a second row.
 - **Rails** (Subagents, Shell, Links, Files) are activity-rail summaries: label left, counts or dots right-aligned. Expanded, flat rows in a bounded scroll area.
-- **Links:** summary `links` plus one dot per link, right-aligned. Dots use the activity-strip states: red failed, blinking green running, black passed, grey pending or without checks.
+- **Links:** summary `links` plus one dot per link, right-aligned. Dots use the activity-strip states: red failed, blinking green running, black passed, grey pending or without checks. Kind icons take GitHub's state colours: open, approved and passed `--ok`; draft `--g3`; merged and completed issues `--done`; closed and failed `--bad`; running and queued `--warn`. The roster scrolls past 40dvh.
 - **CI waterfall:** check name (a link), status dot, bars on one track from the first queue time to the last finish (now while anything runs), and run duration. A bar is the run: black passed, red failed, green running; a pending job is an outlined bar from when it became ready until now. Time waiting on other jobs is not drawn. Tooltip `name · result · waiting for a runner · ran`. Job steps are nested rows. Rows are mono 11 on 20px; a focused row takes the plot ring. Below 900px the bars hide, below 600px the duration. Alternatives: `design-prototypes/orb-links.html`, `design-prototypes/orb-links-duration.html` (D6).
 - **Terminal shade:** opaque, full width, with a complete 1px frame whose top and left rules overlap the header and index rules by one pixel (`left: -1px; width: calc(100% + 1px)`), right edge aligned to the header. No title bar, status word, healthy-state controls, emulator border, radius or shadow.
 

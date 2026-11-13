@@ -19,11 +19,17 @@ export type IconName =
   | "source"
   | "expand"
   | "refresh"
-  | "key";
+  | "key"
+  | "pull"
+  | "issue"
+  | "run";
 
 const PATHS: Record<IconName, string> = {
   refresh: "M13 6a5 5 0 1 0 0 4 M13 2v4H9",
   key: "M8 8h6M11 8v2M14 8v2",
+  pull: "M2.5 3.5a1.5 1.5 0 1 0 3 0 1.5 1.5 0 1 0-3 0 M2.5 12.5a1.5 1.5 0 1 0 3 0 1.5 1.5 0 1 0-3 0 M10.5 12.5a1.5 1.5 0 1 0 3 0 1.5 1.5 0 1 0-3 0 M4 5v6 M12 11V6a2 2 0 0 0-2-2H7 M9 2 7 4l2 2",
+  issue: "M2 8a6 6 0 1 0 12 0 6 6 0 1 0-12 0 M7.25 8a.75.75 0 1 0 1.5 0 .75.75 0 1 0-1.5 0",
+  run: "M2 8a6 6 0 1 0 12 0 6 6 0 1 0-12 0 M6.5 5.5v5l4-2.5z",
   trend: "M2 2v12h12 M4 10l3-4 3 2 4-5",
   fold: "m3 6 5 5 5-5",
   send: "M8 13V3M3 8l5-5 5 5",
