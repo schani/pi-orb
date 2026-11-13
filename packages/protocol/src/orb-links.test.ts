@@ -83,6 +83,8 @@ describe("links response", () => {
             github: {
               title: "Add links",
               status: "draft",
+              diff: { additions: 525, deletions: 38 },
+              comments: null,
               checks: [
                 {
                   name: "e2e",

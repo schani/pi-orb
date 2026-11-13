@@ -20,6 +20,8 @@ const links: OrbLinksResponse = {
       github: {
         title: "Add links drawer",
         status: "draft",
+        diff: { additions: 525, deletions: 38 },
+        comments: null,
         checks: [
           {
             name: "build",
@@ -87,6 +89,8 @@ describe("OrbLinksDrawer", () => {
           github: {
             title: "t",
             status: "open",
+            diff: null,
+            comments: null,
             checks: [
               { name: "build", result: "passed", url: null, ...times(0, 5, 65) },
               { name: "e2e", result: "pending", url: null, ...times(0, 30, null) },
@@ -116,7 +120,8 @@ describe("OrbLinksDrawer", () => {
     const item = (url: string, status: string | null) => ({
       url: `https://github.com/schani/pi-orb/${url}`,
       addedAt: 1,
-      github: status === null ? null : { title: url, status, checks: [] },
+      github:
+        status === null ? null : { title: url, status, diff: null, comments: null, checks: [] },
     });
     const html = render({
       ...links,
@@ -176,7 +181,7 @@ describe("OrbLinksDrawer", () => {
         return {
           url: `https://github.com/schani/pi-orb/${path}`,
           addedAt: 1,
-          github: { title: "t", status, checks: [] },
+          github: { title: "t", status, diff: null, comments: null, checks: [] },
         };
       }),
     });
@@ -188,6 +193,52 @@ describe("OrbLinksDrawer", () => {
       );
     expect(render(links)).toMatch(
       /class="orb-link-kind"><svg[^>]*><use[^>]*><\/use><\/svg><\/span><a href="[^"]*determined\/pull\/14"/,
+    );
+  });
+
+  it("shows each kind's size: PR line diff, issue comments, run duration", () => {
+    const github = (fields: object) => ({
+      title: "t",
+      status: "open",
+      diff: null,
+      comments: null,
+      checks: [],
+      ...fields,
+    });
+    const html = render({
+      ...links,
+      items: [
+        {
+          url: "https://github.com/schani/pi-orb/issues/1",
+          addedAt: 1,
+          github: github({ comments: 4 }),
+        },
+        {
+          url: "https://github.com/schani/pi-orb/issues/2",
+          addedAt: 1,
+          github: github({ comments: 1 }),
+        },
+        {
+          url: "https://github.com/schani/pi-orb/actions/runs/3",
+          addedAt: 1,
+          github: github({
+            status: "passed",
+            checks: [
+              { name: "build", result: "passed", url: null, ...times(0, 5, 65) },
+              { name: "e2e", result: "passed", url: null, ...times(0, 10, 205) },
+            ],
+          }),
+        },
+        { url: "https://github.com/schani/pi-orb/actions/runs/4", addedAt: 1, github: github({}) },
+        { url: "https://github.com/schani/pi-orb/issues/5", addedAt: 1, github: null },
+      ],
+    });
+    const metrics = [
+      ...html.matchAll(/<span class="orb-link-metric">(.*?)<\/span><span class="orb-link-strip">/g),
+    ];
+    expect(metrics.map((m) => m[1])).toEqual(["4 comments", "1 comment", "", "", "3m 20s"]);
+    expect(render(links)).toContain(
+      '<span class="orb-link-metric"><span class="orb-link-ok">+525</span> <span class="orb-link-bad">-38</span></span>',
     );
   });
 

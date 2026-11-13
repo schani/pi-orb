@@ -19,7 +19,9 @@ it("adds canonical links once and lists them with GitHub status", async () => {
   const { task, h, deps } = setup((_task, owner, urls) => {
     seen.push([owner, ...urls]);
     return okAsync(
-      urls.map((url) => (url === PR ? { title: "T", status: "open", checks: [] } : null)),
+      urls.map((url) =>
+        url === PR ? { title: "T", status: "open", diff: null, comments: null, checks: [] } : null,
+      ),
     );
   });
   expect((await addOrbLink(task, h.store, "orb-a", `${PR}/files#x`))._unsafeUnwrap()).toBe(PR);

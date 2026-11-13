@@ -35,6 +35,8 @@ it("maps pull requests, issues and Actions runs from one GraphQL request", async
         state: "OPEN",
         isDraft: false,
         reviewDecision: "APPROVED",
+        additions: 525,
+        deletions: 38,
         commits: {
           nodes: [
             {
@@ -83,7 +85,7 @@ it("maps pull requests, issues and Actions runs from one GraphQL request", async
           ],
         },
       },
-      l1: { __typename: "Issue", title: "Bug", state: "CLOSED" },
+      l1: { __typename: "Issue", title: "Bug", state: "CLOSED", comments: { totalCount: 4 } },
       l2: {
         __typename: "WorkflowRun",
         workflow: { name: "e2e" },
@@ -114,6 +116,8 @@ it("maps pull requests, issues and Actions runs from one GraphQL request", async
     {
       title: "Add links",
       status: "approved",
+      diff: { additions: 525, deletions: 38 },
+      comments: null,
       checks: [
         {
           name: "build",
@@ -133,10 +137,12 @@ it("maps pull requests, issues and Actions runs from one GraphQL request", async
         },
       ],
     },
-    { title: "Bug", status: "closed", checks: [] },
+    { title: "Bug", status: "closed", diff: null, comments: 4, checks: [] },
     {
       title: "e2e · links",
       status: "running",
+      diff: null,
+      comments: null,
       checks: [
         {
           name: "qualify",
@@ -160,6 +166,8 @@ it("reports PR and run outcomes", async () => {
   const pr = (fields: object) => ({
     __typename: "PullRequest",
     title: "t",
+    additions: 1,
+    deletions: 0,
     commits: { nodes: [] },
     ...fields,
   });
