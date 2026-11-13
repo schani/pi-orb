@@ -23,14 +23,21 @@ export function githubRepository(repositoryUrl: string | null): string | null {
   return match ? `${match[1]}/${match[2]}`.toLowerCase() : null;
 }
 
-/** `#291`, `run 1187`; prefixed with the repository name when it is not `repository`. */
+/** `#291`, `1187` (a run); prefixed with the repository name when it is not `repository`. */
 export function githubLinkRef(url: string, repository: string | null): string {
   const match = LINK.exec(url);
   if (!match) return url;
   const [, owner, repo, kind, number] = match;
-  const own = `${owner}/${repo}`.toLowerCase() === repository;
-  const ref = kind === "actions/runs" ? `run ${number}` : `#${number}`;
-  return own ? ref : `${repo}${ref.startsWith("#") ? "" : " "}${ref}`;
+  const run = kind?.toLowerCase() === "actions/runs";
+  if (`${owner}/${repo}`.toLowerCase() === repository) return run ? `${number}` : `#${number}`;
+  return run ? `${repo} ${number}` : `${repo}#${number}`;
+}
+
+export type GithubLinkKind = "pull" | "issue" | "run";
+
+export function githubLinkKind(url: string): GithubLinkKind | null {
+  const kind = LINK.exec(url)?.[3]?.toLowerCase();
+  return kind === "pull" ? "pull" : kind === "issues" ? "issue" : kind ? "run" : null;
 }
 
 export const OrbLinkRequestSchema = Type.Object(

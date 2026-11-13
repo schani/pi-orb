@@ -112,6 +112,85 @@ describe("OrbLinksDrawer", () => {
     );
   });
 
+  it("orders open before closed, then pull requests, issues and runs, each with its icon", () => {
+    const item = (url: string, status: string | null) => ({
+      url: `https://github.com/schani/pi-orb/${url}`,
+      addedAt: 1,
+      github: status === null ? null : { title: url, status, checks: [] },
+    });
+    const html = render({
+      ...links,
+      items: [
+        item("actions/runs/1", "passed"),
+        item("pull/2", "merged"),
+        item("actions/runs/3", "running"),
+        item("issues/4", "open"),
+        item("issues/5", "closed"),
+        item("pull/6", "draft"),
+        item("pull/7", null),
+      ],
+    });
+    const roster = html.split('class="orb-links-roster"')[1] ?? "";
+    expect([...roster.matchAll(/href="[^"]*\/(\d+)"/g)].map((m) => m[1])).toEqual([
+      "6",
+      "7",
+      "4",
+      "3",
+      "2",
+      "5",
+      "1",
+    ]);
+    const summary = html.split("</summary>")[0] ?? "";
+    expect([...summary.matchAll(/aria-label="(\d+|#\d+)/g)].map((m) => m[1])).toEqual([
+      "#6",
+      "#7",
+      "#4",
+      "3",
+      "#2",
+      "#5",
+      "1",
+    ]);
+    expect(roster).toContain('href="#i-pull"');
+    expect(roster).toContain('href="#i-issue"');
+    expect(roster).toContain('href="#i-run"');
+    expect(roster).toContain(">3</a>");
+  });
+
+  it("colours kind icons by GitHub state", () => {
+    const tones = Object.entries({
+      "pull/1:review": "ok",
+      "pull/2:draft": "muted",
+      "pull/3:merged": "done",
+      "pull/4:closed": "bad",
+      "issues/5:open": "ok",
+      "issues/6:closed": "done",
+      "actions/runs/7:passed": "ok",
+      "actions/runs/8:failed": "bad",
+      "actions/runs/9:running": "warn",
+      "actions/runs/10:queued": "warn",
+    });
+    const html = render({
+      ...links,
+      items: tones.map(([key]) => {
+        const [path, status = ""] = key.split(":");
+        return {
+          url: `https://github.com/schani/pi-orb/${path}`,
+          addedAt: 1,
+          github: { title: "t", status, checks: [] },
+        };
+      }),
+    });
+    for (const [key, tone] of tones)
+      expect(html).toMatch(
+        new RegExp(
+          `class="orb-link-kind orb-link-${tone}"><svg[^>]*><use[^>]*></use></svg></span><a href="[^"]*/${key.split(":")[0]}"`,
+        ),
+      );
+    expect(render(links)).toMatch(
+      /class="orb-link-kind"><svg[^>]*><use[^>]*><\/use><\/svg><\/span><a href="[^"]*determined\/pull\/14"/,
+    );
+  });
+
   it("hides without links and shows GitHub failures", () => {
     expect(render(null)).toBe("");
     expect(render({ ...links, items: [] })).toBe("");

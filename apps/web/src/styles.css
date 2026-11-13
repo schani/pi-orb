@@ -62,6 +62,7 @@
   --warn: #966100;
   --bad: #b42318;
   --bad-bg: #fdecea;
+  --done: #8250df;
   --scrim: rgb(0 0 0 / 35%);
   --lightbox: rgb(0 0 0 / 72%);
   --veil: #ffffffbf;
@@ -105,6 +106,7 @@
     --warn: #e3a33b;
     --bad: #ff7a6b;
     --bad-bg: #3a1612;
+    --done: #ab7df8;
     --scrim: rgb(0 0 0 / 60%);
     --veil: #000000bf;
     --you: #2b2b2b;
@@ -3075,6 +3077,8 @@ pre,
   background: var(--g2);
 }
 .orb-links-roster {
+  max-height: 40dvh;
+  overflow-y: auto;
   padding: 0 12px;
   border-top: 1px solid var(--g2);
 }
@@ -3083,7 +3087,7 @@ pre,
 }
 .orb-link > summary {
   display: grid;
-  grid-template-columns: var(--orb-link-ref) minmax(0, 1fr) minmax(0, var(--orb-link-strip)) 8ch 20px;
+  grid-template-columns: 16px var(--orb-link-ref) minmax(0, 1fr) minmax(0, var(--orb-link-strip)) 8ch 20px;
   gap: 8px;
   align-items: center;
   min-height: 24px;
@@ -3099,6 +3103,21 @@ pre,
 .orb-link > summary > a {
   justify-self: start;
   white-space: nowrap;
+}
+.orb-link-ok {
+  color: var(--ok);
+}
+.orb-link-warn {
+  color: var(--warn);
+}
+.orb-link-bad {
+  color: var(--bad);
+}
+.orb-link-done {
+  color: var(--done);
+}
+.orb-link-muted {
+  color: var(--g3);
 }
 .orb-link-title {
   overflow: hidden;
