@@ -87,7 +87,7 @@ it.each(["chromium", "webkit"] as const)(
         const inputs = form.locator("input");
         await inputs.nth(0).fill("Focus");
         await inputs.nth(1).fill("https://example.com/focus.git");
-        await expectFocus(page, form.locator("button"), PAPER, INK);
+        await expectFocus(page, form.locator("button"), INK, PAPER);
 
         const mixed = `${origin}/orbs/frontend-mixed-tool-states`;
         const strip = page.locator("details.activity-strip").first();
