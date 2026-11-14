@@ -10,15 +10,16 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
+  useCallback,
   useEffect,
   useState,
 } from "react";
 import type { ApiError } from "../lib/api.ts";
 import { describeApiError, listOrbLinks, readOrbLinkSteps, removeOrbLink } from "../lib/api.ts";
-import { pollVisible } from "../lib/orb-links-poll.ts";
 import { stripTipStyle } from "../lib/strip-tip.ts";
 import { Icon } from "./Icons.tsx";
 
+const POLL_INTERVAL_MS = 15_000;
 type Result = OrbLinkCheck["result"];
 
 /** Activity-strip dot states; `pending` is gray like a step that has not started. */
@@ -60,7 +61,7 @@ function tone(link: Link): string | null {
     return "done";
   if (status === "closed" || status === "failed") return "bad";
   if (status === "running" || status === "queued") return "warn";
-  return status === "draft" || status === "unknown" ? "muted" : "ok";
+  return status === "draft" ? "muted" : "ok";
 }
 
 const two = (value: number) => String(value).padStart(2, "0");
@@ -136,33 +137,33 @@ function tipText(span: Span): string {
 
 function CheckSteps({
   orbId,
-  url,
-  checkId,
+  check,
   now,
   row,
 }: {
   orbId: string;
-  url: string;
-  checkId: string;
+  check: OrbLinkCheck;
   now: number;
   row: (span: Span, key: string, name: ReactNode) => ReactNode;
 }) {
   const [steps, setSteps] = useState<readonly OrbLinkStep[]>([]);
   const [error, setError] = useState<string | null>(null);
-  useEffect(
-    () =>
-      pollVisible(
-        (signal) => readOrbLinkSteps(orbId, url, checkId, signal),
-        (result) => {
-          if (result.isOk()) {
-            setSteps(result.value.steps);
-            setError(result.value.githubError);
-          } else setError(describeApiError(result.error));
-        },
-        document,
-      ),
-    [orbId, url, checkId],
-  );
+  useEffect(() => {
+    if (check.id === null) return;
+    const controller = new AbortController();
+    // StrictMode may clean up this effect before it can start a read.
+    queueMicrotask(() => {
+      if (controller.signal.aborted || check.id === null) return;
+      void readOrbLinkSteps(orbId, check.id, controller.signal).then((result) => {
+        if (controller.signal.aborted) return;
+        if (result.isOk()) {
+          setSteps(result.value.steps);
+          setError(result.value.githubError);
+        } else setError(describeApiError(result.error));
+      });
+    });
+    return () => controller.abort();
+  }, [orbId, check]);
   return (
     <>
       {error !== null && (
@@ -181,7 +182,7 @@ function CheckSteps({
             started: step.startedAt,
             finished: step.completedAt ?? (step.result === "running" ? now : null),
           },
-          `${checkId}:${index}`,
+          `${check.id}:${index}`,
           <>
             <span className="link-timeline-indent">└</span>
             {step.name}
@@ -193,18 +194,14 @@ function CheckSteps({
 }
 
 /** CI waterfall (Pi turn waterfall language): runner wait outlined, then the run; steps unfold. */
-function Waterfall({
+export function Waterfall({
   checks,
   now,
   orbId,
-  url,
-  active,
 }: {
   checks: readonly OrbLinkCheck[];
   now: number;
   orbId: string;
-  url: string;
-  active: boolean;
 }) {
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [tip, setTip] = useState<BarTip | null>(null);
@@ -296,12 +293,11 @@ function Waterfall({
                     if (check.id !== null) toggle(check.id);
                   },
             ),
-            active && check.id !== null && open.has(check.id) && (
+            check.id !== null && open.has(check.id) && (
               <CheckSteps
                 key={`steps:${check.id}`}
                 orbId={orbId}
-                url={url}
-                checkId={check.id}
+                check={check}
                 now={now}
                 row={row}
               />
@@ -334,7 +330,6 @@ export function OrbLinksDrawer({
   onRemove: (url: string) => void;
 }) {
   const [tip, setTip] = useState<Tip | null>(null);
-  const [expanded, setExpanded] = useState(false);
   const [openLinks, setOpenLinks] = useState<ReadonlySet<string>>(new Set());
   const now = Date.now();
   if (links === null && error === null) return null;
@@ -366,7 +361,8 @@ export function OrbLinksDrawer({
       className="orb-links activity-rail-row"
       open={error !== null || undefined}
       onToggle={(event) => {
-        if (event.target === event.currentTarget) setExpanded(event.currentTarget.open);
+        if (event.target === event.currentTarget && !event.currentTarget.open)
+          setOpenLinks(new Set());
       }}
     >
       <summary>
@@ -403,6 +399,7 @@ export function OrbLinksDrawer({
           <details
             className="orb-link"
             key={link.url}
+            open={openLinks.has(link.url)}
             onToggle={(event) => {
               if (event.target !== event.currentTarget) return;
               const open = event.currentTarget.open;
@@ -446,14 +443,8 @@ export function OrbLinksDrawer({
                 <Icon name="bin" />
               </button>
             </summary>
-            {(link.github?.checks.length ?? 0) > 0 && (
-              <Waterfall
-                checks={link.github?.checks ?? []}
-                now={now}
-                orbId={orbId}
-                url={link.url}
-                active={expanded && openLinks.has(link.url)}
-              />
+            {openLinks.has(link.url) && (link.github?.checks.length ?? 0) > 0 && (
+              <Waterfall checks={link.github?.checks ?? []} now={now} orbId={orbId} />
             )}
           </details>
         ))}
@@ -464,45 +455,39 @@ export function OrbLinksDrawer({
 
 /** The orb's in-progress GitHub links (docs/orb-links.md). */
 export function OrbLinks({ orbId }: { orbId: string }) {
-  return <OrbLinksState key={orbId} orbId={orbId} />;
-}
-
-function OrbLinksState({ orbId }: { orbId: string }) {
   const [links, setLinks] = useState<OrbLinksResponse | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [generation, setGeneration] = useState(0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: generation forces an immediate re-read
-  useEffect(
-    () =>
-      pollVisible(
-        (signal) => listOrbLinks(orbId, signal),
-        (result) => {
-          if (result.isOk()) {
-            setLinks(result.value);
-            setError(null);
-          } else setError(result.error);
-        },
-        document,
-      ),
-    [orbId, generation],
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      const result = await listOrbLinks(orbId);
+      if (cancelled) return;
+      if (result.isOk()) {
+        setLinks(result.value);
+        setError(null);
+      } else if (!(result.error.type === "http" && result.error.status === 404))
+        setError(result.error);
+    };
+    void poll();
+    const timer = window.setInterval(poll, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [orbId, generation]);
+  const remove = useCallback(
+    async (url: string) => {
+      const result = await removeOrbLink(orbId, url);
+      if (result.isErr()) setError(result.error);
+      else setGeneration((value) => value + 1);
+    },
+    [orbId],
   );
-  const remove = async (url: string) => {
-    const result = await removeOrbLink(orbId, url);
-    if (result.isErr()) setError(result.error);
-    else {
-      setLinks((current) =>
-        current === null
-          ? null
-          : {
-              ...current,
-              items: current.items.filter((item) => item.url !== url),
-            },
-      );
-      setGeneration((value) => value + 1);
-    }
-  };
   return (
     <OrbLinksDrawer
+      key={orbId}
       orbId={orbId}
       links={links}
       error={error}

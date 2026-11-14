@@ -80,9 +80,9 @@ it("reports missing orbs, missing URLs and GitHub failures", async () => {
   }
 });
 
-it("loads steps only for registered links and validates check IDs", async () => {
+it("loads the selected check with the project owner token and validates IDs", async () => {
   const calls: unknown[][] = [];
-  const { task, h, app } = await setup(undefined, (...args) => {
+  const { app } = await setup(undefined, (...args) => {
     calls.push(args);
     return okAsync({
       steps: [{ name: "test", result: "running", startedAt: 1, completedAt: null }],
@@ -90,10 +90,7 @@ it("loads steps only for registered links and validates check IDs", async () => 
     });
   });
   try {
-    const path = `/api/v1/orbs/${ORB}/links/steps?url=${encodeURIComponent(PR)}&checkId=CR_1`;
-    expect((await app.inject({ method: "GET", url: path })).statusCode).toBe(404);
-    expect(calls).toHaveLength(0);
-    await addOrbLink(task, h.store, ORB, PR);
+    const path = `/api/v1/orbs/${ORB}/links/steps?checkId=CR_1`;
     const response = await app.inject({ method: "GET", url: path });
     expect(response.statusCode).toBe(200);
     expect(response.headers["cache-control"]).toBe("no-store");
@@ -102,12 +99,7 @@ it("loads steps only for registered links and validates check IDs", async () => 
       githubError: "partial",
     });
     expect(calls[0]?.slice(1)).toEqual([TEST_USER_ID, "CR_1"]);
-    for (const suffix of [
-      "",
-      "?url=bad&checkId=CR_1",
-      `?url=${encodeURIComponent(PR)}`,
-      `?url=${encodeURIComponent(PR)}&checkId=${"x".repeat(513)}`,
-    ])
+    for (const suffix of ["", "?checkId=bad%20id", `?checkId=${"x".repeat(513)}`])
       expect(
         (await app.inject({ method: "GET", url: `/api/v1/orbs/${ORB}/links/steps${suffix}` }))
           .statusCode,
@@ -117,7 +109,7 @@ it("loads steps only for registered links and validates check IDs", async () => 
   }
 });
 
-it("logs failure/recovery edges, not changing request/rate header values", async () => {
+it("logs one failure onset and recovery per operation", async () => {
   let message: string | null =
     "GitHub status partial: inaccessible 1 checks\nGitHub: request-id=first; rate-remaining=10";
   const { task, h, app } = await setup(() => okAsync({ statuses: [null], githubError: message }));
@@ -128,8 +120,7 @@ it("logs failure/recovery edges, not changing request/rate header values", async
     logs.mockClear();
     const read = () => app.inject({ method: "GET", url: `/api/v1/orbs/${ORB}/links` });
     await read();
-    message =
-      "GitHub status partial: inaccessible 2 checks\nGitHub: request-id=second; rate-remaining=9";
+    message = "GitHub status HTTP 403: access denied\nGitHub: request-id=second; rate-remaining=9";
     await read();
     expect(edges()).toHaveLength(1);
     expect(edges()[0]?.[0]).toContain("github-links-failed");

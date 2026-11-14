@@ -5370,7 +5370,7 @@ describe("frontend-only browser behavior", () => {
           comments: null,
           checks: [
             {
-              id: null,
+              id: "build-check" as string | null,
               name: "build",
               result: "passed",
               url: null,
@@ -5402,6 +5402,15 @@ describe("frontend-only browser behavior", () => {
       })),
     );
     const removed: string[] = [];
+    const selected: string[] = [];
+    let listReads = 0;
+    let holdSteps = false;
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.clock.install({ time: 0 });
+    await page.clock.pauseAt(1000);
     await page.routeWebSocket(`**/orbs/${id}/live`, () => {});
     await page.route(`**/api/v1/orbs/${id}/hosted-files`, (route) =>
       route.fulfill({
@@ -5419,9 +5428,11 @@ describe("frontend-only browser behavior", () => {
         },
       }),
     );
-    await page.route(`**/api/v1/orbs/${id}/links**`, (route) => {
+    await page.route(`**/api/v1/orbs/${id}/links**`, async (route) => {
       const request = route.request();
       if (new URL(request.url()).pathname.endsWith("/steps")) {
+        selected.push(new URL(request.url()).searchParams.get("checkId") ?? "");
+        if (holdSteps) await gate;
         return route.fulfill({
           json: {
             githubError: null,
@@ -5438,7 +5449,10 @@ describe("frontend-only browser behavior", () => {
         items = items.filter((item) => item.url !== url);
         return route.fulfill({ status: 204, body: "" });
       }
-      return route.fulfill({ json: { repository: "owner/repo", githubError: null, items } });
+      listReads++;
+      return route.fulfill({
+        json: { repository: "owner/repo", githubError: "Some checks inaccessible", items },
+      });
     });
     try {
       await gotoFrontendHistory(page, `${origin}/orbs/${id}`, id);
@@ -5449,7 +5463,9 @@ describe("frontend-only browser behavior", () => {
           (element) => element.nextElementSibling?.classList.contains("hosted-files") === true,
         ),
       ).toBe(true);
+      expectPage(selected).toEqual([]);
       await links.locator(":scope > summary").click();
+      await expectPage(links.getByText("Some checks inaccessible")).toBeVisible();
       await links.getByRole("img", { name: "e2e · failed" }).hover();
       await expectPage(page.getByRole("tooltip")).toHaveText("e2e · failed");
       await expectPage(page.getByRole("tooltip").getByText("failed")).toHaveClass(
@@ -5469,10 +5485,46 @@ describe("frontend-only browser behavior", () => {
       const waterfall = links.locator(".link-timeline");
       await expectPage(waterfall.getByText("2m 00s")).toBeVisible();
       await expectPage(waterfall.getByText("Run tests")).toHaveCount(0);
+      expectPage(selected).toEqual([]);
+      await expectPage(
+        waterfall.getByRole("row", { name: "job 0 1s", exact: true }),
+      ).not.toHaveAttribute("aria-expanded");
       await waterfall.getByRole("row", { name: /e2e/ }).click({ position: { x: 4, y: 4 } });
       await expectPage(
         waterfall.getByRole("row", { name: /Run tests/ }).locator(".activity-strip-failed"),
       ).toBeVisible();
+      expectPage(selected).toEqual(["e2e-check"]);
+      await page.clock.runFor(15_001);
+      await expectPage.poll(() => selected.length).toBe(2);
+      expectPage(selected).toEqual(["e2e-check", "e2e-check"]);
+      await waterfall.getByRole("row", { name: /e2e/ }).click({ position: { x: 4, y: 4 } });
+      const reads = listReads;
+      await page.clock.runFor(15_001);
+      await expectPage.poll(() => listReads).toBeGreaterThan(reads);
+      expectPage(selected).toEqual(["e2e-check", "e2e-check"]);
+      await waterfall.getByRole("row", { name: /e2e/ }).press("Enter");
+      await expectPage(waterfall.getByText("Run tests")).toBeVisible();
+      expectPage(selected).toHaveLength(3);
+      await links.locator(".orb-link > summary").first().click();
+      await page.clock.runFor(15_001);
+      expectPage(selected).toHaveLength(3);
+      await links.locator(".orb-link > summary").first().click();
+      await expectPage(waterfall.getByText("Run tests")).toHaveCount(0);
+      holdSteps = true;
+      const started = page.waitForRequest((request) => request.url().includes("/links/steps?"));
+      await waterfall.getByRole("row", { name: /e2e/ }).press("Enter");
+      await started;
+      const cancelled = page.waitForEvent("requestfailed", {
+        predicate: (request) => request.url().includes("/links/steps?"),
+      });
+      await links.locator(":scope > summary").click();
+      await cancelled;
+      release();
+      await page.clock.runFor(15_001);
+      expectPage(selected).toHaveLength(4);
+      await links.locator(":scope > summary").click();
+      await links.locator(".orb-link > summary").first().click();
+      await expectPage(waterfall.getByText("Run tests")).toHaveCount(0);
       await waterfall.getByRole("row", { name: /e2e/ }).locator(".link-timeline-bars").hover();
       await expectPage(page.getByRole("tooltip")).toHaveText("e2e · failed · ran 2m 00s");
       await page.mouse.move(0, 0);
@@ -5503,7 +5555,8 @@ describe("frontend-only browser behavior", () => {
       expectPage(removed).toEqual([pr]);
       await expectPage(links.getByRole("link", { name: "determined#14" })).toBeVisible();
     } finally {
-      await page.close();
+      release();
+      await closeRoutedPage(page);
     }
   });
 

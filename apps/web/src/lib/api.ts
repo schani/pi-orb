@@ -530,25 +530,20 @@ export function listHostedFiles(orbId: string): Promise<Result<HostedFilesRespon
   );
 }
 
-export function listOrbLinks(
-  orbId: string,
-  signal: AbortSignal,
-): Promise<Result<OrbLinksResponse, ApiError>> {
+export function listOrbLinks(orbId: string): Promise<Result<OrbLinksResponse, ApiError>> {
   return apiFetch(OrbLinksResponseSchema, `/api/v1/orbs/${encodeURIComponent(orbId)}/links`, {
     cache: "no-store",
-    signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
   });
 }
 
 export function readOrbLinkSteps(
   orbId: string,
-  url: string,
   checkId: string,
   signal: AbortSignal,
 ): Promise<Result<OrbLinkStepsResponse, ApiError>> {
   return apiFetch(
     OrbLinkStepsResponseSchema,
-    `/api/v1/orbs/${encodeURIComponent(orbId)}/links/steps?url=${encodeURIComponent(url)}&checkId=${encodeURIComponent(checkId)}`,
+    `/api/v1/orbs/${encodeURIComponent(orbId)}/links/steps?checkId=${encodeURIComponent(checkId)}`,
     { cache: "no-store", signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) },
   );
 }

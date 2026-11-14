@@ -27,7 +27,7 @@ const nullable = <T extends Parameters<typeof Type.Union>[0][number]>(schema: T)
 // Validate entries separately: GraphQL field errors can null individual nodes or connections.
 const Connection = nullable(Type.Object({ nodes: nullable(Type.Array(Type.Unknown())) }));
 const CheckRun = Type.Object({
-  id: Type.Optional(nullable(Type.String())),
+  id: Type.String(),
   name: Type.String(),
   status: Type.String(),
   conclusion: nullable(Type.String()),
@@ -52,13 +52,6 @@ const Context = Type.Union([
     targetUrl: nullable(Type.String()),
   }),
 ]);
-const Commit = Type.Object({
-  commit: nullable(
-    Type.Object({
-      statusCheckRollup: nullable(Type.Object({ contexts: Connection })),
-    }),
-  ),
-});
 const PullRequest = Type.Object({
   __typename: Type.Literal("PullRequest"),
   title: Type.String(),
@@ -67,25 +60,31 @@ const PullRequest = Type.Object({
   reviewDecision: nullable(Type.String()),
   additions: Type.Number(),
   deletions: Type.Number(),
-  commits: Connection,
+  commits: Type.Object({
+    nodes: Type.Array(
+      Type.Object({
+        commit: Type.Object({
+          statusCheckRollup: nullable(Type.Object({ contexts: Connection })),
+        }),
+      }),
+    ),
+  }),
 });
 const Issue = Type.Object({
   __typename: Type.Literal("Issue"),
   title: Type.String(),
   state: Type.String(),
-  comments: nullable(Type.Object({ totalCount: Type.Number() })),
+  comments: Type.Object({ totalCount: Type.Number() }),
 });
 const WorkflowRun = Type.Object({
   __typename: Type.Literal("WorkflowRun"),
-  workflow: nullable(Type.Object({ name: Type.String() })),
-  checkSuite: nullable(
-    Type.Object({
-      status: Type.String(),
-      conclusion: nullable(Type.String()),
-      branch: nullable(Type.Object({ name: Type.String() })),
-      checkRuns: Connection,
-    }),
-  ),
+  workflow: Type.Object({ name: Type.String() }),
+  checkSuite: Type.Object({
+    status: Type.String(),
+    conclusion: nullable(Type.String()),
+    branch: nullable(Type.Object({ name: Type.String() })),
+    checkRuns: Connection,
+  }),
 });
 const Resource = Type.Union([PullRequest, Issue, WorkflowRun]);
 const ResponseSchema = Type.Object({
@@ -116,7 +115,7 @@ function time(value: string | null): number | null {
 
 function checkRun(run: Static<typeof CheckRun>): OrbLinkCheck {
   return {
-    id: run.id ?? null,
+    id: run.id,
     name: run.name,
     result: runResult(run),
     url: https(run.detailsUrl ?? run.url),
@@ -146,8 +145,7 @@ function context(node: Static<typeof Context>): OrbLinkCheck {
 function status(resource: Static<typeof Resource>): OrbLinkStatus {
   switch (resource.__typename) {
     case "PullRequest": {
-      const commit = resource.commits?.nodes?.find((node) => Check(Commit, node));
-      const nodes = commit?.commit?.statusCheckRollup?.contexts?.nodes ?? [];
+      const nodes = resource.commits.nodes[0]?.commit.statusCheckRollup?.contexts?.nodes ?? [];
       const word =
         resource.state !== "OPEN"
           ? resource.state.toLowerCase()
@@ -173,27 +171,25 @@ function status(resource: Static<typeof Resource>): OrbLinkStatus {
         title: resource.title,
         status: resource.state.toLowerCase(),
         diff: null,
-        comments: resource.comments?.totalCount ?? null,
+        comments: resource.comments.totalCount,
         checks: [],
       };
     case "WorkflowRun": {
       const suite = resource.checkSuite;
       const word =
-        suite === null
-          ? "unknown"
-          : suite.status !== "COMPLETED"
-            ? suite.status === "IN_PROGRESS"
-              ? "running"
-              : "queued"
-            : PASSED.has(suite.conclusion ?? "")
-              ? "passed"
-              : "failed";
+        suite.status !== "COMPLETED"
+          ? suite.status === "IN_PROGRESS"
+            ? "running"
+            : "queued"
+          : PASSED.has(suite.conclusion ?? "")
+            ? "passed"
+            : "failed";
       return {
-        title: [resource.workflow?.name, suite?.branch?.name].filter(Boolean).join(" · "),
+        title: [resource.workflow.name, suite.branch?.name].filter(Boolean).join(" · "),
         status: word,
         diff: null,
         comments: null,
-        checks: (suite?.checkRuns?.nodes ?? [])
+        checks: (suite.checkRuns?.nodes ?? [])
           .filter((node) => Check(CheckRun, node))
           .map(checkRun),
       };

@@ -1,4 +1,3 @@
-import { canonicalGithubLink } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { StoreError } from "../domain/errors.ts";
@@ -35,24 +34,16 @@ export function registerOrbLinkRoutes(
   task: SimulationTask,
   deps: OrbLinkDeps,
 ): void {
-  const failures = new Map<string, string>();
-  const observe = (
-    orbId: string,
-    operation: string,
-    error: string | null,
-    url?: string,
-    checkId?: string,
-  ) => {
-    const key = JSON.stringify([orbId, operation, url, checkId]);
-    // Request IDs, quota values and counts vary between otherwise identical failures.
-    const fingerprint = error?.split("\nGitHub:")[0]?.replace(/(?<!HTTP )\b\d+\b/gu, "#");
-    if (fingerprint) {
-      if (failures.get(key) !== fingerprint) {
-        failures.set(key, fingerprint);
-        logOrbEvent(task, orbId, "github-links-failed", { operation, url, checkId, reason: error });
+  const failures = new Set<string>();
+  const observe = (orbId: string, operation: string, error: string | null, checkId?: string) => {
+    const key = JSON.stringify([orbId, operation, checkId]);
+    if (error !== null) {
+      if (!failures.has(key)) {
+        failures.add(key);
+        logOrbEvent(task, orbId, "github-links-failed", { operation, checkId, reason: error });
       }
     } else if (failures.delete(key)) {
-      logOrbEvent(task, orbId, "github-links-recovered", { operation, url, checkId });
+      logOrbEvent(task, orbId, "github-links-recovered", { operation, checkId });
     }
   };
 
@@ -68,29 +59,21 @@ export function registerOrbLinkRoutes(
     return reply.send(links.value);
   });
 
-  app.get<{ Params: { orbId: string }; Querystring: { url?: unknown; checkId?: unknown } }>(
+  app.get<{ Params: { orbId: string }; Querystring: { checkId?: unknown } }>(
     "/api/v1/orbs/:orbId/links/steps",
     async (request, reply) => {
       reply.header("cache-control", "no-store");
       const { orbId } = request.params;
       if (!isOrbId(orbId)) return notFound(reply);
-      const { url, checkId } = request.query;
-      if (
-        typeof url !== "string" ||
-        url.length > 2048 ||
-        canonicalGithubLink(url) !== url ||
-        typeof checkId !== "string" ||
-        !/^[A-Za-z0-9_=-]{1,512}$/u.test(checkId)
-      )
-        return failure(reply, 400, "invalid_request", "valid url and checkId are required", false);
-      const steps = await readOrbLinkSteps(task, deps, orbId, url, checkId);
+      const { checkId } = request.query;
+      if (typeof checkId !== "string" || !/^[A-Za-z0-9_=-]{1,512}$/u.test(checkId))
+        return failure(reply, 400, "invalid_request", "valid checkId is required", false);
+      const steps = await readOrbLinkSteps(task, deps, orbId, checkId);
       if (steps.isErr()) {
         if (steps.error.type === "orb_not_found") return notFound(reply);
-        if (steps.error.type === "link_not_found")
-          return failure(reply, 404, "not_found", "link does not exist", false);
         return storeFailure(reply, steps.error);
       }
-      observe(orbId, "steps", steps.value.githubError, url, checkId);
+      observe(orbId, "steps", steps.value.githubError, checkId);
       return reply.send(steps.value);
     },
   );

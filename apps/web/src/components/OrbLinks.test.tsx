@@ -1,7 +1,7 @@
 import type { OrbLinksResponse } from "@pi-orb/protocol";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { OrbLinksDrawer } from "./OrbLinks.tsx";
+import { OrbLinksDrawer, Waterfall } from "./OrbLinks.tsx";
 
 const T = Date.UTC(2026, 10, 11, 17, 0, 0);
 const times = (_queued: number, started: number | null, completed: number | null) => ({
@@ -38,6 +38,11 @@ const links: OrbLinksResponse = {
   ],
 };
 
+const renderWaterfall = (value: OrbLinksResponse) =>
+  renderToStaticMarkup(
+    <Waterfall orbId="orb" checks={value.items[0]?.github?.checks ?? []} now={T + 200_000} />,
+  );
+
 const render = (value: OrbLinksResponse | null, error = null) =>
   renderToStaticMarkup(
     <OrbLinksDrawer orbId="orb" links={value} error={error} onRemove={() => {}} />,
@@ -60,14 +65,13 @@ describe("OrbLinksDrawer", () => {
     );
     expect(html).toContain('class="activity-strip-dot" role="img" aria-label="build · passed"');
     expect(html.match(/aria-label="Remove link"/g)).toHaveLength(2);
-    expect(html).toContain('href="https://github.com/o/r/actions/runs/1/job/1"');
-    expect(html).toContain('<td class="link-timeline-name">e2e</td>');
+    expect(html).not.toContain('class="link-timeline"');
     expect(html).toContain("--orb-link-ref:13ch");
     expect(html).toContain("--orb-link-strip:36px");
   });
 
   it("lays started checks out as runs on one track", () => {
-    const table = render(links).split('<table class="link-timeline">')[1] ?? "";
+    const table = renderWaterfall(links).split('<table class="link-timeline">')[1] ?? "";
     expect(table).toContain('<td class="link-timeline-duration">1m 00s</td>');
     expect(table).toContain('<td class="link-timeline-duration">2m 00s</td>');
     expect(table).toContain(
@@ -102,31 +106,11 @@ describe("OrbLinksDrawer", () => {
         },
       ],
     };
-    const table = render(queued).split('<table class="link-timeline">')[1] ?? "";
+    const table = renderWaterfall(queued).split('<table class="link-timeline">')[1] ?? "";
     const e2e = table.split("e2e")[1] ?? "";
     expect(e2e).toContain("link-timeline-queued");
     expect(e2e).not.toContain("link-timeline-pending");
     expect(e2e).toContain('<td class="link-timeline-duration"></td>');
-  });
-
-  it("does not expand StatusContext checks without an ID", () => {
-    const item = links.items[0];
-    const github = item?.github;
-    if (!item || !github) throw new Error("missing fixture");
-    const html = render({
-      ...links,
-      items: [
-        {
-          ...item,
-          github: {
-            ...github,
-            checks: github.checks.map((check) => ({ ...check, id: null })),
-          },
-        },
-      ],
-    });
-    expect(html).not.toContain("link-timeline-unfolds");
-    expect(html).not.toContain("aria-expanded");
   });
 
   it("summarizes each link by its worst check", () => {
@@ -196,7 +180,6 @@ describe("OrbLinksDrawer", () => {
       "actions/runs/8:failed": "bad",
       "actions/runs/9:running": "warn",
       "actions/runs/10:queued": "warn",
-      "actions/runs/11:unknown": "muted",
     });
     const html = render({
       ...links,

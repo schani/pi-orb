@@ -95,23 +95,14 @@ export async function readOrbLinkSteps(
   task: SimulationTask,
   deps: OrbLinkDeps,
   orbId: string,
-  url: string,
   checkId: string,
-): Promise<
-  Result<
-    OrbLinkStepsResponse,
-    { readonly type: "orb_not_found" } | { readonly type: "link_not_found" } | StoreError
-  >
-> {
+): Promise<Result<OrbLinkStepsResponse, { readonly type: "orb_not_found" } | StoreError>> {
   const orb = await deps.store.getOrb(task, orbId);
   if (orb.isErr()) return err(orb.error);
   if (orb.value === null) return err({ type: "orb_not_found" });
   const project = await deps.store.getProject(task, orb.value.projectId);
   if (project.isErr()) return err(project.error);
   if (project.value === null) return err({ type: "orb_not_found" });
-  const links = await deps.store.listOrbLinks(task, orbId);
-  if (links.isErr()) return err(links.error);
-  if (!links.value.some((link) => link.url === url)) return err({ type: "link_not_found" });
   const result = await deps.githubSteps(task, project.value.ownerUserId, checkId);
   return ok(result.isOk() ? result.value : { steps: [], githubError: result.error });
 }

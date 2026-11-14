@@ -7,12 +7,12 @@ const RUN = "https://github.com/o/r/actions/runs/3";
 const GONE = "https://github.com/o/r/pull/4";
 
 const TIMES = {
+  id: "CR_1",
   startedAt: null,
   completedAt: null,
-  steps: { nodes: [] },
 };
 const NO_TIMES = {
-  id: null,
+  id: "CR_1",
   startedAt: null,
   completedAt: null,
 };
@@ -44,6 +44,7 @@ it("maps pull requests, issues and Actions runs from one GraphQL request", async
                 statusCheckRollup: {
                   contexts: {
                     nodes: [
+                      null,
                       {
                         __typename: "CheckRun",
                         name: "build",
@@ -95,6 +96,7 @@ it("maps pull requests, issues and Actions runs from one GraphQL request", async
           branch: { name: "links" },
           checkRuns: {
             nodes: [
+              null,
               {
                 name: "qualify",
                 status: "QUEUED",
@@ -102,6 +104,7 @@ it("maps pull requests, issues and Actions runs from one GraphQL request", async
                 detailsUrl: "https://github.com/o/r/actions/runs/1/job/9",
                 url: "https://github.com/o/r/runs/9",
                 ...TIMES,
+                startedAt: "2026-11-11T17:00:05Z",
               },
             ],
           },
@@ -149,6 +152,7 @@ it("maps pull requests, issues and Actions runs from one GraphQL request", async
           result: "pending",
           url: "https://github.com/o/r/actions/runs/1/job/9",
           ...NO_TIMES,
+          startedAt: Date.parse("2026-11-11T17:00:05Z"),
         },
       ],
     },
@@ -171,7 +175,7 @@ it("reports PR and run outcomes", async () => {
     title: "t",
     additions: 1,
     deletions: 0,
-    commits: { nodes: [] },
+    commits: { nodes: [{ commit: { statusCheckRollup: { contexts: null } } }] },
     ...fields,
   });
   const { fetcher } = respond({
@@ -186,7 +190,7 @@ it("reports PR and run outcomes", async () => {
           status: "COMPLETED",
           conclusion: "FAILURE",
           branch: null,
-          checkRuns: { nodes: [] },
+          checkRuns: null,
         },
       },
     },
@@ -199,6 +203,7 @@ it("reports PR and run outcomes", async () => {
     "failed",
   ]);
   expect(result._unsafeUnwrap().statuses[3]?.title).toBe("Deploy");
+  expect(result._unsafeUnwrap().statuses[3]?.checks).toEqual([]);
 });
 
 it("fails with a message when GitHub rejects the request", async () => {
@@ -260,54 +265,6 @@ it("loads only one check's steps on demand, retaining accessible steps", async (
   expect(body.variables).toEqual({ id: "CR_1" });
   expect(body.query).toContain("steps(first: 50)");
   expect(body.query).not.toContain("resource(");
-});
-
-it("retains status and accessible checks when a check or connection is inaccessible", async () => {
-  const { fetcher } = respond({
-    data: {
-      l0: {
-        __typename: "WorkflowRun",
-        workflow: { name: "CI" },
-        checkSuite: {
-          status: "IN_PROGRESS",
-          conclusion: null,
-          branch: null,
-          checkRuns: {
-            nodes: [
-              null,
-              {
-                id: "CR_1",
-                name: "build",
-                status: "IN_PROGRESS",
-                conclusion: null,
-                detailsUrl: null,
-                url: RUN,
-                startedAt: "2026-11-11T17:00:05Z",
-                completedAt: null,
-              },
-            ],
-          },
-        },
-      },
-      l1: {
-        __typename: "PullRequest",
-        title: "PR",
-        state: "OPEN",
-        isDraft: false,
-        reviewDecision: null,
-        additions: 1,
-        deletions: 0,
-        commits: null,
-      },
-    },
-    errors: [{ message: "Resource not accessible by integration" }],
-  });
-  const result = (await readGithubLinkStatuses(fetcher, "tok", [RUN, PR]))._unsafeUnwrap();
-  expect(result.statuses[0]?.checks).toMatchObject([
-    { id: "CR_1", name: "build", startedAt: Date.parse("2026-11-11T17:00:05Z") },
-  ]);
-  expect(result.statuses[1]).toMatchObject({ title: "PR", checks: [] });
-  expect(result.githubError).toContain("Resource not accessible by integration");
 });
 
 it("preserves bounded safe GitHub explanations and request/rate headers", async () => {
