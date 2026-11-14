@@ -3611,10 +3611,10 @@ button.orb-phone-menu {
     min-height: 44px;
   }
   .orb-link > summary {
-    grid-template-columns: 16px var(--orb-link-ref) minmax(0, 1fr) 11ch minmax(
-        0,
-        var(--orb-link-strip)
-      ) 20px;
+    grid-template-columns: 16px var(--orb-link-ref) minmax(0, 1fr) 11ch 20px;
+  }
+  .orb-link > summary > .orb-link-strip {
+    display: none;
   }
   .orb-link-status {
     display: none;

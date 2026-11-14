@@ -227,6 +227,12 @@ describe("shared text fields", () => {
   });
 });
 
+it("drops per-link check dots on phones", () => {
+  const phone = media("(max-width: 600px)");
+  expect(rule(".orb-link > summary > .orb-link-strip", phone)).toContain("display: none");
+  expect(rule(".orb-link > summary", phone)).not.toContain("orb-link-strip");
+});
+
 it("sets the CI waterfall on 20px rows with the 2px ring of a plot", () => {
   expect(rule(".link-timeline")).toContain("line-height: 20px");
   expect(rule(".link-timeline-dot > .activity-strip-dot")).toContain("height: 20px");
