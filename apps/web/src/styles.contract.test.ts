@@ -80,7 +80,6 @@ describe("orb alerts", () => {
     expect(band).toContain("color: var(--on-alert)");
     expect(band).toContain("white-space: pre-wrap");
     expect(band).toContain("overflow-wrap: anywhere");
-    expect(rule(".orb-entry-alert")).not.toContain("background");
     expect(rule(".rec-bd")).toContain("min-width: 0");
   });
 });
@@ -295,9 +294,9 @@ describe("dashboard layout contract", () => {
     expect(rule(".orb-entry-link")).not.toContain("font-size");
   });
 
-  it("keeps every dashboard orb entry on its line grid behind its state hue", () => {
-    expect(rule(".orb-entry")).toContain("border-left: 2px solid var(--g2)");
-    expect(rule(".orb-entry-deleting")).toContain("border-left-style: dotted");
+  it("keeps every dashboard orb entry on its line grid with the tile as its only state mark", () => {
+    expect(rule(".orb-entry")).not.toContain("border-left");
+    expect(css).not.toMatch(/\.orb-entry-[a-z]+ \{[^}]*border-left/);
     expect(rule(".orb-entry-title")).toContain("height: var(--row)");
     expect(rule(".orb-entry-title")).toContain("align-items: center");
     expect(rule(".orb-entry-link")).toContain("white-space: nowrap");
@@ -306,8 +305,7 @@ describe("dashboard layout contract", () => {
   });
 
   it("uses the stopped gray hue for sleeping rows without overriding selected fill", () => {
-    expect(rule(".s-sleeping")).toContain("color: var(--st-sleeping)");
-    expect(rule(".orb-entry-sleeping")).toContain("border-left-color: var(--st-sleeping)");
+    expect(rule(".s-sleeping")).toContain("color: var(--g3)");
     expect(
       rule(
         ".orb-entry-stopped .orb-entry-link,\n.orb-entry-sleeping .orb-entry-link,\n.orb-entry-archived .orb-entry-link,\n.orb-entry-archiving .orb-entry-link,\n.orb-entry-deleting .orb-entry-link",
@@ -617,17 +615,16 @@ describe("Signal / Boards system", () => {
       "archiving",
       "deleting",
     ]) {
-      expect(rule(`.s-${state}`)).toContain(`color: var(--st-${state})`);
-      expect(css).toContain(`.orb-entry-${state} {`);
+      expect(rule(`.s-${state}`)).toMatch(/color: var\(--(?:ok|warn|g3|bad)\)/);
     }
+    expect(css).not.toContain("--st-");
     expect(css).not.toMatch(/\.(?:s|orb-entry)-(?:idle|start|stop|sleep|fail|arch|archng|del)\b/);
   });
 
   it("uses one inactive gray, one red and no signal hue on ink", () => {
-    expect(declared("--st-stopped")).toBe("var(--g3)");
-    expect(declared("--st-sleeping")).toBe("var(--g3)");
-    expect(declared("--st-archived")).toBe("var(--g3)");
-    expect(declared("--st-transitional")).toBe("var(--warn)");
+    for (const state of ["stopped", "sleeping", "archived"])
+      expect(rule(`.s-${state}`)).toContain("color: var(--g3)");
+    expect(rule(".s-transitional")).toContain("color: var(--warn)");
     expect(declared("--ok-bg")).toBeUndefined();
     expect(rule(".alert-band")).toContain("background: var(--alert)");
     expect(rule(".activity-strip-tip")).toContain("background: var(--w)");
@@ -639,7 +636,10 @@ describe("Signal / Boards system", () => {
     expect(rule(".tag")).toContain("border: 1px solid currentcolor");
     expect(css).not.toContain(".usage-page :is(h2, h3)");
     expect(rule(".session-ribbon")).toContain("border-bottom: 1px solid var(--bad)");
-    expect(rule(".orb-entry-alert")).toBe("\n  border-left-color: var(--bad);\n");
+  });
+
+  it("has one touch condition", () => {
+    expect(css).not.toMatch(/@media[^{]*\((?:pointer: coarse|hover: none)\)/);
   });
 
   it("gives phone orb actions 44px tap areas without growing the row", () => {
@@ -650,11 +650,12 @@ describe("Signal / Boards system", () => {
     expect(rule(".orb-entry-meta")).toContain("height: var(--row)");
   });
 
-  it("flips the primary button to paper on focus and never bolds selection", () => {
+  it("has no primary button variant and never bolds selection", () => {
     expect(rule(":is(button, a, summary):focus-visible")).toContain(
       "background: var(--k) !important",
     );
-    expect(rule(".new-project button:focus-visible")).toContain("background: var(--w) !important");
+    expect(rule(".new-project button")).not.toContain("background");
+    expect(css).not.toContain(".new-project button:");
     expect(rule(".ix-row-current,\n.ix-row-current:hover")).not.toContain("font-weight");
     expect(css).not.toContain(".subagent-message-notice > summary:focus-visible");
   });

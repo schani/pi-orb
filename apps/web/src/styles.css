@@ -77,15 +77,6 @@
   --chart-4: #1baf7a;
   --chart-5: #c2418a;
   --chart-6: #7a5c00;
-  --st-busy: var(--ok);
-  --st-running: var(--ok);
-  --st-transitional: var(--warn);
-  --st-stopped: var(--g3);
-  --st-sleeping: var(--g3);
-  --st-failed: var(--bad);
-  --st-archived: var(--g3);
-  --st-archiving: var(--warn);
-  --st-deleting: var(--bad);
   --text: "Iosevka Etoile", serif;
   --mono: "JetBrains Mono", monospace;
   --text-size: 13px;
@@ -467,40 +458,40 @@ button.text-action.error-text {
 
 .s-busy {
   font-weight: 700;
-  color: var(--st-busy);
+  color: var(--ok);
 }
 
 .s-running {
-  color: var(--st-running);
+  color: var(--ok);
 }
 
 .s-transitional {
-  color: var(--st-transitional);
+  color: var(--warn);
 }
 
 .s-stopped {
-  color: var(--st-stopped);
+  color: var(--g3);
 }
 
 .s-sleeping {
-  color: var(--st-sleeping);
+  color: var(--g3);
 }
 
 .s-failed {
   font-weight: 700;
-  color: var(--st-failed);
+  color: var(--bad);
 }
 
 .s-archived {
-  color: var(--st-archived);
+  color: var(--g3);
 }
 
 .s-archiving {
-  color: var(--st-archiving);
+  color: var(--warn);
 }
 
 .s-deleting {
-  color: var(--st-deleting);
+  color: var(--bad);
 }
 
 .banner {
@@ -691,7 +682,7 @@ button.text-action.error-text {
 .usage-orb-row:focus-visible .usage-orb-bar {
   background: var(--w);
 }
-@media (pointer: coarse) {
+@media (max-width: 600px), (any-pointer: coarse) {
   .usage-orb-row {
     min-height: 44px;
   }
@@ -964,8 +955,7 @@ a.project-new-orb-icon:hover {
 
 .orb-entry {
   flex: none;
-  padding: 4px 12px 4px calc(12px - 2px);
-  border-left: 2px solid var(--g2);
+  padding: 4px 12px;
   border-bottom: 1px solid var(--g1);
 }
 
@@ -1031,47 +1021,6 @@ a.project-new-orb-icon:hover {
 
 .orb-entry-error {
   color: var(--bad);
-}
-
-.orb-entry-busy {
-  border-left-color: var(--st-busy);
-}
-
-.orb-entry-running {
-  border-left-color: var(--st-running);
-}
-
-.orb-entry-transitional {
-  border-left-color: var(--st-transitional);
-}
-
-.orb-entry-stopped {
-  border-left-color: var(--st-stopped);
-}
-
-.orb-entry-sleeping {
-  border-left-color: var(--st-sleeping);
-}
-
-.orb-entry-failed {
-  border-left-color: var(--st-failed);
-}
-
-.orb-entry-archived {
-  border-left-color: var(--st-archived);
-}
-
-.orb-entry-archiving {
-  border-left-color: var(--st-archiving);
-}
-
-.orb-entry-alert {
-  border-left-color: var(--bad);
-}
-
-.orb-entry-deleting {
-  border-left-color: var(--st-deleting);
-  border-left-style: dotted;
 }
 
 .orb-entry-stopped .orb-entry-link,
@@ -1158,23 +1107,6 @@ a.project-new-orb-icon:hover {
 
 .new-project button {
   margin-top: 12px;
-  background: var(--k);
-  color: var(--w);
-}
-
-.new-project button:hover:not(:disabled),
-.new-project button:disabled {
-  background: var(--w);
-  color: var(--k);
-}
-
-.new-project button:focus-visible {
-  background: var(--w) !important;
-  color: var(--k) !important;
-}
-
-.new-project button:disabled {
-  color: var(--g2);
 }
 
 .new-project .banner {
@@ -2072,7 +2004,7 @@ body:has(.orb-page) {
   color: var(--bad);
 }
 
-@media (hover: none) {
+@media (max-width: 600px), (any-pointer: coarse) {
   .response-copy {
     opacity: 1;
   }
@@ -2209,7 +2141,7 @@ pre,
   position: static;
 }
 
-@media (hover: none) {
+@media (max-width: 600px), (any-pointer: coarse) {
   .mermaid-tools {
     opacity: 1;
   }

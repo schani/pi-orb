@@ -36,7 +36,7 @@ Literals live only in the `:root` block of `apps/web/src/styles.css` and its dar
 | `--veil` | paper 75% | paper 75% | drop wash |
 | `--chart-1…6` | `#2a78d6 #eb6834 #4a3aa7 #1baf7a #c2418a #7a5c00` | `#5b9eea #f08050 #a594f0 #2fc08e #e06bab #c9a227` | chart series 4–6 |
 
-Each lifecycle state owns a hue, used wherever that state appears: `--st-busy`, `--st-running` (`--ok`); `--st-transitional`, `--st-archiving` (`--warn`); `--st-stopped`, `--st-sleeping`, `--st-archived` (`--g3`); `--st-failed`, `--st-deleting` (`--bad`). Failure text, failed rows and errors are `--bad`.
+Each lifecycle state takes a signal colour wherever it appears: busy and running `--ok`; transitional and archiving `--warn`; stopped, sleeping and archived `--g3`; failed and deleting `--bad`. Failure text, failed rows and errors are `--bad`.
 
 ### Type
 
@@ -57,7 +57,7 @@ Each lifecycle state owns a hue, used wherever that state appears: `--st-busy`, 
 | Radius | 0; state tiles 2; dots round |
 | Opacity | blink 15%; scrim, lightbox and veil above |
 
-Phone and coarse-pointer targets are 44px.
+Touch is one condition, `(max-width: 600px), (any-pointer: coarse)`: targets are 44px and hover-revealed controls stay visible.
 
 ## Dark mode
 
@@ -77,7 +77,7 @@ Charts need no re-render: Vega writes `var(--…)` colours into SVG attributes. 
 
 - 1px ink rules, `--g2` hairlines, zero radius, no shadows, no gradients. The transcript has no max-width.
 - **Hover.** Buttons and links invert; rows take `--g1` on paper and `--g1x` on fills.
-- **Focus** is inversion (ink ground, paper text), not a tint; the current row is inverted too. Focus inversion outranks every state hue and hover through one `!important` rule; only danger, primary and ring targets override it. An already-inverted control (current index row, selected tab, period, search result or command, pressed icon, link or table in a user turn) steps from ink to `--g3` on focus. Rejected: an inset paper ring (invisible on paper) and an outer ink ring (clipped by the index edges and header bar).
+- **Focus** is inversion (ink ground, paper text), not a tint; the current row is inverted too. Focus inversion outranks every state hue and hover through one `!important` rule; only danger and ring targets override it. An already-inverted control (current index row, selected tab, period, search result or command, pressed icon, link or table in a user turn) steps from ink to `--g3` on focus. Rejected: an inset paper ring (invisible on paper) and an outer ink ring (clipped by the index edges and header bar).
 - Images and plots cannot invert: they get a 2px ink ring. Fields get crop marks (Controls).
 - **Selection** is inversion only. The global `::selection` is ink on `--g2`, readable on paper and inverted surfaces; no modal-specific overrides.
 - **Disabled** is `--g2` text and border; a disabled text action's rule turns dotted.
@@ -116,7 +116,7 @@ Glyphs are white 1.5px strokes with round caps on a 2px-radius tile. Tiles keep 
 
 ### Controls
 
-- **Button:** 1px ink border, 8px side padding, 18px line. **Primary** (Create project) is inverted and flips to paper on hover, focus and disabled. **Danger** is red with a red border.
+- **Button:** 1px ink border, 8px side padding, 18px line. **Danger** is red with a red border.
 - **Text action:** the word over a `--g2` rule, `--g3` text, no box.
 - **Segments and tabs:** text buttons in a row; the selected one is inverted.
 - **Field:** production inputs and textareas show no placeholder; labels are the accessible names. Focus draws four 11px ink crop-mark corners 3px outside the field (3px inside the padding for the full-bleed instruction editors) without changing border, size or padding (`TextFieldFrame`). Rejected: paper-on-ink focus (replaced the writing surface) and a writing-edge rail (formed a double edge).
@@ -138,7 +138,7 @@ Glyphs are white 1.5px strokes with round caps on a 2px-radius tile. Tiles keep 
 - **Board:** fills the viewport between two 24px bars. One background rule per masonry column runs from strip to footer.
 - **Totals strip:** four cells split by 1px rules, each a bold number and an uppercase grey label; icon-only Usage (trend) and Settings (gear) at the right. At ≤600px two rows, with the icons spanning both.
 - **Project header** (`ProjectHeader`, shared by board and index): black-ruled, title-size name, then right-aligned Pi, Claude, gear and red bin; on the index these are contiguous 24px cells, the bin flush with the index's right border. A project box closes with a black rule; a deleting project is greyed; errors are red lines. **New project** has a dashed left rule.
-- **Orb entry:** two 20px lines behind a 2px left border in the state hue (dotted while deleting), 4px padding above and below: (1) state tile, vertically centred, and the 13px name, grey when stopped or archived, truncated; (2) age, with archive and red delete icons right-aligned. On phones archive and delete sit 44px apart with 44px tap areas overflowing the meta row, so rows keep their height and a long title can run under them. Rejected: 20px targets (too small) and 44px rows (13 → 10 orbs on an iPhone 14 dashboard). Error and blocker lines are red and grey.
+- **Orb entry:** two 20px lines, 4px padding above and below: (1) state tile, vertically centred, and the 13px name, grey when stopped or archived, truncated; (2) age, with archive and red delete icons right-aligned. On phones archive and delete sit 44px apart with 44px tap areas overflowing the meta row, so rows keep their height and a long title can run under them. Rejected: 20px targets (too small), 44px rows (13 → 10 orbs on an iPhone 14 dashboard) and a state-hue left border (repeated the tile). Error and blocker lines are red and grey.
 - **Archive:** a `--g1` disclosure footer; its rows hover `--g1x`.
 - **Nesting:** a thin connector; indentation 18px per level, saturating at 40% of the width.
 - **Index:** 236px with a black right rule. First row: a 24px `PI-ORB` home link with the neutral tile, under a black rule. Rows are `tile | name | age` with `--g1` hover and the current orb inverted.
