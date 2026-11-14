@@ -168,18 +168,18 @@ describe("OrbLinksDrawer", () => {
     expect(roster).toContain(">3</a>");
   });
 
-  it("colours kind icons by GitHub state", () => {
+  it("colours kind icons in the activity-strip states", () => {
     const tones = Object.entries({
       "pull/1:review": "ok",
       "pull/2:draft": "muted",
-      "pull/3:merged": "done",
-      "pull/4:closed": "bad",
+      "pull/3:merged": null,
+      "pull/4:closed": "muted",
       "issues/5:open": "ok",
-      "issues/6:closed": "done",
-      "actions/runs/7:passed": "ok",
+      "issues/6:closed": null,
+      "actions/runs/7:passed": null,
       "actions/runs/8:failed": "bad",
-      "actions/runs/9:running": "warn",
-      "actions/runs/10:queued": "warn",
+      "actions/runs/9:running": "ok",
+      "actions/runs/10:queued": "muted",
     });
     const html = render({
       ...links,
@@ -195,7 +195,7 @@ describe("OrbLinksDrawer", () => {
     for (const [key, tone] of tones)
       expect(html).toMatch(
         new RegExp(
-          `class="orb-link-kind orb-link-${tone}"><svg[^>]*><use[^>]*></use></svg></span><a href="[^"]*/${key.split(":")[0]}"`,
+          `class="orb-link-kind${tone === null ? "" : ` orb-link-${tone}`}"><svg[^>]*><use[^>]*></use></svg></span><a href="[^"]*/${key.split(":")[0]}"`,
         ),
       );
     expect(render(links)).toMatch(

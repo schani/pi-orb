@@ -53,15 +53,13 @@ const rank = (link: Link) =>
   (CLOSED.has(link.github?.status ?? "") ? KIND_ORDER.length : 0) +
   KIND_ORDER.indexOf(githubLinkKind(link.url) ?? "run");
 
-/** GitHub's state colours: open green, draft grey, merged or completed purple, closed red. */
+/** Activity-strip states: live green, waiting or abandoned grey, done ink, failed red. */
 function tone(link: Link): string | null {
   const status = link.github?.status;
-  if (status === undefined) return null;
-  if (status === "merged" || (status === "closed" && githubLinkKind(link.url) === "issue"))
-    return "done";
-  if (status === "closed" || status === "failed") return "bad";
-  if (status === "running" || status === "queued") return "warn";
-  return status === "draft" ? "muted" : "ok";
+  if (status === undefined || status === "merged" || status === "passed") return null;
+  if (status === "closed") return githubLinkKind(link.url) === "issue" ? null : "muted";
+  if (status === "failed") return "bad";
+  return status === "draft" || status === "queued" ? "muted" : "ok";
 }
 
 const two = (value: number) => String(value).padStart(2, "0");

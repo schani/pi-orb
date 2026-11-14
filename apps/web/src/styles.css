@@ -62,7 +62,6 @@
   --warn: #966100;
   --bad: #b42318;
   --bad-bg: #fdecea;
-  --done: #8250df;
   --scrim: rgb(0 0 0 / 35%);
   --lightbox: rgb(0 0 0 / 72%);
   --veil: #ffffffbf;
@@ -106,7 +105,6 @@
     --warn: #e3a33b;
     --bad: #ff7a6b;
     --bad-bg: #3a1612;
-    --done: #ab7df8;
     --scrim: rgb(0 0 0 / 60%);
     --veil: #000000bf;
     --you: #2b2b2b;
@@ -3109,14 +3107,8 @@ pre,
 .orb-link-ok {
   color: var(--ok);
 }
-.orb-link-warn {
-  color: var(--warn);
-}
 .orb-link-bad {
   color: var(--bad);
-}
-.orb-link-done {
-  color: var(--done);
 }
 .orb-link-muted {
   color: var(--g3);
