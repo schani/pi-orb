@@ -23,7 +23,7 @@ import { readGceImageIdentity } from "./adapters/gce/image-pin.ts";
 import { GceOrbHostProvider } from "./adapters/gce/provider.ts";
 import { authenticatedGitCredentials } from "./adapters/git-resources/credentials.ts";
 import { GitResourceSource } from "./adapters/git-resources/git.ts";
-import { readGithubLinkStatuses } from "./adapters/github-link-status.ts";
+import { readGithubLinkStatuses, readGithubLinkSteps } from "./adapters/github-link-status.ts";
 import {
   type GithubOAuthConfig,
   GithubOAuthHttpClient,
@@ -975,6 +975,15 @@ export async function main(
               error.type === "auth_required" ? "GitHub login required" : "GitHub token unavailable",
             )
             .andThen((grant) => readGithubLinkStatuses(fetch, grant.accessToken, urls)),
+        githubSteps: (task, ownerUserId, checkId) =>
+          ResultAsync.fromSafePromise(
+            getToken(task, brokerForUser(ownerUserId), GITHUB_PROVIDER, { reason: "startup" }),
+          )
+            .andThen((grant) => grant)
+            .mapErr((error) =>
+              error.type === "auth_required" ? "GitHub login required" : "GitHub token unavailable",
+            )
+            .andThen((grant) => readGithubLinkSteps(fetch, grant.accessToken, checkId)),
       });
       startupPhase("websocket.start");
       await registerLiveProxy(browser, httpTask, deps);

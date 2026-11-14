@@ -2,6 +2,7 @@ import {
   githubLinkKind,
   githubLinkRef,
   type OrbLinkCheck,
+  type OrbLinkStep,
   type OrbLinksResponse,
 } from "@pi-orb/protocol";
 import {
@@ -14,7 +15,7 @@ import {
   useState,
 } from "react";
 import type { ApiError } from "../lib/api.ts";
-import { describeApiError, listOrbLinks, removeOrbLink } from "../lib/api.ts";
+import { describeApiError, listOrbLinks, readOrbLinkSteps, removeOrbLink } from "../lib/api.ts";
 import { stripTipStyle } from "../lib/strip-tip.ts";
 import { Icon } from "./Icons.tsx";
 
@@ -134,9 +135,75 @@ function tipText(span: Span): string {
   return facts.length === 0 ? "" : ` · ${facts.join(" · ")}`;
 }
 
+function CheckSteps({
+  orbId,
+  check,
+  now,
+  row,
+}: {
+  orbId: string;
+  check: OrbLinkCheck;
+  now: number;
+  row: (span: Span, key: string, name: ReactNode) => ReactNode;
+}) {
+  const [steps, setSteps] = useState<readonly OrbLinkStep[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (check.id === null) return;
+    const controller = new AbortController();
+    // StrictMode may clean up this effect before it can start a read.
+    queueMicrotask(() => {
+      if (controller.signal.aborted || check.id === null) return;
+      void readOrbLinkSteps(orbId, check.id, controller.signal).then((result) => {
+        if (controller.signal.aborted) return;
+        if (result.isOk()) {
+          setSteps(result.value.steps);
+          setError(result.value.githubError);
+        } else setError(describeApiError(result.error));
+      });
+    });
+    return () => controller.abort();
+  }, [orbId, check]);
+  return (
+    <>
+      {error !== null && (
+        <tr>
+          <td colSpan={4} className="error-text">
+            {error}
+          </td>
+        </tr>
+      )}
+      {steps.map((step, index) =>
+        row(
+          {
+            name: step.name,
+            result: step.result,
+            queued: null,
+            started: step.startedAt,
+            finished: step.completedAt ?? (step.result === "running" ? now : null),
+          },
+          `${check.id}:${index}`,
+          <>
+            <span className="link-timeline-indent">└</span>
+            {step.name}
+          </>,
+        ),
+      )}
+    </>
+  );
+}
+
 /** CI waterfall (Pi turn waterfall language): runner wait outlined, then the run; steps unfold. */
-function Waterfall({ checks, now }: { checks: readonly OrbLinkCheck[]; now: number }) {
-  const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
+export function Waterfall({
+  checks,
+  now,
+  orbId,
+}: {
+  checks: readonly OrbLinkCheck[];
+  now: number;
+  orbId: string;
+}) {
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [tip, setTip] = useState<BarTip | null>(null);
   const spans = checks.map((check) => checkSpan(check, now));
   const from = Math.min(
@@ -149,10 +216,10 @@ function Waterfall({ checks, now }: { checks: readonly OrbLinkCheck[]; now: numb
   );
   const at = (ms: number) => percent((ms - from) / (to - from));
   const width = (ms: number) => percent(Math.max(0.004, ms / (to - from)));
-  const toggle = (index: number) =>
+  const toggle = (id: string) =>
     setOpen((current) => {
       const next = new Set(current);
-      if (!next.delete(index)) next.add(index);
+      if (!next.delete(id)) next.add(id);
       return next;
     });
   const row = (span: Span, key: string, name: ReactNode, unfold?: () => void) => {
@@ -169,7 +236,7 @@ function Waterfall({ checks, now }: { checks: readonly OrbLinkCheck[]; now: numb
         key={key}
         className={unfold === undefined ? undefined : "link-timeline-unfolds"}
         tabIndex={unfold === undefined ? undefined : 0}
-        aria-expanded={unfold === undefined ? undefined : open.has(Number(key))}
+        aria-expanded={unfold === undefined ? undefined : open.has(key)}
         onClick={onToggle}
         onKeyDown={onToggle}
       >
@@ -212,7 +279,7 @@ function Waterfall({ checks, now }: { checks: readonly OrbLinkCheck[]; now: numb
           {checks.map((check, index) => [
             row(
               spans[index] ?? checkSpan(check, now),
-              String(index),
+              check.id ?? String(index),
               check.url === null ? (
                 check.name
               ) : (
@@ -220,26 +287,21 @@ function Waterfall({ checks, now }: { checks: readonly OrbLinkCheck[]; now: numb
                   {check.name}
                 </a>
               ),
-              check.steps.length > 0 ? () => toggle(index) : undefined,
+              check.id === null
+                ? undefined
+                : () => {
+                    if (check.id !== null) toggle(check.id);
+                  },
             ),
-            ...(open.has(index)
-              ? check.steps.map((step, stepIndex) =>
-                  row(
-                    {
-                      name: step.name,
-                      result: step.result,
-                      queued: null,
-                      started: step.startedAt,
-                      finished: step.completedAt ?? (step.result === "running" ? now : null),
-                    },
-                    `${index}:${stepIndex}`,
-                    <>
-                      <span className="link-timeline-indent">└</span>
-                      {step.name}
-                    </>,
-                  ),
-                )
-              : []),
+            check.id !== null && open.has(check.id) && (
+              <CheckSteps
+                key={`steps:${check.id}`}
+                orbId={orbId}
+                check={check}
+                now={now}
+                row={row}
+              />
+            ),
           ])}
         </tbody>
       </table>
@@ -257,15 +319,18 @@ function Waterfall({ checks, now }: { checks: readonly OrbLinkCheck[]; now: numb
 }
 
 export function OrbLinksDrawer({
+  orbId,
   links,
   error,
   onRemove,
 }: {
+  orbId: string;
   links: OrbLinksResponse | null;
   error: ApiError | null;
   onRemove: (url: string) => void;
 }) {
   const [tip, setTip] = useState<Tip | null>(null);
+  const [openLinks, setOpenLinks] = useState<ReadonlySet<string>>(new Set());
   const now = Date.now();
   if (links === null && error === null) return null;
   if (links?.items.length === 0 && links.githubError === null && error === null) return null;
@@ -292,7 +357,14 @@ export function OrbLinksDrawer({
     />
   );
   return (
-    <details className="orb-links activity-rail-row" open={error !== null || undefined}>
+    <details
+      className="orb-links activity-rail-row"
+      open={error !== null || undefined}
+      onToggle={(event) => {
+        if (event.target === event.currentTarget && !event.currentTarget.open)
+          setOpenLinks(new Set());
+      }}
+    >
       <summary>
         <span className="activity-rail-marker" aria-hidden="true" />
         <span className="activity-rail-summary">links</span>
@@ -324,7 +396,21 @@ export function OrbLinksDrawer({
         {error !== null && <p className="error-text">{describeApiError(error)}</p>}
         {links?.githubError != null && <p className="error-text">{links.githubError}</p>}
         {items.map((link, index) => (
-          <details className="orb-link" key={link.url}>
+          <details
+            className="orb-link"
+            key={link.url}
+            open={openLinks.has(link.url)}
+            onToggle={(event) => {
+              if (event.target !== event.currentTarget) return;
+              const open = event.currentTarget.open;
+              setOpenLinks((current) => {
+                const next = new Set(current);
+                if (open) next.add(link.url);
+                else next.delete(link.url);
+                return next;
+              });
+            }}
+          >
             <summary>
               <span
                 className={["orb-link-kind", tone(link) && `orb-link-${tone(link)}`]
@@ -357,8 +443,8 @@ export function OrbLinksDrawer({
                 <Icon name="bin" />
               </button>
             </summary>
-            {(link.github?.checks.length ?? 0) > 0 && (
-              <Waterfall checks={link.github?.checks ?? []} now={now} />
+            {openLinks.has(link.url) && (link.github?.checks.length ?? 0) > 0 && (
+              <Waterfall checks={link.github?.checks ?? []} now={now} orbId={orbId} />
             )}
           </details>
         ))}
@@ -399,5 +485,13 @@ export function OrbLinks({ orbId }: { orbId: string }) {
     },
     [orbId],
   );
-  return <OrbLinksDrawer links={links} error={error} onRemove={(url) => void remove(url)} />;
+  return (
+    <OrbLinksDrawer
+      key={orbId}
+      orbId={orbId}
+      links={links}
+      error={error}
+      onRemove={(url) => void remove(url)}
+    />
+  );
 }

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { readGithubLinkStatuses } from "./github-link-status.ts";
+import { readGithubLinkStatuses, readGithubLinkSteps } from "./github-link-status.ts";
 
 const PR = "https://github.com/o/r/pull/1";
 const ISSUE = "https://github.com/o/r/issues/2";
@@ -7,14 +7,14 @@ const RUN = "https://github.com/o/r/actions/runs/3";
 const GONE = "https://github.com/o/r/pull/4";
 
 const TIMES = {
+  id: "CR_1",
   startedAt: null,
   completedAt: null,
-  steps: { nodes: [] },
 };
 const NO_TIMES = {
+  id: "CR_1",
   startedAt: null,
   completedAt: null,
-  steps: [],
 };
 
 function respond(body: unknown, status = 200) {
@@ -44,6 +44,7 @@ it("maps pull requests, issues and Actions runs from one GraphQL request", async
                 statusCheckRollup: {
                   contexts: {
                     nodes: [
+                      null,
                       {
                         __typename: "CheckRun",
                         name: "build",
@@ -95,6 +96,7 @@ it("maps pull requests, issues and Actions runs from one GraphQL request", async
           branch: { name: "links" },
           checkRuns: {
             nodes: [
+              null,
               {
                 name: "qualify",
                 status: "QUEUED",
@@ -102,6 +104,7 @@ it("maps pull requests, issues and Actions runs from one GraphQL request", async
                 detailsUrl: "https://github.com/o/r/actions/runs/1/job/9",
                 url: "https://github.com/o/r/runs/9",
                 ...TIMES,
+                startedAt: "2026-11-11T17:00:05Z",
               },
             ],
           },
@@ -112,7 +115,7 @@ it("maps pull requests, issues and Actions runs from one GraphQL request", async
     errors: [{ message: "Could not resolve to a node" }],
   });
   const result = await readGithubLinkStatuses(fetcher, "tok", [PR, ISSUE, RUN, GONE]);
-  expect(result._unsafeUnwrap()).toEqual([
+  expect(result._unsafeUnwrap().statuses).toEqual([
     {
       title: "Add links",
       status: "approved",
@@ -128,12 +131,12 @@ it("maps pull requests, issues and Actions runs from one GraphQL request", async
         { name: "e2e", result: "failed", url: "https://github.com/o/r/runs/2", ...NO_TIMES },
         { name: "dst", result: "running", url: null, ...NO_TIMES },
         {
+          id: null,
           name: "ci/legacy",
           result: "pending",
           url: null,
           startedAt: null,
           completedAt: null,
-          steps: [],
         },
       ],
     },
@@ -149,6 +152,7 @@ it("maps pull requests, issues and Actions runs from one GraphQL request", async
           result: "pending",
           url: "https://github.com/o/r/actions/runs/1/job/9",
           ...NO_TIMES,
+          startedAt: Date.parse("2026-11-11T17:00:05Z"),
         },
       ],
     },
@@ -159,6 +163,9 @@ it("maps pull requests, issues and Actions runs from one GraphQL request", async
   expect(request?.url).toBe("https://api.github.com/graphql");
   expect(new Headers(request?.init.headers).get("authorization")).toBe("Bearer tok");
   const body = JSON.parse(String(request?.init.body));
+  expect(body.query).not.toContain("steps(");
+  expect(body.query).toContain("startedAt completedAt");
+  expect(result._unsafeUnwrap().githubError).toContain("Could not resolve to a node");
   expect(body.variables).toEqual({ u0: PR, u1: ISSUE, u2: RUN, u3: GONE });
 });
 
@@ -168,7 +175,7 @@ it("reports PR and run outcomes", async () => {
     title: "t",
     additions: 1,
     deletions: 0,
-    commits: { nodes: [] },
+    commits: { nodes: [{ commit: { statusCheckRollup: { contexts: null } } }] },
     ...fields,
   });
   const { fetcher } = respond({
@@ -183,19 +190,20 @@ it("reports PR and run outcomes", async () => {
           status: "COMPLETED",
           conclusion: "FAILURE",
           branch: null,
-          checkRuns: { nodes: [] },
+          checkRuns: null,
         },
       },
     },
   });
   const result = await readGithubLinkStatuses(fetcher, "tok", [PR, PR, PR, RUN]);
-  expect(result._unsafeUnwrap().map((status) => status?.status)).toEqual([
+  expect(result._unsafeUnwrap().statuses.map((status) => status?.status)).toEqual([
     "merged",
     "draft",
     "review",
     "failed",
   ]);
-  expect(result._unsafeUnwrap()[3]?.title).toBe("Deploy");
+  expect(result._unsafeUnwrap().statuses[3]?.title).toBe("Deploy");
+  expect(result._unsafeUnwrap().statuses[3]?.checks).toEqual([]);
 });
 
 it("fails with a message when GitHub rejects the request", async () => {
@@ -215,76 +223,75 @@ it("fails with a message when GitHub rejects the request", async () => {
   );
 });
 
-it("maps check and step times, dropping skipped steps", async () => {
-  const { fetcher } = respond({
+it("loads only one check's steps on demand, retaining accessible steps", async () => {
+  const { requests, fetcher } = respond({
     data: {
-      l0: {
-        __typename: "WorkflowRun",
-        workflow: { name: "CI" },
-        checkSuite: {
-          status: "IN_PROGRESS",
-          conclusion: null,
-          branch: null,
-          checkRuns: {
-            nodes: [
-              {
-                name: "e2e",
-                status: "IN_PROGRESS",
-                conclusion: null,
-                detailsUrl: null,
-                url: "https://github.com/o/r/runs/1",
-                startedAt: "2026-11-11T17:00:05Z",
-                completedAt: null,
-                steps: {
-                  nodes: [
-                    {
-                      name: "Set up job",
-                      status: "COMPLETED",
-                      conclusion: "SUCCESS",
-                      startedAt: "2026-11-11T17:00:06Z",
-                      completedAt: "2026-11-11T17:00:07Z",
-                    },
-                    {
-                      name: "Upload evidence",
-                      status: "COMPLETED",
-                      conclusion: "SKIPPED",
-                      startedAt: "2026-11-11T17:00:07Z",
-                      completedAt: "2026-11-11T17:00:07Z",
-                    },
-                    {
-                      name: "Run tests",
-                      status: "IN_PROGRESS",
-                      conclusion: null,
-                      startedAt: "2026-11-11T17:00:07Z",
-                      completedAt: null,
-                    },
-                  ],
-                },
-              },
-            ],
-          },
+      node: {
+        __typename: "CheckRun",
+        steps: {
+          nodes: [
+            null,
+            {
+              name: "run",
+              status: "IN_PROGRESS",
+              conclusion: null,
+              startedAt: "2026-11-11T17:00:07Z",
+              completedAt: null,
+            },
+            {
+              name: "skip",
+              status: "COMPLETED",
+              conclusion: "SKIPPED",
+              startedAt: null,
+              completedAt: null,
+            },
+          ],
         },
       },
     },
+    errors: [{ message: "Some steps unavailable" }],
   });
-  const [check] =
-    (await readGithubLinkStatuses(fetcher, "tok", [RUN]))._unsafeUnwrap()[0]?.checks ?? [];
-  expect(check).toMatchObject({
-    startedAt: Date.parse("2026-11-11T17:00:05Z"),
-    completedAt: null,
-    steps: [
+  const result = (await readGithubLinkSteps(fetcher, "tok", "CR_1"))._unsafeUnwrap();
+  expect(result.steps).toEqual([
+    {
+      name: "run",
+      result: "running",
+      startedAt: Date.parse("2026-11-11T17:00:07Z"),
+      completedAt: null,
+    },
+  ]);
+  expect(result.githubError).toContain("Some steps unavailable");
+  const body = JSON.parse(String(requests[0]?.init.body));
+  expect(body.variables).toEqual({ id: "CR_1" });
+  expect(body.query).toContain("steps(first: 50)");
+  expect(body.query).not.toContain("resource(");
+});
+
+it("preserves bounded safe GitHub explanations and request/rate headers", async () => {
+  const fetcher = (async () =>
+    new Response(
+      JSON.stringify({
+        message: `Resource not accessible by integration\nsecret-token ${"x".repeat(5000)}`,
+      }),
       {
-        name: "Set up job",
-        result: "passed",
-        startedAt: Date.parse("2026-11-11T17:00:06Z"),
-        completedAt: Date.parse("2026-11-11T17:00:07Z"),
+        status: 403,
+        headers: {
+          "x-github-request-id": "request-1 secret-token",
+          "x-ratelimit-remaining": "0",
+          "x-ratelimit-reset": "123",
+          "retry-after": "60",
+        },
       },
-      {
-        name: "Run tests",
-        result: "running",
-        startedAt: Date.parse("2026-11-11T17:00:07Z"),
-        completedAt: null,
-      },
-    ],
-  });
+    )) as typeof fetch;
+  const error = (await readGithubLinkStatuses(fetcher, "secret-token", [PR]))._unsafeUnwrapErr();
+  expect(error).toContain("Resource not accessible by integration");
+  expect(error).toContain("request-id=request-1");
+  expect(error).toContain("rate-remaining=0");
+  expect(error).toContain("rate-reset=123");
+  expect(error).toContain("retry-after=60");
+  expect(error).not.toContain("secret-token");
+  expect(error).toContain("integration [redacted]");
+  expect(error).toContain("request-id=request-1 [redacted]");
+  expect(error.length).toBeLessThan(1400);
+  expect(error.split("\n")).toHaveLength(2);
 });

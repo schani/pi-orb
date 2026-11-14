@@ -8,6 +8,7 @@ import {
   listOrbMessages,
   logout,
   probeSession,
+  readOrbLinkSteps,
 } from "./api.ts";
 import { readBrowserSession, readSessionPrincipal, resetBrowserSessionForTest } from "./session.ts";
 
@@ -546,5 +547,26 @@ describe("API session handling", () => {
     );
     const result = await listHostedFiles("orb/archived");
     expect(result.isOk() && result.value).toEqual(inventory);
+  });
+});
+
+describe("orb link requests", () => {
+  beforeEach(resetBrowserSessionForTest);
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("encodes the selected check and keeps partial-data diagnostics", async () => {
+    const signal = new AbortController().signal;
+    const fetch = vi.fn(async (path: string, init?: RequestInit) => {
+      expect(path).toBe("/api/v1/orbs/orb%2F1/links/steps?checkId=check%2F1");
+      expect(init?.cache).toBe("no-store");
+      expect(init?.signal).toBeDefined();
+      return new Response(JSON.stringify({ steps: [], githubError: "GitHub: check unavailable" }));
+    });
+    vi.stubGlobal("fetch", fetch);
+    expect((await readOrbLinkSteps("orb/1", "check/1", signal))._unsafeUnwrap()).toEqual({
+      steps: [],
+      githubError: "GitHub: check unavailable",
+    });
+    expect(fetch).toHaveBeenCalledOnce();
   });
 });

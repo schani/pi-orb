@@ -2,6 +2,7 @@ import {
   canonicalGithubLink,
   githubRepository,
   type OrbLinkStatus,
+  type OrbLinkStepsResponse,
   type OrbLinksResponse,
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
@@ -16,11 +17,21 @@ export type GithubLinkReader = (
   task: SimulationTask,
   ownerUserId: string,
   urls: readonly string[],
-) => ResultAsync<readonly (OrbLinkStatus | null)[], string>;
+) => ResultAsync<
+  { readonly statuses: readonly (OrbLinkStatus | null)[]; readonly githubError: string | null },
+  string
+>;
+
+export type GithubLinkStepsReader = (
+  task: SimulationTask,
+  ownerUserId: string,
+  checkId: string,
+) => ResultAsync<OrbLinkStepsResponse, string>;
 
 export interface OrbLinkDeps {
   readonly store: OrbLinkStore & Pick<ControlPlaneStore, "getOrb" | "getProject">;
   readonly github: GithubLinkReader;
+  readonly githubSteps: GithubLinkStepsReader;
 }
 
 export async function addOrbLink(
@@ -71,11 +82,27 @@ export async function readOrbLinks(
   );
   return ok({
     repository,
-    githubError: statuses.isErr() ? statuses.error : null,
+    githubError: statuses.isErr() ? statuses.error : statuses.value.githubError,
     items: rows.value.map((row, index) => ({
       url: row.url,
       addedAt: row.addedAt,
-      github: statuses.isOk() ? (statuses.value[index] ?? null) : null,
+      github: statuses.isOk() ? (statuses.value.statuses[index] ?? null) : null,
     })),
   });
+}
+
+export async function readOrbLinkSteps(
+  task: SimulationTask,
+  deps: OrbLinkDeps,
+  orbId: string,
+  checkId: string,
+): Promise<Result<OrbLinkStepsResponse, { readonly type: "orb_not_found" } | StoreError>> {
+  const orb = await deps.store.getOrb(task, orbId);
+  if (orb.isErr()) return err(orb.error);
+  if (orb.value === null) return err({ type: "orb_not_found" });
+  const project = await deps.store.getProject(task, orb.value.projectId);
+  if (project.isErr()) return err(project.error);
+  if (project.value === null) return err({ type: "orb_not_found" });
+  const result = await deps.githubSteps(task, project.value.ownerUserId, checkId);
+  return ok(result.isOk() ? result.value : { steps: [], githubError: result.error });
 }

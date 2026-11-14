@@ -63,6 +63,8 @@ export type OrbLinkStep = Static<typeof OrbLinkStepSchema>;
 
 export const OrbLinkCheckSchema = Type.Object(
   {
+    /** GraphQL node ID, or null for commit statuses. */
+    id: Type.Union([Type.String(), Type.Null()]),
     name: Type.String(),
     result: OrbLinkResultSchema,
     /** The check's GitHub page (an Actions job for workflow checks). */
@@ -70,11 +72,16 @@ export const OrbLinkCheckSchema = Type.Object(
     /** Epoch ms. While pending, GitHub's `startedAt` is when the job became ready to run. */
     startedAt: Time,
     completedAt: Time,
-    steps: Type.Array(OrbLinkStepSchema),
   },
   closed,
 );
 export type OrbLinkCheck = Static<typeof OrbLinkCheckSchema>;
+
+export const OrbLinkStepsResponseSchema = Type.Object(
+  { steps: Type.Array(OrbLinkStepSchema), githubError: Type.Union([Type.String(), Type.Null()]) },
+  closed,
+);
+export type OrbLinkStepsResponse = Static<typeof OrbLinkStepsResponseSchema>;
 
 export const OrbLinkStatusSchema = Type.Object(
   {

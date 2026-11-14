@@ -18,6 +18,8 @@ import {
   ListResponseSchema,
   type LiveDisplayDetail,
   LiveDisplayDetailSchema,
+  type OrbLinkStepsResponse,
+  OrbLinkStepsResponseSchema,
   type OrbLinksResponse,
   OrbLinksResponseSchema,
   OrbMessageListViewSchema,
@@ -532,6 +534,18 @@ export function listOrbLinks(orbId: string): Promise<Result<OrbLinksResponse, Ap
   return apiFetch(OrbLinksResponseSchema, `/api/v1/orbs/${encodeURIComponent(orbId)}/links`, {
     cache: "no-store",
   });
+}
+
+export function readOrbLinkSteps(
+  orbId: string,
+  checkId: string,
+  signal: AbortSignal,
+): Promise<Result<OrbLinkStepsResponse, ApiError>> {
+  return apiFetch(
+    OrbLinkStepsResponseSchema,
+    `/api/v1/orbs/${encodeURIComponent(orbId)}/links/steps?checkId=${encodeURIComponent(checkId)}`,
+    { cache: "no-store", signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) },
+  );
 }
 
 export function removeOrbLink(orbId: string, url: string): Promise<Result<null, ApiError>> {
