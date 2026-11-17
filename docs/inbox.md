@@ -124,7 +124,7 @@ The new orb gets a fresh workspace (default-branch checkout, or an empty directo
 pi-orb spawn --prompt 'Implement the parser tests and push your branch.'
 pi-orb spawn --prompt-file task.md --name 'Parser tests' --json
 pi-orb spawn --prompt-file - < task.md
-pi-orb spawn --prompt 'Review the parser.' --model openai-codex/gpt-6.1-sol
+pi-orb spawn --prompt 'Review the parser.' --model openai-codex/gpt-6.2-sol
 ```
 
 Exactly one prompt source; nonempty UTF-8; the serialized request is limited to 1 MiB; file/stdin reads are bounded. `--name` uses normal name validation. Stdout is one absolute URL; `--json` returns `{orbId,projectId,url,messageId}`; diagnostics go to stderr. Success means the orb and its initial message committed, not that boot or the task succeeded; no browser is needed to start delivery. `--id <uuid>` chooses the orb ID and is the retry key (generated if omitted, lowercased); the initial message ID equals the orb ID. One request, 10-second deadline, no automatic retry: network errors, malformed or lost responses and retryable server errors report unknown acceptance and the ID to reuse with the same prompt/name/model. Exit codes: 2 invalid input, 3 unauthorized, 4 conflict/missing, 6 retryable/unknown, 7 internal.

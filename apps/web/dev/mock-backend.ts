@@ -2636,11 +2636,11 @@ function settingsFor(
   if (!view) {
     view = {
       type: "agent_settings",
-      settings: { model: { provider: "openai-codex", id: "gpt-6.1-sol" }, thinkingLevel: "high" },
+      settings: { model: { provider: "openai-codex", id: "gpt-6.2-sol" }, thinkingLevel: "high" },
       models: (
         [
-          ["gpt-6-astra", "Astra"],
-          ["gpt-6.1-sol", "Sol"],
+          ["gpt-6.2-astra", "Astra"],
+          ["gpt-6.2-sol", "Sol"],
           ["gpt-5.6-terra", "Terra"],
           ["gpt-6-luna", "Luna"],
         ] as const

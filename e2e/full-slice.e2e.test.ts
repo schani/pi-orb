@@ -2347,7 +2347,7 @@ describe("full slice E2E", () => {
     const spawnedOrbId = randomUUID();
     scenarioEvidence.target = spawnedOrbId;
     additionalOrbIds.push(spawnedOrbId);
-    const spawnCommand = `pi-orb spawn --id ${spawnedOrbId} --prompt 'Do the spawned E2E task' --name 'Spawned E2E task' --model openai-codex/gpt-6-astra --json`;
+    const spawnCommand = `pi-orb spawn --id ${spawnedOrbId} --prompt 'Do the spawned E2E task' --name 'Spawned E2E task' --model openai-codex/gpt-6.2-astra --json`;
     const spawned = await terminalRun(
       secondOrbId,
       `${spawnCommand}; printf '\\123\\120\\101\\127\\116\\137\\104\\117\\116\\105\\012'`,
@@ -2361,7 +2361,7 @@ describe("full slice E2E", () => {
         if (!Array.isArray(calls)) return null;
         const first = calls.find((call) => call.matchedRuleIndex === 7 && call.status === 200);
         if (!first) return null;
-        expect(first.body.model).toBe("gpt-6-astra");
+        expect(first.body.model).toBe("gpt-6.2-astra");
         expect(effectiveOpenAIResponseInstructions(first.body)).toContain(timezoneLine);
         return true;
       },

@@ -636,7 +636,7 @@ describe("central Durable agent", () => {
     )._unsafeUnwrap();
     try {
       expect(agent.snapshot()._unsafeUnwrap().settings?.settings).toEqual({
-        model: { provider: "openai-codex", id: "gpt-6.1-sol" },
+        model: { provider: "openai-codex", id: "gpt-6.2-sol" },
         thinkingLevel: "high",
       });
       expect(edges).toContainEqual({

@@ -97,10 +97,13 @@ it.each([
   ["claude", "opus", "lookup", "unavailable"],
   ["claude", "opus", "query", "unavailable"],
   ["claude", "opus", "close", "unavailable"],
-  ["openai-codex", "gpt-6.1-sol", "available", null],
+  ["openai-codex", "gpt-6.2-sol", "available", null],
+  ["openai-codex", "gpt-6.2-astra", "available", null],
+  ["openai-codex", "gpt-6.1-sol", "available", "invalid"],
+  ["openai-codex", "gpt-6-astra", "available", "invalid"],
   ["openai-codex", "missing", "available", "invalid"],
-  ["openai-codex", "gpt-6.1-sol", "wrong-secret", "unavailable"],
-  ["openai-codex", "gpt-6.1-sol", "disconnected", "disconnected"],
+  ["openai-codex", "gpt-6.2-sol", "wrong-secret", "unavailable"],
+  ["openai-codex", "gpt-6.2-sol", "disconnected", "disconnected"],
 ] as const)("spawn checks only owner provider %s/%s (%s)", async (provider, id, mode, reason) => {
   sdk.query.mockReset().mockImplementation(() => {
     if (mode === "query") throw new Error("private");

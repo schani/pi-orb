@@ -1,3 +1,4 @@
+import { calculateCost, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import type { Result } from "neverthrow";
 import { errAsync, ok, okAsync, ResultAsync } from "neverthrow";
@@ -61,6 +62,75 @@ describe("central broker native Models", () => {
     ).rejects.toMatchObject({ code: "auth" });
     expect(process.env["PI_CODING_AGENT_DIR"]).toBe(before);
     expect(runtime.getModels("openai-codex")).toEqual(openaiCodexProvider().getModels());
+  });
+
+  it.each([
+    {
+      id: "gpt-6.2-astra",
+      contextWindow: 272000,
+      input: 8,
+      output: 40,
+      cacheRead: 0.4,
+      cacheWrite: 10,
+    },
+    {
+      id: "gpt-6.2-sol",
+      contextWindow: 500000,
+      input: 2,
+      output: 10,
+      cacheRead: 0.1,
+      cacheWrite: 2.5,
+    },
+  ])("registers $id with provider capabilities and list prices", async (expected) => {
+    const runtime = (
+      await createDurableModels({
+        token: () => okAsync({ accessToken: "catalog-only", expiresAt: Date.now() + 3600000 }),
+      })
+    )._unsafeUnwrap();
+    const model = runtime.getModel("openai-codex", expected.id);
+    assert(model);
+    expect(model).toMatchObject({
+      provider: "openai-codex",
+      api: "openai-codex-responses",
+      baseUrl: "https://chatgpt.com/backend-api",
+      input: ["text", "image"],
+      reasoning: true,
+      contextWindow: expected.contextWindow,
+      maxTokens: 128000,
+      cost: {
+        input: expected.input,
+        output: expected.output,
+        cacheRead: expected.cacheRead,
+        cacheWrite: expected.cacheWrite,
+        tiers: [
+          {
+            inputTokensAbove: 272000,
+            input: expected.input * 2,
+            output: expected.output * 1.5,
+            cacheRead: expected.cacheRead * 2,
+            cacheWrite: expected.cacheWrite * 2,
+          },
+        ],
+      },
+    });
+    expect(getSupportedThinkingLevels(model)).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(runtime.getAllModels("openai-codex")).toContainEqual(model);
+    for (const input of [271800, 271801]) {
+      const cost = calculateCost(model, {
+        input,
+        output: 100,
+        cacheRead: 100,
+        cacheWrite: 100,
+        reasoning: 0,
+        totalTokens: input + 300,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      });
+      const long = input + 200 > 272000;
+      expect(cost.input).toBeCloseTo((input * expected.input * (long ? 2 : 1)) / 1e6);
+      expect(cost.output).toBeCloseTo((100 * expected.output * (long ? 1.5 : 1)) / 1e6);
+      expect(cost.cacheRead).toBeCloseTo((100 * expected.cacheRead * (long ? 2 : 1)) / 1e6);
+      expect(cost.cacheWrite).toBeCloseTo((100 * expected.cacheWrite * (long ? 2 : 1)) / 1e6);
+    }
   });
 
   it("forwards request cancellation without cancelling another owner or publishing a late bearer", async () => {

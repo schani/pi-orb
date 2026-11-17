@@ -93,7 +93,7 @@ const commands = {
     ],
     examples: [
       'pi-orb spawn --prompt "Implement the parser tests and push your branch."',
-      'pi-orb spawn --prompt-file task.md --name "Parser tests" --model openai-codex/gpt-6.1-sol --json',
+      'pi-orb spawn --prompt-file task.md --name "Parser tests" --model openai-codex/gpt-6.2-sol --json',
       "pi-orb spawn --prompt-file - --id 123e4567-e89b-42d3-a456-426614174000 < task.md",
     ],
   },

@@ -37,8 +37,8 @@ describe("Durable public model catalog", () => {
       assert(settings);
       expect(settings.models.map(({ name }) => name)).toEqual(["Astra", "Sol", "Terra", "Luna"]);
       expect(settings?.models.map(({ provider, id }) => ({ provider, id }))).toEqual([
-        { provider: "openai-codex", id: "gpt-6-astra" },
-        { provider: "openai-codex", id: "gpt-6.1-sol" },
+        { provider: "openai-codex", id: "gpt-6.2-astra" },
+        { provider: "openai-codex", id: "gpt-6.2-sol" },
         { provider: "openai-codex", id: "gpt-5.6-terra" },
         { provider: "openai-codex", id: "gpt-6-luna" },
       ]);
@@ -49,7 +49,7 @@ describe("Durable public model catalog", () => {
         expect(option.thinkingLevels).toEqual(getSupportedThinkingLevels(model));
       }
       expect(settings?.settings).toEqual({
-        model: { provider: "openai-codex", id: "gpt-6.1-sol" },
+        model: { provider: "openai-codex", id: "gpt-6.2-sol" },
         thinkingLevel: "high",
       });
       const sol = settings.models[1];
@@ -96,7 +96,7 @@ describe("Durable public model catalog", () => {
       const settings = resumed.snapshot()._unsafeUnwrap().settings;
       expect(settings?.settings.model).toEqual({ provider: "openai-codex", id: "gpt-6-sol" });
       expect(settings?.models.map(({ name }) => name)).toEqual(["Astra", "Sol", "Terra", "Luna"]);
-      expect(settings?.models.find(({ name }) => name === "Sol")?.id).toBe("gpt-6.1-sol");
+      expect(settings?.models.find(({ name }) => name === "Sol")?.id).toBe("gpt-6.2-sol");
       const stream = vi.spyOn(runtime, "streamSimple");
       const storage = new MemoryStorage();
       const fresh = (await open("removed-after-spawn", storage))._unsafeUnwrap();
