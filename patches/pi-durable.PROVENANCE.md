@@ -27,7 +27,7 @@ File SHA-256 pairs are pinned in `scripts/apply-dependency-patches.mjs`. Regress
 
 The rebase preserves upstream OpenCode session headers and optional telemetry contracts. Batch admission adds one content-free span; single-submit statuses and per-input identity remain native. Failed-run continuation uses the public native policy for both failure reasons.
 
-Exact stable 1.5.0 retains three patch sets, 16 files and 37 hunks. Durable keeps eight files/11 hunks. Both code-mode barrels still omit the existing native run/journal tokens, so their export hunks remain necessary for chart replay. Resource-only namespaces, canonical/normalized discovery, explicit-null validation and the low-allocation decoder retain their guards.
+Exact stable 1.5.0 retains three patch sets, 17 files and 38 hunks. Durable keeps eight files/11 hunks. Both code-mode barrels still omit the existing native run/journal tokens, so their export hunks remain necessary for chart replay. Resource-only namespaces, canonical/normalized discovery, explicit-null validation and the low-allocation decoder retain their guards.
 
 `Conversation.submit(tx, draft)` remains native: it rejects admission after the transaction's first table write, including a previous admission. It cannot replace the atomic multi-input snapshot. `submitMany` retains pre-read request deduplication and empty/duplicate-only idle advancement; its final boundary now passes native `{ inputs: users, first }` to `startRun`, preserving the first-entry token used by native run hooks. New inputs honor native `whenIdle: "reject"`; known request IDs still return their receipts. No documents, journal format, task identity or recovery algorithm are patched. Native `afterFailedRun: "continue"` remains Harness configuration.
 
@@ -35,15 +35,15 @@ The lock adds transitive `pi-schema@1.5.0`. Upstream coding-agent pins `undici@8
 
 Registry tarballs for chord, pi-ai, pi-codemode, pi-coding-agent, pi-durable, pi-mcp and pi-schema were fetched at exact 1.5.0 and checked against published SHA-512 integrity and SHA-1. Fresh root `npm ci` applied all three seals, installed 680 packages and audited 688 with zero vulnerabilities. Node installer coverage passed 23/23; Vitest installer contracts/application coverage passed 53/53. These are installation checks, not full runtime qualification.
 
-## Pi AI diagnostic patch
+## Pi AI patch
 
 Package: `@earendil-works/pi-ai@1.5.0` (MIT).
 Upstream: https://github.com/earendil-works/pi/tree/v1.5.0/packages/ai
 Published artifact: https://registry.npmjs.org/@earendil-works/pi-ai/-/pi-ai-1.5.0.tgz
 Artifact SHA-256: `e320fe7bd2b927782ba9a37d356fe5837f1aa96a46432610e1b3b9ccb748ea5c`.
 Artifact integrity: `sha512-VeWxNqTHSqRCf8AcY/6kvNwh+neRL6MPxZPePVztIQy6qqK9MR/YoCSN/ZgDnIyCD3pqEXgRyQbzk4KV4uvjbg==`.
-Patch SHA-256: `f7d82a2a5b31d2d2ea11ce3674bb9adcd726bafd1cce43a0de62eada03ccaa37`.
+Patch SHA-256: `7482185db6688bf6b75ce7b38bd48f625db6b88fb921998223492af4639905b8`.
 
-Two files/17 hunks retain typed, bounded Codex failure facts and request-bound safe broker metadata. Rebase follows the native catch block after upstream removed obsolete custom-input cleanup; transport selection and request behavior remain native. Runtime errors expose only valid WebSocket close codes; typed diagnostics keep allowlisted codes, validated request IDs and bounded numeric fields. Pristine/patched file hashes are sealed by `scripts/apply-dependency-patches.mjs`.
+Three files/18 hunks supply the [Pi model catalog additions](../docs/agent-context.md) and retain typed, bounded Codex failure facts and request-bound safe broker metadata. Rebase follows the native catch block after upstream removed obsolete custom-input cleanup; transport selection and request behavior remain native. Runtime errors expose only valid WebSocket close codes; typed diagnostics keep allowlisted codes, validated request IDs and bounded numeric fields. Pristine/patched file hashes are sealed by `scripts/apply-dependency-patches.mjs`.
 
 **Decision (2026-11-06):** `Waiters.add` marks its already-aborted rejection handled. Callers return that promise across the Session line, so an in-flight commit could leave it unobserved past a macrotask and Node would exit. Evidence: `docs/postmortems/2026-11-06-control-plane-blackouts.md`.

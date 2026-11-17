@@ -136,6 +136,7 @@ describe("public pi-orb help", () => {
         /acceptance.*not.*completion/i,
         /--name.*name/i,
         /--model.*provider\/id/i,
+        "--model openai-codex/gpt-6.2-sol",
         /omission.*harness.*not.*model/is,
         /--id.*UUID.*retry key/i,
         /reuse.*identical arguments/is,

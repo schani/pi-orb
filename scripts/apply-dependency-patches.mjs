@@ -14,8 +14,12 @@ const packages = [
     package: "node_modules/@earendil-works/pi-ai",
     version: "1.5.0",
     patch: "@earendil-works+pi-ai+1.5.0.patch",
-    sha: "f7d82a2a5b31d2d2ea11ce3674bb9adcd726bafd1cce43a0de62eada03ccaa37",
+    sha: "7482185db6688bf6b75ce7b38bd48f625db6b88fb921998223492af4639905b8",
     files: {
+      "node_modules/@earendil-works/pi-ai/dist/providers/data/openai-codex.json": [
+        "dd30453068f310317abf35d9adc6d841339a1351f0c6925a6aff45d975e0257c",
+        "f0c261c8cf125f584fb4952c0a2489b9c1b0ea78cb1c601c4cd0d9ca9c72c03f",
+      ],
       "node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js": [
         "13d02ecedbe4594b7c73bc3b9180e04f2a5e68e42aedfba9a366d5c082be8d57",
         "a2164c7f36198db5e1b67791f1ff3a8cb96ba376ce5617c8a3d554254f548817",
