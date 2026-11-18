@@ -38,12 +38,12 @@ it.each([401, 403, 302])(
     const address = app.server.address();
     if (!address || typeof address === "string") throw new Error("Missing TCP address");
     const accepted = once(app.server, "connection");
-    const client = new Socket();
+    const client = new Socket({ allowHalfOpen: true });
     let peer: Socket | undefined;
     try {
       client.connect(address.port, "127.0.0.1");
       [peer] = (await accepted) as [Socket];
-      const peerTerminal = Promise.race([once(peer, "end"), once(peer, "close")]);
+      const closed = Promise.all([once(client, "end"), once(peer, "close")]);
       const response = readResponse(client);
       client.write(
         "GET /live HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive, Upgrade\r\n" +
@@ -53,9 +53,8 @@ it.each([401, 403, 302])(
       const raw = await response;
       expect(raw).toContain(`HTTP/1.1 ${status}`);
       expect(raw).toMatch(/\r\n\r\nrejected$/);
-      client.destroy();
-      await peerTerminal;
-      expect(peer.destroyed || peer.writableEnded).toBe(true);
+      await closed;
+      expect(peer.destroyed).toBe(true);
       expect(app.websocketServer.clients.size).toBe(0);
     } finally {
       client.destroy();
@@ -96,6 +95,27 @@ it("preserves accepted WebSockets and ordinary HTTP keep-alive", async () => {
   } finally {
     client.terminate();
     http.destroy();
+    await app.close();
+  }
+});
+
+it("preserves response hooks for injected upgrade rejections", async () => {
+  const app = Fastify();
+  registerWebSocketRejectionCleanup(app);
+  let completed = false;
+  app.addHook("onResponse", async () => {
+    completed = true;
+  });
+  app.get("/live", async (_request, reply) => reply.code(401).send("rejected"));
+  try {
+    const response = await app.inject({
+      url: "/live",
+      headers: { connection: "Upgrade", upgrade: "websocket" },
+    });
+    expect(response.statusCode).toBe(401);
+    expect(response.body).toBe("rejected");
+    expect(completed).toBe(true);
+  } finally {
     await app.close();
   }
 });

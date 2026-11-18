@@ -10,7 +10,7 @@ export function registerWebSocketRejectionCleanup(app: FastifyInstance): void {
     ) {
       // Early auth hooks can reply before @fastify/websocket sets request.ws.
       // Its synthetic HTTP response has no Node HTTP socket cleanup handler.
-      reply.raw.socket?.destroySoon();
+      reply.raw.socket?.destroySoon?.();
     }
   });
 }
