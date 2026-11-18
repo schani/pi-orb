@@ -5,7 +5,7 @@ import { Socket } from "node:net";
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
 import { err, ok, type Result } from "neverthrow";
-import { expect, it, vi } from "vitest";
+import { expect, it } from "vitest";
 import { HttpDiagnostics, readFileDescriptorCount } from "./http-diagnostics.ts";
 
 function fixture() {
@@ -13,28 +13,20 @@ function fixture() {
   const samples: Record<string, unknown>[] = [];
   let tick = () => {};
   let cpuTick = () => {};
+  let loopTick = () => {};
   let cpu: Result<{ process: number; main: number }, { code: "unavailable" }> = ok({
     process: 0,
     main: 0,
   });
-  const delay = {
-    count: 0,
-    max: 0,
-    enable: () => true,
-    disable: vi.fn(() => true),
-    reset: () => {
-      delay.count = delay.max = 0;
-    },
-  };
   let cancelled = 0;
   const diagnostics = new HttpDiagnostics({
     now: () => now,
     readFdCount: () => ok(27),
     emit: (sample) => samples.push(sample),
     readCpu: () => cpu,
-    createDelay: () => delay,
     schedule: (callback, interval) => {
       if (interval === 1_000) cpuTick = callback;
+      else if (interval === 100) loopTick = callback;
       else tick = callback;
       return () => {
         cancelled++;
@@ -44,11 +36,11 @@ function fixture() {
   return {
     diagnostics,
     samples,
-    delay,
     cpu: (value: typeof cpu) => {
       cpu = value;
     },
     cpuTick: () => cpuTick(),
+    loopTick: () => loopTick(),
     [Symbol.dispose]: () => diagnostics[Symbol.dispose](),
     tick: () => tick(),
     time: (value: number) => {
@@ -66,14 +58,14 @@ it("retains CPU peaks and event-loop delay, then resets each reporting window", 
     main_cpu_peak_percent: null,
     event_loop_delay_max_ms: null,
   });
+  f.time(700);
+  f.loopTick();
   f.time(1_000);
   f.cpu(ok({ process: 1_800_000, main: 900_000 }));
   f.cpuTick();
   f.time(30_000);
   f.cpu(ok({ process: 3_000_000, main: 1_500_000 }));
   f.cpuTick();
-  f.delay.count = 1;
-  f.delay.max = 700_000_000;
   f.tick();
   expect(f.samples.at(-1)).toMatchObject({
     process_cpu_peak_percent: 180,
@@ -93,8 +85,18 @@ it("retains CPU peaks and event-loop delay, then resets each reporting window", 
   });
   f.diagnostics[Symbol.dispose]();
   f.diagnostics[Symbol.dispose]();
-  expect(f.cancelled()).toBe(2);
-  expect(f.delay.disable).toHaveBeenCalledOnce();
+  expect(f.cancelled()).toBe(3);
+});
+
+it("captures a stall immediately after reporting without resetting the timing baseline", () => {
+  using f = fixture();
+  f.time(100);
+  f.loopTick();
+  f.tick();
+  f.time(1_000);
+  f.loopTick();
+  f.tick();
+  expect(f.samples.at(-1)).toMatchObject({ event_loop_delay_max_ms: 900 });
 });
 
 it("reestablishes the CPU baseline after an unavailable read", () => {
@@ -163,7 +165,7 @@ it("samples stalled requests independently of health probes and cleans up once",
     responses_closed_early: 1,
   });
   f.diagnostics[Symbol.dispose]();
-  expect(f.cancelled()).toBe(2);
+  expect(f.cancelled()).toBe(3);
   expect(server.listenerCount("request")).toBe(0);
   expect(server.listenerCount(errorMonitor)).toBe(0);
   socket.destroy();

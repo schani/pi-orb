@@ -8,26 +8,22 @@ it("exports every numeric HTTP sample field as a revision-scoped Monitoring dist
   let sample: Record<string, unknown> = {};
   let now = 0;
   let tick = () => {};
+  let loopTick = () => {};
   using diagnostics = new HttpDiagnostics({
     now: () => now,
     readCpu: () => ok({ process: now * 100, main: now * 50 }),
-    createDelay: () => ({
-      count: 1,
-      max: 100_000_000,
-      enable: () => true,
-      disable: () => true,
-      reset: () => {},
-    }),
     emit: (value) => {
       sample = value;
     },
     schedule: (callback, interval) => {
       if (interval === 1_000) tick = callback;
+      if (interval === 100) loopTick = callback;
       return () => {};
     },
   });
   now = 1_000;
   tick();
+  loopTick();
   diagnostics.sample();
   for (const [field, value] of Object.entries(sample)) {
     if (typeof value !== "number" || field === "pid") continue;
