@@ -11,12 +11,18 @@ import { HttpDiagnostics, readFileDescriptorCount } from "./http-diagnostics.ts"
 function fixture() {
   let now = 0;
   const samples: Record<string, unknown>[] = [];
+  const events: Record<string, unknown>[] = [];
   let tick = () => {};
   let cancelled = false;
   const diagnostics = new HttpDiagnostics({
+    projectId: "test-project",
     now: () => now,
     readFdCount: () => ok(27),
-    emit: (sample) => samples.push(sample),
+    emit: (sample) => {
+      if (sample.message === "control-plane.http.transport") events.push(sample);
+      else samples.push(sample);
+    },
+    createRuntime: () => ({ sample: () => ({}), [Symbol.dispose]: () => {} }),
     schedule: (callback) => {
       tick = callback;
       return () => {
@@ -27,6 +33,8 @@ function fixture() {
   return {
     diagnostics,
     samples,
+    events,
+    [Symbol.dispose]: () => diagnostics[Symbol.dispose](),
     tick: () => tick(),
     time: (value: number) => {
       now = value;
@@ -34,6 +42,123 @@ function fixture() {
     cancelled: () => cancelled,
   };
 }
+
+it("reports half-closed socket ages and bounds trace-correlated abnormal events", () => {
+  using f = fixture();
+  const server = createServer();
+  server.on("upgrade", () => {});
+  f.diagnostics.observeServer(server);
+  const socket = new Socket({ allowHalfOpen: true });
+  server.emit("connection", socket);
+  server.emit("upgrade", {}, socket, Buffer.alloc(0));
+  Object.defineProperty(socket, "readableEnded", { value: true });
+  f.time(20_000);
+  for (let i = 0; i < 12; i++) {
+    const response = new ServerResponse({ method: "GET" } as never);
+    server.emit(
+      "request",
+      {
+        url: "/api/private?secret=hidden",
+        socket,
+        headers: { "x-cloud-trace-context": "0123456789abcdef0123456789abcdef/123;o=1" },
+      },
+      response,
+    );
+    response.emit("close");
+    response.emit("finish");
+  }
+  const events = f.events;
+  expect(events).toHaveLength(10);
+  expect(events[0]).toMatchObject({
+    event: "response_closed_early",
+    connection_id: 1,
+    request_id: 1,
+    request_kind: "public",
+    headers_sent: false,
+    writable_finished: false,
+    readable_ended: true,
+    writable_ended: false,
+    socket_destroyed: false,
+    "logging.googleapis.com/trace": "projects/test-project/traces/0123456789abcdef0123456789abcdef",
+  });
+  f.tick();
+  expect(f.samples.at(-1)).toMatchObject({
+    inbound_half_closed_connections: 1,
+    oldest_inbound_connection_ms: 20_000,
+    oldest_upgraded_connection_ms: 20_000,
+    responses_closed_early: 12,
+    transport_events_suppressed: 2,
+  });
+  expect(JSON.stringify([...f.samples, ...f.events])).not.toMatch(/secret|private|123;o/);
+  f.tick();
+  expect(f.samples.at(-1)).toMatchObject({ transport_events_suppressed: 0 });
+  f.diagnostics[Symbol.dispose]();
+  socket.destroy();
+});
+
+it("counts errors without exposing messages or allowing codes and trace headers to carry data", () => {
+  using f = fixture();
+  const server = createServer();
+  server.on("clientError", () => {});
+  f.diagnostics.observeServer(server);
+  const socket = new Socket();
+  socket.on("error", () => {});
+  server.emit("connection", socket);
+  socket.emit("error", Object.assign(new Error("secret address"), { code: "ECONNRESET" }));
+  server.emit("clientError", Object.assign(new Error("secret packet"), { code: "secret" }), socket);
+  const response = new ServerResponse({ method: "GET" } as never);
+  server.emit(
+    "request",
+    { url: "/health", socket, headers: { "x-cloud-trace-context": "secret" } },
+    response,
+  );
+  response.emit("close");
+  expect(f.events[0]).toMatchObject({
+    event: "socket_error",
+    error_code: "ECONNRESET",
+    connection_id: 1,
+  });
+  expect(f.events).toContainEqual(
+    expect.objectContaining({ event: "client_error", error_code: "other" }),
+  );
+  expect(f.events.find((event) => event.event === "response_closed_early")).not.toHaveProperty(
+    "logging.googleapis.com/trace",
+  );
+  expect(JSON.stringify(f.events)).not.toContain("secret");
+  f.diagnostics[Symbol.dispose]();
+  socket.destroy();
+});
+
+it("emits details for 429 and 5xx responses while healthy responses remain aggregate-only", () => {
+  using f = fixture();
+  const server = createServer();
+  f.diagnostics.observeServer(server);
+  for (const status of [200, 404, 429, 503]) {
+    const response = new ServerResponse({ method: "GET" } as never);
+    response.statusCode = status;
+    response.writeHead(status);
+    server.emit("request", { url: "/", headers: {} }, response);
+    response.emit("finish");
+    response.emit("close");
+  }
+  expect(f.events).toHaveLength(2);
+  expect(f.events[0]).toMatchObject({
+    event: "response_finished",
+    status_code: 429,
+    headers_sent: true,
+  });
+  expect(f.events[1]).toMatchObject({
+    event: "response_finished",
+    status_code: 503,
+    headers_sent: true,
+  });
+  f.tick();
+  expect(f.samples.at(-1)).toMatchObject({
+    responses_finished: 4,
+    responses_closed_early: 0,
+    requests_in_flight: 0,
+  });
+});
 
 it("samples stalled requests independently of health probes and cleans up once", () => {
   const f = fixture();
@@ -119,13 +244,19 @@ it("counts upgraded and outbound sockets, preserves error handling, and detaches
 });
 
 it("keeps telemetry failures from affecting requests", () => {
-  const diagnostics = new HttpDiagnostics({
+  using diagnostics = new HttpDiagnostics({
     readFdCount: () => err({ code: "unavailable" }),
     emit: () => {
       throw new Error("closed stdout");
     },
     schedule: () => () => {},
   });
+  const server = createServer();
+  diagnostics.observeServer(server);
+  const response = new ServerResponse({ method: "GET" } as never);
+  server.emit("request", { url: "/health", headers: {} }, response);
+  expect(() => response.emit("close")).not.toThrow();
+  expect(response.listenerCount("finish")).toBe(0);
   expect(() => diagnostics.sample()).not.toThrow();
   diagnostics[Symbol.dispose]();
 });

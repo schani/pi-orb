@@ -229,7 +229,7 @@ export async function main(
   } = {},
 ): Promise<void> {
   startupPhase("main.enter");
-  using httpDiagnostics = new HttpDiagnostics();
+  using httpDiagnostics = new HttpDiagnostics({ projectId: env("PI_ORB_GCP_PROJECT", "") });
   const bootTask = new NoSimulationTask("boot", true);
   const databaseUrl = env("DATABASE_URL", "postgres://pi-orb:pi-orb@127.0.0.1:5433/pi_orb");
   const databaseKind = env("PI_ORB_DATABASE_KIND", "postgresql");
