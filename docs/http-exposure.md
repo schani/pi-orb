@@ -188,6 +188,10 @@ replay. Relative redirects work; absolute localhost redirects, OAuth origins, ho
 HTTPS-only or IPv6-only listeners need application configuration. Preview WebSockets require their
 exact origin.
 
+Rejected WebSocket upgrades close their TCP socket after flushing the HTTP response, including
+rejections from auth hooks registered before the WebSocket plugin. Accepted upgrades retain
+WebSocket ownership (`docs/postmortems/2026-11-17-rejected-websocket-leak.md`).
+
 Before headers, typed failures distinguish missing orb, unavailable compute, unregistered port,
 auth, stale target, refusal and upstream failure; missing resources keep the URL and link to the
 dashboard. After headers, failures abort the stream rather than fake EOF or inject HTML. The runtime
