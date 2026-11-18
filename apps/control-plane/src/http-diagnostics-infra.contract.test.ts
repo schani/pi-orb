@@ -1,16 +1,33 @@
 import { readFileSync } from "node:fs";
+import { ok } from "neverthrow";
 import { expect, it } from "vitest";
 import { HttpDiagnostics } from "./adapters/http-diagnostics.ts";
 
 it("exports every numeric HTTP sample field as a revision-scoped Monitoring distribution", () => {
   const source = readFileSync("infra/http-diagnostics.tf", "utf8");
   let sample: Record<string, unknown> = {};
+  let now = 0;
+  let tick = () => {};
   using diagnostics = new HttpDiagnostics({
+    now: () => now,
+    readCpu: () => ok({ process: now * 100, main: now * 50 }),
+    createDelay: () => ({
+      count: 1,
+      max: 100_000_000,
+      enable: () => true,
+      disable: () => true,
+      reset: () => {},
+    }),
     emit: (value) => {
       sample = value;
     },
-    schedule: () => () => {},
+    schedule: (callback, interval) => {
+      if (interval === 1_000) tick = callback;
+      return () => {};
+    },
   });
+  now = 1_000;
+  tick();
   diagnostics.sample();
   for (const [field, value] of Object.entries(sample)) {
     if (typeof value !== "number" || field === "pid") continue;

@@ -4,29 +4,52 @@ import { createServer, get, ServerResponse } from "node:http";
 import { Socket } from "node:net";
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
-import { err, ok } from "neverthrow";
-import { expect, it } from "vitest";
+import { err, ok, type Result } from "neverthrow";
+import { expect, it, vi } from "vitest";
 import { HttpDiagnostics, readFileDescriptorCount } from "./http-diagnostics.ts";
 
 function fixture() {
   let now = 0;
   const samples: Record<string, unknown>[] = [];
   let tick = () => {};
-  let cancelled = false;
+  let cpuTick = () => {};
+  let cpu: Result<{ process: number; main: number }, { code: "unavailable" }> = ok({
+    process: 0,
+    main: 0,
+  });
+  const delay = {
+    count: 0,
+    max: 0,
+    enable: () => true,
+    disable: vi.fn(() => true),
+    reset: () => {
+      delay.count = delay.max = 0;
+    },
+  };
+  let cancelled = 0;
   const diagnostics = new HttpDiagnostics({
     now: () => now,
     readFdCount: () => ok(27),
     emit: (sample) => samples.push(sample),
-    schedule: (callback) => {
-      tick = callback;
+    readCpu: () => cpu,
+    createDelay: () => delay,
+    schedule: (callback, interval) => {
+      if (interval === 1_000) cpuTick = callback;
+      else tick = callback;
       return () => {
-        cancelled = true;
+        cancelled++;
       };
     },
   });
   return {
     diagnostics,
     samples,
+    delay,
+    cpu: (value: typeof cpu) => {
+      cpu = value;
+    },
+    cpuTick: () => cpuTick(),
+    [Symbol.dispose]: () => diagnostics[Symbol.dispose](),
     tick: () => tick(),
     time: (value: number) => {
       now = value;
@@ -34,6 +57,68 @@ function fixture() {
     cancelled: () => cancelled,
   };
 }
+
+it("retains CPU peaks and event-loop delay, then resets each reporting window", () => {
+  using f = fixture();
+  f.tick();
+  expect(f.samples.at(-1)).toMatchObject({
+    process_cpu_peak_percent: null,
+    main_cpu_peak_percent: null,
+    event_loop_delay_max_ms: null,
+  });
+  f.time(1_000);
+  f.cpu(ok({ process: 1_800_000, main: 900_000 }));
+  f.cpuTick();
+  f.time(30_000);
+  f.cpu(ok({ process: 3_000_000, main: 1_500_000 }));
+  f.cpuTick();
+  f.delay.count = 1;
+  f.delay.max = 700_000_000;
+  f.tick();
+  expect(f.samples.at(-1)).toMatchObject({
+    process_cpu_peak_percent: 180,
+    main_cpu_peak_percent: 90,
+    cpu_sample_max_interval_ms: 29_000,
+    event_loop_delay_max_ms: 700,
+  });
+  f.time(31_000);
+  f.cpu(ok({ process: 3_100_000, main: 1_550_000 }));
+  f.cpuTick();
+  f.tick();
+  expect(f.samples.at(-1)).toMatchObject({
+    process_cpu_peak_percent: 10,
+    main_cpu_peak_percent: 5,
+    cpu_sample_max_interval_ms: 1_000,
+    event_loop_delay_max_ms: null,
+  });
+  f.diagnostics[Symbol.dispose]();
+  f.diagnostics[Symbol.dispose]();
+  expect(f.cancelled()).toBe(2);
+  expect(f.delay.disable).toHaveBeenCalledOnce();
+});
+
+it("reestablishes the CPU baseline after an unavailable read", () => {
+  using f = fixture();
+  f.time(1_000);
+  f.cpu(err({ code: "unavailable" }));
+  f.cpuTick();
+  f.time(2_000);
+  f.cpu(ok({ process: 5_000_000, main: 2_000_000 }));
+  f.cpuTick();
+  f.tick();
+  expect(f.samples.at(-1)).toMatchObject({
+    process_cpu_peak_percent: null,
+    main_cpu_peak_percent: null,
+  });
+  f.time(3_000);
+  f.cpu(ok({ process: 5_100_000, main: 2_050_000 }));
+  f.cpuTick();
+  f.tick();
+  expect(f.samples.at(-1)).toMatchObject({
+    process_cpu_peak_percent: 10,
+    main_cpu_peak_percent: 5,
+  });
+});
 
 it("samples stalled requests independently of health probes and cleans up once", () => {
   const f = fixture();
@@ -78,7 +163,7 @@ it("samples stalled requests independently of health probes and cleans up once",
     responses_closed_early: 1,
   });
   f.diagnostics[Symbol.dispose]();
-  expect(f.cancelled()).toBe(true);
+  expect(f.cancelled()).toBe(2);
   expect(server.listenerCount("request")).toBe(0);
   expect(server.listenerCount(errorMonitor)).toBe(0);
   socket.destroy();

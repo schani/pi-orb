@@ -18,6 +18,10 @@ locals {
     server_errors              = "1"
     client_errors              = "1"
     socket_errors              = "1"
+    process_cpu_peak_percent   = "%"
+    main_cpu_peak_percent      = "%"
+    cpu_sample_max_interval_ms = "ms"
+    event_loop_delay_max_ms    = "ms"
   }
 }
 

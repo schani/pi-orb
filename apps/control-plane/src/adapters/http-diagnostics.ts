@@ -3,7 +3,7 @@ import { errorMonitor } from "node:events";
 import { readdirSync } from "node:fs";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { Socket } from "node:net";
-import { performance } from "node:perf_hooks";
+import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import { err, Result, type Result as ResultType } from "neverthrow";
 
 export const HTTP_SAMPLE_INTERVAL_MS = 30_000;
@@ -24,15 +24,29 @@ export function readFileDescriptorCount(): ResultType<number, FdError> {
 interface Dependencies {
   now(): number;
   readFdCount(): ResultType<number, FdError>;
+  readCpu(): ResultType<{ process: number; main: number }, { code: "unavailable" }>;
+  createDelay(): Pick<
+    ReturnType<typeof monitorEventLoopDelay>,
+    "count" | "max" | "enable" | "disable" | "reset"
+  >;
   emit(sample: Record<string, unknown>): void;
-  schedule(callback: () => void): () => void;
+  schedule(callback: () => void, intervalMs: number): () => void;
 }
 const defaults: Dependencies = {
   now: () => performance.now(),
   readFdCount: readFileDescriptorCount,
+  readCpu: Result.fromThrowable(
+    () => {
+      const cpu = process.cpuUsage();
+      const main = process.threadCpuUsage();
+      return { process: cpu.user + cpu.system, main: main.user + main.system };
+    },
+    () => ({ code: "unavailable" as const }),
+  ),
+  createDelay: () => monitorEventLoopDelay({ resolution: 100 }),
   emit: (sample) => console.log(JSON.stringify(sample)),
-  schedule: (callback) => {
-    const timer = setInterval(callback, HTTP_SAMPLE_INTERVAL_MS);
+  schedule: (callback, intervalMs) => {
+    const timer = setInterval(callback, intervalMs);
     timer.unref();
     return () => clearInterval(timer);
   },
@@ -62,6 +76,13 @@ export class HttpDiagnostics {
   private counts = counters();
   private server: Server | undefined;
   private readonly cancel: () => void;
+  private readonly cancelCpu: () => void;
+  private readonly delay: ReturnType<Dependencies["createDelay"]>;
+  private cpu: ReturnType<Dependencies["readCpu"]>;
+  private cpuSampledAt: number;
+  private processPeak: number | null = null;
+  private mainPeak: number | null = null;
+  private maxCpuInterval = 0;
   private readonly outbound = channel("net.client.socket");
   private sampledAt: number;
   private lastPublicRequest: number | undefined;
@@ -70,8 +91,31 @@ export class HttpDiagnostics {
   constructor(deps: Partial<Dependencies> = {}) {
     this.deps = { ...defaults, ...deps };
     this.sampledAt = this.deps.now();
+    this.cpuSampledAt = this.sampledAt;
+    this.cpu = this.deps.readCpu();
+    this.delay = this.deps.createDelay();
+    this.delay.enable();
     this.outbound.subscribe(this.onOutbound);
-    this.cancel = this.deps.schedule(() => this.sample());
+    this.cancelCpu = this.deps.schedule(() => this.sampleCpu(), 1_000);
+    this.cancel = this.deps.schedule(() => this.sample(), HTTP_SAMPLE_INTERVAL_MS);
+  }
+  private sampleCpu(): void {
+    const now = this.deps.now();
+    const elapsed = now - this.cpuSampledAt;
+    const cpu = this.deps.readCpu();
+    if (elapsed > 0 && cpu.isOk() && this.cpu.isOk()) {
+      this.processPeak = Math.max(
+        this.processPeak ?? 0,
+        (cpu.value.process - this.cpu.value.process) / (elapsed * 10),
+      );
+      this.mainPeak = Math.max(
+        this.mainPeak ?? 0,
+        (cpu.value.main - this.cpu.value.main) / (elapsed * 10),
+      );
+    }
+    this.maxCpuInterval = Math.max(this.maxCpuInterval, elapsed);
+    this.cpu = cpu;
+    this.cpuSampledAt = now;
   }
   observeServer(server: Server): void {
     this.server = server;
@@ -171,9 +215,16 @@ export class HttpDiagnostics {
         this.lastPublicRequest === undefined ? -1 : Math.round(now - this.lastPublicRequest),
       fd_count: fds.isOk() ? fds.value : null,
       fd_sample_status: fds.isOk() ? "ok" : fds.error.code,
+      process_cpu_peak_percent: this.processPeak,
+      main_cpu_peak_percent: this.mainPeak,
+      cpu_sample_max_interval_ms: this.maxCpuInterval,
+      event_loop_delay_max_ms: this.delay.count > 0 ? this.delay.max / 1e6 : null,
       ...this.counts,
     };
     this.counts = counters();
+    this.processPeak = this.mainPeak = null;
+    this.maxCpuInterval = 0;
+    this.delay.reset();
     this.sampledAt = now;
     // A closed diagnostic sink must not change HTTP or shutdown behavior.
     try {
@@ -185,7 +236,9 @@ export class HttpDiagnostics {
   [Symbol.dispose](): void {
     if (this.disposed) return;
     this.cancel();
+    this.cancelCpu();
     this.sample();
+    this.delay.disable();
     this.disposed = true;
     this.outbound.unsubscribe(this.onOutbound);
     this.server?.off("request", this.onRequest);
