@@ -143,6 +143,7 @@ import { registerRoutes } from "./http/routes.ts";
 import { registerRuntimePreviewRoutes } from "./http/runtime-preview-routes.ts";
 import { registerRuntimeRoutes } from "./http/runtime-routes.ts";
 import { registerWebAssets } from "./http/web-assets.ts";
+import { registerWebSocketRejectionCleanup } from "./http/websocket-rejection.ts";
 import { registerWorkspaceUploadRoutes } from "./http/workspace-upload-routes.ts";
 import {
   createRequestPrincipalResolver,
@@ -637,6 +638,7 @@ export async function main(
   });
   app.addHook("onReady", async () => httpDiagnostics.observeServer(app.server));
   app.addHook("preClose", async () => httpDiagnostics.stopObservingUpgrades());
+  registerWebSocketRejectionCleanup(app);
   const filesBaseUrl = (orbId: string): string | null =>
     orbFilesBaseUrl(hostingOrigin, deps.hostProvider.kind, orbId);
   registerOrbFilesBoundary(app, { filesOrigin: hostingOrigin, appOrigin });
