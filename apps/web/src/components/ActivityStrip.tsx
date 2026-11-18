@@ -1,6 +1,7 @@
 import {
   type CSSProperties,
   cloneElement,
+  createContext,
   Fragment,
   isValidElement,
   type ReactNode,
@@ -25,6 +26,8 @@ export interface ActivityStep {
   key: string;
   /** Detail identity shared by a step's live and persisted forms, before alias resolution. */
   identity: string;
+  /** Carry an open peer body into a different strip. */
+  restoreDisclosure?: boolean;
   state: ActivityStepState;
   label: string;
   headline: string;
@@ -43,6 +46,9 @@ export interface ActivityOpenMemory {
   aliases: ReadonlyMap<string, string>;
   opened: Set<string>;
 }
+
+export const InActivityStrip = createContext(false);
+export const activityStripOpenId = (identity: string) => `strip:${identity}`;
 
 const DOT_WIDTH = 12;
 /** Material "refresh" with a widened gap at the arc start, drawn in the success dot's box. */
@@ -122,13 +128,34 @@ export function ActivityStrip({
 }) {
   const dotsRef = useRef<HTMLSpanElement>(null);
   const [width, setWidth] = useState(0);
-  const remembered = steps.map(
-    (step) => `strip:${memory?.aliases.get(step.identity) ?? step.identity}`,
+  const remembered = steps.map((step) =>
+    activityStripOpenId(memory?.aliases.get(step.identity) ?? step.identity),
   );
   const [open, setOpen] = useState(() => remembered.some((id) => memory?.opened.has(id)));
   // Once opened, rows stay mounted while closed so in-flight headlines still land, as in a category.
   const [mounted, setMounted] = useState(open);
   const [picked, setPicked] = useState<string | null>(null);
+  const previousSteps = useRef(steps);
+  useLayoutEffect(() => {
+    const previous = previousSteps.current;
+    if (previous === steps) return;
+    previousSteps.current = steps;
+    // The destination strip may already exist. Restore an entering peer only if
+    // both the body and its containing disclosure were open.
+    if (
+      steps.some(
+        (step) =>
+          step.restoreDisclosure &&
+          memory?.opened.has(step.identity) &&
+          memory.opened.has(activityStripOpenId(step.identity)) &&
+          !previous.some((oldStep) => oldStep.identity === step.identity),
+      )
+    ) {
+      setOpen(true);
+      setMounted(true);
+      setPicked(null);
+    }
+  }, [memory, steps]);
   const remember = (value: boolean) => {
     for (const id of remembered) {
       if (value) memory?.opened.add(id);
@@ -200,8 +227,14 @@ export function ActivityStrip({
                 event.preventDefault();
                 visit(step.key);
                 remember(false);
+                const next = picked === step.key ? null : step.key;
+                if (next !== null && step.restoreDisclosure) {
+                  // Record the body and strip before the browser dispatches toggle.
+                  memory?.opened.add(step.identity);
+                  memory?.opened.add(activityStripOpenId(step.identity));
+                }
                 setOpen(false);
-                setPicked((current) => (current === step.key ? null : step.key));
+                setPicked(next);
               }}
             >
               {step.state === "restart" && (
@@ -250,17 +283,19 @@ export function ActivityStrip({
       }}
     >
       <div className="activity-strip-body">
-        {steps.map((step) =>
-          mounted || visited.has(step.key) || picked === step.key ? (
-            <StepOwner
-              key={step.key}
-              step={step}
-              target={tip?.key === step.key ? tipHeader : null}
-              picked={pickedStep?.key ?? null}
-              publish={publish}
-            />
-          ) : null,
-        )}
+        <InActivityStrip value={true}>
+          {steps.map((step) =>
+            mounted || visited.has(step.key) || picked === step.key ? (
+              <StepOwner
+                key={step.key}
+                step={step}
+                target={tip?.key === step.key ? tipHeader : null}
+                picked={pickedStep?.key ?? null}
+                publish={publish}
+              />
+            ) : null,
+          )}
+        </InActivityStrip>
       </div>
     </ActivityRailRow>
   );

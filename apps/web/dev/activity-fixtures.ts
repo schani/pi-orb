@@ -1,4 +1,5 @@
-import type { HistoryRecord } from "@pi-orb/protocol";
+import type { HistoryRecord, OrbMessageView } from "@pi-orb/protocol";
+import { usageOrbs } from "./usage-fixture.ts";
 
 /** Thinking, call, failed call, subagent receipt, sleep wake after a host restart, harness restart. */
 type Step = ["t" | "c" | "f" | "n" | "s" | "h", string];
@@ -180,6 +181,87 @@ function prose(id: string, role: "user" | "assistant", text: string, at: string)
     content: [{ type: "text", text }],
     overflow: {},
   };
+}
+
+/** A failed tool followed by five steers held in the inbox, without committed receipts. */
+export function peerActivityFixture(orbId: string, at: string) {
+  const ask = {
+    ...prose(
+      "peer-activity-ask",
+      "user",
+      "Check the weekly token usage report before publishing.",
+      at,
+    ),
+    inboxMessageIds: ["00000000-0000-4000-8000-000000000309"],
+  };
+  const callId = "peer-activity-report";
+  const records: HistoryRecord[] = [
+    ask,
+    {
+      id: "peer-activity-tool",
+      parentId: ask.id,
+      timestamp: at,
+      type: "message",
+      role: "assistant",
+      content: [
+        {
+          type: "tool_call",
+          callId,
+          name: "codemode",
+          arguments: { code: 'text(await tools.read({path:"reports/token-usage.json"}))' },
+        },
+      ],
+      overflow: {},
+    },
+    {
+      id: "peer-activity-result",
+      parentId: "peer-activity-tool",
+      timestamp: at,
+      type: "message",
+      role: "tool",
+      content: [
+        {
+          type: "tool_result",
+          callId,
+          isError: true,
+          content: [{ type: "text", text: "reports/token-usage.json: No such file or directory" }],
+        },
+      ],
+      overflow: {},
+    },
+  ];
+  // Reuse named UUIDs already in the mock orb index instead of adding sender fixtures.
+  const updates = [
+    [
+      "Provider cache audit",
+      "The provider export landed. Compare cache hits separately from input tokens.",
+    ],
+    [
+      "Token usage dashboard",
+      "The dashboard now uses quarter-hour buckets. Keep the report aligned.",
+    ],
+    ["Durable recovery", "Exclude the duplicate samples from the replay job on Tuesday."],
+    ["Agent SDK parity", "Please keep Codex and Claude totals separate until units match."],
+    ["Token usage dashboard", "The generated report moved to artifacts/weekly-token-usage.json."],
+  ] as const;
+  const messages = updates.flatMap(([name, text], index): OrbMessageView[] => {
+    const sender = usageOrbs.find((entry) => entry.name === name);
+    if (sender === undefined) return [];
+    return [
+      {
+        id: `00000000-0000-4000-8000-00000000030${index}`,
+        orbId,
+        content: [{ type: "text", text }],
+        system: { kind: "orb_message", senderOrbId: sender.id },
+        status: "delivering",
+        delivery: "steer",
+        operationId: "00000000-0000-4000-8000-000000000310",
+        createdAt: at,
+        updatedAt: at,
+      },
+    ];
+  });
+  return { records, messages };
 }
 
 /** A babysitting turn whose interleaved activity exercises the strip, a 300-step overflow, and restarts. */
