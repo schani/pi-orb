@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { HistoryRecord } from "@pi-orb/protocol";
+import { type HistoryRecord, type OrbMessageView, projectDisplayRecord } from "@pi-orb/protocol";
 import { type Browser, chromium, expect as expectPage } from "@playwright/test";
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -222,32 +222,33 @@ it.each([1280, 320])(
       await gotoFrontendHistory(page, `${origin}/orbs/${orb}`, orb);
       const strip = page.locator(".activity-strip");
       await expectPage(strip).toHaveCount(1);
-      await expectPage(strip.locator(".activity-strip-dot")).toHaveCount(3);
+      // The history arrives before the inbox; the six dots include both sources.
+      const dots = strip.locator(".activity-strip-dot");
+      await expectPage(dots).toHaveCount(6);
       expect(
-        await strip
-          .locator(".activity-strip-dot")
-          .evaluateAll((dots) => dots.map((dot) => dot.getAttribute("data-step"))),
-      ).toEqual(["success", "notification", "success"]);
+        await dots.evaluateAll((nodes) => nodes.map((dot) => dot.getAttribute("data-step"))),
+      ).toEqual(["success", "notification", "success", "notification", "failed", "notification"]);
       await expectPage(strip.locator(".peer-notice")).toHaveCount(0);
-      const dot = strip.locator('[data-step="notification"]');
+      const dot = dots.nth(1);
       await dot.hover();
       await expectPage(page.getByRole("tooltip")).toContainText(`notification · ${sender}`);
       await dot.click();
-      const notice = strip.locator(".peer-notice");
-      await expectPage(notice).toHaveAttribute("open", "");
-      await expectPage(notice.locator(".peer-body")).toHaveText(literal);
-      await expectPage(notice.locator(".peer-sender")).toHaveAttribute("href", `/orbs/${sender}`);
-      await expectPage(notice.locator("script, img, strong")).toHaveCount(0);
+      const body = strip.locator(":scope > .activity-strip-body");
+      const receipt = body.locator(".peer-notice").filter({ hasNot: page.locator(".rec-status") });
+      await expectPage(receipt).toHaveAttribute("open", "");
+      await expectPage(receipt.locator(".peer-body")).toHaveText(literal);
+      await expectPage(receipt.locator(".peer-sender")).toHaveAttribute("href", `/orbs/${sender}`);
+      await expectPage(receipt.locator("script, img, strong")).toHaveCount(0);
       await dot.click();
       await strip.locator(":scope > summary .activity-rail-label").click();
-      await expectPage(strip.locator(".activity-strip-body > .activity-rail-row")).toHaveCount(3);
-      await expectPage(notice).toHaveAttribute("open", "");
-      await notice.locator(":scope > summary .activity-rail-label").click();
-      await expectPage(notice).not.toHaveAttribute("open", "");
-      await notice.locator(":scope > summary .activity-rail-label").click();
-      await expectPage(notice.locator(".peer-body")).toBeVisible();
+      await expectPage(body.locator(":scope > .activity-rail-row")).toHaveCount(6);
+      await expectPage(receipt).toHaveAttribute("open", "");
+      await receipt.locator(":scope > summary .activity-rail-label").click();
+      await expectPage(receipt).not.toHaveAttribute("open", "");
+      await receipt.locator(":scope > summary .activity-rail-label").click();
+      await expectPage(receipt.locator(".peer-body")).toBeVisible();
 
-      const pending = page.locator(".peer-notice").filter({ has: page.locator(".rec-status") });
+      const pending = body.locator(".peer-notice").filter({ has: page.locator(".rec-status") });
       await expectPage(pending).toHaveCount(3);
       await expectPage(pending.nth(0).locator(".rec-status")).toHaveText("paused");
       await expectPage(pending.nth(1).locator(".rec-status")).toHaveText("failed");
@@ -302,3 +303,159 @@ it.each([1280, 320])(
     }
   },
 );
+
+it.each(["arrival", "receipt", "collapsed receipt"] as const)(
+  "preserves peer disclosure when a strip changes on %s",
+  async (transition) => {
+    const arrival = transition === "arrival";
+    const collapsed = transition === "collapsed receipt";
+    const page = await browser.newPage();
+    const orb = "frontend-long-history";
+    const at = "2026-11-06T00:00:00.000Z";
+    const senderOrbId = "629e53de-a2c9-4f1b-87a6-437fd415e8de";
+    const message = (id: string, text: string) =>
+      ({
+        id,
+        orbId: orb,
+        status: "queued",
+        createdAt: at,
+        updatedAt: at,
+        system: { kind: "orb_message", senderOrbId },
+        content: [{ type: "text", text }],
+      }) satisfies OrbMessageView;
+    const selected = message("peer-selected", "Selected peer body");
+    const sibling = message("peer-sibling", "Sibling peer body");
+    const delivered = collapsed ? sibling : selected;
+    const failed = {
+      id: "failed-inbox",
+      orbId: orb,
+      status: "failed",
+      createdAt: at,
+      updatedAt: at,
+      content: [{ type: "text", text: "Failed inbox boundary" }],
+    } satisfies OrbMessageView;
+    const receipt = (id: string, parentId: string | null, text: string, inboxId: string) =>
+      projectDisplayRecord({
+        id,
+        parentId,
+        timestamp: at,
+        overflow: {},
+        type: "event",
+        eventType: "orb.message",
+        sender: { orbId: senderOrbId },
+        content: [{ type: "text", text }],
+        inboxMessageIds: [inboxId],
+      });
+    const initialHistory = arrival
+      ? []
+      : [
+          receipt("earlier-a", null, "Earlier peer A", "peer-a"),
+          receipt("earlier-b", "earlier-a", "Earlier peer B", "peer-b"),
+        ];
+    let advance = false;
+    try {
+      await page.route(`**/api/v1/orbs/${orb}`, async (route) => {
+        const response = await route.fetch();
+        await route.fulfill({
+          response,
+          json: { ...(await response.json()), state: "stopped", activity: "idle" },
+        });
+      });
+      await page.route(`**/api/v1/orbs/${orb}/history`, (route) => {
+        const records =
+          advance && !arrival
+            ? [
+                ...initialHistory,
+                receipt("canonical", "earlier-b", "Committed peer body", delivered.id),
+              ]
+            : initialHistory;
+        const headId = records.at(-1)?.id ?? null;
+        return route.fulfill({
+          json: { orbId: orb, session: null, cursor: headId, headId, records },
+        });
+      });
+      await page.route(`**/api/v1/orbs/${orb}/messages/poll`, (route) => {
+        const { after } = route.request().postDataJSON() as { after: number };
+        return route.fulfill({
+          json: {
+            cursor: advance && arrival ? 2 : 1,
+            items:
+              after === 0
+                ? arrival
+                  ? [selected]
+                  : [failed, selected, sibling]
+                : advance && arrival && after === 1
+                  ? [sibling]
+                  : [],
+            updates:
+              advance && !arrival
+                ? [
+                    {
+                      id: delivered.id,
+                      orbId: orb,
+                      status: "delivered",
+                      createdAt: at,
+                      updatedAt: at,
+                    },
+                  ]
+                : [],
+          },
+        });
+      });
+
+      await gotoFrontendHistory(page, `${origin}/orbs/${orb}`, orb);
+      const strips = page.locator(".activity-strip");
+      const body = page.locator(".peer-body").filter({ hasText: "Selected peer body" });
+      if (arrival) {
+        await expectPage(strips).toHaveCount(0);
+        await page.locator(".peer-notice > summary .activity-rail-label").click();
+      } else {
+        await expectPage(page.locator(".rec-q")).toContainText("Failed inbox boundary");
+        await expectPage(strips).toHaveCount(2);
+        await strips.last().locator(".activity-strip-dot").first().click();
+      }
+      await expectPage(body).toBeVisible();
+      if (collapsed) {
+        await strips.last().locator(":scope > summary .activity-rail-label").click();
+        await expectPage(body).toBeHidden();
+      }
+      advance = true;
+
+      await expectPage(strips).toHaveCount(1);
+      const dotCount = arrival ? 2 : 3;
+      await expectPage(strips.locator(".activity-strip-dot")).toHaveCount(dotCount);
+      if (collapsed) {
+        await expectPage(page.locator(".peer-notice").filter({ has: body })).not.toHaveAttribute(
+          "open",
+          "",
+        );
+        return;
+      }
+      await expectPage(
+        strips.locator(".peer-body").filter({
+          hasText: arrival ? "Selected peer body" : "Committed peer body",
+        }),
+      ).toBeVisible();
+      await expectPage(
+        strips.locator(".peer-body").filter({
+          hasText: arrival ? "Sibling peer body" : "Earlier peer A",
+        }),
+      ).toBeHidden();
+    } finally {
+      await page.close();
+    }
+  },
+);
+
+it("renders the peer activity demo prompt as a user turn", async () => {
+  const page = await browser.newPage();
+  try {
+    const orb = "frontend-peer-activity";
+    await gotoFrontendHistory(page, `${origin}/orbs/${orb}`, orb);
+    await expectPage(page.locator('.rec-you[data-history-row="peer-activity-ask"]')).toContainText(
+      "Check the weekly token usage report before publishing.",
+    );
+  } finally {
+    await page.close();
+  }
+});

@@ -1770,6 +1770,64 @@ describe("orb correspondence", () => {
     expect(html).not.toContain("snapshot-");
   });
 
+  const dotStates = (html: string) =>
+    [...html.matchAll(/data-step="(\w+)"/g)].map((match) => match[1]);
+
+  it("keeps adjacent persisted, inbox and live steps in order through receipt handoff", () => {
+    const call: HistoryRecord = {
+      ...message("committed", "assistant", ""),
+      content: [{ type: "tool_call", callId: "read", name: "read", arguments: { path: "notes" } }],
+    };
+    const queuedMessages: OrbMessageView[] = [
+      { ...pending, status: "delivered" },
+      { ...pending, id: "second-inbox", delivery: "steer" },
+    ];
+    for (const handoff of [false, true]) {
+      const html = renderToStaticMarkup(
+        <HistoryView
+          {...idle}
+          records={handoff ? [call, receipt] : [call]}
+          queuedMessages={queuedMessages}
+          tools={[{ callId: "live", name: "bash", state: "completed", message: null }]}
+        />,
+      );
+      expect(html.match(/class="[^"]* activity-strip"/g) ?? []).toHaveLength(1);
+      expect(dotStates(html)).toEqual(["running", "notification", "running", "success"]);
+    }
+  });
+
+  it("keeps non-peer inbox items and prose as boundaries", () => {
+    const { system: _system, ...human } = pending;
+    const html = renderToStaticMarkup(
+      <HistoryView
+        {...idle}
+        records={[receipt, message("boundary", "assistant", "Committed prose")]}
+        queuedMessages={[
+          { ...pending, id: "left-queued" },
+          { ...pending, id: "left-failed", status: "failed" },
+          { ...human, id: "human", content: [{ type: "text", text: "Inbox boundary" }] },
+          { ...pending, id: "right-delivering", status: "delivering" },
+        ]}
+        liveBlocks={[
+          { blockId: "live", blockType: "reasoning", text: "Thinking aloud", revision: 1 },
+          { blockId: "prose", blockType: "text", text: "Live prose", revision: 1 },
+          { blockId: "after-prose", blockType: "reasoning", text: "Thinking again", revision: 1 },
+        ]}
+      />,
+    );
+    const [persisted, left, right, live] = html
+      .replace("Committed prose", "|boundary|")
+      .replace("Inbox boundary", "|boundary|")
+      .replace("Live prose", "|boundary|")
+      .split("|boundary|");
+    expect(persisted).toContain("activity-rail-row-neutral peer-notice");
+    expect(dotStates(persisted ?? "")).toEqual([]);
+    expect(dotStates(left ?? "")).toEqual(["notification", "failed"]);
+    expect(dotStates(right ?? "")).toEqual(["running", "thinking"]);
+    expect(dotStates(live ?? "")).toEqual([]);
+    expect(html.match(/class="[^"]* activity-strip"/g)).toHaveLength(2);
+  });
+
   it("requires trusted provenance, not human text, correlation or another event type", () => {
     const human = {
       ...message("human", "user", `orb.message from ${senderId}`),
@@ -1788,22 +1846,25 @@ describe("orb correspondence", () => {
   });
 
   it.each([
-    ["queued", "running", "queued"],
-    ["delivering", "running", "delivering"],
-    ["queued", "failed", "blocked"],
-    ["delivering", "failed", "blocked"],
-    ["queued", "stopped", "paused"],
-    ["delivered", "failed", "delivered"],
-    ["failed", "running", "failed"],
-  ] as const)("preserves attribution for %s while %s", (status, state, label) => {
+    ["queued", "running", "queued", "neutral"],
+    ["delivering", "running", "delivering", "running"],
+    ["steer", "running", "steering", "running"],
+    ["queued", "failed", "blocked", "neutral"],
+    ["steer", "failed", "blocked", "neutral"],
+    ["delivering", "failed", "blocked", "neutral"],
+    ["queued", "stopped", "paused", "neutral"],
+    ["steer", "stopped", "paused", "neutral"],
+    ["delivered", "failed", "delivered", "neutral"],
+    ["failed", "running", "failed", "failed"],
+  ] as const)("preserves attribution for %s while %s", (status, state, label, railState) => {
+    const row: OrbMessageView =
+      status === "steer" ? { ...pending, delivery: "steer" } : { ...pending, status };
     const html = renderToStaticMarkup(
       <HistoryView
         {...idle}
         records={[]}
         orbState={state}
-        queuedMessages={[
-          { ...pending, status, ...(status === "failed" ? { error: "Rejected <token>" } : {}) },
-        ]}
+        queuedMessages={[{ ...row, ...(status === "failed" ? { error: "Rejected <token>" } : {}) }]}
         senderNames={new Map([[senderId, "runtime handshake"]])}
       />,
     );
@@ -1811,10 +1872,21 @@ describe("orb correspondence", () => {
     expect(html).toContain(`href="/orbs/${senderId}">runtime handshake</a>`);
     expect(html).toContain("peer-body");
     expect(html).toContain('class="activity-rail-label">notification</span>');
-    if (status === "failed") {
-      expect(html.match(/>Rejected &lt;token&gt;</g)).toHaveLength(1);
-      expect(html).toContain("activity-rail-row-failed peer-notice");
-    }
+    expect(html).toContain(`activity-rail-row-${railState} peer-notice`);
+    if (status === "failed") expect(html.match(/>Rejected &lt;token&gt;</g)).toHaveLength(1);
+
+    const grouped = renderToStaticMarkup(
+      <HistoryView
+        {...idle}
+        records={[]}
+        orbState={state}
+        queuedMessages={[row, { ...pending, id: "next" }]}
+      />,
+    );
+    expect(dotStates(grouped)).toEqual([
+      railState === "neutral" ? "notification" : railState,
+      "notification",
+    ]);
   });
 
   it.each(["renamed <sender>", null, "", undefined])(

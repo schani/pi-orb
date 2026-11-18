@@ -145,6 +145,7 @@ Campaign replay: `DST_REPLAY=<trace> LIFECYCLE_CAMPAIGN_FIRST_SEED=<seed> LIFECY
 - Rendered UI behavior (layout, terminal geometry, focus, scroll) is checked in a real browser; CSS contracts and SSR only pin static invariants. React StrictMode can replace imperative subtrees: assert on stable containers.
 - Linux WebKit and synthetic viewport events do not equal physical iPhone/iPad behavior; physical checks are tracked in `TODO.md`.
 - The frontend-only mock seeds `/orbs/frontend-mixed-tool-states` (completed, failed and running calls in one group) for manual inspection, and `/orbs/frontend-long-history` for the typing-performance regression (a test-only Vite transform counts `HistoryView` executions; gate initial live replay and inbox traffic before navigating).
+- For manual peer activity checks, open `/orbs/frontend-peer-activity` in the frontend-only mock. Expand the activity strip to see one failed tool and five `steering` peer messages with named sender links.
 - Sub-pixel layout regressions bundle their font (`e2e/fixtures/fonts/DejaVuSansMono.ttf`) so installed fallbacks cannot mask drift.
 
 ### Database tests

@@ -1,6 +1,7 @@
 import {
   type DisplayBlock,
   type DisplayRecord,
+  type OrbMessageSystem,
   type OrbMessageView,
   type OrbView,
   ToolResultContext,
@@ -23,7 +24,12 @@ import { representedInboxMessageIds } from "../lib/queued-messages.ts";
 import { HeadlineSlots } from "../lib/use-activity-headline.tsx";
 import { useHistoryTail } from "../lib/use-history-tail.ts";
 import { ActivityRailRow } from "./ActivityRailRow.tsx";
-import { type ActivityItem, groupActivity } from "./ActivityStrip.tsx";
+import {
+  type ActivityItem,
+  activityStripOpenId,
+  groupActivity,
+  InActivityStrip,
+} from "./ActivityStrip.tsx";
 import { BitRegister } from "./BitRegister.tsx";
 import { ChatMarkdown as UnmemoizedChatMarkdown } from "./ChatMarkdown.tsx";
 import { PlainChatText } from "./ChatText.tsx";
@@ -386,9 +392,19 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
   return nodes;
 }
 
+type PeerInboxMessage = OrbMessageView & {
+  system: Extract<OrbMessageSystem, { kind: "orb_message" }>;
+};
+
 type Turn =
   | { kind: "user"; record: MessageRecord }
-  | { kind: "agent"; key: string; records: Array<MessageRecord | EventRecord> }
+  | {
+      kind: "agent";
+      key: string;
+      records: Array<MessageRecord | EventRecord>;
+      peers?: PeerInboxMessage[];
+    }
+  | { kind: "inbox"; message: OrbMessageView }
   | { kind: "alert"; record: EventRecord; message: string }
   | { kind: "compaction"; record: CompactionRecord | EventRecord };
 
@@ -494,28 +510,14 @@ function renderAgentRecords(
     if (record.type === "event") {
       flushTools();
       if (record.eventType === "orb.message" && record.sender !== undefined) {
-        const senderId = record.sender.orbId;
-        const node = (
-          <PeerNotice
-            key={record.id}
-            id={record.id}
-            senderId={senderId}
-            name={senderNames.get(senderId)}
-            text={blockText(record.content ?? [])}
-          />
+        items.push(
+          peerActivity({
+            id: peerRecordIdentity(record),
+            senderId: record.sender.orbId,
+            name: senderNames.get(record.sender.orbId),
+            text: blockText(record.content ?? []),
+          }),
         );
-        items.push({
-          key: record.id,
-          node,
-          step: {
-            key: record.id,
-            identity: record.id,
-            node,
-            state: "notification",
-            label: "notification",
-            headline: senderNames.get(senderId)?.trim() || senderId,
-          },
-        });
         continue;
       }
       const facts = subagentStep(record);
@@ -639,6 +641,8 @@ const AgentRecords = memo(
     pairing,
     tools,
     senderNames,
+    peers,
+    orbState,
     live,
     busy = false,
   }: {
@@ -646,11 +650,26 @@ const AgentRecords = memo(
     pairing: ToolPairing;
     tools: readonly ToolChip[];
     senderNames: ReadonlyMap<string, string | null>;
+    peers?: readonly PeerInboxMessage[] | undefined;
+    orbState?: OrbView["state"] | undefined;
     live?: LiveAgentContent | undefined;
     busy?: boolean;
   }) {
     const openState = useContext(OpenDetailValue);
     const items = renderAgentRecords(records, pairing, tools, senderNames);
+    for (const message of peers ?? []) {
+      const senderId = message.system.senderOrbId;
+      items.push(
+        peerActivity({
+          id: peerInboxIdentity(message.id),
+          senderId,
+          name: senderNames.get(senderId),
+          text: blockText(message.content.filter((block) => block.type === "text")),
+          status: inboxStatusLabel(message, orbState),
+          error: message.status === "failed" ? message.error : undefined,
+        }),
+      );
+    }
     if (live !== undefined) items.push(...liveAgentItems(live));
     return [
       ...groupActivity(items, openState),
@@ -662,6 +681,9 @@ const AgentRecords = memo(
     if (
       previous.tools !== next.tools ||
       previous.senderNames !== next.senderNames ||
+      previous.orbState !== next.orbState ||
+      previous.peers?.length !== next.peers?.length ||
+      next.peers?.some((message, index) => message !== previous.peers?.[index]) ||
       previous.live !== next.live ||
       previous.busy !== next.busy ||
       previous.records.length !== next.records.length ||
@@ -688,12 +710,15 @@ const AgentRecords = memo(
 );
 
 function turnKey(turn: Turn): string {
-  return turn.kind === "agent" ? turn.key : turn.record.id;
+  if (turn.kind === "agent") return turn.key;
+  return turn.kind === "inbox" ? turn.message.id : turn.record.id;
+}
+
+function isPeerInboxMessage(message: OrbMessageView): message is PeerInboxMessage {
+  return message.system?.kind === "orb_message";
 }
 
 function groupTurns(records: readonly DisplayRecord[], queuedMessages: readonly OrbMessageView[]) {
-  const represented = representedInboxMessageIds(records);
-  const pendingMessages = queuedMessages.filter((message) => !represented.has(message.id));
   const turns: Turn[] = [];
   const appendAgentPart = (record: MessageRecord | EventRecord) => {
     const last = turns[turns.length - 1];
@@ -725,7 +750,28 @@ function groupTurns(records: readonly DisplayRecord[], queuedMessages: readonly 
         break;
     }
   }
-  return { turns, pendingMessages };
+  const historyTurnCount = turns.length;
+  const represented = representedInboxMessageIds(records);
+  for (const message of queuedMessages) {
+    if (represented.has(message.id)) continue;
+    if (isPeerInboxMessage(message)) {
+      const last = turns.at(-1);
+      if (last?.kind === "agent") {
+        last.peers ??= [];
+        last.peers.push(message);
+      } else {
+        turns.push({
+          kind: "agent",
+          key: peerInboxIdentity(message.id),
+          records: [],
+          peers: [message],
+        });
+      }
+    } else {
+      turns.push({ kind: "inbox", message });
+    }
+  }
+  return { turns, historyTurnCount };
 }
 
 function OwnedSubagent({ record }: { record: EventRecord }) {
@@ -771,6 +817,48 @@ function liveAgentItems(live: LiveAgentContent): ActivityItem[] {
   return items;
 }
 
+function peerInboxIdentity(id: string): string {
+  return `peer:inbox:${id}`;
+}
+
+function peerRecordIdentity(record: EventRecord): string {
+  const inboxId = record.inboxMessageIds?.length === 1 ? record.inboxMessageIds[0] : undefined;
+  return inboxId === undefined ? `peer:record:${record.id}` : peerInboxIdentity(inboxId);
+}
+
+type PeerNoticeProps = {
+  senderId: string;
+  name: string | null | undefined;
+  text: string;
+  id: string;
+  status?: ReturnType<typeof inboxStatusLabel>;
+  error?: string | undefined;
+};
+
+function peerActivity(props: PeerNoticeProps): ActivityItem {
+  const { id, name, senderId, status } = props;
+  const state =
+    status === "failed"
+      ? "failed"
+      : status === "steering" || status === "delivering"
+        ? "running"
+        : "notification";
+  const node = <PeerNotice key={id} {...props} state={state} />;
+  return {
+    key: id,
+    node,
+    step: {
+      key: id,
+      identity: id,
+      restoreDisclosure: true,
+      node,
+      state,
+      label: "notification",
+      headline: name?.trim() || senderId,
+    },
+  };
+}
+
 function PeerNotice({
   senderId,
   name,
@@ -778,22 +866,21 @@ function PeerNotice({
   id,
   status,
   error,
-}: {
-  senderId: string;
-  name: string | null | undefined;
-  text: string;
-  id: string;
-  status?: string;
-  error?: string;
-}) {
+  state,
+}: PeerNoticeProps & { state: "failed" | "running" | "notification" }) {
   const openState = useContext(OpenDetailValue);
-  const [open, setOpen] = useState(() => openState?.opened.has(id) ?? false);
+  const inStrip = useContext(InActivityStrip);
+  const [open, setOpen] = useState(
+    () =>
+      openState?.opened.has(id) === true &&
+      (inStrip || openState.opened.has(activityStripOpenId(id))),
+  );
   return (
     <ActivityRailRow
       className="peer-notice"
       label="notification"
       headline={open ? undefined : error}
-      state={status === "failed" ? "failed" : "neutral"}
+      state={state === "notification" ? "neutral" : state}
       metric={
         <>
           <a
@@ -809,8 +896,14 @@ function PeerNotice({
       defaultOpen={open}
       onToggle={(value) => {
         setOpen(value);
-        if (value) openState?.opened.add(id);
-        else openState?.opened.delete(id);
+        const opened = openState?.opened;
+        if (value) {
+          opened?.add(id);
+          if (!inStrip) opened?.add(activityStripOpenId(id));
+        } else {
+          opened?.delete(id);
+          if (!inStrip) opened?.delete(activityStripOpenId(id));
+        }
       }}
     >
       <div className="peer-body">
@@ -824,7 +917,6 @@ function PeerNotice({
 function renderInboxMessage(
   message: OrbMessageView,
   orbState: OrbView["state"] | undefined,
-  senderNames: ReadonlyMap<string, string | null>,
 ): ReactNode {
   const system = message.system !== undefined;
   const status = inboxStatusLabel(message, orbState);
@@ -832,22 +924,6 @@ function renderInboxMessage(
   // message is, with the reason, rather than leaving it looking pending
   // forever (docs/runtime-protocol.md).
   const failed = message.status === "failed";
-  if (message.system?.kind === "orb_message") {
-    return (
-      <article className="rec rec-orb" key={message.id} aria-label="Orb message">
-        <div className="rec-bd">
-          <PeerNotice
-            id={message.id}
-            senderId={message.system.senderOrbId}
-            name={senderNames.get(message.system.senderOrbId)}
-            text={blockText(message.content.filter((block) => block.type === "text"))}
-            status={status}
-            {...(failed && message.error !== undefined ? { error: message.error } : {})}
-          />
-        </div>
-      </article>
-    );
-  }
   return (
     <article className={`rec ${system ? "rec-orb" : "rec-you"} rec-q`} key={message.id}>
       <span className="visually-hidden">{system ? "System:" : "You:"}</span>
@@ -876,6 +952,7 @@ function renderTurn(
   pairing: ToolPairing,
   tools: readonly ToolChip[],
   senderNames: ReadonlyMap<string, string | null>,
+  orbState: OrbView["state"] | undefined,
   live?: LiveAgentContent,
   busy = false,
   compactionIdentity?: string,
@@ -890,9 +967,16 @@ function renderTurn(
           </div>
         </article>
       );
-    case "agent":
+    case "inbox":
+      return renderInboxMessage(turn.message, orbState);
+    case "agent": {
+      const first = turn.records[0];
+      const key =
+        first?.type === "event" && first.eventType === "orb.message" && first.sender !== undefined
+          ? peerRecordIdentity(first)
+          : turn.key;
       return (
-        <article className="rec rec-orb" key={turn.key} data-history-row={turn.key}>
+        <article className="rec rec-orb" key={key} data-history-row={first?.id}>
           <span className="visually-hidden">Orb:</span>
           <div className="rec-bd">
             <AgentRecords
@@ -900,12 +984,15 @@ function renderTurn(
               pairing={pairing}
               tools={tools}
               senderNames={senderNames}
+              peers={turn.peers}
+              orbState={turn.peers === undefined ? undefined : orbState}
               live={live}
               busy={busy}
             />
           </div>
         </article>
       );
+    }
     case "alert":
       return (
         <article
@@ -942,7 +1029,7 @@ function persistedToolCallIds(records: readonly DisplayRecord[]): Set<string> {
 }
 
 /** Lifecycle labels are presentation only; delivered and failed rows stay terminal. */
-function inboxStatusLabel(message: OrbMessageView, orbState: OrbView["state"] | undefined): string {
+function inboxStatusLabel(message: OrbMessageView, orbState: OrbView["state"] | undefined) {
   if (message.status === "failed" || message.status === "delivered") return message.status;
   if (orbState === "failed") return "blocked";
   if (
@@ -976,7 +1063,7 @@ export const HistoryView = memo(function HistoryView({
   const sharedHeadlineSlots = useContext(HeadlineSlots);
   const [headlineSlots] = useState(() => new HeadlineLimiter());
   const [openedDetails] = useState(() => new Set<string>());
-  const { turns, pendingMessages, pairing, committedToolCallIds, derivationMs } = useMemo(() => {
+  const { turns, historyTurnCount, pairing, committedToolCallIds, derivationMs } = useMemo(() => {
     const start = performance.now();
     return {
       ...groupTurns(records, queuedMessages),
@@ -985,7 +1072,10 @@ export const HistoryView = memo(function HistoryView({
       derivationMs: performance.now() - start,
     };
   }, [records, queuedMessages]);
-  const keys = useMemo(() => turns.map(turnKey), [turns]);
+  const keys = useMemo(
+    () => turns.slice(0, historyTurnCount).map(turnKey),
+    [turns, historyTurnCount],
+  );
   const historyRef = useRef<HTMLDivElement>(null);
   const firstMounted = useHistoryTail(keys, historyRef, viewportRef, onCompensatedRef);
   const openDetailValue = useMemo(
@@ -1000,13 +1090,13 @@ export const HistoryView = memo(function HistoryView({
     performance.mark("pi-orb:history-mount", {
       detail: {
         records: records.length,
-        totalRows: turns.length,
-        mountedRows: turns.length - firstMounted,
+        totalRows: historyTurnCount,
+        mountedRows: historyTurnCount - firstMounted,
         derivationRecords: derived ? records.length : 0,
         derivationMs: derived ? derivationMs : 0,
       },
     });
-  }, [records, turns.length, firstMounted, derivationMs]);
+  }, [records, historyTurnCount, firstMounted, derivationMs]);
   const anchorIndex =
     compaction?.afterId === null
       ? -1
@@ -1024,52 +1114,40 @@ export const HistoryView = memo(function HistoryView({
   const finalTurn = turns[turns.length - 1];
   const uncommittedTools = tools.filter((tool) => !committedToolCallIds.has(tool.callId));
   const hasAgentLive = liveBlocks.length > 0 || uncommittedTools.length > 0;
-  const mergeLiveIntoFinalTurn =
-    hasAgentLive && finalTurn?.kind === "agent" && pendingMessages.length === 0;
-  const mergedTurnIndex = mergeLiveIntoFinalTurn ? turns.length - 1 : -1;
-  const liveAgentContent: LiveAgentContent = {
-    blocks: liveBlocks,
-    tools: uncommittedTools,
-  };
+  const live = hasAgentLive ? { blocks: liveBlocks, tools: uncommittedTools } : undefined;
+  const mergeLiveIntoFinalTurn = live !== undefined && finalTurn?.kind === "agent";
   return createElement(
     HeadlineSlots.Provider,
     { value: sharedHeadlineSlots ?? headlineSlots },
     <DetailContextValue.Provider value={detailContext}>
       <OpenDetailValue.Provider value={openDetailValue}>
         <div className="history" ref={historyRef}>
-          {turns
-            .slice(firstMounted)
-            .map((turn, index) =>
-              index + firstMounted === mergedTurnIndex
-                ? renderTurn(turn, pairing, tools, senderNames, liveAgentContent, busy)
-                : renderTurn(
-                    turn,
-                    pairing,
-                    tools,
-                    senderNames,
-                    undefined,
-                    false,
-                    turn.kind === "compaction" && turn.record.id === compactionResult?.id
-                      ? compaction?.operationId
-                      : undefined,
-                  ),
+          {turns.slice(firstMounted).map((turn) => {
+            const merged = mergeLiveIntoFinalTurn && turn === finalTurn;
+            return renderTurn(
+              turn,
+              pairing,
+              tools,
+              senderNames,
+              orbState,
+              merged ? live : undefined,
+              merged && busy,
+              turn.kind === "compaction" && turn.record.id === compactionResult?.id
+                ? compaction?.operationId
+                : undefined,
+            );
+          })}
+          {live !== undefined &&
+            !mergeLiveIntoFinalTurn &&
+            renderTurn(
+              { kind: "agent", key: "live", records: [] },
+              pairing,
+              tools,
+              senderNames,
+              orbState,
+              live,
+              busy,
             )}
-          {pendingMessages.map((message) => renderInboxMessage(message, orbState, senderNames))}
-          {hasAgentLive && !mergeLiveIntoFinalTurn && (
-            <article className="rec rec-orb">
-              <span className="visually-hidden">Orb:</span>
-              <div className="rec-bd">
-                <AgentRecords
-                  records={[]}
-                  pairing={pairing}
-                  tools={tools}
-                  senderNames={senderNames}
-                  live={liveAgentContent}
-                  busy={busy}
-                />
-              </div>
-            </article>
-          )}
           {compacting && compaction !== null && compactionResult === undefined && (
             <CompactionRail key={compaction.operationId} identity={compaction.operationId} />
           )}
