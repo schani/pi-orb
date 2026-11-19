@@ -9,7 +9,7 @@ it("checks the pinned native Claude executable without authentication or inferen
   const result = await execFileAsync(process.execPath, ["infra/native-vm/claude-check.mjs"], {
     env: { PATH: process.env["PATH"] },
   });
-  expect(result.stdout.trim()).toBe("CLAUDE_SDK_OK 0.3.318 / 2.1.318");
+  expect(result.stdout.trim()).toBe("CLAUDE_SDK_OK 0.3.328 / 2.1.328");
   expect(result.stderr).toBe("");
 });
 

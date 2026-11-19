@@ -89,7 +89,7 @@ while True:
     child.on("message", (message) => {
       process.stdout.write(`OWNED_READY ${JSON.stringify({ parent: metadata(), ...message })}\n`);
       process.stdout.write("https://claude.com/cai/oauth/authorize?state=synthetic-public\n");
-      process.stdout.write("Paste code here if prompted > \n");
+      process.stdout.write("Paste code here if prompted\r\r\n╭────╮\r\r\n│ │\r\r\n╰────╯\n");
       process.stdout.write(
         "Your OAuth token (valid for 1 year):\nsk-ant-oat01-synthetic-group-only\n",
       );
