@@ -14,6 +14,50 @@ export const FLING_INTEGRITY =
 const boundary = (type, fn) => ResultAsync.fromThrowable(fn, () => ({ type }))();
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 
+// Both patched releases satisfy the existing ranges and leave other lock metadata unchanged.
+const honoPins = {
+  "@hono/node-server": [
+    [
+      "2.1.5",
+      "sha512-MgP/I06GdvsilDspMk/qmRzpk8LOUStP6jFAbSRi40W09DhoyUn+Mj7eyKICPqeYKybOjVFLVIAQzvu1bfIa7Q==",
+    ],
+    [
+      "2.1.9",
+      "sha512-Sk4NQd3GFY0WZWCzndwFMPwJhtD0y9qjsQ+pjID0/03nK9pxyBCUoUHCho8QYBLBVhi0ssL8UkNPHqbgSOFPIQ==",
+    ],
+  ],
+  hono: [
+    [
+      "4.13.14",
+      "sha512-yhRLQ21U6qa9Hsu2N7Qcbh8tE+WKEcoErjIo56LeSGiGXGp9sA7UpE86Ui9uexb61KakiGwuHMn2QdV7w6i6kQ==",
+    ],
+    [
+      "4.13.19",
+      "sha512-KmXvQAXwcAHV+muzbIwoJ23niEB5nMoDVr9WcRkU8mvjUECm/1+7v4Jgp7P7a+H6MLFrh+vXrGonGrGS+RQfkA==",
+    ],
+  ],
+};
+
+function patchHonoLock(lock) {
+  const packages = { ...lock.packages };
+  for (const [name, [[oldVersion, oldIntegrity], [version, integrity]]] of Object.entries(
+    honoPins,
+  )) {
+    const path = `node_modules/${name}`;
+    const resolved = (v) =>
+      `https://registry.npmjs.org/${name}/-/${name.split("/").at(-1)}-${v}.tgz`;
+    const entry = packages[path];
+    if (
+      entry?.version !== oldVersion ||
+      entry.resolved !== resolved(oldVersion) ||
+      entry.integrity !== oldIntegrity
+    )
+      return err({ type: "hono_lock_mismatch" });
+    packages[path] = { ...entry, version, resolved: resolved(version), integrity };
+  }
+  return ok({ ...lock, packages });
+}
+
 export function validatePins(head, lock, installed) {
   const fling = lock?.packages?.["node_modules/flingit"];
   return head === PIN &&
@@ -494,8 +538,9 @@ export async function runLocalFake(command, env = process.env) {
     if (checkout.isErr()) return checkout;
     const head = await tool("git", ["rev-parse", "HEAD"], source);
     if (head.isErr()) return head;
+    const lockPath = join(source, "package-lock.json");
     const lock = await boundary("lock_read", async () => {
-      const raw = await fs.readFile(join(source, "package-lock.json"), "utf8");
+      const raw = await fs.readFile(lockPath, "utf8");
       manifest.lockSha256 = hash(raw);
       return JSON.parse(raw);
     });
@@ -525,6 +570,12 @@ export async function runLocalFake(command, env = process.env) {
       ),
     );
     if (approved.isErr()) return approved;
+    const patched = patchHonoLock(lock.value);
+    if (patched.isErr()) return patched;
+    const preparedLock = `${JSON.stringify(patched.value, null, 2)}\n`;
+    const written = await boundary("lock_write", () => fs.writeFile(lockPath, preparedLock));
+    if (written.isErr()) return written;
+    manifest.preparedLockSha256 = hash(preparedLock);
     const install = await tool("npm", ["ci", "--no-audit", "--no-fund"], source);
     if (install.isErr()) return install;
     const installed = await boundary(
@@ -536,6 +587,16 @@ export async function runLocalFake(command, env = process.env) {
     if (installed.isErr()) return installed;
     const verified = validatePins(head.value.trim(), lock.value, installed.value);
     if (verified.isErr()) return verified;
+    const installedHono = {};
+    for (const [name, [, [version]]] of Object.entries(honoPins)) {
+      const pkg = await boundary("hono_package", async () =>
+        JSON.parse(await fs.readFile(join(source, "node_modules", name, "package.json"), "utf8")),
+      );
+      if (pkg.isErr()) return pkg;
+      if (pkg.value?.version !== version) return err({ type: "hono_version_mismatch" });
+      installedHono[name] = version;
+    }
+    manifest.installedHono = installedHono;
     const sqlitePrefix = "node_modules/flingit/node_modules/better-sqlite3";
     const sqlitePath = join(source, sqlitePrefix);
     const sqlite = await boundary(

@@ -34,16 +34,21 @@ class BrowserEvidenceTest(unittest.TestCase):
         dockerfile = ROOT / 'infra/postgres-test/Dockerfile'
         self.assertTrue(dockerfile.exists())
         source = dockerfile.read_text()
+        base = 'postgres:17.12-bookworm@sha256:837bed18782820fe967067cb5328b02b0d9992c1be9a37ee0c9c492cfc03af3b'
+        self.assertEqual(re.findall(r'^FROM (\S+)', source, re.M), [base, base])
         for value in (
-            'postgres:17.11-bookworm@sha256:839fbb5a4942a7758dd93e18b42ea5649807491a0545b5eeeb8f0b8bb11857a5',
+            'postgresql-server-dev-17=17.12-1.pgdg12+1',
             'pg_textsearch-1.3.1.tar.gz',
             '5d49f047c7e926a99f863d8af9d7800b9989ebb84c42f827ad81dac746a0b9e8',
             'shared_preload_libraries=pg_textsearch',
         ):
             self.assertIn(value, source)
+        image = 'pi-orb-postgres-test:17.12-textsearch1.3.1'
+        self.assertIn(f'export const POSTGRES_IMAGE = "{image}";', (ROOT / 'e2e/postgres-image.ts').read_text())
         ci = steps('ci.yml')
-        self.assertIn('docker build', ci['Start PostgreSQL qualification fixture'])
+        self.assertIn(f'docker build -f infra/postgres-test/Dockerfile -t {image} .', ci['Start PostgreSQL qualification fixture'])
         self.assertIn('docker run', ci['Start PostgreSQL qualification fixture'])
+        self.assertIn(f'-p 127.0.0.1:5432:5432 {image}', ci['Start PostgreSQL qualification fixture'])
         self.assertIn('pg_isready', ci['Start PostgreSQL qualification fixture'])
         self.assertIn('docker logs', ci['Collect PostgreSQL qualification evidence'])
         self.assertIn('docker rm', ci['Collect PostgreSQL qualification evidence'])
@@ -143,7 +148,7 @@ class BrowserEvidenceTest(unittest.TestCase):
         self.assertIn('    timeout-minutes: 60', body)
         self.assertIn('        shard: [1, 2, 3, 4]', body)
         workflow_steps = steps('e2e.yml')
-        self.assertIn("node-version: '26.13.0'", workflow_steps['Set up Node.js'])
+        self.assertIn("node-version: '26.13.1'", workflow_steps['Set up Node.js'])
         self.assertIn('run: npm ci', workflow_steps['Install dependencies'])
         self.assertIn('run: |\n          npm run test:e2e:install\n', workflow_steps['Install pinned browser engines and system dependencies'])
         full = workflow_steps['Run end-to-end test']

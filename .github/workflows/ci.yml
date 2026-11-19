@@ -39,7 +39,7 @@ jobs:
       - name: Set up Node.js for default-command smoke
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '26.13.0'
+          node-version: '26.13.1'
           cache: npm
 
       - name: Install pinned npm
@@ -97,7 +97,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '26.13.0'
+          node-version: '26.13.1'
           cache: npm
 
       - name: Install pinned npm
@@ -127,10 +127,10 @@ jobs:
       - name: Start PostgreSQL qualification fixture
         run: |
           set -euo pipefail
-          docker build -f infra/postgres-test/Dockerfile -t pi-orb-postgres-test:17.11-textsearch1.3.1 .
+          docker build -f infra/postgres-test/Dockerfile -t pi-orb-postgres-test:17.12-textsearch1.3.1 .
           docker run --detach --name qualification-postgres \
             -e POSTGRES_USER=qualification -e POSTGRES_PASSWORD=qualification -e POSTGRES_DB=qualification \
-            -p 127.0.0.1:5432:5432 pi-orb-postgres-test:17.11-textsearch1.3.1
+            -p 127.0.0.1:5432:5432 pi-orb-postgres-test:17.12-textsearch1.3.1
           for attempt in $(seq 1 60); do
             if docker exec qualification-postgres pg_isready -h 127.0.0.1 -U qualification -d qualification; then
               docker exec qualification-postgres psql -U qualification -d qualification -v ON_ERROR_STOP=1 \

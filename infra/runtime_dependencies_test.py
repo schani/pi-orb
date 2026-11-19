@@ -22,14 +22,14 @@ class RuntimeDependenciesTests(unittest.TestCase):
             with self.subTest(workflow=name):
                 source = (ROOT / f'.github/workflows/{name}.yml').read_text()
                 self.assertEqual(re.findall(r"node-version: '([^']+)'", source),
-                                 ['26.13.0'] * (2 if name == 'ci' else 1))
+                                 ['26.13.1'] * (2 if name == 'ci' else 1))
         for app, count in [('control-plane', 3), ('orb-runtime', 1)]:
             with self.subTest(app=app):
                 source = (ROOT / f'apps/{app}/Dockerfile').read_text()
                 self.assertEqual(re.findall(r'^FROM (\S+)', source, re.M),
-                                 ['node:26.13.0-bookworm-slim'] * count)
+                                 ['node:26.13.1-bookworm-slim'] * count)
         filesystem = (ROOT / 'infra/native-vm/workspace-filesystem.test.sh').read_text()
-        self.assertIn('node:26.13.0-bookworm python3', filesystem)
+        self.assertIn('node:26.13.1-bookworm python3', filesystem)
 
     def test_npm_pin_is_installed_and_verified_before_each_ci_install(self):
         for name in ['ci', 'e2e', 'deploy', 'durable-qualification']:
@@ -111,9 +111,9 @@ class RuntimeDependenciesTests(unittest.TestCase):
 
     def test_native_node_archive_is_checksum_verified_before_extraction(self):
         source = (ROOT / 'infra/native-vm/install.sh').read_text()
-        download = ('curl -fsSL https://nodejs.org/dist/v26.13.0/'
-                    'node-v26.13.0-linux-x64.tar.xz -o /tmp/node.tar.xz')
-        checksum = ("echo 'd28a96af6c38596f6d9d97c0ee531c13d238d757742387d1928de822d959e997"
+        download = ('curl -fsSL https://nodejs.org/dist/v26.13.1/'
+                    'node-v26.13.1-linux-x64.tar.xz -o /tmp/node.tar.xz')
+        checksum = ("echo '5c063e46bab0fbc1c17cc445d7ff129cbdcd0471be6ed83b6ab864f8143bc864"
                     "  /tmp/node.tar.xz' | sha256sum -c -")
         extraction = 'tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1'
         self.assertIn(download, source)

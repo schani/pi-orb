@@ -1,6 +1,6 @@
 import { docker } from "./harness.ts";
 
-export const POSTGRES_IMAGE = "pi-orb-postgres-test:17.11-textsearch1.3.1";
+export const POSTGRES_IMAGE = "pi-orb-postgres-test:17.12-textsearch1.3.1";
 
 export async function ensurePostgresImage(): Promise<void> {
   await docker(
