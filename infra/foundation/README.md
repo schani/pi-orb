@@ -174,12 +174,11 @@ There is no CIDR operator, so the prefixes are split across bounded condition
 bindings, each under the 12-logical-operator IAM Conditions limit and each
 requiring port 22.
 
-**Rendered-contract gate:** `infra/foundation/test-tofu.sh` (OpenTofu 1.13.2;
-CI `checks` runs it). `infra/foundation/test.sh` runs it plus the Node
-contracts that `npm run test:infra` also runs. `tests/release_ssh.tftest.hcl` uses a Google mock plan to pin the
+**Rendered-contract gate:** CI `checks` runs `infra/foundation/test-tofu.sh`.
+`infra/foundation/test.sh` runs it plus the Node contracts in `npm run test:infra`.
+`tests/release_ssh.tftest.hcl` uses a Google mock plan to pin the
 complete `deployer_iap_tunnel` expression map: three exact keys, port 22 conjoined
 with grouped exact IP prefixes, at most 12 rendered logical operators. It pins
 rendered policy text, not CEL evaluation or live enforcement. The gate validates
-a temporary copy of the module, then omits only `imports.tf` for the mock plan
-(OpenTofu 1.13.2 crashes on mock imports). The backend is disabled and the
-lockfile read-only; no cloud credentials.
+a temporary copy of the module, then omits only `imports.tf` for the mock plan.
+The backend is disabled and the lockfile read-only; no cloud credentials.

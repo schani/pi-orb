@@ -114,7 +114,7 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertEqual(sdk_steps[0].strip().splitlines(), [
             'uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3',
             '        with:',
-            "          version: '592.0.0'",
+            "          version: '594.0.0'",
             '          install_components: beta',
         ])
 
