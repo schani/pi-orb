@@ -1,5 +1,5 @@
 import { posix } from "node:path";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ToolExecutionResult } from "@earendil-works/pi-durable";
 import { errAsync, okAsync, Result, type ResultAsync } from "neverthrow";
 import type { ResourceReader } from "../../domain/resources.ts";

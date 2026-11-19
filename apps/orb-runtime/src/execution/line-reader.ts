@@ -1,5 +1,5 @@
 import { type FileHandle, open } from "node:fs/promises";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import {
   type Result as EnvResult,
   FileError,

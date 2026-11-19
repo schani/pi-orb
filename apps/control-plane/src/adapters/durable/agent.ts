@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { WatchHandle } from "@earendil-works/chord";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { BACKGROUND_CONTEXT, type Context } from "@earendil-works/chord/context";
+import type { WatchHandle } from "@earendil-works/chord/watch";
 import {
   type AssistantMessage,
   getSupportedThinkingLevels,
@@ -164,9 +164,7 @@ export interface DurableAgentOptions {
   readonly openSignal?: AbortSignal;
   readonly ownershipSignal?: AbortSignal;
   readonly executionActive?: () => boolean;
-  readonly checkExecutionReady?: (
-    context: import("@earendil-works/chord").Context,
-  ) => ResultAsync<void, RuntimeClientError>;
+  readonly checkExecutionReady?: (context: Context) => ResultAsync<void, RuntimeClientError>;
   readonly models: Models;
   /** Usage ledger tap; never awaited by the model call. */
   readonly recordModelCall?: (use: ModelCallUse, response: AssistantMessage) => void;
@@ -699,9 +697,7 @@ export class DurableAgent implements AgentSessionFacade {
   executionActive(): boolean {
     return this.options.executionActive?.() ?? false;
   }
-  checkExecutionReady(
-    ctx: import("@earendil-works/chord").Context,
-  ): ResultAsync<void, RuntimeClientError> {
+  checkExecutionReady(ctx: Context): ResultAsync<void, RuntimeClientError> {
     return this.options.checkExecutionReady?.(ctx) ?? okAsync(undefined);
   }
   workActive(): boolean {
@@ -1018,7 +1014,7 @@ export class DurableAgent implements AgentSessionFacade {
   notifyParent(
     message: string,
     api: ToolExecutionApi,
-    invocationContext: import("@earendil-works/chord").Context,
+    invocationContext: Context,
   ): ResultAsync<{ accepted: true }, OrbAgentError> {
     const checkLocal = (): ResultAsync<void, RuntimeClientError> =>
       this.closing || this.paused || this.options.ownershipSignal?.aborted || this.failure

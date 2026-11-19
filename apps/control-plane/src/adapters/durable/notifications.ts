@@ -1,4 +1,4 @@
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { StorageWrite, ToolExecutionApi } from "@earendil-works/pi-durable";
 import { err, ok, okAsync, ResultAsync } from "neverthrow";
 import type { RuntimeClientError } from "../../domain/errors.ts";
