@@ -83,7 +83,7 @@ class RuntimeDependenciesTests(unittest.TestCase):
         self.assertEqual(package['packageManager'], 'npm@12.2.1')
         self.assertEqual(package['allowScripts'], {
             'node-pty@1.1.0': True,
-            '@anthropic-ai/claude-code@2.1.318': True,
+            '@anthropic-ai/claude-code@2.1.328': True,
             'esbuild@0.28.2': True,
         })
 

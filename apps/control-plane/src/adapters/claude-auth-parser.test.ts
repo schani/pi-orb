@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { ClaudeSetupTokenParser } from "./claude-auth-parser.ts";
 
 const nativeUrl = `https://claude.com/cai/oauth/authorize?code=true&client_id=00000000-0000-0000-0000-000000000000&response_type=code&redirect_uri=${encodeURIComponent("https://platform.claude.com/oauth/code/callback")}&scope=user%3Ainference&code_challenge=${"c".repeat(43)}&code_challenge_method=S256&state=${"s".repeat(43)}`;
-const prompt = "\nPaste code here if prompted > ";
+const prompt = "\nPaste code here if prompted\r\r\n╭────╮\r\r\n│ │\r\r\n╰────╯\r\r\n";
 
-describe("Claude 2.1.318 setup-token parser", () => {
+describe("Claude 2.1.328 setup-token parser", () => {
   it("publishes only a complete native consent URL after the code prompt", () => {
     const p = new ClaudeSetupTokenParser();
     p.feed(`${nativeUrl.slice(0, 240)}\n`);
@@ -14,6 +14,13 @@ describe("Claude 2.1.318 setup-token parser", () => {
     p.feed(nativeUrl);
     expect(p.challenge()).toEqual({ needsCode: true });
     p.feed(prompt);
+    expect(p.challenge()).toEqual({ url: nativeUrl, needsCode: true });
+  });
+  it("waits for the boxed input, not just its label", () => {
+    const p = new ClaudeSetupTokenParser();
+    p.feed(`${nativeUrl}\nPaste code here if prompted\r\r\n`);
+    expect(p.challenge()).toEqual({});
+    p.feed("\u001b[2G╭────╮\r\r\n│ │\r\r\n╰────╯");
     expect(p.challenge()).toEqual({ url: nativeUrl, needsCode: true });
   });
   it("waits for the prompt and handles native ANSI cursor redraws", () => {

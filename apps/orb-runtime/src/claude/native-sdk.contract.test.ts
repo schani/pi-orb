@@ -265,7 +265,7 @@ nativeIt(
     expect(result.supportedModels).toEqual([
       { value: "default", resolvedModel: "claude-opus-5-5" },
       { value: "opus", resolvedModel: "claude-opus-5-5" },
-      { value: "fable", resolvedModel: "claude-fable-5-1" },
+      { value: "fable", resolvedModel: "claude-fable-5-2" },
       { value: "sonnet", resolvedModel: "claude-sonnet-5-5" },
       { value: "haiku", resolvedModel: "claude-haiku-5-5" },
     ]);

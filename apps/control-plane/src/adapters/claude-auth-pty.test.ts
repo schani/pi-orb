@@ -65,7 +65,7 @@ function cleanupStarted(): Promise<void> {
 }
 
 const nativeUrl = `https://claude.com/cai/oauth/authorize?code=true&client_id=00000000-0000-0000-0000-000000000000&response_type=code&redirect_uri=${encodeURIComponent("https://platform.claude.com/oauth/code/callback")}&scope=user%3Ainference&code_challenge=${"c".repeat(43)}&code_challenge_method=S256&state=${"s".repeat(43)}`;
-const nativePrompt = "\nPaste code here if prompted > ";
+const nativePrompt = "\nPaste code here if prompted\r\r\n╭────╮\r\r\n│ │\r\r\n╰────╯";
 
 it("never republishes submitted codes echoed by the PTY", async () => {
   const events: unknown[] = [];
@@ -109,10 +109,10 @@ it("waits for native exit after submission, suppressing repeated prompts and raw
   const started = (
     await new ClaudePtyAuthTransport().start((event) => events.push(event))
   )._unsafeUnwrap();
-  state.onData?.("Paste code here if prompted > ");
+  state.onData?.(nativePrompt);
   expect(events).toEqual([{ challenge: { needsCode: true } }]);
   expect(started.sendCode("synthetic-completion-code").isOk()).toBe(true);
-  state.onData?.("Invalid synthetic-completion-code\nPaste code here if prompted > ");
+  state.onData?.(`Invalid synthetic-completion-code${nativePrompt}`);
   expect(events).toEqual([{ challenge: { needsCode: true } }]);
   state.onExit?.({ exitCode: 1 });
   expect(events).toEqual([
@@ -181,7 +181,7 @@ it("ignores late native data after exit instead of reopening the challenge", asy
   )._unsafeUnwrap();
   state.onExit?.({ exitCode: 1 });
   await session.drain();
-  state.onData?.("Paste code here if prompted > ");
+  state.onData?.(nativePrompt);
   expect(events).toEqual([{ error: "Claude sign-in failed", stage: "transport" }]);
 });
 it("does not equate wrapper exit with native process-group drain", async () => {

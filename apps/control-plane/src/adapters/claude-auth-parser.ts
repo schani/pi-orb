@@ -1,6 +1,6 @@
 import type { ClaudeAuthView } from "@pi-orb/protocol";
 
-/** Output grammar pinned to Claude Code 2.1.318; raw output remains private. */
+/** Output grammar pinned to Claude Code 2.1.328; raw output remains private. */
 export class ClaudeSetupTokenParser {
   private raw = "";
   private submittedInput = "";
@@ -43,7 +43,7 @@ export class ClaudeSetupTokenParser {
   }
   challenge(): NonNullable<ClaudeAuthView["challenge"]> {
     const text = this.text();
-    const needsCode = text.replace(/\s/g, "").includes("Pastecodehereifprompted>");
+    const needsCode = text.replace(/\s/g, "").includes("Pastecodehereifprompted╭");
     let candidate: string | undefined;
     if (needsCode) {
       // Lookahead also finds a URL following an ANSI cursor redraw without whitespace.
