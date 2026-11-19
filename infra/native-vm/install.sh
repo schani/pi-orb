@@ -38,12 +38,11 @@ test "$(bun --version)" = 1.4.4
 test "$(bunx --version)" = 1.4.4
 sh infra/install_git_crypt.sh
 test "$(git-crypt --version 2>&1)" = "git-crypt 0.8.0"
-npm ci --workspace @pi-orb/orb-runtime --include-workspace-root=false --ignore-scripts
+npm ci --workspace @pi-orb/orb-runtime --include-workspace-root=false --ignore-scripts --include=optional
+test -x node_modules/@agent-browser/cli-linux-x64-gnu/bin/agent-browser
 node infra/native-vm/claude-check.mjs | tee /opt/pi-orb/claude-sdk-version
 rm -rf node_modules/node-pty/prebuilds
 npm rebuild node-pty
-chmod 755 node_modules/agent-browser/bin/agent-browser-linux-x64
-find node_modules/agent-browser/bin -type f -name 'agent-browser-*' ! -name agent-browser-linux-x64 -delete
 node -e 'const pty = require("node-pty"); const child = pty.spawn("/bin/sh", ["-c", "exit 0"]); child.onExit(({ exitCode }) => process.exit(exitCode))'
 ln -s /app/node_modules/.bin/agent-browser /usr/local/bin/agent-browser
 install -m755 apps/orb-runtime/docker/gh apps/orb-runtime/docker/pi-orb-git-credential apps/orb-runtime/docker/pi-orb scripts/pi-orb-gcp-identity /usr/local/bin/

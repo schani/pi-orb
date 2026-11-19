@@ -265,6 +265,17 @@ printf license > "$source/COPYING"
         for step in [self.install, self.rebuild]:
             self.assertLess(self.dockerfile.index(step), first_source)
 
+    def test_agent_browser_images_keep_system_chromium_and_use_locked_platform_packages(self):
+        native = (ROOT / 'infra/native-vm/install.sh').read_text()
+        for source in [self.install, native]:
+            self.assertIn('--ignore-scripts --include=optional', source)
+            self.assertNotIn('agent-browser install', source)
+        self.assertNotIn('node_modules/agent-browser/bin/agent-browser-linux-x64', native)
+        self.assertIn('test -x node_modules/@agent-browser/cli-linux-x64-gnu/bin/agent-browser', native)
+        self.assertIn('ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium', self.dockerfile)
+        runtime = (ROOT / 'infra/native-vm/pi-orb-runtime.service').read_text()
+        self.assertIn('Environment=AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium', runtime)
+
     def test_rebuild_is_offline_with_installed_headers_and_spawn_smoke(self):
         self.assertTrue(self.rebuild.startswith('--network=none '))
         self.assertIn('rm -rf node_modules/node-pty/prebuilds', self.rebuild)
@@ -272,9 +283,13 @@ printf license > "$source/COPYING"
         self.assertIn("pty.spawn('/bin/sh', ['-c', 'exit 0'])", self.rebuild)
         self.assertIn('child.onExit(({ exitCode }) => process.exit(exitCode))', self.rebuild)
 
-    def run_step(self, step, failure=''):
+    def run_step(self, step, failure='', with_browser=True):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            binary = root / 'node_modules/@agent-browser/cli-linux-x64-gnu/bin/agent-browser'
+            if with_browser:
+                binary.parent.mkdir(parents=True)
+                binary.touch(mode=0o755)
             for command in ['npm', 'node', 'rm', 'ln']:
                 stub = root / command
                 stub.write_text('''#!/bin/sh
@@ -282,11 +297,13 @@ printf '%s nodedir=%s\\n' "$(basename "$0") $*" "${npm_config_nodedir:-}" >> "$C
 case "$(basename "$0") $*" in
   *"$FAILURE"*) [ -z "$FAILURE" ] || exit 42 ;;
 esac
+if [ "$(basename "$0") $*" = "node -p process.arch" ]; then echo x64; fi
 ''')
                 stub.chmod(0o755)
             calls = root / 'calls'
             result = subprocess.run(
                 ['/bin/sh', '-c', re.sub(r'^--network=none ', '', step)],
+                cwd=root,
                 env=dict(os.environ, PATH=str(root) + ':' + os.environ['PATH'],
                          CALLS=str(calls), FAILURE=failure),
                 capture_output=True, text=True, timeout=5)
@@ -304,6 +321,12 @@ esac
                                      rf'runtime-deps:{phase}:complete elapsed_s=\d+')
                 if phases == ['pty-rebuild']:
                     self.assertIn('npm rebuild node-pty nodedir=/usr/local', calls)
+
+    def test_missing_agent_browser_binary_fails_image_install(self):
+        result, calls = self.run_step(self.install, with_browser=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('runtime-deps:npm-install:complete', result.stdout)
+        self.assertNotIn('ln -s', calls)
 
     def test_failures_preserve_status_without_success_markers_or_later_commands(self):
         for step, failure, phase, later in [
