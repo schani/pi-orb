@@ -1,6 +1,7 @@
 import { once } from "node:events";
 import { get, IncomingMessage } from "node:http";
 import { Socket } from "node:net";
+import { setImmediate } from "node:timers/promises";
 import { RUNTIME_SUBPROTOCOL } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
@@ -336,6 +337,21 @@ it("sends a complete HTTP error when preview validation expires before upstream 
   const disposed = new Promise<void>((resolve) => {
     markDisposed = resolve;
   });
+  let markSending!: () => void;
+  const sending = new Promise<void>((resolve) => {
+    markSending = resolve;
+  });
+  let finishSending!: () => void;
+  const sendGate = new Promise<void>((resolve) => {
+    finishSending = resolve;
+  });
+  app.addHook("onSend", async (_request, reply, payload) => {
+    if (reply.statusCode === 504) {
+      markSending();
+      await sendGate;
+    }
+    return payload;
+  });
   let signal: AbortSignal | undefined;
   let reads = 0;
   const lateResponse: PreviewHttpResponse = {
@@ -370,18 +386,23 @@ it("sends a complete HTTP error when preview validation expires before upstream 
   });
   const address = await app.listen({ host: "127.0.0.1", port: 0 });
   const client = get(address, { headers: { host: `p5173-o${id}.preview.example.org` } });
+  const received = once(client, "response") as Promise<[IncomingMessage]>;
   try {
-    const [response] = (await once(client, "response")) as [IncomingMessage];
+    await Promise.race([sending, received]);
+    expect(signal?.aborted).toBe(true);
+    releaseUpstream(lateResponse);
+    await disposed;
+    await setImmediate();
+    finishSending();
+    const [response] = await received;
     const chunks: Buffer[] = [];
     for await (const chunk of response) chunks.push(chunk);
     expect(response.statusCode).toBe(504);
     expect(response.headers["cache-control"]).toBe("no-store");
     expect(JSON.parse(Buffer.concat(chunks).toString()).error).toEqual(timeout);
-    expect(signal?.aborted).toBe(true);
-    releaseUpstream(lateResponse);
-    await disposed;
     expect(reads).toBe(0);
   } finally {
+    finishSending();
     releaseUpstream(lateResponse);
     client.destroy();
     await app.close();
