@@ -5,7 +5,7 @@ APT recommendations. `packages.tsv` records every resolved package and its
 installed size; transitive libraries remain only as dependencies of this baseline.
 
 - Google guest agent 1:20261021.00-g1, systemd, SSH, CA certificates: VM boot and operation.
-- Node 26.13.0 LTS, npm 12.2.1, runtime npm dependencies, native node-pty: agent and terminal.
+- Node 26.13.1 LTS, npm 12.2.1, runtime npm dependencies, native node-pty: agent and terminal.
 - Bun 1.4.4 (`bun`, `bunx`): project JavaScript runtime/package tooling; checksum-pinned x64 baseline archive, shared with Docker via `infra/install_bun.sh`.
 - Docker Engine/CLI 29.9.3, containerd.io 2.4.2-3, Buildx, Compose: project containers/builds.
 - git, git-crypt 0.8.0, gh and broker helpers: repository and GitHub workflows.
@@ -46,14 +46,14 @@ package.
 The builder installs and verifies npm 12.2.1 after extracting Node and before
 installing dependencies; acceptance verifies it as `orb` (`docs/stack.md`).
 
-Node 26.13.0 is used for CI, Docker and native builds; it has the Wasm wrapper
+Node 26.13.1 is used for CI, Docker and native builds; it has the Wasm wrapper
 lifetime protection Node 24.22.1 lacks
 (`docs/postmortems/2026-10-28-node-wasm-wrapper-lifetime.md`). The linux-x64
 archive SHA-256 is checked against the
-[signed manifest](https://nodejs.org/dist/v26.13.0/SHASUMS256.txt.asc) and pinned
+[signed manifest](https://nodejs.org/dist/v26.13.1/SHASUMS256.txt.asc) and pinned
 in `infra/native-vm/install.sh`; `/opt/pi-orb/node-version` records it. Docker
-stages use `node:26.13.0-bookworm-slim`; the non-Linux filesystem test uses
-`node:26.13.0-bookworm` for Python and ext4 tools.
+stages use `node:26.13.1-bookworm-slim`; the non-Linux filesystem test uses
+`node:26.13.1-bookworm` for Python and ext4 tools.
 
 Build checks and `acceptance.sh` require Bun/bunx 1.4.4 and git-crypt 0.8.0, run
 as `orb`. Both images build git-crypt with `infra/install_git_crypt.sh` from the

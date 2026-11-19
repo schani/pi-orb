@@ -25,7 +25,7 @@ A full local gate runs sequentially on one runner against frozen source: `npm ru
 PI_ORB_E2E_BACKEND=process node scripts/local-fake-provider.mjs -- npm run test:e2e -- e2e/full-slice.e2e.test.ts -t 'runs login, a scripted tool round trip'
 ```
 
-Ports 3210/5173 make the wrapper exclusive per host: do not overlap it with another wrapper run or the full unit/infra suite. Its `npm ci` refuses to run unless the fixture denies `cloudflared` install scripts and npm meets the pinned minimum.
+Ports 3210/5173 make the wrapper exclusive per host: do not overlap it with another wrapper run or the full unit/infra suite. Before `npm ci`, the wrapper checks the npm minimum and the fixture's `cloudflared` script denial and applies pinned Hono lockfile updates.
 
 **DST replay.** A failing schedule writes `test-failures/<scenario>-<epoch>-<iteration>.json`. Replay it with the same source:
 
@@ -151,7 +151,7 @@ Campaign replay: `DST_REPLAY=<trace> LIFECYCLE_CAMPAIGN_FIRST_SEED=<seed> LIFECY
 ### Database tests
 
 - PGlite shares migrations and store SQL with production but not the driver, so not parameter binding. Structured parameters declare intent with `jsonParam()`/`arrayParam()` (`apps/control-plane/src/adapters/pg/client.ts`); a shared prepare step rejects bare arrays/objects in both clients ([postmortem](postmortems/2026-08-11-orb-message-jsonb-param-encoding.md)).
-- The store contract (`apps/control-plane/src/testkit/store-contract.ts`) runs on PGlite in `npm test`, on node-postgres in `e2e/postgres-store.e2e.test.ts` against `infra/postgres-test/Dockerfile` (PostgreSQL 17.11 + `pg_textsearch` 1.3.1), and from the unit suite with `PI_ORB_TEST_DATABASE_URL`.
+- The store contract (`apps/control-plane/src/testkit/store-contract.ts`) runs on PGlite in `npm test`, on node-postgres in `e2e/postgres-store.e2e.test.ts` against `infra/postgres-test/Dockerfile` (PostgreSQL 17.12 + `pg_textsearch` 1.3.1), and from the unit suite with `PI_ORB_TEST_DATABASE_URL`.
 - Raw SQL assertions select an explicit representation (`generation::text`) where drivers decode differently; typed store results stay typed ([postmortem](postmortems/2026-09-27-mcp-audit-generation-driver.md)).
 - PGlite cannot establish relation-lock behavior. Locking contracts run on real PostgreSQL and observe the competing session through `pg_blocking_pids`/live lock inspection before committing; no guessed sleeps ([postmortem](postmortems/2026-10-13-history-migration-deadlock.md)).
 - Search contracts require actual `EXPLAIN (ANALYZE)` use of the BM25 index with ordered `<@>` access. PGlite embeds a different extension version; it is not native parity.
@@ -267,7 +267,7 @@ Every project has `maxWorkers: 1`; frontend browsers never overlap Docker networ
 
 | Workflow / job | Runs | Budget |
 | --- | --- | --- |
-| CI `checks` | Artifact guard; OpenTofu foundation checks (`infra/foundation/test-tofu.sh`); typecheck; lint; `npx vitest run --maxWorkers=1 --no-file-parallelism` with both PostgreSQL URLs against a PostgreSQL 17.11/`pg_textsearch` container; `npm run test:infra` | 45 min |
+| CI `checks` | Artifact guard; OpenTofu foundation checks (`infra/foundation/test-tofu.sh`); typecheck; lint; `npx vitest run --maxWorkers=1 --no-file-parallelism` with both PostgreSQL URLs against the [PostgreSQL test image](#database-tests); `npm run test:infra` | 45 min |
 | CI `control-plane-image` | After the tracked-artifact guard and a 15 GiB free-disk check, builds the control-plane image; boots its real ENTRYPOINT/CMD with network `none` and checks `/health` and the startup phase sequence (`scripts/control-plane-startup-smoke.mjs`); proves the packaged bounded worker, pinned Git and bundled skills offline (`scripts/control-plane-image-proof.mjs`) | 30 min |
 | E2E `E2E (N/4)` | Docker backend: `--bail 1 --project frontend --project provider --project postgres --shard=N/4` under the local fake provider | 60 min |
 | Durable `Central process (N/4)` | Process backend: `--bail 1 --project process --project provider --shard=N/4` under the local fake provider | 60 min |

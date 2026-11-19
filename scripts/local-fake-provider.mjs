@@ -5,7 +5,7 @@ import * as fs from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { err, ok, Result, ResultAsync } from "neverthrow";
 
 export const PIN = "a6e97a6057d4c323c341b41ea4be98b4fa59f575";
@@ -13,6 +13,8 @@ export const FLING_INTEGRITY =
   "sha512-bfgwsKB5NlW5aMtaz64ZZpFlFAZCwHyPhwKHlUXTKpCUfG9WF569ibc9HXq+pL627voYm8bp96HlBbYiudyUlA==";
 const boundary = (type, fn) => ResultAsync.fromThrowable(fn, () => ({ type }))();
 const hash = (value) => createHash("sha256").update(value).digest("hex");
+
+const lockPatch = fileURLToPath(new URL("./local-fake-provider-lock.patch", import.meta.url));
 
 export function validatePins(head, lock, installed) {
   const fling = lock?.packages?.["node_modules/flingit"];
@@ -525,6 +527,9 @@ export async function runLocalFake(command, env = process.env) {
       ),
     );
     if (approved.isErr()) return approved;
+    const patched = await tool("git", ["apply", "--whitespace=error", "--", lockPatch], source);
+    if (patched.isErr())
+      return patched.error.type === "tool_failed" ? err({ type: "hono_lock_mismatch" }) : patched;
     const install = await tool("npm", ["ci", "--no-audit", "--no-fund"], source);
     if (install.isErr()) return install;
     const installed = await boundary(
@@ -536,6 +541,16 @@ export async function runLocalFake(command, env = process.env) {
     if (installed.isErr()) return installed;
     const verified = validatePins(head.value.trim(), lock.value, installed.value);
     if (verified.isErr()) return verified;
+    for (const [name, version] of Object.entries({
+      "@hono/node-server": "2.1.9",
+      hono: "4.13.19",
+    })) {
+      const pkg = await boundary("hono_package", async () =>
+        JSON.parse(await fs.readFile(join(source, "node_modules", name, "package.json"), "utf8")),
+      );
+      if (pkg.isErr()) return pkg;
+      if (pkg.value?.version !== version) return err({ type: "hono_version_mismatch" });
+    }
     const sqlitePrefix = "node_modules/flingit/node_modules/better-sqlite3";
     const sqlitePath = join(source, sqlitePrefix);
     const sqlite = await boundary(
