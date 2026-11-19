@@ -166,8 +166,10 @@ the central-Pi execution runtime serve the same route; the execution runtime exe
 bearer check. Registration and dial are not atomic: observed closure rejects, later closure cancels
 through revalidation, delivered bytes cannot be recalled.
 
-A per-orb watcher revalidates every 5 s with a 2 s deadline and fails closed; stale streams close
-within 10 s. Local lifecycle closure cancels owned connections.
+A per-orb watcher revalidates every 5 s with a 2 s deadline and fails closed. Local lifecycle
+closure also cancels owned connections. For ordinary HTTP requests, cancellation before headers
+returns a preview error (504 on a validation deadline). Cancellation closes established streams
+and WebSocket upgrades. Stale streams close within 10 s.
 
 ### Activity lease
 

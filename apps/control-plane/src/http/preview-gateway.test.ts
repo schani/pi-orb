@@ -1,13 +1,16 @@
 import { once } from "node:events";
-import { IncomingMessage } from "node:http";
+import { get, IncomingMessage } from "node:http";
 import { Socket } from "node:net";
+import { setImmediate } from "node:timers/promises";
 import { RUNTIME_SUBPROTOCOL } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
-import { ok, okAsync, ResultAsync } from "neverthrow";
+import { err, ok, okAsync, ResultAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import { WebSocket } from "ws";
+import { previewError } from "../domain/preview.ts";
 import { PreviewConnections } from "../domain/preview-connections.ts";
+import type { PreviewHttpResponse } from "../domain/preview-transport.ts";
 import { makeHarness, seedRunningOrb } from "../testkit/fixtures.ts";
 import { previewRoutingUrl, registerPreviewGateway } from "./preview-gateway.ts";
 import { createPreviewHosts, type PreviewHosts } from "./preview-host.ts";
@@ -289,6 +292,119 @@ it("preserves upstream protocol selection, ping/pong and normal close over real 
     expect(closeCalls).toBe(1);
   } finally {
     client.terminate();
+    await app.close();
+  }
+});
+
+it("sends a complete HTTP error when preview validation expires before upstream headers", async () => {
+  const hosts = createPreviewHosts({
+    previewOrigin: "https://preview.example.org",
+    appOrigin: "https://app.example.com",
+    filesOrigin: "https://files.example.net",
+  })._unsafeUnwrap();
+  const app = Fastify();
+  const h = makeHarness();
+  const task = new NoSimulationTask("preview-cancel-before-headers", false);
+  const id = "00000000-0000-0000-0000-000000000003";
+  seedRunningOrb(task, h, id);
+  const runtimeTokenHash = h.store.orbSnapshot(id)?.runtimeTokenHash;
+  if (!runtimeTokenHash) throw new Error("Expected a seeded runtime token hash");
+  await h.store.registerPreview(task, {
+    orbId: id,
+    port: 5173,
+    registrationId: "r1",
+    caller: { runtimeTokenHash, hostIncarnation: 0 },
+    now: task.wallNow(),
+  });
+  const health = h.deps.runtimeClient.health.bind(h.deps.runtimeClient);
+  h.deps.runtimeClient.health = (...args) =>
+    health(...args).map((value) =>
+      value.status === "ready" ? { ...value, incarnation: 0, executionId: "boot" } : value,
+    );
+  app.addHook("onRequest", async (request) => {
+    request.previewIdentity = { expiresAt: task.wallNow() + 60_000 } as never;
+  });
+  const timeout = previewError("deadline_exceeded", "Preview authority validation timed out");
+  let expireValidation!: () => void;
+  const validation = new Promise<void>((resolve) => {
+    expireValidation = resolve;
+  });
+  let releaseUpstream!: (response: PreviewHttpResponse) => void;
+  const upstream = new Promise<PreviewHttpResponse>((resolve) => {
+    releaseUpstream = resolve;
+  });
+  let markDisposed!: () => void;
+  const disposed = new Promise<void>((resolve) => {
+    markDisposed = resolve;
+  });
+  let markSending!: () => void;
+  const sending = new Promise<void>((resolve) => {
+    markSending = resolve;
+  });
+  let finishSending!: () => void;
+  const sendGate = new Promise<void>((resolve) => {
+    finishSending = resolve;
+  });
+  app.addHook("onSend", async (_request, reply, payload) => {
+    if (reply.statusCode === 504) {
+      markSending();
+      await sendGate;
+    }
+    return payload;
+  });
+  let signal: AbortSignal | undefined;
+  let reads = 0;
+  const lateResponse: PreviewHttpResponse = {
+    status: 200,
+    headers: [],
+    body: {
+      read: async () => {
+        reads++;
+        return ok(null);
+      },
+    },
+    dispose: markDisposed,
+  };
+  await registerPreviewGateway(app, task, {
+    deps: h.deps,
+    hosts,
+    appOrigin: "https://app.example.com",
+    connections: new PreviewConnections(
+      h.deps,
+      () => new ResultAsync(validation.then(() => err(timeout))),
+    ),
+    transport: {
+      openHttp: (_task, _route, _request, context) => {
+        signal = context.signal;
+        expireValidation();
+        return ResultAsync.fromSafePromise(upstream);
+      },
+      openWebSocket: () => {
+        throw new Error("must not upgrade");
+      },
+    },
+  });
+  const address = await app.listen({ host: "127.0.0.1", port: 0 });
+  const client = get(address, { headers: { host: `p5173-o${id}.preview.example.org` } });
+  const received = once(client, "response") as Promise<[IncomingMessage]>;
+  try {
+    await Promise.race([sending, received]);
+    expect(signal?.aborted).toBe(true);
+    releaseUpstream(lateResponse);
+    await disposed;
+    await setImmediate();
+    finishSending();
+    const [response] = await received;
+    const chunks: Buffer[] = [];
+    for await (const chunk of response) chunks.push(chunk);
+    expect(response.statusCode).toBe(504);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(JSON.parse(Buffer.concat(chunks).toString()).error).toEqual(timeout);
+    expect(reads).toBe(0);
+  } finally {
+    finishSending();
+    releaseUpstream(lateResponse);
+    client.destroy();
     await app.close();
   }
 });
