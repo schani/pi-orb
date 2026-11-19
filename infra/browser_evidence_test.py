@@ -164,6 +164,18 @@ class BrowserEvidenceTest(unittest.TestCase):
         self.assertEqual(positions, sorted(positions))
         self.assertNotIn('/usr/bin/chromium', full)
 
+    def test_managed_chromium_pins_match_the_locked_playwright_manifest(self):
+        lock = json.loads((ROOT / 'package-lock.json').read_text())['packages']
+        version = lock['']['devDependencies']['@playwright/test']
+        for name in ('@playwright/test', 'playwright', 'playwright-core'):
+            self.assertEqual(lock[f'node_modules/{name}']['version'], version)
+        manifest = json.loads((ROOT / 'node_modules/playwright-core/browsers.json').read_text())
+        browsers = {browser['name']: browser for browser in manifest['browsers']}
+        for name in ('chromium', 'chromium-headless-shell'):
+            with self.subTest(browser=name):
+                self.assertEqual(browsers[name]['revision'], '1255')
+                self.assertEqual(browsers[name]['browserVersion'], '159.0.8154.6')
+
     def test_functional_ci_selects_and_logs_the_installed_chromium(self):
         expected = (
             '        run: |\n'
