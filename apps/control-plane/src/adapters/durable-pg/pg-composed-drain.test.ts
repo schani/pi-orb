@@ -313,7 +313,7 @@ it.for([
       const staleModel = models.getModel("faux", "faux-1");
       if (!staleModel) expect.fail("Synthetic model missing");
       expect((await guardedModels.completeSimple(staleModel, { messages: [] })).stopReason).toBe(
-        "error",
+        "aborted",
       );
       expect(dispatches).toBe(beforeCloseDispatches);
       if (!admittedApi) expect.fail("Native tool API was not captured");
