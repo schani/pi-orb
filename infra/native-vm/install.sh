@@ -21,7 +21,7 @@ echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/github.gpg] https://cli.github
 echo 'deb [signed-by=/etc/apt/keyrings/google.asc] https://packages.cloud.google.com/apt cloud-sdk main' >/etc/apt/sources.list.d/google-cloud-sdk.list
 echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable' >/etc/apt/sources.list.d/docker.list
 apt-get update
-apt-get install -y --no-install-recommends gh chromium google-cloud-cli google-guest-agent=1:20261021.00-g1 docker-ce=5:29.9.3-1~debian.12~bookworm docker-ce-cli=5:29.9.3-1~debian.12~bookworm containerd.io=2.4.2-3~debian.12~bookworm docker-buildx-plugin docker-compose-plugin
+apt-get install -y --no-install-recommends gh chromium google-cloud-cli google-guest-agent=1:20261021.00-g1 docker-ce=5:29.10.0-1~debian.12~bookworm docker-ce-cli=5:29.10.0-1~debian.12~bookworm containerd.io=2.4.2-4~debian.12~bookworm docker-buildx-plugin docker-compose-plugin
 curl -fsSL https://nodejs.org/dist/v26.13.1/node-v26.13.1-linux-x64.tar.xz -o /tmp/node.tar.xz
 echo '5c063e46bab0fbc1c17cc445d7ff129cbdcd0471be6ed83b6ab864f8143bc864  /tmp/node.tar.xz' | sha256sum -c -
 tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1
@@ -30,20 +30,19 @@ curl -fsSL https://static.rust-lang.org/rustup/archive/1.29.3/x86_64-unknown-lin
 echo 'b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55  /usr/local/bin/rustup' | sha256sum -c -
 chmod 755 /usr/local/bin/rustup
 for proxy in cargo rustc rustdoc rustfmt cargo-clippy cargo-fmt clippy-driver; do ln -s rustup "/usr/local/bin/$proxy"; done
-npm install --global npm@12.2.1
-test "$(npm --version)" = 12.2.1
+npm install --global npm@12.2.3
+test "$(npm --version)" = 12.2.3
 cd /app
 sh infra/install_bun.sh amd64
-test "$(bun --version)" = 1.4.4
-test "$(bunx --version)" = 1.4.4
+test "$(bun --version)" = 1.4.5
+test "$(bunx --version)" = 1.4.5
 sh infra/install_git_crypt.sh
 test "$(git-crypt --version 2>&1)" = "git-crypt 0.8.0"
-npm ci --workspace @pi-orb/orb-runtime --include-workspace-root=false --ignore-scripts
+npm ci --workspace @pi-orb/orb-runtime --include-workspace-root=false --ignore-scripts --include=optional
+test -x node_modules/@agent-browser/cli-linux-x64-gnu/bin/agent-browser
 node infra/native-vm/claude-check.mjs | tee /opt/pi-orb/claude-sdk-version
 rm -rf node_modules/node-pty/prebuilds
 npm rebuild node-pty
-chmod 755 node_modules/agent-browser/bin/agent-browser-linux-x64
-find node_modules/agent-browser/bin -type f -name 'agent-browser-*' ! -name agent-browser-linux-x64 -delete
 node -e 'const pty = require("node-pty"); const child = pty.spawn("/bin/sh", ["-c", "exit 0"]); child.onExit(({ exitCode }) => process.exit(exitCode))'
 ln -s /app/node_modules/.bin/agent-browser /usr/local/bin/agent-browser
 install -m755 apps/orb-runtime/docker/gh apps/orb-runtime/docker/pi-orb-git-credential apps/orb-runtime/docker/pi-orb scripts/pi-orb-gcp-identity /usr/local/bin/

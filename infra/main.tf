@@ -13,7 +13,7 @@ terraform {
   required_providers {
     google = {
       source  = "opentofu/google"
-      version = "8.10.0"
+      version = "8.12.0"
     }
     random = {
       source  = "opentofu/random"

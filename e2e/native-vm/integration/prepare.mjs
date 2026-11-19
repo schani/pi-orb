@@ -14,7 +14,7 @@ const tool = {
       name: "bash",
       arguments: {
         command:
-          "sudo systemctl start docker && docker run --rm alpine:3.22 echo NATIVE_VM_TOOL_OK",
+          "sudo systemctl start docker && docker run --rm alpine:3.24 echo NATIVE_VM_TOOL_OK",
       },
     },
     { type: "stop", status: "completed" },

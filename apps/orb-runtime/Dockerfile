@@ -2,7 +2,7 @@
 # the GitHub CLI and the Google Cloud CLI. Build from the repository root:
 #   docker build -f apps/orb-runtime/Dockerfile -t pi-orb-runtime:dev .
 FROM node:26.13.1-bookworm-slim
-RUN npm install --global npm@12.2.1 && test "$(npm --version)" = 12.2.1
+RUN npm install --global npm@12.2.3 && test "$(npm --version)" = 12.2.3
 
 COPY infra/runtime_apt.sh /usr/local/bin/runtime-apt
 RUN chmod 755 /usr/local/bin/runtime-apt \
@@ -40,8 +40,8 @@ RUN case "$TARGETARCH" in \
 
 COPY infra/install_bun.sh /tmp/install_bun.sh
 RUN sh /tmp/install_bun.sh "$TARGETARCH" \
-  && test "$(bun --version)" = 1.4.4 \
-  && test "$(bunx --version)" = 1.4.4 \
+  && test "$(bun --version)" = 1.4.5 \
+  && test "$(bunx --version)" = 1.4.5 \
   && rm /tmp/install_bun.sh
 
 COPY infra/install_git_crypt.sh /tmp/install_git_crypt.sh
@@ -56,7 +56,8 @@ COPY packages/protocol/package.json packages/protocol/
 COPY apps/orb-runtime/package.json apps/orb-runtime/
 RUN start="$(date +%s)" \
   && echo "runtime-deps:npm-install:start" \
-  && npm ci --workspace @pi-orb/orb-runtime --include-workspace-root=false --ignore-scripts \
+  && npm ci --workspace @pi-orb/orb-runtime --include-workspace-root=false --ignore-scripts --include=optional \
+  && test -x "node_modules/@agent-browser/cli-linux-$(node -p process.arch)-gnu/bin/agent-browser" \
   && echo "runtime-deps:npm-install:complete elapsed_s=$(($(date +%s) - start))" \
   && ln -s /app/node_modules/.bin/agent-browser /usr/local/bin/agent-browser
 RUN --network=none start="$(date +%s)" \
@@ -100,6 +101,7 @@ ENV PI_ORB_WORK_DIR=/workspace
 ENV PI_ORB=1
 # PID 1 lifetime is the execution boundary on both Docker and GCE.
 ENV PI_ORB_CONTAINER=1
+ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV HOME=/workspace/home
 ENV RUSTUP_HOME=/workspace/home/.rustup
 ENV CARGO_HOME=/workspace/home/.cargo

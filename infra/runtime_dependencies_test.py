@@ -38,8 +38,8 @@ class RuntimeDependenciesTests(unittest.TestCase):
             self.assertEqual(len(sections), 2 if name == 'ci' else 1)
             for section in sections:
                 with self.subTest(workflow=name):
-                    install = section.index('npm install --global npm@12.2.1')
-                    verify = section.index('test "$(npm --version)" = 12.2.1')
+                    install = section.index('npm install --global npm@12.2.3')
+                    verify = section.index('test "$(npm --version)" = 12.2.3')
                     self.assertLess(install, verify)
                     if 'npm ci' in section:
                         self.assertLess(verify, section.index('npm ci'))
@@ -50,21 +50,21 @@ class RuntimeDependenciesTests(unittest.TestCase):
             stages = re.split(r'^FROM [^\n]+\n', source, flags=re.M)[1:]
             for stage in stages:
                 with self.subTest(app=app):
-                    install = stage.index('npm install --global npm@12.2.1')
-                    verify = stage.index('test "$(npm --version)" = 12.2.1')
+                    install = stage.index('npm install --global npm@12.2.3')
+                    verify = stage.index('test "$(npm --version)" = 12.2.3')
                     self.assertLess(install, verify)
                     if 'npm ci' in stage:
                         self.assertLess(verify, stage.index('npm ci'))
         native = (ROOT / 'infra/native-vm/install.sh').read_text()
         self.assertLess(native.index('tar -xJf /tmp/node.tar.xz'),
-                        native.index('npm install --global npm@12.2.1'))
+                        native.index('npm install --global npm@12.2.3'))
         proxies = ('for proxy in cargo rustc rustdoc rustfmt cargo-clippy cargo-fmt clippy-driver; '
                    'do ln -s rustup "/usr/local/bin/$proxy"; done')
-        self.assertLess(native.index(proxies), native.index('npm install --global npm@12.2.1'))
-        self.assertLess(native.index('test "$(npm --version)" = 12.2.1'),
+        self.assertLess(native.index(proxies), native.index('npm install --global npm@12.2.3'))
+        self.assertLess(native.index('test "$(npm --version)" = 12.2.3'),
                         native.index('npm ci'))
         acceptance = (ROOT / 'infra/native-vm/acceptance.sh').read_text()
-        self.assertIn('test "$(npm --version)" = 12.2.1', acceptance)
+        self.assertIn('test "$(npm --version)" = 12.2.3', acceptance)
 
     def test_runtime_owns_execution_context_dependency(self):
         runtime = json.loads((ROOT / 'apps/orb-runtime/package.json').read_text())
@@ -80,7 +80,7 @@ class RuntimeDependenciesTests(unittest.TestCase):
 
     def test_npm_lifecycle_policy_allows_only_required_exact_versions(self):
         package = json.loads((ROOT / 'package.json').read_text())
-        self.assertEqual(package['packageManager'], 'npm@12.2.1')
+        self.assertEqual(package['packageManager'], 'npm@12.2.3')
         self.assertEqual(package['allowScripts'], {
             'node-pty@1.1.0': True,
             '@anthropic-ai/claude-code@2.1.318': True,
@@ -91,9 +91,9 @@ class RuntimeDependenciesTests(unittest.TestCase):
         native = (ROOT / 'infra/native-vm/install.sh').read_text()
         acceptance = (ROOT / 'infra/native-vm/acceptance.sh').read_text()
         expected = {
-            'docker-ce': '5:29.9.3-1~debian.12~bookworm',
-            'docker-ce-cli': '5:29.9.3-1~debian.12~bookworm',
-            'containerd.io': '2.4.2-3~debian.12~bookworm',
+            'docker-ce': '5:29.10.0-1~debian.12~bookworm',
+            'docker-ce-cli': '5:29.10.0-1~debian.12~bookworm',
+            'containerd.io': '2.4.2-4~debian.12~bookworm',
             'google-guest-agent': '1:20261021.00-g1',
         }
         for package, version in expected.items():
@@ -124,10 +124,10 @@ class RuntimeDependenciesTests(unittest.TestCase):
 
     def test_bun_installer_pins_supported_archives_and_verifies_before_install(self):
         source = (ROOT / 'infra/install_bun.sh').read_text()
-        self.assertIn('bun-v1.4.4/${artifact}.zip', source)
+        self.assertIn('bun-v1.4.5/${artifact}.zip', source)
         for architecture, artifact, checksum in [
-            ('amd64', 'bun-linux-x64-baseline', 'e0446eb55995772eb9894bebae9a6be368d985a8b9271ee124486f9946eedd76'),
-            ('arm64', 'bun-linux-aarch64', 'baa6bb36f51d6e58561e02bbea825038a9df454f673d6d776e8bbf86f8c7850e'),
+            ('amd64', 'bun-linux-x64-baseline', 'dcb23a18a1c2fff12d57bcef696dbbb42eb67fde29f43816ecb595459a24c463'),
+            ('arm64', 'bun-linux-aarch64', '18656a3bf0ea5641f5796ae4213b75255579a70a0fded2f337933785568cdf84'),
         ]:
             with self.subTest(architecture=architecture):
                 self.assertIn(f'{architecture}) artifact={artifact}; bun_sha={checksum}', source)
@@ -247,8 +247,8 @@ printf license > "$source/COPYING"
         self.assertIn("sudo -u orb sh -ec '", acceptance)
         for source in [self.dockerfile, native, acceptance]:
             with self.subTest(source=source[:30]):
-                self.assertIn('test "$(bun --version)" = 1.4.4', source)
-                self.assertIn('test "$(bunx --version)" = 1.4.4', source)
+                self.assertIn('test "$(bun --version)" = 1.4.5', source)
+                self.assertIn('test "$(bunx --version)" = 1.4.5', source)
                 self.assertIn('test "$(git-crypt --version 2>&1)" = "git-crypt 0.8.0"', source)
 
     def test_install_patch_and_rebuild_are_distinct_cacheable_layers(self):
@@ -265,6 +265,17 @@ printf license > "$source/COPYING"
         for step in [self.install, self.rebuild]:
             self.assertLess(self.dockerfile.index(step), first_source)
 
+    def test_agent_browser_images_keep_system_chromium_and_use_locked_platform_packages(self):
+        native = (ROOT / 'infra/native-vm/install.sh').read_text()
+        for source in [self.install, native]:
+            self.assertIn('--ignore-scripts --include=optional', source)
+            self.assertNotIn('agent-browser install', source)
+        self.assertNotIn('node_modules/agent-browser/bin/agent-browser-linux-x64', native)
+        self.assertIn('test -x node_modules/@agent-browser/cli-linux-x64-gnu/bin/agent-browser', native)
+        self.assertIn('ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium', self.dockerfile)
+        runtime = (ROOT / 'infra/native-vm/pi-orb-runtime.service').read_text()
+        self.assertIn('Environment=AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium', runtime)
+
     def test_rebuild_is_offline_with_installed_headers_and_spawn_smoke(self):
         self.assertTrue(self.rebuild.startswith('--network=none '))
         self.assertIn('rm -rf node_modules/node-pty/prebuilds', self.rebuild)
@@ -272,9 +283,13 @@ printf license > "$source/COPYING"
         self.assertIn("pty.spawn('/bin/sh', ['-c', 'exit 0'])", self.rebuild)
         self.assertIn('child.onExit(({ exitCode }) => process.exit(exitCode))', self.rebuild)
 
-    def run_step(self, step, failure=''):
+    def run_step(self, step, failure='', with_browser=True):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            binary = root / 'node_modules/@agent-browser/cli-linux-x64-gnu/bin/agent-browser'
+            if with_browser:
+                binary.parent.mkdir(parents=True)
+                binary.touch(mode=0o755)
             for command in ['npm', 'node', 'rm', 'ln']:
                 stub = root / command
                 stub.write_text('''#!/bin/sh
@@ -282,11 +297,13 @@ printf '%s nodedir=%s\\n' "$(basename "$0") $*" "${npm_config_nodedir:-}" >> "$C
 case "$(basename "$0") $*" in
   *"$FAILURE"*) [ -z "$FAILURE" ] || exit 42 ;;
 esac
+if [ "$(basename "$0") $*" = "node -p process.arch" ]; then echo x64; fi
 ''')
                 stub.chmod(0o755)
             calls = root / 'calls'
             result = subprocess.run(
                 ['/bin/sh', '-c', re.sub(r'^--network=none ', '', step)],
+                cwd=root,
                 env=dict(os.environ, PATH=str(root) + ':' + os.environ['PATH'],
                          CALLS=str(calls), FAILURE=failure),
                 capture_output=True, text=True, timeout=5)
@@ -304,6 +321,12 @@ esac
                                      rf'runtime-deps:{phase}:complete elapsed_s=\d+')
                 if phases == ['pty-rebuild']:
                     self.assertIn('npm rebuild node-pty nodedir=/usr/local', calls)
+
+    def test_missing_agent_browser_binary_fails_image_install(self):
+        result, calls = self.run_step(self.install, with_browser=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('runtime-deps:npm-install:complete', result.stdout)
+        self.assertNotIn('ln -s', calls)
 
     def test_failures_preserve_status_without_success_markers_or_later_commands(self):
         for step, failure, phase, later in [

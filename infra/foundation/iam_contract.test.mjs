@@ -4,14 +4,14 @@ import test from "node:test";
 
 const iam = readFileSync(new URL("./iam.tf", import.meta.url), "utf8");
 
-test("both roots pin Google 8.10.0 in configuration and lockfile", () => {
+test("both roots pin Google 8.12.0 in configuration and lockfile", () => {
   for (const root of ["./", "../"]) {
     const main = readFileSync(new URL(`${root}main.tf`, import.meta.url), "utf8");
     const lock = readFileSync(new URL(`${root}.terraform.lock.hcl`, import.meta.url), "utf8");
-    assert.match(main, /google = \{\s+source\s+= "opentofu\/google"\s+version = "8\.10\.0"/);
+    assert.match(main, /google = \{\s+source\s+= "opentofu\/google"\s+version = "8\.12\.0"/);
     assert.match(
       lock,
-      /provider "registry\.opentofu\.org\/opentofu\/google" \{\s+version\s+= "8\.10\.0"\s+constraints = "8\.10\.0"/,
+      /provider "registry\.opentofu\.org\/opentofu\/google" \{\s+version\s+= "8\.12\.0"\s+constraints = "8\.12\.0"/,
     );
   }
 });
