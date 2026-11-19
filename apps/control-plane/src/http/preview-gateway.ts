@@ -189,9 +189,10 @@ export async function registerPreviewGateway(
     };
     request.raw.once("aborted", abort);
     reply.raw.once("close", abort);
-    const ownership = connections.add(task, route.value, upgrade === undefined, () => {
+    const ownership = connections.add(task, route.value, upgrade === undefined, (error) => {
       controller.abort();
-      reply.raw.destroy();
+      if (upgrade !== undefined || reply.raw.headersSent) reply.raw.destroy();
+      else if (!reply.sent && !reply.raw.destroyed) deny(reply, error, appOrigin);
     });
     if (ownership.isErr()) {
       request.raw.off("aborted", abort);
@@ -266,12 +267,14 @@ export async function registerPreviewGateway(
       },
       { signal: controller.signal },
     );
-    if (response.isErr()) {
-      record("connect", response.error);
+    if (controller.signal.aborted || response.isErr()) {
+      if (response.isOk()) response.value.dispose();
+      else record("connect", response.error);
       await ownership.value.release(task);
       request.raw.off("aborted", abort);
       reply.raw.off("close", abort);
-      return deny(reply, response.error, appOrigin);
+      if (response.isErr() && !controller.signal.aborted) deny(reply, response.error, appOrigin);
+      return;
     }
     record("connect", null);
     reply.hijack();
