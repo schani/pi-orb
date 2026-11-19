@@ -288,9 +288,14 @@ describe("dashboard layout contract", () => {
 
   it("gives the project name 18px and the orb name the base size on their own lines", () => {
     expect(rule(".project-head-name")).toContain("height: 24px");
-    expect(rule(".project-name")).toContain("font-size: 18px");
-    expect(rule(".project-name")).toContain("line-height: 24px");
-    expect(rule(".new-project h2")).toContain("font-size: 18px");
+    for (const name of [".project-name", ".new-project h2", ".simple-page h1"]) {
+      const title = rule(name);
+      expect(title).toContain("font-size: 18px");
+      expect(title).toContain("line-height: 24px");
+      expect(title).toContain("font-weight: 700");
+      expect(title).toContain("letter-spacing: -0.01em");
+      expect(title).toContain("text-transform: none");
+    }
     expect(rule(".orb-entry-link")).not.toContain("font-size");
   });
 
@@ -636,6 +641,133 @@ describe("Signal / Boards system", () => {
     expect(rule(".tag")).toContain("border: 1px solid currentcolor");
     expect(css).not.toContain(".usage-page :is(h2, h3)");
     expect(rule(".session-ribbon")).toContain("border-bottom: 1px solid var(--bad)");
+  });
+
+  describe("three voices", () => {
+    const rules = [...body.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .map(([, selector = "", decls = ""]) => ({
+        selectors: selector.split(",").map((part) => part.trim()),
+        decls,
+      }))
+      .filter(({ selectors }) => !selectors[0]?.startsWith("@"));
+    const declaring = (pattern: RegExp) => rules.filter(({ decls }) => pattern.test(decls));
+
+    it("sets every caps label as one quiet micro style", () => {
+      const caps = declaring(/text-transform: uppercase/);
+      expect(caps.map(({ selectors }) => selectors)).toEqual([
+        [
+          "h1",
+          "h2",
+          "h3",
+          ".app-search-group",
+          ".dashboard-total span",
+          ".usage-summary dt",
+          ".markdown-table-scroll th",
+          ".sect",
+        ],
+        [".up"],
+      ]);
+      const label = caps[0]?.decls ?? "";
+      expect(label).toContain("font-size: 11px");
+      expect(label).toContain("line-height: 16px");
+      expect(label).toContain("font-weight: 400");
+      expect(label).toContain("color: var(--g3)");
+      expect(label).toContain("letter-spacing: 0.08em");
+      // Labels in 20px rows keep the row: 16px line plus 4px.
+      expect(rule(".app-search-group")).toContain("padding: 4px 12px 0");
+      expect(rule(".markdown-table-scroll th")).toContain("padding: 6px 12px");
+    });
+
+    it("leaves Markdown headings as written, bold, with h1 at title size", () => {
+      const heading = rule(".chat-markdown :is(h1, h2, h3, h4, h5, h6)");
+      expect(heading).toContain("font-size: var(--text-size)");
+      expect(heading).toContain("line-height: var(--row)");
+      expect(heading).toContain("font-weight: 700");
+      expect(heading).toContain("color: inherit");
+      expect(heading).toContain("text-transform: none");
+      expect(heading).toContain("letter-spacing: 0");
+      expect(rule(".chat-markdown h1")).toContain("font-size: 18px");
+      expect(rule(".chat-markdown h1")).toContain("line-height: 24px");
+    });
+
+    it("sets time and meta in the text face's italic, never the mono's", () => {
+      const italic = declaring(/font-style: italic/);
+      expect(italic.map(({ selectors }) => selectors)).toEqual([
+        [
+          ".orb-entry-meta > span:not(.orb-entry-actions)",
+          ".ix-age",
+          ".app-search-age",
+          ".project-archive > summary",
+          ".orb-life-word",
+          ".activity-rail-headline",
+          ".dashboard-footer > span",
+        ],
+      ]);
+      expect(italic[0]?.decls).not.toMatch(/color|font-family/);
+      expect(rule(".activity-rail-headline :is(code, .error-text)")).toContain(
+        "font-style: normal",
+      );
+    });
+  });
+
+  describe("hard shadow", () => {
+    it("declares the lift in both themes", () => {
+      expect(declared("--lift-c")).toBe("var(--k)");
+      expect(declared("--lift")).toBe("4px 4px 0 var(--lift-c)");
+      expect(value(darkBlock, "--lift-c")).toBe("var(--g2)");
+    });
+
+    it("draws only solid, unblurred offset shadows", () => {
+      const shadows = new Set(
+        [...body.matchAll(/box-shadow:\s*([^;]+);/g)].map((match) =>
+          (match[1] ?? "").replace(/\s+/g, " ").trim(),
+        ),
+      );
+      expect([...shadows].sort()).toEqual(
+        [
+          "none",
+          "var(--lift)",
+          "2px 2px 0 var(--lift-c)",
+          "2px 2px 0 var(--k)",
+          "2px 2px 0 var(--bad)",
+          // The running activity dot's ring, not a shadow.
+          "0 0 0 2px var(--w), 0 0 0 3px var(--ok)",
+          "0 0 0 2px var(--g1x), 0 0 0 3px var(--ok)",
+        ].sort(),
+      );
+    });
+
+    it("lifts dialogs, Find and the tooltip", () => {
+      expect(rule(".app-search-dialog")).toContain("box-shadow: var(--lift)");
+      expect(rule(".project-secrets-dialog")).toContain("box-shadow: var(--lift)");
+      expect(rule(".activity-strip-tip")).toContain("box-shadow: 2px 2px 0 var(--lift-c)");
+    });
+
+    it("stands bordered buttons on a shadow they press into instantly", () => {
+      const exempt = [
+        ".icon-button",
+        ".text-action",
+        ".activity-strip-dot",
+        ".command-picker button",
+      ];
+      const bordered = /\nbutton:where\(\s*:not\(([^)]*)\)\s*\):not\(:disabled\) \{([^}]*)\}/.exec(
+        body,
+      );
+      for (const name of exempt) expect(bordered?.[1]).toContain(name);
+      expect(bordered?.[2]).toContain("box-shadow: 2px 2px 0 var(--k)");
+      expect(
+        rule(
+          "button.danger:where(:not(.icon-button, .text-action)):not(:disabled),\n.session-ribbon button:not(:disabled)",
+        ),
+      ).toContain("box-shadow: 2px 2px 0 var(--bad)");
+      // Same specificity as the danger rule, and later, so a press drops every shadow.
+      const press =
+        /\nbutton:where\(\s*:not\(([^)]*)\)\s*\):active:not\(:disabled\) \{([^}]*)\}/.exec(body);
+      expect(press?.[1]).toBe(bordered?.[1]);
+      expect(press?.[2]).toContain("transform: translate(2px, 2px)");
+      expect(press?.[2]).toContain("box-shadow: none");
+      expect(css).not.toMatch(/transition\s*:/);
+    });
   });
 
   it("has one touch condition", () => {

@@ -34,6 +34,7 @@ Literals live only in the `:root` block of `apps/web/src/styles.css` and its dar
 | `--scrim` | black 35% | black 60% | behind dialogs and Find |
 | `--lightbox` | black 72% | black 72% | behind image and diagram viewers |
 | `--veil` | paper 75% | paper 75% | drop wash |
+| `--lift-c` / `--lift` | `--k` / `4px 4px 0 var(--lift-c)` | `--g2` / same | hard shadow under dialogs and Find |
 | `--chart-1…6` | `#2a78d6 #eb6834 #4a3aa7 #1baf7a #c2418a #7a5c00` | `#5b9eea #f08050 #a594f0 #2fc08e #e06bab #c9a227` | chart series 4–6 |
 
 Each lifecycle state takes a signal colour wherever it appears: busy and running `--ok`; transitional and archiving `--warn`; stopped, sleeping and archived `--g3`; failed and deleting `--bad`. Failure text, failed rows and errors are `--bad`.
@@ -42,8 +43,12 @@ Each lifecycle state takes a signal colour wherever it appears: busy and running
 
 - `--text` is Iosevka Etoile (quasi-proportional) for UI, transcript prose and every composer mode. `--mono` is JetBrains Mono for inline code, code blocks, tool output, the Bit register, tooltips, charts and terminal cells. Both enable `calt` ligatures and tabular numerals.
 - Regular, bold and italic WOFF2 subsets (Latin/ASCII plus UI symbols) are served from `apps/web/public/fonts` with OFL licenses and a source/SHA-256 manifest. Subset family names stay renamed as the licenses require. Other glyphs use fallback fonts; bold italic is synthesized. Versions and archive digests: `docs/dependency-audit.md`.
-- Scale (size/line): micro 11/16 (mono: charts, tooltips, ranks), base 13/20 everywhere, controls 13/18, title 18/24, metric 26/32. Weights 400 and 700.
-- Headings, including Markdown `h1`–`h6`, are uppercase bold at body size with `letter-spacing: .08em`; metric labels are caps. Only project names and the New project heading rank by size (title). Device codes track at `.16em`.
+- Scale (size/line): micro 11/16 (caps labels; mono: charts, tooltips, ranks), base 13/20 everywhere, controls 13/18, title 18/24, metric 26/32. Weights 400 and 700.
+- Three voices: bold names things, regular says things, italic tells time. Alternatives: `design-prototypes/design-system-refresh.html`.
+- Project names, the New project heading, the Usage title and the “doesn't exist” heading are bold title size, as typed, tracked `-0.01em`; no other heading outside the transcript ranks by size.
+- Caps labels are one quiet style: micro 11/16, regular, `--g3`, uppercase, `.08em`. They are every other heading outside Markdown (dialog and Usage headings) plus totals, Find group, table and metric labels. In a 20px row padding keeps the row height. The `PI-ORB` home link and the session ribbon stay bold body-size caps; device codes track at `.16em`.
+- Markdown headings stay as written, untracked, bold: `h1` 18/24, `h2`–`h6` 13/20.
+- Italic, in `--text` only, never `--mono`, sets time and meta in their usual colour: ages and durations (dashboard, index, Find), the archive summary, the orb header's state word, activity-rail headlines after the `·` (code headlines stay upright mono, failure text upright) and footer meta.
 - Editable inputs, textareas and selects use 16px at ≤600px or when any pointer is coarse, so Safari does not zoom on focus. The transcript stays 13px.
 
 ### Space and size
@@ -75,7 +80,9 @@ Charts need no re-render: Vega writes `var(--…)` colours into SVG attributes. 
 
 ## Geometry and states
 
-- 1px ink rules, `--g2` hairlines, zero radius, no shadows, no gradients. The transcript has no max-width.
+- 1px ink rules, `--g2` hairlines, zero radius, no gradients. The transcript has no max-width.
+- **Hard shadow.** Shadows are solid offsets, never blurred: `--lift` under dialogs and Find, 2px `--lift-c` under the tooltip, 2px ink under bordered buttons (`--bad` when red). Icon buttons, text actions, rows, dots, image triggers and disabled buttons have none. Joined segments each carry one; the neighbour covers the shared side, leaving one continuous edge. The scrim is unchanged.
+- **Press.** A bordered button's `:active` moves 2px right and down onto its shadow and drops it.
 - **Hover.** Buttons and links invert; rows take `--g1` on paper and `--g1x` on fills.
 - **Focus** is inversion (ink ground, paper text), not a tint; the current row is inverted too. Focus inversion outranks every state hue and hover through one `!important` rule; only danger and ring targets override it. An already-inverted control (current index row, selected tab, period, search result or command, pressed icon, link or table in a user turn) steps from ink to `--g3` on focus. Rejected: an inset paper ring (invisible on paper) and an outer ink ring (clipped by the index edges and header bar).
 - Images and plots cannot invert: they get a 2px ink ring. Fields get crop marks (Controls).
@@ -83,7 +90,7 @@ Charts need no re-render: Vega writes `var(--…)` colours into SVG attributes. 
 - **Disabled** is `--g2` text and border; a disabled text action's rule turns dotted.
 - **Links** have a 1px underline under their text only, never the cell, and invert on hover, past any state grey.
 - Orb names on the dashboard and index use regular weight in every state.
-- **Motion.** Only two things move: running dots blink (1s, two steps, to 15%) and the Bit register steps. Everything else, including the terminal shade, opens and closes instantly.
+- **Motion.** Only two things move: running dots blink (1s, two steps, to 15%) and the Bit register steps. Everything else, including the terminal shade and a press, changes instantly.
 
 ## State tiles
 
@@ -116,7 +123,7 @@ Glyphs are white 1.5px strokes with round caps on a 2px-radius tile. Tiles keep 
 
 ### Controls
 
-- **Button:** 1px ink border, 8px side padding, 18px line. **Danger** is red with a red border.
+- **Button:** 1px ink border, 8px side padding, 18px line, 2px hard shadow. **Danger** is red with a red border and shadow.
 - **Text action:** the word over a `--g2` rule, `--g3` text, no box.
 - **Segments and tabs:** text buttons in a row; the selected one is inverted.
 - **Field:** production inputs and textareas show no placeholder; labels are the accessible names. Focus draws four 11px ink crop-mark corners 3px outside the field (3px inside the padding for the full-bleed instruction editors) without changing border, size or padding (`TextFieldFrame`). Rejected: paper-on-ink focus (replaced the writing surface) and a writing-edge rail (formed a double edge).
@@ -129,15 +136,15 @@ Glyphs are white 1.5px strokes with round caps on a 2px-radius tile. Tiles keep 
 - **Notices** (lifecycle, authentication, errors) span the transcript width and wrap long text.
 - **Alert band:** `--on-alert` text on `--alert`, 8px 12px padding, wrapping anywhere. Alternatives: `design-prototypes/orb-alerts.html`.
 - **Tag:** 1px `currentcolor` border, 6px side padding, 16px line.
-- **Tooltip:** paper, 1px ink border, mono 11/16, one line with ellipsis. The activity-strip and waterfall tooltips are this tooltip; failure, running and restart labels take `--bad`, `--ok`, `--warn`.
+- **Tooltip:** paper, 1px ink border, 2px hard shadow, mono 11/16, one line with ellipsis. The activity-strip and waterfall tooltips are this tooltip; failure, running and restart labels take `--bad`, `--ok`, `--warn`.
 - **Bit register** (`BitRegister.tsx`), the live-work mark: paper 13/16 mono digits in an ink `calc(3ch + 6px)` × 16px tile cycling the Gray code `001 → 011 → 010 → 110 → 111 → 101 → 100 → 000` at 400ms per frame via one CSS-stepped strip. Reduced motion shows `001`. It sits at the orb turn's 12px inset and never shifts between phases. Decoration, never a progress or work counter.
 - **Drop target:** a dashed 1px boundary 8px inside the receiving surface, a `--veil` wash and a centred paper-backed caption.
 
 ### Board and index
 
 - **Board:** fills the viewport between two 24px bars. One background rule per masonry column runs from strip to footer.
-- **Totals strip:** four cells split by 1px rules, each a bold number and an uppercase grey label; icon-only Usage (trend) and Settings (gear) at the right. At ≤600px two rows, with the icons spanning both.
-- **Project header** (`ProjectHeader`, shared by board and index): black-ruled, title-size name, then right-aligned Pi, Claude, gear and red bin; on the index these are contiguous 24px cells, the bin flush with the index's right border. A project box closes with a black rule; a deleting project is greyed; errors are red lines. **New project** has a dashed left rule.
+- **Totals strip:** four cells split by 1px rules, each a bold 13px number and a caps label; icon-only Usage (trend) and Settings (gear) at the right. At ≤600px two rows, with the icons spanning both.
+- **Project header** (`ProjectHeader`, shared by board and index): black-ruled, bold title-size name as typed, then right-aligned Pi, Claude, gear and red bin; on the index these are contiguous 24px cells, the bin flush with the index's right border. A project box closes with a black rule; a deleting project is greyed; errors are red lines. **New project** has a dashed left rule.
 - **Orb entry:** two 20px lines, 4px padding above and below: (1) state tile, vertically centred, and the 13px name, grey when stopped or archived, truncated; (2) age, with archive and red delete icons right-aligned. On phones archive and delete sit 44px apart with 44px tap areas overflowing the meta row, so rows keep their height and a long title can run under them. Rejected: 20px targets (too small), 44px rows (13 → 10 orbs on an iPhone 14 dashboard) and a state-hue left border (repeated the tile). Error and blocker lines are red and grey.
 - **Archive:** a `--g1` disclosure footer; its rows hover `--g1x`.
 - **Nesting:** a thin connector; indentation 18px per level, saturating at 40% of the width.
@@ -161,14 +168,14 @@ Glyphs are white 1.5px strokes with round caps on a 2px-radius tile. Tiles keep 
 - **Activity strip:** one dot per step in a gapless 12×20px cell, count as metric. Dots: thinking small grey (3px), success ink, receipt grey, failure red, running a blinking green ring, restart a `--warn` refresh glyph in the 6px dot box. Excess dots collapse oldest-first into `+N`. The body is an indented `--g1` band of borderless rows.
 - **Code:** inline code and fences share the `--g1` ground; fences keep a 1px ink border and have no header or language label. Each fence has a corner copy icon with reserved space beside the scrollable content.
 - **Response copy:** one copy icon at the top right of the first non-empty text block, shown on hover/focus and always on touch (44px on phones); content reserves its space.
-- **Tables:** natural column widths, whole-word wrapping, top-aligned cells, left headers unless specified, row rules, inside a focusable horizontal scroller. Prose elsewhere and error text wrap anywhere; the pane never scrolls sideways.
+- **Tables:** natural column widths, whole-word wrapping, top-aligned cells, left caps-label headers unless specified, row rules, inside a focusable horizontal scroller. Prose elsewhere and error text wrap anywhere; the pane never scrolls sideways.
 - **Mermaid:** the diagram sits in the code block's 1px frame, Source, Open and Copy icons in the right gutter (hover/focus, always on touch). Fixed theme: mono 12px, ink lines, square corners, actors as ink boxes, classic/Dagre layout, 200px wrapping. Diagrams shrink to 75% of natural width, then scroll, never upscale.
 - **Tool images:** previews fit 32rem × 22rem.
 
 ### Overlays
 
-- **Dialog:** 560px, 80px from the top, 1px ink border over `--scrim`. Panels pad 8px top and 12px sides and bottom. Close is an X flush with the inner top-right corner: 32px desktop, 44px phone, 16px icon.
-- **Find:** 640px, 80px from the top, 1px border over `--scrim`: a `>` column and the search input, then results under uppercase group headings, each a 20px row of tile, name with the match marked, project chip and fixed-width age. The active row is inverted. No count, legend, kind column or close control. The orb-link picker is the same dialog.
+- **Dialog:** 560px, 80px from the top, 1px ink border on `--lift` over `--scrim`. Panels pad 8px top and 12px sides and bottom. Close is an X flush with the inner top-right corner: 32px desktop, 44px phone, 16px icon.
+- **Find:** 640px, 80px from the top, 1px border on `--lift` over `--scrim`: a `>` column and the search input, then results under caps-label group headings, each a 20px row of tile, name with the match marked, project chip and fixed-width age. The active row is inverted. No count, legend, kind column or close control. The orb-link picker is the same dialog.
 - **Command picker:** the composer's grid column, at most 420px.
 - **Viewer** (tool images, Mermaid Open): native modal over `--lightbox`, sized in `dvh`; 44px X on touch.
 

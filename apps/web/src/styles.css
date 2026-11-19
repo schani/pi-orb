@@ -65,6 +65,8 @@
   --scrim: rgb(0 0 0 / 35%);
   --lightbox: rgb(0 0 0 / 72%);
   --veil: #ffffffbf;
+  --lift-c: var(--k);
+  --lift: 4px 4px 0 var(--lift-c);
   --you: var(--k);
   --on-you: var(--w);
   --alert: var(--bad);
@@ -98,6 +100,7 @@
     --bad-bg: #3a1612;
     --scrim: rgb(0 0 0 / 60%);
     --veil: #000000bf;
+    --lift-c: var(--g2);
     --you: #2b2b2b;
     --on-you: var(--k);
     --alert: #b42318;
@@ -205,6 +208,45 @@ button.danger {
 button.danger:hover:not(:disabled) {
   background: var(--bad);
   color: var(--w);
+}
+
+/* Bordered buttons stand on a hard shadow and press into it. */
+button:where(
+  :not(
+    .icon-button,
+    .text-action,
+    .app-search-result,
+    .activity-strip-dot,
+    .chart-key button,
+    .command-picker button,
+    .orb-settings button,
+    .composer-open,
+    .tool-image-trigger
+  )
+):not(:disabled) {
+  box-shadow: 2px 2px 0 var(--k);
+}
+
+button.danger:where(:not(.icon-button, .text-action)):not(:disabled),
+.session-ribbon button:not(:disabled) {
+  box-shadow: 2px 2px 0 var(--bad);
+}
+
+button:where(
+  :not(
+    .icon-button,
+    .text-action,
+    .app-search-result,
+    .activity-strip-dot,
+    .chart-key button,
+    .command-picker button,
+    .orb-settings button,
+    .composer-open,
+    .tool-image-trigger
+  )
+):active:not(:disabled) {
+  transform: translate(2px, 2px);
+  box-shadow: none;
 }
 
 /* Text actions: a rule under the word, no box. */
@@ -394,13 +436,15 @@ button.danger:focus-visible {
 h1,
 h2,
 h3,
-.up,
-.sect,
 .app-search-group,
-.chat-markdown :is(h1, h2, h3, h4, h5, h6) {
-  font-size: var(--text-size);
-  line-height: var(--row);
-  font-weight: 700;
+.dashboard-total span,
+.usage-summary dt,
+.markdown-table-scroll th,
+.sect {
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 400;
+  color: var(--g3);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -409,6 +453,42 @@ h1,
 h2,
 h3 {
   margin: 0;
+}
+
+.up {
+  font-size: var(--text-size);
+  line-height: var(--row);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.chat-markdown :is(h1, h2, h3, h4, h5, h6) {
+  font-size: var(--text-size);
+  line-height: var(--row);
+  font-weight: 700;
+  color: inherit;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.chat-markdown h1 {
+  font-size: 18px;
+  line-height: 24px;
+}
+
+.orb-entry-meta > span:not(.orb-entry-actions),
+.ix-age,
+.app-search-age,
+.project-archive > summary,
+.orb-life-word,
+.activity-rail-headline,
+.dashboard-footer > span {
+  font-style: italic;
+}
+
+.activity-rail-headline :is(code, .error-text) {
+  font-style: normal;
 }
 
 .muted {
@@ -542,6 +622,15 @@ button.text-action.error-text {
   align-items: flex-start;
 }
 
+.simple-page h1 {
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 700;
+  color: inherit;
+  text-transform: none;
+  letter-spacing: -0.01em;
+}
+
 .usage-page {
   padding: 0 12px 20px;
   min-width: 0;
@@ -556,6 +645,10 @@ button.text-action.error-text {
 .usage-header h1 {
   font-size: 18px;
   line-height: var(--bar);
+  font-weight: 700;
+  color: inherit;
+  text-transform: none;
+  letter-spacing: -0.01em;
 }
 .usage-periods {
   display: flex;
@@ -600,11 +693,6 @@ button.text-action.error-text {
 }
 .usage-summary > div + div {
   border-top: 1px solid var(--k);
-}
-.usage-summary dt {
-  color: var(--g3);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
 }
 .usage-summary dd {
   margin: 0;
@@ -769,12 +857,6 @@ button.text-action.error-text {
   border-right: 0;
 }
 
-.dashboard-total span {
-  color: var(--g3);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
 /* The bottom line: what this deployment is made of, held against the viewport
    bottom so the board's column rules always end on it. */
 .dashboard-footer {
@@ -894,9 +976,10 @@ a.project-new-orb-icon:hover {
   font-size: 18px;
   line-height: 24px;
   text-overflow: ellipsis;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
   font-weight: 700;
+  color: inherit;
+  text-transform: none;
+  letter-spacing: -0.01em;
 }
 
 .project-column-deleting .project-name {
@@ -1093,6 +1176,10 @@ a.project-new-orb-icon:hover {
 .new-project h2 {
   font-size: 18px;
   line-height: 24px;
+  font-weight: 700;
+  color: inherit;
+  text-transform: none;
+  letter-spacing: -0.01em;
 }
 
 .new-project label {
@@ -1133,6 +1220,7 @@ a.project-new-orb-icon:hover {
   margin: 80px auto 0;
   background: var(--w);
   border: 1px solid var(--k);
+  box-shadow: var(--lift);
 }
 
 .app-search-query-row {
@@ -1168,7 +1256,7 @@ a.project-new-orb-icon:hover {
 }
 
 .app-search-group {
-  padding: 0 12px;
+  padding: 4px 12px 0;
 }
 
 .app-search-result {
@@ -1408,6 +1496,7 @@ button.personal-instructions-gear {
   margin: 80px auto 0;
   background: var(--w);
   border: 1px solid var(--k);
+  box-shadow: var(--lift);
 }
 
 .project-secrets-header {
@@ -2031,6 +2120,7 @@ body:has(.orb-page) {
 }
 
 .markdown-table-scroll th {
+  padding: 6px 12px;
   text-align: left;
   border-bottom: 1px solid var(--k);
 }
@@ -2224,7 +2314,8 @@ pre,
 }
 
 .rec-you .chat-markdown blockquote,
-.rec-you .muted {
+.rec-you .muted,
+.rec-you .markdown-table-scroll th {
   color: var(--on-you);
 }
 
@@ -2472,6 +2563,7 @@ pre,
   color: var(--k);
   background: var(--w);
   border: 1px solid var(--k);
+  box-shadow: 2px 2px 0 var(--lift-c);
   font-family: var(--mono);
   font-size: 11px;
   line-height: 16px;
