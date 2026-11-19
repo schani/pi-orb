@@ -190,6 +190,9 @@ describe.each(["chromium", "webkit"] as const)("page sharing · %s", (engine) =>
       await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, ORB_ID, page.locator(".orb-name"));
       const share = page.getByRole("button", { name: "Share current page", exact: true });
       await expect(share).toBeEnabled();
+      await page
+        .getByRole("button", { name: "Change model", exact: true })
+        .waitFor({ state: "visible" });
       await page.getByRole("button", { name: "Rename orb", exact: true }).click();
       await expect(page.getByRole("textbox", { name: "orb name", exact: true })).toBeVisible();
       await expect(share).toBeEnabled();
