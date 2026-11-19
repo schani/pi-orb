@@ -76,7 +76,7 @@ The runtime uses official `node-pty` 1.1.0 behind a narrow `Result`-returning ad
 
 ## Browser emulator
 
-`OrbTerminal` uses `@wterm/react` with the DOM renderer and the `@wterm/ghostty` core, all pinned exactly to 0.5.9 (matching core dependencies). The DOM renderer gives native selection, browser find and an accessibility baseline. wterm's own `WebSocketTransport` is not used: it reconnects and replays buffered writes.
+`OrbTerminal` uses `@wterm/react` with the DOM renderer and the `@wterm/ghostty` core, all pinned exactly to 0.6.0 (matching core dependencies). The DOM renderer gives native selection, browser find and an accessibility baseline. wterm's own `WebSocketTransport` is not used: it reconnects and replays buffered writes.
 
 - **Ghostty core.** The built-in wterm core destroyed cells on resize (a 180-digit line shrunk then widened lost 60 digits and its end marker); Ghostty reflows wrapped lines and keeps the cursor bottom-anchored. Cost: a 599 kB (200 kB gzip) WASM asset.
 - **Asset URL.** Import `@wterm/ghostty/ghostty-vt.wasm?url` and pass it to `GhosttyCore.load()`; the package's default `new URL()` path resolves to a non-WASM response under Vite's dev optimizer. Load failures are caught at the adapter and shown in the terminal body.
