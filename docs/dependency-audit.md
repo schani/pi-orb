@@ -45,7 +45,7 @@ Floating APT packages (`gh`, Chromium, buildx/compose plugins, Google Cloud CLI 
 
 From the latest audit, still current:
 
-- **PGlite is held** at engine 0.5.12 / `pglite-pg_textsearch` 0.0.14 behind registry latest, and native `pg_textsearch` at Cloud SQL's 1.3.1, by the extension policy in `docs/history.md` ("Search"). Registry freshness does not authorize an upgrade.
+- **Native `pg_textsearch` is held** at the Cloud SQL version. See `docs/history.md` ("Search") for native upgrade requirements and the separate PGlite pins.
 - PostgreSQL 17 is current on its supported major; no move to 18 is needed.
 
 ## Pinned assets
