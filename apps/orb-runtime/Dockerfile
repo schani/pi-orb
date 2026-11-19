@@ -2,7 +2,7 @@
 # the GitHub CLI and the Google Cloud CLI. Build from the repository root:
 #   docker build -f apps/orb-runtime/Dockerfile -t pi-orb-runtime:dev .
 FROM node:26.13.1-bookworm-slim
-RUN npm install --global npm@12.2.1 && test "$(npm --version)" = 12.2.1
+RUN npm install --global npm@12.2.3 && test "$(npm --version)" = 12.2.3
 
 COPY infra/runtime_apt.sh /usr/local/bin/runtime-apt
 RUN chmod 755 /usr/local/bin/runtime-apt \
@@ -40,8 +40,8 @@ RUN case "$TARGETARCH" in \
 
 COPY infra/install_bun.sh /tmp/install_bun.sh
 RUN sh /tmp/install_bun.sh "$TARGETARCH" \
-  && test "$(bun --version)" = 1.4.4 \
-  && test "$(bunx --version)" = 1.4.4 \
+  && test "$(bun --version)" = 1.4.5 \
+  && test "$(bunx --version)" = 1.4.5 \
   && rm /tmp/install_bun.sh
 
 COPY infra/install_git_crypt.sh /tmp/install_git_crypt.sh

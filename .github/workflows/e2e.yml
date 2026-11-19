@@ -38,8 +38,8 @@ jobs:
 
       - name: Install pinned npm
         run: |
-          npm install --global npm@12.2.1
-          test "$(npm --version)" = 12.2.1
+          npm install --global npm@12.2.3
+          test "$(npm --version)" = 12.2.3
 
       - name: Use the signed Ubuntu archive
         run: sudo python3 infra/runner_apt.py /etc/apt/sources.list.d/ubuntu.sources /etc/apt/apt.conf.d/99pi-orb-force-ipv4

@@ -5,9 +5,9 @@ APT recommendations. `packages.tsv` records every resolved package and its
 installed size; transitive libraries remain only as dependencies of this baseline.
 
 - Google guest agent 1:20261021.00-g1, systemd, SSH, CA certificates: VM boot and operation.
-- Node 26.13.1 LTS, npm 12.2.1, runtime npm dependencies, native node-pty: agent and terminal.
-- Bun 1.4.4 (`bun`, `bunx`): project JavaScript runtime/package tooling; checksum-pinned x64 baseline archive, shared with Docker via `infra/install_bun.sh`.
-- Docker Engine/CLI 29.9.3, containerd.io 2.4.2-3, Buildx, Compose: project containers/builds.
+- Node 26.13.1 LTS, npm 12.2.3, runtime npm dependencies, native node-pty: agent and terminal.
+- Bun 1.4.5 (`bun`, `bunx`): project JavaScript runtime/package tooling; checksum-pinned x64 baseline archive, shared with Docker via `infra/install_bun.sh`.
+- Docker Engine/CLI 29.10.0, containerd.io 2.4.2-4, Buildx, Compose: project containers/builds.
 - git, git-crypt 0.8.0, gh and broker helpers: repository and GitHub workflows.
 - gcloud: prescribed GCP tooling.
 - Chromium and agent-browser: prescribed browser automation.
@@ -25,8 +25,8 @@ requires for the guest environment and prescribed tools; it does not run a broad
 autoremove over the GCE base image.
 The base is `projects/debian-cloud/global/images/debian-12-bookworm-v20261027`.
 Builds refresh installed Debian packages, pin Docker/CLI to
-`5:29.9.3-1~debian.12~bookworm`, containerd.io to
-`2.4.2-3~debian.12~bookworm`, and google-guest-agent to `1:20261021.00-g1`.
+`5:29.10.0-1~debian.12~bookworm`, containerd.io to
+`2.4.2-4~debian.12~bookworm`, and google-guest-agent to `1:20261021.00-g1`.
 Docker's Bookworm repository does not offer containerd 2.3.7 LTS. Build and
 acceptance validate exact versions and parse the configured persistent roots
 without starting daemons.
@@ -43,7 +43,7 @@ Workspace admission: `README.md`. Boot edges are written to the serial journal, 
 Cloud publication uses the already prescribed Google Cloud CLI and adds no image
 package.
 
-The builder installs and verifies npm 12.2.1 after extracting Node and before
+The builder installs and verifies npm 12.2.3 after extracting Node and before
 installing dependencies; acceptance verifies it as `orb` (`docs/stack.md`).
 
 Node 26.13.1 is used for CI, Docker and native builds; it has the Wasm wrapper
@@ -55,7 +55,7 @@ in `infra/native-vm/install.sh`; `/opt/pi-orb/node-version` records it. Docker
 stages use `node:26.13.1-bookworm-slim`; the non-Linux filesystem test uses
 `node:26.13.1-bookworm` for Python and ext4 tools.
 
-Build checks and `acceptance.sh` require Bun/bunx 1.4.4 and git-crypt 0.8.0, run
+Build checks and `acceptance.sh` require Bun/bunx 1.4.5 and git-crypt 0.8.0, run
 as `orb`. Both images build git-crypt with `infra/install_git_crypt.sh` from the
 checksum-pinned upstream source against Debian OpenSSL (the upstream x86_64 binary
 needs a newer glibc). Source and GPL license are in

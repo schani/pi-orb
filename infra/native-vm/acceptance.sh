@@ -15,10 +15,10 @@ esac
 sudo -u orb sudo -n true
 sudo -u orb sh -ec '
   npm --version
-  test "$(npm --version)" = 12.2.1
+  test "$(npm --version)" = 12.2.3
   bun --version
-  test "$(bun --version)" = 1.4.4
-  test "$(bunx --version)" = 1.4.4
+  test "$(bun --version)" = 1.4.5
+  test "$(bunx --version)" = 1.4.5
   git-crypt --version
   test "$(git-crypt --version 2>&1)" = "git-crypt 0.8.0"
 '
@@ -52,9 +52,9 @@ runtime_pid=$(pgrep --parent "$runtime_supervisor_pid" --full '/usr/local/bin/no
 test "$(printf '%s\n' "$runtime_pid" | wc -l)" = 1
 curl --fail --silent --show-error http://127.0.0.1:8080/v1/health | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "ready"'
 
-test "$(dpkg-query -W -f='${Version}' docker-ce)" = '5:29.9.3-1~debian.12~bookworm'
-test "$(dpkg-query -W -f='${Version}' docker-ce-cli)" = '5:29.9.3-1~debian.12~bookworm'
-test "$(dpkg-query -W -f='${Version}' containerd.io)" = '2.4.2-3~debian.12~bookworm'
+test "$(dpkg-query -W -f='${Version}' docker-ce)" = '5:29.10.0-1~debian.12~bookworm'
+test "$(dpkg-query -W -f='${Version}' docker-ce-cli)" = '5:29.10.0-1~debian.12~bookworm'
+test "$(dpkg-query -W -f='${Version}' containerd.io)" = '2.4.2-4~debian.12~bookworm'
 test "$(dpkg-query -W -f='${Version}' google-guest-agent)" = '1:20261021.00-g1'
 docker --version
 containerd --version
