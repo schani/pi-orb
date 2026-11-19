@@ -7,7 +7,7 @@ seed)
   mkdir -p docker-fixture
   cd docker-fixture
   cat >Dockerfile <<'EOF'
-FROM alpine:3.22
+FROM alpine:3.24
 RUN printf 'unpublished-image-sentinel\n' >/image-sentinel
 CMD ["sleep", "infinity"]
 EOF
@@ -17,7 +17,7 @@ EOF
   docker exec native-vm-writes sh -c 'printf container-write-sentinel >/unique-write; sync'
   docker stop native-vm-writes
   docker volume create native-vm-unattached
-  docker run --rm -v native-vm-unattached:/data alpine:3.22 sh -c 'printf unattached-volume-sentinel >/data/sentinel; sync'
+  docker run --rm -v native-vm-unattached:/data alpine:3.24 sh -c 'printf unattached-volume-sentinel >/data/sentinel; sync'
   cat >compose.yaml <<'EOF'
 services:
   db:
@@ -62,7 +62,7 @@ PYWAIT
   test "$(docker exec native-vm-writes cat /unique-write)" = container-write-sentinel
   test "$(docker exec native-vm-writes cat /image-sentinel)" = unpublished-image-sentinel
   docker stop native-vm-writes >/dev/null
-  test "$(docker run --rm -v native-vm-unattached:/data alpine:3.22 cat /data/sentinel)" = unattached-volume-sentinel
+  test "$(docker run --rm -v native-vm-unattached:/data alpine:3.24 cat /data/sentinel)" = unattached-volume-sentinel
   cd docker-fixture
   test "$(docker compose -p native-vm-fixture exec -T db psql -U postgres -Atc 'SELECT value FROM retention')" = database-sentinel
   docker compose -p native-vm-fixture exec -T db test -f /fixture/compose.yaml

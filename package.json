@@ -2,7 +2,7 @@
   "name": "pi-orb",
   "private": true,
   "type": "module",
-  "packageManager": "npm@12.2.1",
+  "packageManager": "npm@12.2.3",
   "workspaces": [
     "packages/protocol",
     "packages/mock-openai",

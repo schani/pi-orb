@@ -2,14 +2,14 @@
 # Shared by the Docker and native Debian image builds.
 set -eu
 case "$1" in
-  amd64) artifact=bun-linux-x64-baseline; bun_sha=e0446eb55995772eb9894bebae9a6be368d985a8b9271ee124486f9946eedd76 ;;
-  arm64) artifact=bun-linux-aarch64; bun_sha=baa6bb36f51d6e58561e02bbea825038a9df454f673d6d776e8bbf86f8c7850e ;;
+  amd64) artifact=bun-linux-x64-baseline; bun_sha=dcb23a18a1c2fff12d57bcef696dbbb42eb67fde29f43816ecb595459a24c463 ;;
+  arm64) artifact=bun-linux-aarch64; bun_sha=18656a3bf0ea5641f5796ae4213b75255579a70a0fded2f337933785568cdf84 ;;
   *) echo "unsupported Bun architecture: $1" >&2; exit 1 ;;
 esac
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 curl --proto "=https" --tlsv1.2 -fsSL \
-  "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/${artifact}.zip" \
+  "https://github.com/oven-sh/bun/releases/download/bun-v1.4.5/${artifact}.zip" \
   -o "$temporary/bun.zip"
 echo "$bun_sha  $temporary/bun.zip" | sha256sum --check -
 unzip -q "$temporary/bun.zip" -d "$temporary"
