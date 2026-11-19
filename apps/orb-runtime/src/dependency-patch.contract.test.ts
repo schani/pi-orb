@@ -20,7 +20,7 @@ const json = (
     devDependencies?: Record<string, string>;
   };
 
-const piVersion = "1.5.0";
+const piVersion = "1.5.2";
 const helperPath = "scripts/apply-dependency-patches.mjs";
 
 describe("Pi dependency patch installation", () => {
@@ -75,7 +75,7 @@ describe("Pi dependency patch installation", () => {
       ],
       [
         "node_modules/@earendil-works/pi-coding-agent/dist/core/model-runtime.js",
-        "44d8017928eff6721d5a56b4e71f98bcafb124f5aa6e7d3f016491e11fcf6461",
+        "b17018cb70007a194f10b2aaf5ec3631329db20cf853ddc9ce4088e6b4373ab1",
       ],
       [
         "node_modules/@earendil-works/pi-coding-agent/dist/core/provider-composer.d.ts",
@@ -94,15 +94,15 @@ describe("Pi dependency patch installation", () => {
     expect(read(helperPath)).not.toContain(
       'package: "node_modules/@earendil-works/pi-coding-agent"',
     );
-    expect(read("apps/control-plane/Dockerfile")).not.toContain("pi-coding-agent+1.5.0.patch");
+    expect(read("apps/control-plane/Dockerfile")).not.toContain("pi-coding-agent+1.5.2.patch");
   });
 
   it("keeps code-mode declarations pristine", () => {
     const path = "node_modules/@earendil-works/pi-codemode/dist/declarations.js";
     expect(createHash("sha256").update(read(path)).digest("hex")).toBe(
-      "00ab54f850a7412d029f8d9699fcb51b1346f3cb2c58e47b63f9189292ec260c",
+      "32a4607ab15e8e7e5f58e6979f3f7216704e716671c11442f9e9cd77c23ec75a",
     );
-    expect(read("patches/@earendil-works+pi-codemode+1.5.0.patch")).not.toContain(path);
+    expect(read("patches/@earendil-works+pi-codemode+1.5.2.patch")).not.toContain(path);
   });
 
   it("keeps native Durable journals, namespace discovery and argument semantics", () => {
@@ -136,11 +136,11 @@ describe("Pi dependency patch installation", () => {
         .slice(adapter.indexOf("harness = await Harness.open("))
         .match(/settings: \{[^}]*\}/)?.[0],
     ).toContain('afterFailedRun: "continue"');
-    const patch = read("patches/@earendil-works+pi-durable+1.5.0.patch");
+    const patch = read("patches/@earendil-works+pi-durable+1.5.2.patch");
     expect(patch).not.toContain("dist/harness/generation.js");
     const native = read("node_modules/@earendil-works/pi-durable/dist/harness/generation.js");
     expect(createHash("sha256").update(native).digest("hex")).toBe(
-      "65a11a5164ffdb95b2031c3ae937da848a8897e57d1823ff34f97692eec7c570",
+      "d5d64b2be6844ba4b535880da000b6661ec08dd23cbf2bc52a3f6406b20b19ab",
     );
     expect(native).toContain("const policy = settings.afterFailedRun;");
     expect(native).not.toContain('prepareFailure(tx, runtime, "continue")');
@@ -208,9 +208,9 @@ describe("Pi dependency patch installation", () => {
     );
 
     const patchFiles = [
-      "@earendil-works+pi-ai+1.5.0.patch",
-      "@earendil-works+pi-codemode+1.5.0.patch",
-      "@earendil-works+pi-durable+1.5.0.patch",
+      "@earendil-works+pi-ai+1.5.2.patch",
+      "@earendil-works+pi-codemode+1.5.2.patch",
+      "@earendil-works+pi-durable+1.5.2.patch",
     ];
     expect(
       readdirSync(join(root, "patches"))

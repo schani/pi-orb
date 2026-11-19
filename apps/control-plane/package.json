@@ -10,11 +10,11 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.328",
     "@anthropic-ai/claude-code": "2.1.328",
-    "@earendil-works/chord": "1.5.0",
-    "@earendil-works/pi-ai": "1.5.0",
-    "@earendil-works/pi-codemode": "1.5.0",
-    "@earendil-works/pi-coding-agent": "1.5.0",
-    "@earendil-works/pi-durable": "1.5.0",
+    "@earendil-works/chord": "1.5.2",
+    "@earendil-works/pi-ai": "1.5.2",
+    "@earendil-works/pi-codemode": "1.5.2",
+    "@earendil-works/pi-coding-agent": "1.5.2",
+    "@earendil-works/pi-durable": "1.5.2",
     "@electric-sql/pglite": "0.5.12",
     "@electric-sql/pglite-pg_textsearch": "0.0.14",
     "@fastify/static": "^10.1.12",
@@ -37,7 +37,7 @@
     "tldts": "7.5.4",
     "typebox": "^1.4.7",
     "undici": "8.12.4",
-    "ws": "^8.22.1",
+    "ws": "8.23.0",
     "zod": "4.6.7"
   },
   "devDependencies": {

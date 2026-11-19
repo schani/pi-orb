@@ -1,5 +1,5 @@
-import type { JsonValue } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
+import type { JsonValue } from "@earendil-works/chord/json";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   type ConversationId,

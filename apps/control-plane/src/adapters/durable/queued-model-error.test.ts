@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import type { WatchHandle } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import type { WatchHandle } from "@earendil-works/chord/watch";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   fauxAssistantMessage,

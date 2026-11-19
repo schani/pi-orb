@@ -42,8 +42,8 @@
     "esbuild@0.28.2": true
   },
   "overrides": {
-    "@earendil-works/chord@1.5.0": {
-      "ws": "8.22.1"
+    "@earendil-works/chord@1.5.2": {
+      "ws": "8.23.0"
     },
     "gcp-metadata@8.1.4": {
       "gaxios": "7.3.0"

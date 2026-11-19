@@ -1,4 +1,5 @@
-import { type Context, copyJson } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
+import { copyJson } from "@earendil-works/chord/json";
 import { type CodemodeSandbox, parseCodemodeSource } from "@earendil-works/pi-codemode";
 import {
   defineTool,

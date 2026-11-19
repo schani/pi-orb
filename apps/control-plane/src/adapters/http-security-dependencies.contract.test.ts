@@ -12,7 +12,7 @@ it.each([
   ["find-my-way", "9.10.0"],
   ["@fastify/static", "10.1.12"],
   ["@fastify/websocket", "11.3.7"],
-  ["ws", "8.22.1"],
+  ["ws", "8.23.0"],
   ["openid-client", "6.9.0"],
   ["tldts", "7.5.4"],
   ["tldts-core", "7.5.4"],
@@ -31,13 +31,13 @@ it("updates Google auth 11 without replacing legacy provider auth 10", () => {
   expect(lock.packages["node_modules/google-auth-library"]?.version).toBe("10.5.0");
 });
 
-it("removes affected glob/minimatch copies and locks Pi and Chord to 1.5.0", () => {
+it("removes affected glob/minimatch copies and locks Pi and Chord to 1.5.2", () => {
   for (const [path, pkg] of Object.entries(lock.packages)) {
     if (/node_modules\/(?:glob|minimatch)$/.test(path)) {
       expect(path.endsWith("/glob") ? ["14.0.6"] : ["11.0.3", "11.0.9"]).toContain(pkg.version);
     }
     if (/^node_modules\/@earendil-works\/(?:pi-[^/]+|chord)$/.test(path)) {
-      expect(pkg.version, path).toBe("1.5.0");
+      expect(pkg.version, path).toBe("1.5.2");
     }
   }
 });

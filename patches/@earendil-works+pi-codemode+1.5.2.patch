@@ -1,5 +1,5 @@
 diff --git a/node_modules/@earendil-works/pi-codemode/dist/runtime/host.js b/node_modules/@earendil-works/pi-codemode/dist/runtime/host.js
-index 1d9b018..09383c6 100644
+index 1d9b018764576d469ee4b562afe45a709bd946a5..09383c6deb4067ce1b4e438c89ace2920ec04ad1 100644
 --- a/node_modules/@earendil-works/pi-codemode/dist/runtime/host.js
 +++ b/node_modules/@earendil-works/pi-codemode/dist/runtime/host.js
 @@ -23,7 +23,7 @@ function workerLauncher(options) {
@@ -21,7 +21,7 @@ index 1d9b018..09383c6 100644
          try {
              options.onWorkerStarted?.(new Promise((resolve) => worker.once("exit", () => resolve())));
 diff --git a/node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js b/node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js
-index c244f03..0268760 100644
+index 213310de09005c192ed5c781e077e12a6b45f8ba..8edc0b2e53e8a7ea15006b3375ca128c12749149 100644
 --- a/node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js
 +++ b/node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js
 @@ -39,7 +39,8 @@ export const MAX_STORE_TOTAL_CHARS = 1024 * 1024;
@@ -34,7 +34,7 @@ index c244f03..0268760 100644
  export const MAX_OUTPUT_ITEMS = 100_000;
  const IMAGE_HELPER_EXPECTS = 'image expects a non-empty image URL string, an object with image_url, or an image block { type: "image", data, mimeType }';
  export const PRELUDE_SOURCE = `(function (bridge, toolsJson, globalsJson, storeJson) {
-@@ -397,6 +398,15 @@ export const PRELUDE_SOURCE = `(function (bridge, toolsJson, globalsJson, storeJ
+@@ -399,6 +400,15 @@ export const PRELUDE_SOURCE = `(function (bridge, toolsJson, globalsJson, storeJ
  		["image/webp", /^UklG.{8}RUJQ/],
  	];
  
@@ -50,7 +50,7 @@ index c244f03..0268760 100644
  	function image(value) {
  		const url = imageUrl(value);
  		if (url === "") throw new TypeErrorCtor(${JSON.stringify(IMAGE_HELPER_EXPECTS)});
-@@ -414,7 +424,7 @@ export const PRELUDE_SOURCE = `(function (bridge, toolsJson, globalsJson, storeJ
+@@ -416,7 +426,7 @@ export const PRELUDE_SOURCE = `(function (bridge, toolsJson, globalsJson, storeJ
  		// resent on every later turn. Line breaks from wrapped base64 are dropped. The declared type
  		// is ignored in favor of the detected one, as providers also reject mismatches.
  		const data = url.slice(comma + 1).replace(/\\s+/g, "");
@@ -60,7 +60,7 @@ index c244f03..0268760 100644
  		}
  		const head = data.slice(0, 16);
 diff --git a/node_modules/@earendil-works/pi-codemode/dist/runtime/vm.d.ts b/node_modules/@earendil-works/pi-codemode/dist/runtime/vm.d.ts
-index e8b0e9d..7e47fa9 100644
+index e8b0e9dcce5e985a2c086587fdf28392a9b0fcfc..7e47fa9aff36d0ceac39affe257d9c448043f1e5 100644
 --- a/node_modules/@earendil-works/pi-codemode/dist/runtime/vm.d.ts
 +++ b/node_modules/@earendil-works/pi-codemode/dist/runtime/vm.d.ts
 @@ -19,6 +19,8 @@ export interface StartVmOptions {
@@ -74,7 +74,7 @@ index e8b0e9d..7e47fa9 100644
  //# sourceMappingURL=vm.d.ts.map
 \ No newline at end of file
 diff --git a/node_modules/@earendil-works/pi-codemode/dist/runtime/vm.js b/node_modules/@earendil-works/pi-codemode/dist/runtime/vm.js
-index 929527b..04557d4 100644
+index 929527b976f8dc2b344b595f0dd87ac4af1874e9..04557d45cf0c3f878353230214da9df7d1891f65 100644
 --- a/node_modules/@earendil-works/pi-codemode/dist/runtime/vm.js
 +++ b/node_modules/@earendil-works/pi-codemode/dist/runtime/vm.js
 @@ -142,6 +142,7 @@ export async function startVm(options) {
@@ -86,7 +86,7 @@ index 929527b..04557d4 100644
      let issued = 0;
      /** Deterministic mode: the next result to apply, and results that arrived before it. */
 diff --git a/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js b/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js
-index eca6e30..ccb7161 100644
+index eca6e30e7a20e9282c1b0cef060bc6d1cbd153fa..ccb7161f03ca816ccfc24000b0bb2306551d1c9c 100644
 --- a/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js
 +++ b/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js
 @@ -23,7 +23,8 @@ async function main(data) {
@@ -100,7 +100,7 @@ index eca6e30..ccb7161 100644
      parentPort?.on("message", (message) => {
          if (isHostToWorkerMessage(message))
 diff --git a/node_modules/@earendil-works/pi-codemode/dist/types.d.ts b/node_modules/@earendil-works/pi-codemode/dist/types.d.ts
-index 76b5c58..9d1c026 100644
+index 76b5c5895fc63180193bcf7340b353a055554d82..9d1c026938fd36500fce394c2988a07f91160b55 100644
 --- a/node_modules/@earendil-works/pi-codemode/dist/types.d.ts
 +++ b/node_modules/@earendil-works/pi-codemode/dist/types.d.ts
 @@ -140,6 +140,8 @@ export interface CodemodeSandboxOptions extends CodemodeSandboxBaseOptions {

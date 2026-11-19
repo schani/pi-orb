@@ -1,8 +1,9 @@
 // PostgreSQL implementation adapted from @earendil-works/pi-durable 1.5.0 storage and scan semantics.
 // Upstream portions copyright (c) 2025 Mario Zechner, MIT; see LICENSE.
 
-import type { Context, JsonValue } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { apply, type Op } from "@earendil-works/chord/delta";
+import type { JsonValue } from "@earendil-works/chord/json";
 import { StorageRequestError } from "@earendil-works/pi-durable";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import { rejectStorage, rejectStorageRequest, StorageFailure } from "./storage-boundary.ts";

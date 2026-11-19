@@ -1,5 +1,7 @@
-import type { Context, JsonValue, WatchCall } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import type { JsonValue } from "@earendil-works/chord/json";
+import type { WatchCall } from "@earendil-works/chord/watch";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   type ConversationId,

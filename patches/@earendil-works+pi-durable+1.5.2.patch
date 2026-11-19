@@ -1,8 +1,8 @@
 diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js b/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js
-index 9ef1da0..4d20e81 100644
+index aa51bd52815007c82b7425d467b8fd9c0e0b0cd2..d4a79db9190e68ed23c216ed44b76dafaf525fce 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js
 +++ b/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js
-@@ -234,7 +234,12 @@ class CodemodeCall {
+@@ -198,7 +198,12 @@ class CodemodeCall {
              ...models.map((name) => ({ name, spread: true })),
              ...(this.options.globals ?? []).map((global) => ({ name: global.name, spread: global.spread === true })),
          ];
@@ -16,7 +16,7 @@ index 9ef1da0..4d20e81 100644
          for (const tool of callable) {
              const namespace = namespaceOf(tool.name, this.options.namespaces ?? []);
              if (namespace === undefined)
-@@ -670,7 +675,7 @@ class CodemodeCall {
+@@ -634,7 +639,7 @@ class CodemodeCall {
      }
      async callTool(call) {
          // Passed as the script gave them; validation reports arguments that are not an object.
@@ -26,7 +26,7 @@ index 9ef1da0..4d20e81 100644
          if (model) {
              await this.modelSlot();
 diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/index.d.ts b/node_modules/@earendil-works/pi-durable/dist/codemode/index.d.ts
-index 3e1c49c..2af19e7 100644
+index 3e1c49c52cfcb495f0e6fd74250bf07008107766..2af19e724d3cc346574b43ce036ba26ae2511bf2 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/codemode/index.d.ts
 +++ b/node_modules/@earendil-works/pi-durable/dist/codemode/index.d.ts
 @@ -1,3 +1,3 @@
@@ -36,7 +36,7 @@ index 3e1c49c..2af19e7 100644
  //# sourceMappingURL=index.d.ts.map
 \ No newline at end of file
 diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/index.js b/node_modules/@earendil-works/pi-durable/dist/codemode/index.js
-index 0556d0b..f1b75a4 100644
+index 0556d0b84a189bac4f496369a5cd0384181cdf87..f1b75a45c1cd468b2a3afe491a91ff0208f20f8f 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/codemode/index.js
 +++ b/node_modules/@earendil-works/pi-durable/dist/codemode/index.js
 @@ -1,3 +1,3 @@
@@ -46,7 +46,7 @@ index 0556d0b..f1b75a4 100644
  //# sourceMappingURL=index.js.map
 \ No newline at end of file
 diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/output.js b/node_modules/@earendil-works/pi-durable/dist/codemode/output.js
-index d28306e..27d7672 100644
+index d28306e526198175420d555b8058eb2f1976793a..27d767242eb313c3f941419935d911b249cb1279 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/codemode/output.js
 +++ b/node_modules/@earendil-works/pi-durable/dist/codemode/output.js
 @@ -106,7 +106,10 @@ async function truncate(items, maxTokens, limits, write) {
@@ -62,7 +62,7 @@ index d28306e..27d7672 100644
          // A failed write must not discard the result of a script whose calls already ran: it becomes part of the label.
          const saved = await write(`image-${index}${IMAGE_EXTENSIONS[mimeType] ?? ".bin"}`, bytes);
 diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/harness.js b/node_modules/@earendil-works/pi-durable/dist/harness/harness.js
-index e286f00..5675ed9 100644
+index e286f00f872ebec79367a594938040c6a37a879f..5675ed90e2e8a2e5ab56503075b44a839ff2e193 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/harness/harness.js
 +++ b/node_modules/@earendil-works/pi-durable/dist/harness/harness.js
 @@ -43,6 +43,9 @@ class ConversationImpl {
@@ -76,7 +76,7 @@ index e286f00..5675ed9 100644
          this.#host.tasks.resume();
          const input = { reason: "manual", ...(instructions === undefined ? {} : { instructions }) };
 diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js b/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js
-index 6e882a8..8695590 100644
+index 512b2477c29b83c03a1c239ee427d928ce553caa..53b1c2b43839b774bfbc0d0c7690174eba589837 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js
 +++ b/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js
 @@ -72,6 +72,75 @@ export class Submissions {
@@ -212,10 +212,10 @@ index 6e882a8..8695590 100644
  //# sourceMappingURL=submissions.js.map
 \ No newline at end of file
 diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts b/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts
-index eb64e47..54cb9ff 100644
+index 7f4a0ba59df6d5870248c60c055dd188fdab51c4..34a19131b1a0f5c485ea1a4b874324c4cd56e78a 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts
 +++ b/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts
-@@ -756,6 +756,12 @@ export interface Conversation {
+@@ -773,6 +773,12 @@ export interface Conversation {
       * it is, after placing queued items; a busy conversation rejects it with `ConversationBusy`, as it never queues.
       */
      submit(submission: SubmissionDraft, context: Context): Promise<Submission>;
@@ -229,7 +229,7 @@ index eb64e47..54cb9ff 100644
       * Admit a submission inside the caller's commit `tx` (`Harness.commit()`, `Conversation.commit()`, a task's
       * `runtime.commit()`), with the same rules, and return its ID: the admission is stored with that commit, or not at all
 diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/util.js b/node_modules/@earendil-works/pi-durable/dist/harness/util.js
-index b089b700..86582dad 100644
+index b089b70016bf28fc00708245c7a822a1ce6594f4..86582dade1de567a92b9556160ac6a684dfefb8a 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/harness/util.js
 +++ b/node_modules/@earendil-works/pi-durable/dist/harness/util.js
 @@ -4,8 +4,12 @@ export class Waiters {
