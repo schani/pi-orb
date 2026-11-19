@@ -377,7 +377,7 @@ test("Pi release inputs align on stable 1.5.0 with upstream coding-agent securit
   assert.equal(family.length, 10);
   for (const [path, entry] of family) assert.equal(entry.version, "1.5.0", path);
   for (const [owner, version] of [
-    ["apps/control-plane", "8.12.3"],
+    ["apps/control-plane", "8.12.4"],
     ["node_modules/@earendil-works/pi-coding-agent", "8.12.3"],
   ]) {
     const require = createRequire(join(repository, owner, "package.json"));
@@ -385,7 +385,6 @@ test("Pi release inputs align on stable 1.5.0 with upstream coding-agent securit
   }
   assert.deepEqual(JSON.parse(readFileSync(join(repository, "package.json"), "utf8")).overrides, {
     "@earendil-works/chord@1.5.0": { ws: "8.22.1" },
-    "@fastify/static@10.1.8": { glob: "14.0.3" },
     "gcp-metadata@8.1.4": { gaxios: "7.3.0" },
   });
 });

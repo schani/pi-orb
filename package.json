@@ -28,12 +28,12 @@
     "native-image:build": "npm run build --workspace @pi-orb/native-image --"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.4",
+    "@biomejs/biome": "2.6.8",
     "@playwright/test": "1.64.1",
     "@types/node": "26.6.6",
     "typescript": "7.0.2",
-    "vite": "8.3.5",
-    "vitest": "5.1.0",
+    "vite": "8.3.8",
+    "vitest": "5.1.1",
     "esbuild": "0.28.2"
   },
   "allowScripts": {
@@ -44,9 +44,6 @@
   "overrides": {
     "@earendil-works/chord@1.5.0": {
       "ws": "8.22.1"
-    },
-    "@fastify/static@10.1.8": {
-      "glob": "14.0.3"
     },
     "gcp-metadata@8.1.4": {
       "gaxios": "7.3.0"
