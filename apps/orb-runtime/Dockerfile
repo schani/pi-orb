@@ -56,7 +56,8 @@ COPY packages/protocol/package.json packages/protocol/
 COPY apps/orb-runtime/package.json apps/orb-runtime/
 RUN start="$(date +%s)" \
   && echo "runtime-deps:npm-install:start" \
-  && npm ci --workspace @pi-orb/orb-runtime --include-workspace-root=false --ignore-scripts \
+  && npm ci --workspace @pi-orb/orb-runtime --include-workspace-root=false --ignore-scripts --include=optional \
+  && test -x "node_modules/@agent-browser/cli-linux-$(node -p process.arch)-gnu/bin/agent-browser" \
   && echo "runtime-deps:npm-install:complete elapsed_s=$(($(date +%s) - start))" \
   && ln -s /app/node_modules/.bin/agent-browser /usr/local/bin/agent-browser
 RUN --network=none start="$(date +%s)" \
@@ -100,6 +101,7 @@ ENV PI_ORB_WORK_DIR=/workspace
 ENV PI_ORB=1
 # PID 1 lifetime is the execution boundary on both Docker and GCE.
 ENV PI_ORB_CONTAINER=1
+ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV HOME=/workspace/home
 ENV RUSTUP_HOME=/workspace/home/.rustup
 ENV CARGO_HOME=/workspace/home/.cargo
