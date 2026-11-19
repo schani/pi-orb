@@ -12,7 +12,7 @@ Decisions and rationale for where pi-orb runs and how releases are made safe. Op
 - Polling state and cursors live in PostgreSQL because Cloud Run may restart even the minimum instance; the loop recovers entirely from the database. Concurrent pollers are safe through an optimistic cursor compare-and-swap in the commit transaction; there is no polling lock or leader.
 - Ingress is public with IAM invocation disabled; Google login and machine-token verification happen in the application (`docs/auth.md`). Sharing one service means public issuer handlers share control-plane privileges: reduced infrastructure isolation is intentional, not reduced authentication. Runtime bearers still fence each incarnation. Compute SSH stays behind IAP.
 - Egress is private-ranges-only through the foundation-owned VPC.
-- The control plane, runtime, protocol and web UI are TypeScript on Node.js 26.13.1 LTS (`docs/stack.md`).
+- The control plane, runtime, protocol and web UI are TypeScript on Node.js 26.13.0 LTS (`docs/stack.md`).
 
 ## Origins and issuer
 
@@ -152,7 +152,7 @@ After a validated transaction, `infra/rollout_monitor.py` observes a fixed 900 s
 
 - Manual `workflow_dispatch` on `main` only; automatic deploy on push is open question 40. Empty `validate_release` releases; a release ID or `latest` validates. Inputs pass through quoted environment variables, never interpolated shell.
 - The workflow checks out the immutable dispatched SHA, verifies it, creates local `main` at it before authentication, and `exec`s `release.sh` for signal delivery. Hard cancellation still requires evidence-backed inspection of remote work and the lock.
-- Pinned: every action by commit SHA, `ubuntu-24.04`, Node 26.13.1, Cloud SDK 592.0.0 with its beta component (checksum-verified), OpenTofu 1.13.2 (checksum-verified). Provider lock files are read-only. Job budget 240 minutes.
+- Pinned: every action by commit SHA, `ubuntu-24.04`, Node 26.13.0, Cloud SDK 592.0.0 with its beta component (checksum-verified), OpenTofu 1.13.2 (checksum-verified). Provider lock files are read-only. Job budget 240 minutes.
 - Checks do not inherit the release's result-directory or fixture-recorder variables; only smoke gets the real recorder (`docs/postmortems/2026-09-09-release-test-environment.md`).
 - `infra/release_report.py` exports exactly one allowlisted `release.json`; no diagnostics, state, plans, credentials or source. A successful step without a completed validated record fails the reporter.
 - The release job uses concurrency group `pi-orb-production-release` without in-progress cancellation. GitHub coalesces pending runs and does not guarantee commit order; a strict every-push policy would need its own ordering check.

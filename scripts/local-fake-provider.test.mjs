@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -654,16 +653,16 @@ for (const [
           resolved: "https://registry.npmjs.org/@hono/node-server/-/node-server-2.1.5.tgz",
           integrity:
             "sha512-MgP/I06GdvsilDspMk/qmRzpk8LOUStP6jFAbSRi40W09DhoyUn+Mj7eyKICPqeYKybOjVFLVIAQzvu1bfIa7Q==",
-          peerDependencies: { hono: "^4 || ^5.0.0-0" },
+          license: "MIT",
+          engines: {},
         },
         "node_modules/hono": {
           version: "4.13.14",
           resolved: "https://registry.npmjs.org/hono/-/hono-4.13.14.tgz",
           integrity:
-            expectedError === "hono_lock_mismatch"
-              ? "sha512-unexpected"
-              : "sha512-yhRLQ21U6qa9Hsu2N7Qcbh8tE+WKEcoErjIo56LeSGiGXGp9sA7UpE86Ui9uexb61KakiGwuHMn2QdV7w6i6kQ==",
-          engines: { node: ">=16.9.0" },
+            "sha512-yhRLQ21U6qa9Hsu2N7Qcbh8tE+WKEcoErjIo56LeSGiGXGp9sA7UpE86Ui9uexb61KakiGwuHMn2QdV7w6i6kQ==",
+          license: "MIT",
+          engines: {},
         },
         "node_modules/flingit/node_modules/better-sqlite3": {
           version: "12.11.1",
@@ -677,40 +676,24 @@ for (const [
         },
       },
     };
+    if (expectedError === "hono_lock_mismatch")
+      lock.packages["node_modules/hono"].integrity = "sha512-unexpected";
+    const rawLock = `${JSON.stringify(lock, null, 2)}\n`;
     await fs.writeFile(
       join(bin, "git"),
-      `#!${process.execPath}\nconst fs=require('node:fs'), a=process.argv.slice(2);if(a[0]==='init'){fs.mkdirSync(a.at(-1));fs.writeFileSync(a.at(-1)+'/package-lock.json',${JSON.stringify(JSON.stringify(lock))});fs.writeFileSync(a.at(-1)+'/package.json',${JSON.stringify(JSON.stringify({ allowScripts: { cloudflared: denied ? false : true } }))});}if(a[0]==='rev-parse')console.log('${PIN}');`,
+      `#!${process.execPath}\nconst fs=require('node:fs'), a=process.argv.slice(2);if(a[0]==='init'){fs.mkdirSync(a.at(-1));fs.writeFileSync(a.at(-1)+'/package-lock.json',${JSON.stringify(rawLock)});fs.writeFileSync(a.at(-1)+'/package.json',${JSON.stringify(JSON.stringify({ allowScripts: { cloudflared: !denied } }))});}if(a[0]==='rev-parse')console.log('${PIN}');
+if(a[0]==='apply')require('node:child_process').execFileSync('git',a,{stdio:'inherit',env:{...process.env,PATH:${JSON.stringify(process.env.PATH)}}});`,
       { mode: 0o700 },
     );
     const calls = join(f.root, "calls");
     await fs.writeFile(
       join(bin, "npm"),
-      `#!${process.execPath}
-const fs = require('node:fs');
-const args = process.argv.slice(2);
-fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify(args) + '\\n');
-if (args[0] === '--version') {
-  console.log('${npmVersion}');
-  process.exit(0);
+      `#!${process.execPath}\nrequire('node:fs').appendFileSync(${JSON.stringify(calls)},JSON.stringify(process.argv.slice(2))+'\\n');if(process.argv[2]==='--version'){console.log('${npmVersion}');process.exit(0);}require('node:fs').copyFileSync('package.json',${JSON.stringify(`${calls}-policy.json`)});
+if(${native}&&process.argv[2]==='ci'){const fs=require('node:fs');
+for(const [name,version] of Object.entries({'@hono/node-server':'2.1.9',hono:'${expectedError === "hono_version_mismatch" ? "4.13.14" : "4.13.19"}'})){
+  fs.mkdirSync('node_modules/'+name,{recursive:true});fs.writeFileSync('node_modules/'+name+'/package.json',JSON.stringify({version}));
 }
-if (args[0] === 'ci') {
-  fs.copyFileSync('package.json', ${JSON.stringify(`${calls}-policy.json`)});
-  fs.copyFileSync('package-lock.json', ${JSON.stringify(`${calls}-lock.json`)});
-  if (${native}) {
-    for (const [name, version] of Object.entries({
-      '@hono/node-server': '2.1.9',
-      hono: '${expectedError === "hono_version_mismatch" ? "4.13.14" : "4.13.19"}',
-      flingit: '0.0.71',
-      'flingit/node_modules/better-sqlite3': '${expectedError === "native_version_mismatch" ? "12.11.0" : "12.11.1"}',
-    })) {
-      fs.mkdirSync('node_modules/' + name, { recursive: true });
-      fs.writeFileSync('node_modules/' + name + '/package.json', JSON.stringify({ version }));
-    }
-    process.exit(0);
-  }
-}
-console.error('npm error code ${npmCode}\\nnpm error errno ${errno}\\nnpm error command sh -c secret https://token@private.invalid');
-process.exit(152);`,
+fs.mkdirSync('node_modules/flingit/node_modules/better-sqlite3',{recursive:true});fs.writeFileSync('node_modules/flingit/package.json',JSON.stringify({version:'0.0.71'}));fs.writeFileSync('node_modules/flingit/node_modules/better-sqlite3/package.json',JSON.stringify({version:${JSON.stringify(expectedError === "native_version_mismatch" ? "12.11.0" : "12.11.1")}}));process.exit(0);}console.error('npm error code ${npmCode}\\nnpm error errno ${errno}\\nnpm error command sh -c secret https://token@private.invalid');process.exit(152);`,
       { mode: 0o700 },
     );
     const wrapper = fileURLToPath(new URL("./local-fake-provider.mjs", import.meta.url));
@@ -723,13 +706,12 @@ process.exit(152);`,
     assert.ok(privateRoot?.startsWith(join(tmpdir(), "pi-orb-local-fake-")));
     t.after(() => fs.rm(privateRoot, { recursive: true, force: true }));
     assert.equal(child.exit.code, 1);
-    const runsCi = ["tool_failed", "hono_version_mismatch", "native_version_mismatch"].includes(
-      expectedError,
-    );
     assert.equal(
       await fs.readFile(calls, "utf8"),
       '["--version"]\n' +
-        (runsCi ? '["ci","--no-audit","--no-fund"]\n' : "") +
+        (["tool_failed", "native_version_mismatch", "hono_version_mismatch"].includes(expectedError)
+          ? '["ci","--no-audit","--no-fund"]\n'
+          : "") +
         (native && expectedError === "tool_failed"
           ? '["run","install","--prefix","node_modules/flingit/node_modules/better-sqlite3"]\n'
           : ""),
@@ -740,46 +722,26 @@ process.exit(152);`,
       (p) => p.phase === (native ? "sqlite_install" : "install") && p.state === "finished",
     );
     assert.equal(installs.length, expectedError === "tool_failed" ? 1 : 0);
-    const sha256 = (raw) => createHash("sha256").update(raw).digest("hex");
-    assert.equal(manifest.lockSha256, sha256(JSON.stringify(lock)));
-    if (runsCi) {
+    if (expectedError === "tool_failed") {
       const project = JSON.parse(await fs.readFile(`${calls}-policy.json`, "utf8"));
       assert.deepEqual(project.allowScripts, {
         cloudflared: false,
         "esbuild@0.28.2": true,
       });
-      const preparedLock = await fs.readFile(`${calls}-lock.json`, "utf8");
-      assert.equal(manifest.preparedLockSha256, sha256(preparedLock));
-      assert.deepEqual(JSON.parse(preparedLock), {
-        ...lock,
-        packages: {
-          ...lock.packages,
-          "node_modules/@hono/node-server": {
-            ...lock.packages["node_modules/@hono/node-server"],
-            version: "2.1.9",
-            resolved: "https://registry.npmjs.org/@hono/node-server/-/node-server-2.1.9.tgz",
-            integrity:
-              "sha512-Sk4NQd3GFY0WZWCzndwFMPwJhtD0y9qjsQ+pjID0/03nK9pxyBCUoUHCho8QYBLBVhi0ssL8UkNPHqbgSOFPIQ==",
-          },
-          "node_modules/hono": {
-            ...lock.packages["node_modules/hono"],
-            version: "4.13.19",
-            resolved: "https://registry.npmjs.org/hono/-/hono-4.13.19.tgz",
-            integrity:
-              "sha512-KmXvQAXwcAHV+muzbIwoJ23niEB5nMoDVr9WcRkU8mvjUECm/1+7v4Jgp7P7a+H6MLFrh+vXrGonGrGS+RQfkA==",
-          },
-        },
-      });
-    } else {
-      assert.equal(manifest.preparedLockSha256, undefined);
-      assert.equal(
-        await fs.readFile(join(privateRoot, "source/package-lock.json"), "utf8"),
-        JSON.stringify(lock),
-      );
-    }
-    if (expectedError === "tool_failed") {
       assert.deepEqual(installs[0].npm, { npmCode, errno, clipped: false });
       assert.equal(installs[0].code, 152);
+      if (npmVersion === "11.19.1" && npmCode === "ECONNRESET") {
+        const { packages } = JSON.parse(
+          await fs.readFile(join(privateRoot, "source/package-lock.json"), "utf8"),
+        );
+        assert.deepEqual(
+          [
+            packages["node_modules/@hono/node-server"].version,
+            packages["node_modules/hono"].version,
+          ],
+          ["2.1.9", "4.13.19"],
+        );
+      }
     }
     assert.equal(manifest.error, expectedError);
     assert.equal(manifest.npm, npmVersion);

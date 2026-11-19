@@ -25,7 +25,7 @@ A full local gate runs sequentially on one runner against frozen source: `npm ru
 PI_ORB_E2E_BACKEND=process node scripts/local-fake-provider.mjs -- npm run test:e2e -- e2e/full-slice.e2e.test.ts -t 'runs login, a scripted tool round trip'
 ```
 
-Ports 3210/5173 make the wrapper exclusive per host: do not overlap it with another wrapper run or the full unit/infra suite. Before `npm ci`, the wrapper checks the npm minimum and the fixture's `cloudflared` script denial, then replaces only the two Hono lock entries with pinned security updates. It requires the expected upstream entries and verifies the installed versions before launch. The manifest records `lockSha256` for the upstream lock and `preparedLockSha256` for the lock used by `npm ci`.
+Ports 3210/5173 make the wrapper exclusive per host: do not overlap it with another wrapper run or the full unit/infra suite. Before `npm ci`, the wrapper checks the npm minimum and the fixture's `cloudflared` script denial and applies pinned Hono lockfile updates.
 
 **DST replay.** A failing schedule writes `test-failures/<scenario>-<epoch>-<iteration>.json`. Replay it with the same source:
 

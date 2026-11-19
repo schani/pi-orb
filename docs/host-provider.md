@@ -168,7 +168,7 @@ The shared contract is a persistent filesystem plus a host running the orb runti
 
 Docker (`apps/orb-runtime/Dockerfile`) and native Debian (`infra/native-vm/install.sh`) images carry the same prescribed tools. No installation runs at orb boot; no keys or credentials are baked in.
 
-- Node.js 26.13.1 LTS and npm 12.2.1; git, ripgrep, curl, `zip`/`unzip`, `sudo`.
+- Node.js 26.13.0 LTS and npm 12.2.1; git, ripgrep, curl, `zip`/`unzip`, `sudo`.
 - Python 3 with the `python` alias and `venv`. No global `python3-pip`: Debian's externally-managed policy favors `python -m venv .venv`.
 - `build-essential`, `pkg-config`, `libssl-dev` for native addons. `node-pty` is rebuilt from source during image construction (`docs/terminal.md`).
 - Rustup 1.29.3 (SHA-256-verified per architecture) and its proxies, with **no toolchain**. Users, hooks or `rust-toolchain.toml` acquire toolchains, which persist in `$HOME`. Rejected: automatic stable installation, which made boot depend on `static.rust-lang.org` (`docs/postmortems/2026-09-07-native-rust-dns-bootstrap.md`).
