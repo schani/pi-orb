@@ -1,12 +1,14 @@
-import type { HistoryRecord } from "@pi-orb/protocol";
+import type { HistoryRecord, RuntimeHealth } from "@pi-orb/protocol";
 import { ConditionVariable } from "determined";
 import { err, errAsync, ok, okAsync, ResultAsync } from "neverthrow";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { orbView } from "../http/views.ts";
 import { makeHarness, makeOrbRow, makeProjectRow } from "../testkit/fixtures.ts";
-import { runDst, TEST_WALL_EPOCH, waitUntil } from "../testkit/sim.ts";
+import { LogCapture, runDst, TEST_WALL_EPOCH, waitUntil } from "../testkit/sim.ts";
 import { commitAgentHistory } from "./agent-history.ts";
 import type { AgentPlane } from "./agent-ports.ts";
+import type { RuntimeClientError } from "./errors.ts";
+import { HarnessAgentPlane } from "./harness-agent-plane.ts";
 import {
   reconcileCentralAgent,
   reconcileOrbOnce,
@@ -16,6 +18,198 @@ import {
 import { pollLoop } from "./loops.ts";
 
 describe("independent central dispatcher", () => {
+  it.each(["ready", "stop", "delivery-cancelled"] as const)(
+    "leaves pending startup input unclaimed until %s",
+    async (end) => {
+      const log = new LogCapture();
+      await runDst(
+        { name: `central-dispatch-pending-${end}`, iterations: 10, logCapture: log },
+        async (sim) => {
+          const h = makeHarness();
+          const gate = new ConditionVariable("central startup release");
+          let started = false;
+          let released = false;
+          let ready = false;
+          let failure: "transport" | "failed-health" | null = null;
+          const identity = { v: 1 as const, orbId: "orb", runtimeInstanceId: "central" };
+          const unavailable: RuntimeClientError = {
+            type: "runtime_client_error",
+            code: "unreachable",
+            message: "Agent temporarily unavailable",
+            answered: false,
+            retryable: true,
+          };
+          const health = vi.fn<AgentPlane["health"]>(() => errAsync(unavailable));
+          const pollHealth = vi.fn<AgentPlane["health"]>(() => {
+            if (failure === "transport") return errAsync(unavailable);
+            return okAsync<RuntimeHealth, RuntimeClientError>(
+              failure === "failed-health"
+                ? {
+                    ...identity,
+                    status: "failed",
+                    error: {
+                      code: "open_failed",
+                      message: "Agent startup failed",
+                      retryable: false,
+                    },
+                  }
+                : ready
+                  ? {
+                      ...identity,
+                      status: "ready",
+                      checkoutCommit: null,
+                      sessionId: "central",
+                      activity: "idle",
+                    }
+                  : { ...identity, status: "initializing", phase: "loading_session" },
+            );
+          });
+          let cancelDelivery = end === "delivery-cancelled";
+          const deliverMessage = vi.fn<AgentPlane["deliverMessage"]>((task, _orb, request) => {
+            if (cancelDelivery) {
+              cancelDelivery = false;
+              return errAsync({ ...unavailable, code: "cancelled", retryable: false });
+            }
+            return commitAgentHistory(task, h.deps, {
+              orbId: identity.orbId,
+              runtimeInstanceId: identity.runtimeInstanceId,
+              activity: "busy",
+              session: { id: "central", overflow: {} },
+              records: [
+                {
+                  id: "record",
+                  parentId: null,
+                  timestamp: new Date(task.wallNow()).toISOString(),
+                  overflow: {},
+                  type: "message",
+                  role: "user",
+                  content: [...request.content],
+                  inboxMessageIds: [...request.messageIds],
+                },
+              ],
+              headId: "record",
+            }).map(() => ({
+              v: 1 as const,
+              messageId: request.messageId,
+              status: "persisted" as const,
+              delivery: "turn" as const,
+              operationId: "turn",
+              duplicate: false,
+            }));
+          });
+          const suspend = vi.fn<AgentPlane["suspend"]>(() => okAsync(undefined));
+          const agent = {
+            placement: "central" as const,
+            health,
+            pollHealth,
+            deliverMessage,
+            pullHistory: () => errAsync(unavailable),
+            prepareIdleStop: () => errAsync(unavailable),
+            suspend,
+            dispose: () => okAsync(undefined),
+            session: () => null,
+            close: () => okAsync(undefined),
+          };
+          const deps = { ...h.deps, agentPlane: new HarnessAgentPlane(agent, agent, h.store) };
+          const claim = vi.spyOn(h.store, "claimOrbMessageBacklog");
+          h.store.seedProject(makeProjectRow("project"));
+          h.store.seedOrb(makeOrbRow("orb", "project", "starting"));
+          const result = await sim.runTasks([
+            {
+              name: "startup",
+              f: async (task) => {
+                started = true;
+                gate.notifyAll(task, "startup held");
+                while (!released) await gate.wait(task, "finish startup");
+                ready = true;
+                gate.notifyAll(task, "startup finished");
+              },
+            },
+            {
+              name: "poller",
+              f: async (task) => {
+                while (!started) await gate.wait(task, "startup entered");
+                for (const messageId of ["first", "second"]) {
+                  (
+                    await h.store.enqueueOrbMessage(task, {
+                      orbId: "orb",
+                      messageId,
+                      content: [{ type: "text", text: messageId }],
+                      now: task.wallNow(),
+                    })
+                  )._unsafeUnwrap();
+                }
+                const queued = h.store.messageSnapshots("orb");
+                for (const verdict of [null, "transport", null, "failed-health"] as const) {
+                  failure = verdict;
+                  expect((await reconcileCentralAgent(task, deps, "orb")).isOk()).toBe(true);
+                  expect(h.store.messageSnapshots("orb")).toEqual(queued);
+                  expect(claim).not.toHaveBeenCalled();
+                  expect(deliverMessage).not.toHaveBeenCalled();
+                }
+                expect(log.matching(" central-agent-unavailable ")).toHaveLength(2);
+                expect(log.matching(" central-delivery-blocked ")).toHaveLength(0);
+                failure = null;
+                if (end === "stop") {
+                  const stopped = (await requestOrbStop(task, deps, "orb"))._unsafeUnwrap();
+                  expect(stopped).toMatchObject({ stopReason: "manual", agentAdmissionVersion: 1 });
+                  expect(suspend).toHaveBeenCalledWith(task, "orb", expect.anything(), 1);
+                }
+                released = true;
+                gate.notifyAll(task, "release startup");
+                while (!ready) await gate.wait(task, "ready");
+                if (end === "delivery-cancelled") {
+                  expect((await reconcileCentralAgent(task, deps, "orb")).isOk()).toBe(true);
+                  expect(h.store.messageSnapshots("orb").map((row) => row.status)).toEqual([
+                    "delivering",
+                    "delivering",
+                  ]);
+                }
+                for (let pass = 0; pass < 2; pass++) {
+                  expect((await reconcileCentralAgent(task, deps, "orb")).isOk()).toBe(true);
+                }
+                expect(health).not.toHaveBeenCalled();
+                if (end === "stop") {
+                  expect(pollHealth).toHaveBeenCalledTimes(4);
+                  expect(claim).not.toHaveBeenCalled();
+                  expect(deliverMessage).not.toHaveBeenCalled();
+                  expect(h.store.messageSnapshots("orb")).toMatchObject(
+                    ["first", "second"].map((messageId) => ({
+                      messageId,
+                      status: "queued",
+                      deliveryBatchId: null,
+                      autoStart: false,
+                    })),
+                  );
+                } else {
+                  expect(pollHealth).toHaveBeenCalledTimes(end === "delivery-cancelled" ? 7 : 6);
+                  expect(deliverMessage).toHaveBeenCalledTimes(
+                    end === "delivery-cancelled" ? 2 : 1,
+                  );
+                  expect(deliverMessage).toHaveBeenLastCalledWith(
+                    task,
+                    expect.anything(),
+                    expect.objectContaining({ messageIds: ["first", "second"] }),
+                    expect.anything(),
+                  );
+                  if (end === "delivery-cancelled")
+                    expect(deliverMessage.mock.calls[0]?.[2]).toEqual(
+                      deliverMessage.mock.calls[1]?.[2],
+                    );
+                  expect(h.store.messageSnapshots("orb").map((row) => row.status)).toEqual([
+                    "delivered",
+                    "delivered",
+                  ]);
+                }
+              },
+            },
+          ]);
+          expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        },
+      );
+    },
+  );
+
   it.each(["deliver", "stop", "sleep"] as const)("fences claimed input after %s", async (fence) => {
     await runDst({ name: `central-dispatch-${fence}-claim`, iterations: 15 }, async (sim) => {
       const h = makeHarness();
@@ -66,8 +260,10 @@ describe("independent central dispatcher", () => {
             v: 1 as const,
             orbId: "orb",
             runtimeInstanceId: "central",
-            status: "initializing" as const,
-            phase: "booting" as const,
+            status: "ready" as const,
+            checkoutCommit: null,
+            sessionId: "central",
+            activity: "idle" as const,
           }),
         deliverMessage: unavailable,
         deliverMessages: (_task, _orb, requests) => {

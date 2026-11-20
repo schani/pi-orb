@@ -35,8 +35,10 @@ function plane(deliver: () => void, work = false): AgentPlane {
         v: 1 as const,
         orbId: "orb",
         runtimeInstanceId: "central",
-        status: "initializing" as const,
-        phase: "booting" as const,
+        status: "ready" as const,
+        checkoutCommit: null,
+        sessionId: "central",
+        activity: "idle" as const,
       }),
     deliverMessage: () => {
       deliver();
@@ -887,9 +889,15 @@ it.each(["probe", "open", "failed-health"] as const)(
         ...base,
         session: () => null,
         recoveryDemand: () => (failing && stage === "probe" ? errAsync(failure) : okAsync(demand)),
-        health: () =>
+        pollHealth: () =>
           initializing
-            ? base.health(task, row, { signal: new AbortController().signal })
+            ? okAsync({
+                v: 1 as const,
+                orbId: "orb",
+                runtimeInstanceId: "central",
+                status: "initializing" as const,
+                phase: "loading_session" as const,
+              })
             : failing
               ? stage === "failed-health"
                 ? okAsync({

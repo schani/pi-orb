@@ -4,6 +4,7 @@ The only backlog: one line per item, linked to the owning doc or postmortem. Del
 
 ## Bugs
 
+- **Central startup stalls:** attribute main event-loop stalls using central startup phase timings and a profile captured during a reproducing workload (`docs/postmortems/2026-11-19-central-agent-open-deadline.md`).
 - **Cloud Run service gaps:** open a Google support case with the instance IDs and decide what one-instance operation can tolerate (`docs/postmortems/2026-11-06-control-plane-blackouts.md`).
 - **Claude query-rotation incidents:** reproduce the initial-close/late-edge ordering before changing quiescence logic (`docs/postmortems/2026-10-13-claude-query-rotation.md`, `docs/postmortems/2026-11-04-claude-query-rotation-1f315657.md`, `docs/postmortems/2026-11-05-claude-query-rotation-93add73b.md`).
 - **Agent-lease database contention:** add real-PostgreSQL pool/lock-contention coverage and bounded pool-acquisition/SQL/transaction timings with backend/operation correlation; identify the original lock chain (`docs/postmortems/2026-10-23-agent-lease-loss-drain.md`).

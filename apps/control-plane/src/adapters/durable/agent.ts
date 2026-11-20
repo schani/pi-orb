@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { BACKGROUND_CONTEXT, type Context } from "@earendil-works/chord/context";
+import { BACKGROUND_CONTEXT, type Context, withAbortSignal } from "@earendil-works/chord/context";
 import type { WatchHandle } from "@earendil-works/chord/watch";
 import {
   type AssistantMessage,
@@ -68,7 +68,7 @@ import type { OrbAgentError } from "../../domain/orb-agent-operations.ts";
 import type { DeliverMessageClientRequest } from "../../domain/ports.ts";
 import type { AuthorityError } from "../durable-pg/index.ts";
 import { storageAuthorityError } from "../durable-pg/storage-boundary.ts";
-import { durableError } from "./manager.ts";
+import { cancelledOpen, durableError, type StartupFailure } from "./manager.ts";
 import { fenceModels } from "./model-fence.ts";
 import { meterModels } from "./model-usage.ts";
 import { nativeInputContent } from "./native-input.ts";
@@ -226,7 +226,7 @@ export class DurableAgent implements AgentSessionFacade {
   private readonly operationKind = "agent";
   private closing = false;
   private revokeResources: (() => void) | undefined;
-  private paused: boolean;
+  private paused = true;
   private closeResult: ResultAsync<void, RuntimeClientError> | null = null;
   private operationOutcome: "completed" | "aborted" | "failed" = "completed";
   private failure: RuntimeClientError | null = null;
@@ -243,7 +243,6 @@ export class DurableAgent implements AgentSessionFacade {
   private readonly root: Conversation;
   private constructor(options: DurableAgentOptions, harness: Harness, root: Conversation) {
     this.options = options;
-    this.paused = options.resume === false;
     this.harness = harness;
     this.root = root;
     const summary = options.turnSummary;
@@ -302,6 +301,20 @@ export class DurableAgent implements AgentSessionFacade {
   }
 
   static open(options: DurableAgentOptions): ResultAsync<DurableAgent, RuntimeClientError> {
+    return DurableAgent.build(options)
+      .mapErr((error) => (error.type === "startup_cleanup_failed" ? error.error : error))
+      .andThen((agent) =>
+        agent
+          .activate()
+          .map(() => agent)
+          .orElse((error) => agent.close().andThen(() => errAsync(error))),
+      );
+  }
+
+  /** Build while the native scheduler and external resources are still inactive. */
+  static build(options: DurableAgentOptions): ResultAsync<DurableAgent, StartupFailure> {
+    const openContext = options.openSignal ? withAbortSignal(options.openSignal, context) : context;
+    const openAborted = () => options.openSignal?.aborted || options.ownershipSignal?.aborted;
     let harness: Harness | undefined;
     let stage = "registry";
     let owner: DurableAgent | undefined;
@@ -316,6 +329,7 @@ export class DurableAgent implements AgentSessionFacade {
       : options.models;
     return ResultAsync.fromPromise(
       (async () => {
+        if (openAborted()) return err(cancelledOpen());
         options.registry.install(promptExtension(options.instructions));
         stage = "storage";
         harness = await Harness.open(
@@ -334,7 +348,7 @@ export class DurableAgent implements AgentSessionFacade {
               else void owner.reportFailure(report);
             },
           },
-          context,
+          openContext,
         );
         const startupStorageFailure = reports.find((report) => report.kind === "storage_failed");
         if (startupStorageFailure) {
@@ -354,7 +368,7 @@ export class DurableAgent implements AgentSessionFacade {
           thinkingLevel: "high" as const,
         };
         stage = "root";
-        const root = await harness.root(context, {
+        const root = await harness.root(openContext, {
           agent: {
             cwd: options.env.cwd,
             model: { provider: initial.model.provider, modelId: initial.model.id },
@@ -365,7 +379,7 @@ export class DurableAgent implements AgentSessionFacade {
         const priorIdentity = await options.storage.findDocument(
           { kind: "orb.identity", scope: { kind: "conversation", conversationId: root.id } },
           "current",
-          context,
+          openContext,
         );
         const identity = await root.commit(async (tx) => {
           const doc = await tx.doc(Identity, root.id);
@@ -389,14 +403,14 @@ export class DurableAgent implements AgentSessionFacade {
             receipts: JSON.parse(JSON.stringify(doc.receipts)) as Record<string, Receipt>,
             settings: JSON.parse(JSON.stringify(doc.settings ?? {})) as Record<string, string>,
           };
-        }, context);
+        }, openContext);
         await root.configure(
           {
             cwd: options.env.cwd,
             ...(options.modelTools ? { tools: null, modelTools: options.modelTools } : {}),
             ...(options.childExtension ? { extensions: { remove: [options.childExtension] } } : {}),
           },
-          context,
+          openContext,
         );
         const rootStorageFailure = reports.find((report) => report.kind === "storage_failed");
         if (rootStorageFailure) {
@@ -420,11 +434,12 @@ export class DurableAgent implements AgentSessionFacade {
         let unfinishedSubmissions = false;
         let submissionCursor: Cursor | undefined;
         do {
+          if (openAborted()) return err(cancelledOpen());
           const page = await options.storage.scanSubmissions(
             { conversationId: root.id },
             256,
             submissionCursor,
-            context,
+            openContext,
           );
           for (const submission of page.items) {
             if (submission.status === "queued" || submission.status === "placed")
@@ -441,7 +456,8 @@ export class DurableAgent implements AgentSessionFacade {
         } while (submissionCursor !== undefined);
         let cursor: Cursor | undefined;
         do {
-          const page = await root.entries({}, 256, cursor, context);
+          if (openAborted()) return err(cancelledOpen());
+          const page = await root.entries({}, 256, cursor, openContext);
           agent.pendingEntries.unshift(...[...page.items].reverse());
           cursor = page.next;
         } while (cursor !== undefined);
@@ -517,13 +533,12 @@ export class DurableAgent implements AgentSessionFacade {
         });
         const recoveredTasks = Object.keys(agent.tasks.tasks);
         const recovering = recoveredTasks.length > 0 || unfinishedSubmissions;
+        if (openAborted()) return err(cancelledOpen());
         if (recovering && options.resume !== false) {
           stage = "recovery budget";
           const admitted = await options.admitRecovery?.();
-          if (admitted?.isErr()) {
-            await agent.close();
-            return err(admitted.error);
-          }
+          if (admitted?.isErr()) return err(admitted.error);
+          if (openAborted()) return err(cancelledOpen());
           stage = "restart notice";
           await root.commit(
             (tx) =>
@@ -531,65 +546,101 @@ export class DurableAgent implements AgentSessionFacade {
                 kind: "orb.harness-restarted",
                 data: { timestamp: agent.now(), taskIds: recoveredTasks },
               }),
-            context,
+            openContext,
           );
         }
         stage = "projection";
         const projected = await agent.queueProjection();
-        if (projected.isErr()) {
-          await agent.close();
-          return err(projected.error);
-        }
+        if (projected.isErr()) return err(projected.error);
         const edge = await options.edge?.("harness.opened", {
           orbId: options.orbId,
           sessionId: identity.sessionId,
           recovered: recovering,
-          readonly: agent.paused,
+          readonly: options.resume === false,
           processId: process.pid,
         });
-        if (edge?.isErr()) {
-          await agent.close();
-          return err(edge.error);
-        }
-        const admitted = await options.checkAdmission?.();
-        if (admitted?.isErr() || options.openSignal?.aborted) {
-          await agent.close();
-          return err(admitted?.isErr() ? admitted.error : durableError("agent open cancelled"));
-        }
-        agent.updateStatus();
-        stage = "resume";
-        if (options.resume !== false) {
-          await root.submitMany([], context);
-          agent.revokeResources = options.activateResources?.(agent.appendAlert.bind(agent));
-          harness.resume();
-        }
+        if (edge?.isErr()) return err(edge.error);
+        if (openAborted() || !agent.accepting()) return err(cancelledOpen());
         return ok(agent);
       })(),
       (error) => {
         const terminal = storageAuthorityError(error);
         return terminal
-          ? startupRuntimeError(terminal)
-          : durableError(`central Harness initialization failed (${stage})`);
+          ? terminal.code === "stale_owner" && openAborted()
+            ? cancelledOpen()
+            : startupRuntimeError(terminal)
+          : openAborted()
+            ? cancelledOpen()
+            : durableError(`central Harness initialization failed (${stage})`);
       },
     )
       .andThen((result) => result)
-      .orElse((error) => {
-        const cleanup = harness
-          ? ResultAsync.fromPromise(harness.close(context), () =>
-              durableError("failed Harness cleanup failed"),
-            )
-          : ResultAsync.fromPromise(options.storage.close(context), () =>
-              durableError("failed storage cleanup failed"),
-            );
-        return ResultAsync.fromSafePromise(
-          (async () => {
-            await cleanup;
-            await closeResources();
-            await options.edge?.("harness.open_failed", { orbId: options.orbId, stage });
-            return err<DurableAgent, RuntimeClientError>(error);
-          })(),
-        ).andThen((result) => result);
-      });
+      .orElse(
+        (error): ResultAsync<DurableAgent, StartupFailure> =>
+          ResultAsync.fromPromise(
+            (async () => {
+              const cleanup = owner
+                ? await owner.closeAgent(false)
+                : await ResultAsync.combine([
+                    ResultAsync.fromPromise(
+                      harness ? harness.close(context) : options.storage.close(context),
+                      () => durableError("failed Harness cleanup failed"),
+                    ),
+                    closeResources(),
+                  ]);
+              await options.edge?.("harness.open_failed", { orbId: options.orbId, stage });
+              return err<DurableAgent, StartupFailure>(
+                cleanup.isErr() ? { type: "startup_cleanup_failed", error: cleanup.error } : error,
+              );
+            })(),
+            (): StartupFailure => ({
+              type: "startup_cleanup_failed",
+              error: durableError("failed Harness cleanup failed"),
+            }),
+          ).andThen((result) => result),
+      );
+  }
+
+  /** Only a published owner may cross this boundary in the manager path. */
+  activate(): ResultAsync<void, RuntimeClientError> {
+    const { openSignal, ownershipSignal } = this.options;
+    const cancelled = () => openSignal?.aborted || ownershipSignal?.aborted || !this.accepting();
+    const openContext = openSignal ? withAbortSignal(openSignal, context) : context;
+    return ResultAsync.fromPromise(
+      (async () => {
+        if (cancelled()) return err(cancelledOpen());
+        const admitted = await this.options.checkAdmission?.();
+        if (admitted?.isErr() && !ownershipSignal?.aborted) return err(admitted.error);
+        if (cancelled()) return err(cancelledOpen());
+        if (this.options.resume !== false) {
+          this.paused = false;
+          this.updateStatus();
+          // Place any orphan queued inputs without enabling native work before the startup guard.
+          await this.root.submitMany([], openContext, { deferScheduling: true });
+          if (cancelled()) return err(cancelledOpen());
+          const revoke = this.options.activateResources?.(this.appendAlert.bind(this));
+          if (cancelled()) {
+            revoke?.();
+            return err(cancelledOpen());
+          }
+          this.revokeResources = revoke;
+          this.harness.resume();
+        } else {
+          this.updateStatus();
+        }
+        return ok(undefined);
+      })(),
+      (error) => {
+        const terminal = storageAuthorityError(error);
+        return terminal
+          ? terminal.code === "stale_owner" && cancelled()
+            ? cancelledOpen()
+            : startupRuntimeError(terminal)
+          : cancelled()
+            ? cancelledOpen()
+            : durableError("central Harness initialization failed (resume)");
+      },
+    ).andThen((result) => result);
   }
 
   private storageFailed(error: unknown): void {
@@ -1482,6 +1533,10 @@ export class DurableAgent implements AgentSessionFacade {
   }
 
   close(): ResultAsync<void, RuntimeClientError> {
+    return this.closeAgent(true);
+  }
+
+  private closeAgent(includeProjectionFailure: boolean): ResultAsync<void, RuntimeClientError> {
     if (this.closeResult) return this.closeResult;
     this.revoke();
     this.summaryAbort.abort();
@@ -1498,14 +1553,14 @@ export class DurableAgent implements AgentSessionFacade {
         await this.summaryCoordinator?.drain();
         await this.summaryOutcomes;
         this.unsubscribeCommits();
-        await this.view.stop();
-        await this.graph.stop();
+        await this.view?.stop();
+        await this.graph?.stop();
         const resources = await this.options.closeResources?.();
         const failed = draining?.isErr()
           ? { stage: "drain", error: draining.error }
           : suspended.isErr()
             ? { stage: "native", error: suspended.error }
-            : projected.isErr()
+            : includeProjectionFailure && projected.isErr()
               ? { stage: "projection", error: projected.error }
               : resources?.isErr()
                 ? { stage: "resources", error: resources.error }

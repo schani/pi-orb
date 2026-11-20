@@ -35,19 +35,33 @@ export interface AgentOwnership<T> {
   active?(agent: T): boolean;
 }
 
-type AgentOwner<T> = { admissionVersion: number; agent: T } & (
-  | { state: "owned" }
-  | { state: "retiring"; closed: ResultAsync<void, RuntimeClientError> }
-);
+type Revocation = "superseded" | "suspend" | "dispose" | "shutdown";
+
+type Owned<T> = { state: "owned"; admissionVersion: number; agent: T };
+type AgentOwner<T> =
+  | Owned<T>
+  | { state: "retiring"; admissionVersion: number; closed: ResultAsync<void, RuntimeClientError> };
+
+export type StartupFailure =
+  | RuntimeClientError
+  | { type: "startup_cleanup_failed"; error: RuntimeClientError };
+
+type Publish<T> = (agent: T, openSignal?: AbortSignal) => Result<void, RuntimeClientError>;
+type Open<T> = (signal: AbortSignal, publish: Publish<T>) => ResultAsync<T, StartupFailure>;
+
+function startupError(error: RuntimeClientError, signal: AbortSignal): RuntimeClientError {
+  return signal.aborted && error.code === "cancelled" ? cancelledOpen() : error;
+}
 
 /** One mutation line per orb; shutdown joins every previously admitted open. */
 export class OrbAgentManager<T> {
   private readonly agents = new Map<string, AgentOwner<T>>();
   private readonly queues = new Map<string, Promise<void>>();
   private readonly disposed = new Set<string>();
-  private readonly suspended = new Set<string>();
+  private readonly suspended = new Map<string, boolean>();
   private readonly admissions = new Map<string, number>();
   private readonly tickets = new Map<string, number>();
+  private readonly opening = new Map<string, AbortController>();
   private closing = false;
   private readonly ownership: AgentOwnership<T>;
   constructor(ownership: AgentOwnership<T>) {
@@ -93,20 +107,42 @@ export class OrbAgentManager<T> {
     return closed;
   }
 
+  admit(
+    orbId: string,
+    admissionVersion: number,
+    resume: "always" | "newer" | "never",
+  ): Result<void, RuntimeClientError> {
+    const floor = this.admissions.get(orbId) ?? 0;
+    if (this.closing || this.disposed.has(orbId))
+      return err(durableError("agent admissions are closed"));
+    if (admissionVersion < floor) return err(durableError("stale agent admission authority"));
+    if (
+      this.suspended.has(orbId) &&
+      (resume === "never" ||
+        (resume === "newer" && this.suspended.get(orbId) && admissionVersion === floor))
+    )
+      return err(durableError("agent admissions are closed"));
+    this.admissions.set(orbId, admissionVersion);
+    if (admissionVersion > floor) {
+      this.suspended.delete(orbId);
+      this.opening.get(orbId)?.abort("superseded" satisfies Revocation);
+    }
+    const previous = this.agents.get(orbId);
+    if (previous?.state === "owned" && previous.admissionVersion < admissionVersion)
+      this.ownership.revoke?.(previous.agent);
+    return ok(undefined);
+  }
+
   ensure(
     orbId: string,
     admissionVersion: number,
-    open?: () => ResultAsync<T, RuntimeClientError>,
+    open?: Open<T>,
     resume = false,
+    waiter?: AbortSignal,
   ): ResultAsync<T, RuntimeClientError> {
-    if (this.closing || this.disposed.has(orbId) || (this.suspended.has(orbId) && !resume))
-      return new ResultAsync(Promise.resolve(err(durableError("agent admissions are closed"))));
-    if (admissionVersion < (this.admissions.get(orbId) ?? 0))
-      return errAsync(durableError("stale agent admission authority"));
-    this.admissions.set(orbId, admissionVersion);
-    const previous = this.agents.get(orbId);
-    if (previous && previous.admissionVersion < admissionVersion)
-      this.ownership.revoke?.(previous.agent);
+    if (waiter?.aborted) return errAsync(cancelledOpen(false));
+    const admission = this.admit(orbId, admissionVersion, resume ? "always" : "never");
+    if (admission.isErr()) return errAsync(admission.error);
     const ticket = this.tickets.get(orbId) ?? 0;
     const admitted = () =>
       !this.closing &&
@@ -114,8 +150,9 @@ export class OrbAgentManager<T> {
       ticket === (this.tickets.get(orbId) ?? 0) &&
       this.admissions.get(orbId) === admissionVersion;
     return this.serial(orbId, async () => {
+      if (waiter?.aborted) return err(cancelledOpen(false));
       if (!admitted()) return err(durableError("agent admission superseded"));
-      if (resume) this.suspended.delete(orbId);
+      if (resume && this.suspended.get(orbId) === false) this.suspended.delete(orbId);
       const existing = this.agents.get(orbId);
       if (
         existing?.state === "owned" &&
@@ -127,32 +164,91 @@ export class OrbAgentManager<T> {
         const closed = await this.retire(orbId, existing);
         if (closed.isErr()) return err(closed.error);
       }
-      const opened = await (open ? open() : this.ownership.open(orbId, admissionVersion));
-      if (opened.isOk()) {
-        const owner: AgentOwner<T> = { state: "owned", admissionVersion, agent: opened.value };
-        this.agents.set(orbId, owner);
-        if (!admitted()) {
-          const closed = await this.retire(orbId, owner);
-          return closed.isErr()
-            ? err(closed.error)
-            : err(durableError("agent admission superseded"));
+      if (waiter?.aborted) return err(cancelledOpen(false));
+      if (!admitted()) return err(durableError("agent admission superseded"));
+      const controller = new AbortController();
+      this.opening.set(orbId, controller);
+      let candidate: Owned<T> | undefined;
+      const publish: Publish<T> = (agent, openSignal) => {
+        candidate = { state: "owned", admissionVersion, agent };
+        if (openSignal?.aborted) return err(cancelledOpen());
+        if (waiter?.aborted) return err(cancelledOpen(false));
+        if (!admitted() || this.ownership.active?.(agent) === false)
+          return err(durableError("agent admission superseded"));
+        this.agents.set(orbId, candidate);
+        return ok(undefined);
+      };
+      try {
+        const opened = await ResultAsync.fromPromise(
+          (async () =>
+            open
+              ? open(controller.signal, publish)
+              : this.ownership.open(orbId, admissionVersion))(),
+          () => durableError("agent ownership open failed"),
+        ).andThen((result) => result);
+        const result = opened.match<Result<T, RuntimeClientError>>(
+          (agent) => (candidate ? ok(agent) : publish(agent).map(() => agent)),
+          (failure) => {
+            if (failure.type !== "startup_cleanup_failed") return err(failure);
+            const { error } = failure;
+            this.agents.set(orbId, {
+              state: "retiring",
+              admissionVersion,
+              closed: errAsync(error),
+            });
+            return err(error);
+          },
+        );
+        if (opened.isErr() && opened.error.type === "startup_cleanup_failed") return result;
+        if (
+          result.isOk() &&
+          !waiter?.aborted &&
+          admitted() &&
+          this.ownership.active?.(result.value) !== false
+        )
+          return result;
+        if (candidate) {
+          const closed = await this.retire(orbId, candidate);
+          if (closed.isErr()) return err(closed.error);
         }
+        return result.isErr()
+          ? result
+          : err(
+              waiter?.aborted ? cancelledOpen(false) : durableError("agent admission superseded"),
+            );
+      } finally {
+        this.opening.delete(orbId);
       }
-      return opened;
     });
   }
 
-  suspend(orbId: string, throughAdmissionVersion?: number): ResultAsync<void, RuntimeClientError> {
+  isOpening(orbId: string): boolean {
+    return this.opening.has(orbId);
+  }
+
+  hasNewerAuthority(orbId: string, throughAdmissionVersion: number): boolean {
+    return (this.admissions.get(orbId) ?? 0) > throughAdmissionVersion;
+  }
+
+  suspend(
+    orbId: string,
+    throughAdmissionVersion?: number,
+    origin: Revocation = "suspend",
+  ): ResultAsync<void, RuntimeClientError> {
     if (
       throughAdmissionVersion !== undefined &&
-      (this.admissions.get(orbId) ?? 0) > throughAdmissionVersion
+      this.hasNewerAuthority(orbId, throughAdmissionVersion)
     )
       return okAsync(undefined);
     if (throughAdmissionVersion !== undefined) this.admissions.set(orbId, throughAdmissionVersion);
-    this.suspended.add(orbId);
+    this.suspended.set(
+      orbId,
+      throughAdmissionVersion !== undefined || this.suspended.get(orbId) === true,
+    );
     const owned = this.agents.get(orbId);
-    if (owned) this.ownership.revoke?.(owned.agent);
+    if (owned?.state === "owned") this.ownership.revoke?.(owned.agent);
     this.tickets.set(orbId, (this.tickets.get(orbId) ?? 0) + 1);
+    this.opening.get(orbId)?.abort(origin);
     return this.serial(orbId, async () => {
       const existing = this.agents.get(orbId);
       if (
@@ -182,18 +278,64 @@ export class OrbAgentManager<T> {
 
   dispose(orbId: string): ResultAsync<void, RuntimeClientError> {
     this.disposed.add(orbId);
-    return this.suspend(orbId);
+    return this.suspend(orbId, undefined, "dispose");
   }
 
   close(): ResultAsync<void, RuntimeClientError> {
     this.closing = true;
     return ResultAsync.combine(
-      [...new Set([...this.agents.keys(), ...this.queues.keys()])].map((id) => this.suspend(id)),
+      [...new Set([...this.agents.keys(), ...this.queues.keys()])].map((id) =>
+        this.suspend(id, undefined, "shutdown"),
+      ),
     ).map(() => undefined);
   }
 }
 
+const POLL_STARTUP_BUDGET_MS = 30_000;
+
+export const cancelledOpen = (retryable = true) => ({
+  ...durableError("agent open cancelled", retryable),
+  code: "cancelled" as const,
+});
+
+type StartupAbort = Revocation | "deadline" | "lease" | "composition";
+type StartupStage = "check_ms" | "prepare_ms" | "lease_ms" | "compose_ms" | "harness_ms";
+
+type StartupTrace = {
+  readonly stages: Partial<Record<StartupStage, number>>;
+  abortOrigin?: StartupAbort;
+};
+
+const elapsedMs = (task: SimulationTask, startedAt: number) =>
+  Math.max(0, Math.round(task.monotonicNow() - startedAt));
+
+// Determined deadlines are structurally compatible, but not native AbortSignals.
+function relaySignal(signal: AbortSignal, abort: () => void): () => void {
+  if (signal.aborted) abort();
+  else signal.addEventListener("abort", abort, { once: true });
+  return () => signal.removeEventListener("abort", abort);
+}
+
+type PollStartup = {
+  readonly version: number;
+  readonly readOnly: boolean;
+  readonly trace: StartupTrace;
+  readonly completion: ResultAsync<DurableAgent, RuntimeClientError>;
+  invalidated: boolean;
+  outcome?: Result<DurableAgent, RuntimeClientError>;
+};
+
 export interface DurableAgentPlaneOptions {
+  /**
+   * Run and join one startup on an independently owned task, not the poll lane.
+   * The supplied task must remain usable by resources (e.g. the lease heartbeat)
+   * for the lifetime of the owner. Without a runner, pollHealth joins ordinary
+   * health on its caller's task (for scoped simulations).
+   */
+  readonly runStartup?: (
+    orbId: string,
+    run: (task: SimulationTask) => Promise<void>,
+  ) => Promise<void>;
   readonly persistence: AgentPersistence;
   /** Persist required repository resources before acquiring an agent ownership lease. */
   readonly prepare?: (
@@ -223,11 +365,9 @@ export interface DurableAgentPlaneOptions {
 export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
   readonly placement = "central" as const;
   private readonly handles = new Map<string, StableAgentHandle>();
-  private readonly opening = new Map<string, { version: number; abort: AbortController }>();
-  private readonly contexts = new Map<
-    string,
-    { task: SimulationTask; orb: OrbRow; context: OperationContext }
-  >();
+  private readonly pollStarts = new Map<string, PollStartup>();
+  private readonly ownerModes = new WeakMap<DurableAgent, boolean>();
+  private readonly contexts = new Map<string, { task: SimulationTask; orb: OrbRow }>();
   private readonly manager = new OrbAgentManager<DurableAgent>({
     open: () => errAsync(durableError("missing central agent open context")),
     close: (agent) => agent.close(),
@@ -290,91 +430,257 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
     return this.options.persistence.checkStartup?.(task, orb, context) ?? okAsync(undefined);
   }
 
+  private openAgent(
+    task: SimulationTask,
+    orb: OrbRow,
+    context: OperationContext,
+    readOnly: boolean,
+    publish: Publish<DurableAgent>,
+    trace?: StartupTrace,
+  ): ResultAsync<DurableAgent, StartupFailure> {
+    const timed = async <T>(stage: StartupStage, run: () => PromiseLike<T>): Promise<T> => {
+      if (!trace) return run();
+      const began = task.monotonicNow();
+      try {
+        return await run();
+      } finally {
+        trace.stages[stage] = elapsedMs(task, began);
+      }
+    };
+    return ResultAsync.fromPromise(
+      (async (): Promise<Result<DurableAgent, StartupFailure>> => {
+        if (context.signal.aborted) return err(cancelledOpen());
+        const checked = await timed("check_ms", () => this.checkStartup(task, orb, context));
+        if (checked.isErr()) return err(startupError(checked.error, context.signal));
+        if (context.signal.aborted) return err(cancelledOpen());
+        const prepared = await timed(
+          "prepare_ms",
+          () => this.options.prepare?.(task, orb, context) ?? okAsync(undefined),
+        );
+        if (prepared.isErr()) return err(startupError(prepared.error, context.signal));
+        if (context.signal.aborted) return err(cancelledOpen());
+        const acquired = await timed("lease_ms", () =>
+          this.options.persistence.open(task, orb, context),
+        );
+        if (acquired.isErr()) return err(startupError(acquired.error, context.signal));
+        const lease = acquired.value;
+        const operation = { signal: AbortSignal.any([context.signal, lease.signal]) };
+        const detachLeaseTrace = relaySignal(lease.signal, () => {
+          if (trace) trace.abortOrigin ??= "lease";
+        });
+        let released: ResultAsync<void, RuntimeClientError> | undefined;
+        let handedOff = false;
+        const release = () => {
+          detachLeaseTrace();
+          released ??= ResultAsync.fromThrowable(
+            async () => lease.release(),
+            () => durableError("agent ownership release failed"),
+          )().andThen((result) => result);
+          return released;
+        };
+        const opened = await ResultAsync.fromPromise(
+          (async (): Promise<Result<DurableAgent, StartupFailure>> => {
+            if (operation.signal.aborted) return err(cancelledOpen());
+            const composed = await timed("compose_ms", () =>
+              this.options.openContext(task, orb, operation, readOnly, lease),
+            );
+            if (composed.isErr()) return err(startupError(composed.error, operation.signal));
+            const options = composed.value;
+            const controller = new AbortController();
+            const detachOpen =
+              options.openSignal &&
+              relaySignal(options.openSignal, () => {
+                if (trace) trace.abortOrigin ??= "composition";
+                controller.abort();
+              });
+            const openSignal = AbortSignal.any([operation.signal, controller.signal]);
+            let detachOwner = () => {};
+            const closeResources = () => {
+              detachOpen?.();
+              detachOwner();
+              return ResultAsync.combine([
+                ResultAsync.fromThrowable(
+                  async () => options.closeResources?.() ?? okAsync(undefined),
+                  () => durableError("agent startup resources close failed"),
+                )().andThen((result) => result),
+                release(),
+              ]).map(() => undefined);
+            };
+            try {
+              if (openSignal.aborted) {
+                const closed = await closeResources();
+                return err(
+                  closed.isErr()
+                    ? { type: "startup_cleanup_failed", error: closed.error }
+                    : cancelledOpen(),
+                );
+              }
+              return await timed("harness_ms", async () => {
+                const built = await DurableAgent.build({
+                  ...options,
+                  ...(readOnly ? { resume: false } : {}),
+                  orbId: orb.id,
+                  storage: lease.storage,
+                  openSignal,
+                  ownershipSignal: lease.signal,
+                  beginDrain: lease.beginDrain,
+                  checkInputAdmission: lease.checkInputAdmission,
+                  checkAdmission: () =>
+                    lease.check().andThen(() => options.checkAdmission?.() ?? okAsync(undefined)),
+                  closeResources,
+                });
+                if (built.isErr()) {
+                  return built.error.type === "startup_cleanup_failed"
+                    ? err(built.error)
+                    : err(startupError(built.error, openSignal));
+                }
+                const agent = built.value;
+                handedOff = true;
+                const published = publish(agent, openSignal);
+                if (published.isErr()) return err(published.error);
+                this.ownerModes.set(agent, readOnly);
+                detachOwner = relaySignal(lease.signal, () => {
+                  agent.revoke();
+                  void agent.close();
+                });
+                const activated = await agent.activate();
+                return activated.isErr()
+                  ? err(startupError(activated.error, openSignal))
+                  : ok(agent);
+              });
+            } finally {
+              detachOpen?.();
+            }
+          })(),
+          () => (operation.signal.aborted ? cancelledOpen() : durableError("agent startup failed")),
+        ).andThen((result) => result);
+        detachLeaseTrace();
+        if (!handedOff) {
+          const cleanup = await release();
+          if (cleanup.isErr()) {
+            logOrbEvent(task, orb.id, "agent.startup_cleanup_failed", {
+              code: cleanup.error.code,
+              admission_version: orb.agentAdmissionVersion,
+            });
+            if (opened.isOk() || opened.error.type !== "startup_cleanup_failed")
+              return err({ type: "startup_cleanup_failed", error: cleanup.error });
+          }
+        }
+        return opened;
+      })(),
+      () => (context.signal.aborted ? cancelledOpen() : durableError("agent startup failed")),
+    ).andThen((result) => result);
+  }
+
+  private attach(
+    orb: OrbRow,
+    agent: DurableAgent,
+    readOnly: boolean,
+  ): Result<DurableAgent, RuntimeClientError> {
+    if (!readOnly && this.ownerModes.get(agent))
+      return err(durableError("agent authority mode changed"));
+    if (this.manager.get(orb.id, orb.agentAdmissionVersion) !== agent || !agent.accepting())
+      return err(durableError("agent admission superseded"));
+    this.handleFor(orb.id).attach(agent);
+    return ok(agent);
+  }
+
   private ensure(task: SimulationTask, orb: OrbRow, context: OperationContext, readOnly = false) {
-    if (context.signal.aborted)
-      return errAsync({ ...durableError("agent open cancelled"), code: "cancelled" as const });
-    this.contexts.set(orb.id, { task, orb, context });
-    let opening = this.opening.get(orb.id);
-    if (!opening || opening.version !== orb.agentAdmissionVersion || opening.abort.signal.aborted) {
-      opening?.abort.abort();
-      opening = { version: orb.agentAdmissionVersion, abort: new AbortController() };
-      this.opening.set(orb.id, opening);
+    if (context.signal.aborted) return errAsync(cancelledOpen(false));
+    const admission = this.manager.admit(
+      orb.id,
+      orb.agentAdmissionVersion,
+      readOnly ? "always" : "newer",
+    );
+    if (admission.isErr()) return errAsync(admission.error);
+    this.invalidateStartup(orb.id, "superseded", orb.agentAdmissionVersion - 1);
+    this.rememberContext(task, orb);
+    const start = this.pollStarts.get(orb.id);
+    if (
+      start &&
+      !start.invalidated &&
+      !start.outcome &&
+      start.version === orb.agentAdmissionVersion
+    ) {
+      if (!readOnly && start.readOnly)
+        return errAsync(durableError("agent authority mode changed"));
+      return new ResultAsync(
+        new Promise<Result<DurableAgent, RuntimeClientError>>((resolve) => {
+          const abort = () => resolve(err(cancelledOpen(false)));
+          context.signal.addEventListener("abort", abort, { once: true });
+          void start.completion.then((result) => {
+            context.signal.removeEventListener("abort", abort);
+            if (context.signal.aborted) abort();
+            else resolve(result);
+          });
+          if (context.signal.aborted) abort();
+        }),
+      );
     }
-    const admittedContext = { signal: AbortSignal.any([context.signal, opening.abort.signal]) };
     return this.manager
       .ensure(
         orb.id,
         orb.agentAdmissionVersion,
-        () =>
-          this.checkStartup(task, orb, admittedContext)
-            .andThen(() => this.options.prepare?.(task, orb, admittedContext) ?? okAsync(undefined))
-            .andThen(() => this.options.persistence.open(task, orb, admittedContext))
-            .andThen((lease) =>
-              this.options
-                .openContext(task, orb, admittedContext, readOnly, lease)
-                .andThen((options) =>
-                  DurableAgent.open({
-                    ...options,
-                    ...(readOnly ? { resume: false } : {}),
-                    orbId: orb.id,
-                    storage: lease.storage,
-                    ownershipSignal: lease.signal,
-                    beginDrain: lease.beginDrain,
-                    checkInputAdmission: lease.checkInputAdmission,
-                    checkAdmission: () =>
-                      lease.check().andThen(() => options.checkAdmission?.() ?? okAsync(undefined)),
-                    closeResources: () =>
-                      ResultAsync.combine([
-                        options.closeResources?.() ?? okAsync(undefined),
-                        lease.release(),
-                      ]).map(() => undefined),
-                  }).map((agent) => {
-                    lease.signal.addEventListener(
-                      "abort",
-                      () => {
-                        agent.revoke();
-                        void agent.close();
-                      },
-                      { once: true },
-                    );
-                    if (lease.signal.aborted) agent.revoke();
-                    return agent;
-                  }),
-                )
-                .orElse((error) =>
-                  lease
-                    .release()
-                    .orElse((cleanup) => {
-                      logOrbEvent(task, orb.id, "agent.startup_cleanup_failed", {
-                        code: cleanup.code,
-                        startup_code: error.code,
-                        admission_version: orb.agentAdmissionVersion,
-                      });
-                      return okAsync(undefined);
-                    })
-                    .andThen(() => errAsync(error)),
-                ),
-            ),
+        (scope, publish) => {
+          const controller = new AbortController();
+          const detach = relaySignal(context.signal, () => controller.abort());
+          return this.openAgent(
+            task,
+            orb,
+            { signal: AbortSignal.any([controller.signal, scope]) },
+            readOnly,
+            publish,
+          )
+            .andTee(detach)
+            .orTee(detach);
+        },
         true,
+        context.signal,
       )
-      .map((agent) => {
-        this.handleFor(orb.id).attach(agent);
-        return agent;
-      });
+      .andThen((agent) =>
+        context.signal.aborted ? err(cancelledOpen(false)) : this.attach(orb, agent, readOnly),
+      );
+  }
+
+  private rememberContext(task: SimulationTask, orb: OrbRow) {
+    const previous = this.contexts.get(orb.id)?.orb;
+    if (
+      !previous ||
+      previous.agentAdmissionVersion < orb.agentAdmissionVersion ||
+      (previous.agentAdmissionVersion === orb.agentAdmissionVersion &&
+        previous.stateVersion <= orb.stateVersion)
+    )
+      this.contexts.set(orb.id, { task, orb });
+  }
+
+  private readonlyMode(orb: OrbRow): boolean {
+    return (
+      orb.stopReason === "manual" ||
+      orb.stopReason === "sleep" ||
+      orb.state === "deleting" ||
+      orb.state === "archiving" ||
+      orb.state === "archived"
+    );
   }
 
   health(task: SimulationTask, orb: OrbRow, context: OperationContext) {
-    return this.ensure(task, orb, context)
-      .map((agent) => {
-        if (
-          orb.stopReason !== "manual" &&
-          orb.stopReason !== "sleep" &&
-          orb.state !== "deleting" &&
-          orb.state !== "archiving" &&
-          orb.state !== "archived"
-        )
-          agent.resume();
-        return agent.health();
+    return this.healthResult(orb, context, this.ensure(task, orb, context, this.readonlyMode(orb)));
+  }
+
+  private healthResult(
+    orb: OrbRow,
+    context: OperationContext,
+    result: ResultAsync<DurableAgent, RuntimeClientError>,
+  ) {
+    return result
+      .andThen((agent) => {
+        if (context.signal.aborted) return err(cancelledOpen(false));
+        if (!this.readonlyMode(orb) && this.ownerModes.get(agent))
+          return err(durableError("agent authority mode changed"));
+        if (this.manager.get(orb.id, orb.agentAdmissionVersion) !== agent || !agent.accepting())
+          return err(durableError("agent admission superseded"));
+        if (!this.readonlyMode(orb)) agent.resume();
+        return ok(agent.health());
       })
       .orElse((failure) =>
         failure.answered && failure.initializationHealth !== undefined
@@ -391,6 +697,136 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
               })
             : errAsync(failure),
       );
+  }
+
+  pollHealth(
+    task: SimulationTask,
+    orb: OrbRow,
+    context: OperationContext,
+  ): ResultAsync<RuntimeHealth, RuntimeClientError> {
+    if (context.signal.aborted) return errAsync(cancelledOpen(false));
+    const runStartup = this.options.runStartup;
+    if (!runStartup) return this.health(task, orb, context);
+    const readOnly = this.readonlyMode(orb);
+    const admission = this.manager.admit(orb.id, orb.agentAdmissionVersion, "newer");
+    if (admission.isErr()) return errAsync(admission.error);
+    this.invalidateStartup(orb.id, "superseded", orb.agentAdmissionVersion - 1);
+    this.rememberContext(task, orb);
+    const loading = (): ResultAsync<RuntimeHealth, RuntimeClientError> =>
+      okAsync({
+        v: 1,
+        orbId: orb.id,
+        runtimeInstanceId: `agent:${orb.id}`,
+        status: "initializing",
+        phase: "loading_session",
+      });
+    const previous = this.pollStarts.get(orb.id);
+    if (previous) {
+      if (!previous.outcome) return loading();
+      this.pollStarts.delete(orb.id);
+      if (
+        !previous.invalidated &&
+        previous.version === orb.agentAdmissionVersion &&
+        previous.readOnly === readOnly &&
+        previous.outcome.isErr()
+      )
+        return this.healthResult(orb, context, errAsync(previous.outcome.error));
+    }
+    const agent = this.manager.get(orb.id, orb.agentAdmissionVersion);
+    if (agent?.accepting())
+      return this.manager.isOpening(orb.id)
+        ? loading()
+        : this.healthResult(orb, context, okAsync(agent));
+
+    let worker: SimulationTask | undefined;
+    const began = task.monotonicNow();
+    const trace: StartupTrace = { stages: {} };
+    const completion = this.manager
+      .ensure(
+        orb.id,
+        orb.agentAdmissionVersion,
+        (scope, publish) =>
+          ResultAsync.fromPromise(
+            (async () => {
+              let opened: Result<DurableAgent, StartupFailure> = err(
+                durableError("agent startup worker unavailable", true),
+              );
+              const controller = new AbortController();
+              const abort = (origin: StartupAbort) => {
+                trace.abortOrigin ??= origin;
+                controller.abort();
+              };
+              const detach = relaySignal(scope, () => abort(scope.reason as Revocation));
+              try {
+                await runStartup(orb.id, async (startupTask) => {
+                  worker = startupTask;
+                  if (controller.signal.aborted) {
+                    opened = err(cancelledOpen());
+                    return;
+                  }
+                  const deadline = startupTask.createDeadline(
+                    POLL_STARTUP_BUDGET_MS,
+                    "central agent poll startup",
+                  );
+                  const detachDeadline = relaySignal(deadline.signal, () => abort("deadline"));
+                  try {
+                    opened = await this.openAgent(
+                      startupTask,
+                      orb,
+                      { signal: controller.signal },
+                      readOnly,
+                      publish,
+                      trace,
+                    );
+                  } finally {
+                    detachDeadline();
+                    deadline.cancel();
+                  }
+                });
+              } catch {
+                return opened.isErr() && opened.error.type === "startup_cleanup_failed"
+                  ? opened
+                  : err(
+                      controller.signal.aborted
+                        ? cancelledOpen()
+                        : durableError("agent startup worker failed", true),
+                    );
+              } finally {
+                detach();
+              }
+              return opened.isOk() && controller.signal.aborted ? err(cancelledOpen()) : opened;
+            })(),
+            () => durableError("agent startup worker failed", true),
+          ).andThen((result) => result),
+        true,
+      )
+      .andThen((opened) => {
+        const attached = this.attach(orb, opened, readOnly);
+        if (attached.isOk() && worker) this.rememberContext(worker, orb);
+        return attached;
+      });
+    const start: PollStartup = {
+      version: orb.agentAdmissionVersion,
+      readOnly,
+      trace,
+      completion,
+      invalidated: false,
+    };
+    this.pollStarts.set(orb.id, start);
+    void completion.then((outcome) => {
+      start.outcome = outcome;
+      if (start.invalidated && this.pollStarts.get(orb.id) === start)
+        this.pollStarts.delete(orb.id);
+      logOrbEvent(worker ?? task, orb.id, "agent.poll_startup_finished", {
+        admission_version: start.version,
+        duration_ms: elapsedMs(task, began),
+        ...trace.stages,
+        outcome: outcome.isOk() ? "opened" : "failed",
+        error_code: outcome.isErr() ? outcome.error.code : undefined,
+        abort_origin: trace.abortOrigin,
+      });
+    });
+    return loading();
   }
 
   executionReady(
@@ -413,8 +849,9 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
           ...durableError("central agent initializing", true),
           initializationHealth: health,
         });
-      const agent = this.manager.get(orb.id);
-      return agent
+      const agent = this.manager.get(orb.id, orb.agentAdmissionVersion);
+      if (context.signal.aborted) return errAsync(cancelledOpen(false));
+      return agent?.accepting()
         ? agent.checkExecutionReady(withAbortSignal(context.signal, BACKGROUND_CONTEXT))
         : errAsync(durableError("central agent unavailable", true));
     });
@@ -450,28 +887,35 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
 
   readSession(task: SimulationTask, orb: OrbRow, context: OperationContext) {
     if (context.signal.aborted) return errAsync(durableError("conversation read cancelled"));
-    this.contexts.set(orb.id, { task, orb, context });
+    this.rememberContext(task, orb);
     return okAsync(this.handleFor(orb.id));
   }
 
   unload(task: SimulationTask, orb: OrbRow, context: OperationContext) {
+    const pending = () => {
+      const startup = this.pollStarts.get(orb.id);
+      return (startup && !startup.outcome) || this.manager.isOpening(orb.id);
+    };
     const handle = this.handles.get(orb.id);
-    if (!handle || context.signal.aborted || orb.state !== "stopped") return okAsync(false);
+    if (!handle || context.signal.aborted || orb.state !== "stopped" || pending())
+      return okAsync(false);
     return handle.admit(() =>
-      this.manager.unload(orb.id, (agent) => {
-        return agent.prepareIdleStop().andThen((prepared) => {
-          if (!prepared.prepared || agent.workActive() || agent.executionActive())
-            return okAsync(false);
-          return (this.options.currentOrb?.(task, orb.id) ?? okAsync(orb)).map(
-            (current) =>
-              !context.signal.aborted &&
-              current?.state === "stopped" &&
-              current.agentAdmissionVersion === orb.agentAdmissionVersion &&
-              !agent.workActive() &&
-              !agent.executionActive(),
-          );
-        });
-      }),
+      pending()
+        ? okAsync(false)
+        : this.manager.unload(orb.id, (agent) => {
+            return agent.prepareIdleStop().andThen((prepared) => {
+              if (!prepared.prepared || agent.workActive() || agent.executionActive())
+                return okAsync(false);
+              return (this.options.currentOrb?.(task, orb.id) ?? okAsync(orb)).map(
+                (current) =>
+                  !context.signal.aborted &&
+                  current?.state === "stopped" &&
+                  current.agentAdmissionVersion === orb.agentAdmissionVersion &&
+                  !agent.workActive() &&
+                  !agent.executionActive(),
+              );
+            });
+          }),
     );
   }
 
@@ -505,7 +949,9 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
     const handle = this.handles.get(orb.id);
     return agent && handle
       ? handle.admit(() =>
-          this.ensure(_task, orb, context).andThen((current) => current.deliverMany(requests)),
+          this.ensure(_task, orb, context).andThen((current) =>
+            context.signal.aborted ? errAsync(cancelledOpen(false)) : current.deliverMany(requests),
+          ),
         )
       : this.checkStartup(_task, orb, context).andThen(() =>
           errAsync(durableError("central agent is not open", true)),
@@ -577,24 +1023,50 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
     _context: OperationContext,
     throughAdmissionVersion?: number,
   ) {
-    const opening = this.opening.get(orbId);
     if (
-      opening &&
-      (throughAdmissionVersion === undefined || opening.version <= throughAdmissionVersion)
+      throughAdmissionVersion !== undefined &&
+      this.manager.hasNewerAuthority(orbId, throughAdmissionVersion)
     )
-      opening.abort.abort();
-    return this.manager.suspend(orbId, throughAdmissionVersion);
+      return okAsync(undefined);
+    const suspended = this.manager.suspend(orbId, throughAdmissionVersion);
+    const startup = this.invalidateStartup(orbId, "suspend", throughAdmissionVersion);
+    return this.joinStartups(suspended, startup ? [startup] : []);
   }
+
+  private invalidateStartup(orbId: string, origin: Revocation, throughAdmissionVersion?: number) {
+    const start = this.pollStarts.get(orbId);
+    if (
+      !start ||
+      (throughAdmissionVersion !== undefined && start.version > throughAdmissionVersion)
+    )
+      return undefined;
+    start.invalidated = true;
+    if (start.outcome) {
+      this.pollStarts.delete(orbId);
+      return undefined;
+    }
+    start.trace.abortOrigin ??= origin;
+    return start.completion;
+  }
+
+  private joinStartups(
+    operation: ResultAsync<void, RuntimeClientError>,
+    startups: readonly ResultAsync<DurableAgent, RuntimeClientError>[],
+  ): ResultAsync<void, RuntimeClientError> {
+    if (startups.length === 0) return operation;
+    return ResultAsync.fromSafePromise(Promise.all([operation, ...startups])).andThen(
+      ([result]) => result,
+    );
+  }
+
   dispose(
     _task: SimulationTask,
     orbId: string,
     deleteAuthority: boolean,
     _context: OperationContext,
   ) {
-    this.opening.get(orbId)?.abort.abort();
-    this.opening.delete(orbId);
-    return this.manager
-      .dispose(orbId)
+    const startup = this.invalidateStartup(orbId, "dispose");
+    return this.joinStartups(this.manager.dispose(orbId), startup ? [startup] : [])
       .map(() => {
         this.handles.get(orbId)?.dispose();
         this.handles.delete(orbId);
@@ -604,10 +1076,12 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
       .andThen(() => this.options.persistence.dispose(_task, orbId, deleteAuthority));
   }
   close() {
-    for (const opening of this.opening.values()) opening.abort.abort();
-    this.opening.clear();
-    return this.manager
-      .close()
+    const closing = this.manager.close();
+    const startups = [...this.pollStarts.keys()].flatMap((orbId) => {
+      const startup = this.invalidateStartup(orbId, "shutdown");
+      return startup ? [startup] : [];
+    });
+    return this.joinStartups(closing, startups)
       .map(() => {
         for (const handle of this.handles.values()) handle.dispose();
         this.handles.clear();

@@ -89,5 +89,5 @@ Operations:
 Tracking:
 - [TODO.md](TODO.md) — actionable backlog
 - [docs/open-questions.md](docs/open-questions.md) — undecided questions (frozen numbering)
-- [docs/postmortems/](docs/postmortems/) — incident forensics, including [rejected WebSocket socket leaks](docs/postmortems/2026-11-17-rejected-websocket-leak.md); owning docs keep the resulting rules
+- [docs/postmortems/](docs/postmortems/) — incident forensics, including [rejected WebSocket socket leaks](docs/postmortems/2026-11-17-rejected-websocket-leak.md) and [central agent open deadline](docs/postmortems/2026-11-19-central-agent-open-deadline.md); owning docs keep the resulting rules
 - [docs/references/amp-orb-lessons.md](docs/references/amp-orb-lessons.md) — lessons from Amp's orbs

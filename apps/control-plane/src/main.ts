@@ -707,22 +707,33 @@ export async function main(
   startupPhase("central-factory.start");
   const opened = await DurableAgentPlane.create({
     persistence: database.agentPersistence,
+    runStartup: (orbId, run) => run(new ControlPlaneTask(`agent-startup:${orbId}`)),
     prepare: (task, orb, context) =>
       resourceGate
         .acquire(task, orb, context)
         .map(() => undefined)
-        .mapErr((error) => ({
-          type: "runtime_client_error" as const,
-          code: "initialization_failed" as const,
-          answered: true,
-          retryable: error.code === "storage",
-          message: error.message,
-          initializationError: {
-            code: "resource_acquisition_failed",
-            message: error.message,
-            retryable: error.code === "storage",
-          },
-        })),
+        .mapErr((error) =>
+          error.code === "cancelled"
+            ? {
+                type: "runtime_client_error" as const,
+                code: "cancelled" as const,
+                answered: false,
+                retryable: true,
+                message: error.message,
+              }
+            : {
+                type: "runtime_client_error" as const,
+                code: "initialization_failed" as const,
+                answered: true,
+                retryable: error.code === "storage",
+                message: error.message,
+                initializationError: {
+                  code: "resource_acquisition_failed",
+                  message: error.message,
+                  retryable: error.code === "storage",
+                },
+              },
+        ),
     currentOrb: (task, orbId) =>
       database.store.getOrb(task, orbId).mapErr(() => ({
         type: "runtime_client_error" as const,

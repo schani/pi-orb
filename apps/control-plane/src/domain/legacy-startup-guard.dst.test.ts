@@ -11,18 +11,18 @@ import { reconcileCentralAgent, requestOrbStart } from "./lifecycle.ts";
 import { cancelQueuedUserTurn } from "./queued-turn-cancellation.ts";
 
 const message = "This orb uses the old Pi backend. Create a new orb to continue.";
-const refusal = {
+const legacyRefusal: RuntimeClientError = {
   type: "runtime_client_error",
   code: "legacy_backend",
   answered: true,
   retryable: false,
   message,
-} as unknown as RuntimeClientError;
+};
 const first = "00000000-0000-4000-8000-000000000061";
 const second = "00000000-0000-4000-8000-000000000062";
 const later = "00000000-0000-4000-8000-000000000063";
 
-function rejectingPlane() {
+function rejectingPlane(refusal = legacyRefusal) {
   const checkStartup = vi.fn((..._args: Parameters<AgentPlane["health"]>) =>
     errAsync<void, RuntimeClientError>(refusal),
   );
@@ -94,15 +94,20 @@ it("manual refusal precedes sleep cancellation and CAS, and shares one rejection
   );
 });
 
-it.each(["queued", "delivering", "cancelled-member"] as const)(
-  "legacy dispatch terminally fails %s batches without history rotation or compute failure",
-  async (scenario) => {
+it.each(
+  (["legacy_backend", "history_integrity"] as const).flatMap((code) =>
+    (["queued", "delivering", "cancelled-member"] as const).map((scenario) => ({ code, scenario })),
+  ),
+)(
+  "$code dispatch terminally fails $scenario batches without history rotation or compute failure",
+  async ({ code, scenario }) => {
     const log = new LogCapture();
+    const message = code === "legacy_backend" ? legacyRefusal.message : "History integrity failure";
     await runDst(
-      { name: `legacy-batch-${scenario}`, iterations: 10, logCapture: log },
+      { name: `${code}-batch-${scenario}`, iterations: 10, logCapture: log },
       async (sim) => {
         const h = makeHarness();
-        const f = rejectingPlane();
+        const f = rejectingPlane({ ...legacyRefusal, code, message });
         const deps = { ...h.deps, agentPlane: f.plane };
         h.store.seedProject(makeProjectRow("project"));
         h.store.seedOrb(makeOrbRow("orb", "project", "starting"));

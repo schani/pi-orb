@@ -57,6 +57,9 @@ it("routes central Pi and native Claude by immutable harness selection", async (
     expect(host[method]).toHaveBeenCalledTimes(1);
     expect(selected[method]).toHaveBeenCalledTimes(1);
   }
+  await plane.pollHealth(task, claude, context);
+  expect(host.health).toHaveBeenCalledTimes(2);
+  expect(host.health).toHaveBeenLastCalledWith(task, claude, context);
   expect((await plane.deliverMessages(task, pi, [], context)).isOk()).toBe(true);
   expect(bulk).toHaveBeenCalledWith(task, pi, [], context);
   const rejected = await plane.deliverMessages(task, claude, [], context);

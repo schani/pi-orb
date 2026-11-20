@@ -5,7 +5,7 @@ Upstream: https://github.com/earendil-works/pi/tree/v1.5.2/packages/durable
 Published artifact: https://registry.npmjs.org/@earendil-works/pi-durable/-/pi-durable-1.5.2.tgz
 Artifact SHA-256: `915648ed07c48ca4a2cf8bde97e9b1693a0127cb1332225b6883bf0d5f6f9082`.
 Artifact integrity: `sha512-zDB3anbI/yD0IG+VVY+g5tU+c5XOVqQAFwLkXRMiqZb4p/afWro0voZtLNoRAWcDA2r73kvmH6kKin9Ka8l55g==`.
-Patch SHA-256: `96e628bdd02a7b5700ffff23fda8643156262ba8b2ed1ff353ee38bc1c8d5530`.
+Patch SHA-256: `d37cc749f132a1f7dc67838a5e8287f8376a6b53eaf6e19876fa23e3dd7aa137`.
 
 **Decision (2026-10-16):** retain upstream native execution, task identity, journal and replay. Export the existing `CodemodeRunDoc` and `CodemodeJournalDoc` through the public code-mode JavaScript/declaration barrels so chart replay reads native successful journal entries and completion decoration updates native `run.result` in the same commit. Private imports, copied document tokens and a second task document/journal are rejected.
 
@@ -21,7 +21,7 @@ Root and packaged control-plane installs run `node scripts/apply-dependency-patc
 
 File SHA-256 pairs are pinned in `scripts/apply-dependency-patches.mjs`. Regression contracts: `apps/orb-runtime/src/dependency-patch.contract.test.ts`, `apps/orb-runtime/src/dependency-patch-application.test.ts`, `scripts/apply-dependency-patches.test.mjs`. Native behavior/reopen/chart coverage lives under `apps/control-plane/src/adapters/durable/tools/`.
 
-**Decision (2026-10-18):** add input-only `Conversation.submitMany(inputs, context)`. One Session commit validates and looks up all request IDs before table writes, queues each distinct input through the shared admission helper, then applies one idle boundary. Empty and duplicate-only snapshots advance an idle inbox without minting replacement submissions. Pi configures both queue modes as `all`; receipts and entries remain per input. No persisted document or submission schema changes.
+**Decision (2026-10-18):** add input-only `Conversation.submitMany(inputs, context, options?)`. One Session commit validates and looks up all request IDs before table writes, queues each distinct input through the shared admission helper, then applies one idle boundary. Empty and duplicate-only snapshots advance an idle inbox without minting replacement submissions. The optional `deferScheduling` flag skips the implicit scheduler resume without changing admission or the boundary; startup policy is in [docs/lifecycle.md](../docs/lifecycle.md). Pi configures both queue modes as `all`; receipts and entries remain per input. No persisted document or submission schema changes.
 
 **Decision (2026-10-24):** `DurableAgent.open` sets native `HarnessSettings.afterFailedRun: "continue"`. Terminal provider/blocking-compaction `model_error` and `no_model` settle failed inputs before a final boundary starts queued input. A still-unavailable model settles the finite queued batch `unanswered`; it does not replay failed input or start an empty run. This is nonpersisted Harness configuration. This drains already-admitted input even during Sleep, when SQL dispatch is gated. Duplicate-only `submitMany` also advances idle queued input without replaying failed input. Writable reopen guards unfinished submissions with the existing recovery budget before an empty snapshot advances the queue; passive reopen stays inert. Regression coverage: `apps/control-plane/src/adapters/durable/{agent-backlog,queued-model-error,queued-no-model,operation-identity}.test.ts`.
 

@@ -62,30 +62,31 @@ index d28306e526198175420d555b8058eb2f1976793a..27d767242eb313c3f941419935d911b2
          // A failed write must not discard the result of a script whose calls already ran: it becomes part of the label.
          const saved = await write(`image-${index}${IMAGE_EXTENSIONS[mimeType] ?? ".bin"}`, bytes);
 diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/harness.js b/node_modules/@earendil-works/pi-durable/dist/harness/harness.js
-index e286f00f872ebec79367a594938040c6a37a879f..5675ed90e2e8a2e5ab56503075b44a839ff2e193 100644
+index e286f00f872ebec79367a594938040c6a37a879f..a39cbb36869d925f8ddbab8aa84c5545865f150c 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/harness/harness.js
 +++ b/node_modules/@earendil-works/pi-durable/dist/harness/harness.js
 @@ -43,6 +43,9 @@ class ConversationImpl {
              return this.#host.submissions.submit(this.id, first, second);
          return this.#host.submissions.admit(first, this.id, second);
      }
-+    submitMany(inputs, context) {
-+        return this.#host.submissions.submitMany(this.id, inputs, context);
++    submitMany(inputs, context, options) {
++        return this.#host.submissions.submitMany(this.id, inputs, context, options);
 +    }
      async compact(instructions, context) {
          this.#host.tasks.resume();
          const input = { reason: "manual", ...(instructions === undefined ? {} : { instructions }) };
 diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js b/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js
-index 512b2477c29b83c03a1c239ee427d928ce553caa..53b1c2b43839b774bfbc0d0c7690174eba589837 100644
+index 512b2477c29b83c03a1c239ee427d928ce553caa..eca83edd9157758bdf0a09f1a41694462fd006fc 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js
 +++ b/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js
-@@ -72,6 +72,75 @@ export class Submissions {
+@@ -72,6 +72,76 @@ export class Submissions {
              }
          });
      }
 +    /** Admit the snapshot on one Session line, preserving each submission's identity. */
-+    async submitMany(conversationId, inputs, context) {
-+        this.#resume();
++    async submitMany(conversationId, inputs, context, options) {
++        if (options?.deferScheduling !== true)
++            this.#resume();
 +        return createTypedSpanStarter(this.#telemetry, [DURABLE_TELEMETRY_SCHEMA])("pi.durable.submit", {
 +            "submission.type": "input",
 +            "conversation.id": conversationId,
@@ -155,7 +156,7 @@ index 512b2477c29b83c03a1c239ee427d928ce553caa..53b1c2b43839b774bfbc0d0c7690174e
      /** Handle for an existing submission, or `undefined`. */
      async get(id, context) {
          const record = await this.#session.readOnLine((storage) => storage.submission(id, context));
-@@ -216,24 +285,8 @@ export async function admitSubmission(tx, conversationId, draft, now, queueModes
+@@ -216,24 +286,8 @@ export async function admitSubmission(tx, conversationId, draft, now, queueModes
      // A boundary reads the table, so it is prepared before the first table write; a busy one needs none.
      const boundary = busy ? undefined : await prepareBoundary(tx, conversationId, queueModes);
      if (boundary === undefined || boundary.inbox.items.length > 0) {
@@ -182,7 +183,7 @@ index 512b2477c29b83c03a1c239ee427d928ce553caa..53b1c2b43839b774bfbc0d0c7690174e
          if (boundary === undefined)
              return { id, status: "queued" };
          const { users, first } = await applyBoundary(tx, boundary, "final", now);
-@@ -259,4 +312,27 @@ export async function admitSubmission(tx, conversationId, draft, now, queueModes
+@@ -259,4 +313,27 @@ export async function admitSubmission(tx, conversationId, draft, now, queueModes
      await startRun(tx, conversationId, live, { inputs: [id], first: entry.id });
      return { id, status: "placed" };
  }
@@ -212,15 +213,20 @@ index 512b2477c29b83c03a1c239ee427d928ce553caa..53b1c2b43839b774bfbc0d0c7690174e
  //# sourceMappingURL=submissions.js.map
 \ No newline at end of file
 diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts b/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts
-index 7f4a0ba59df6d5870248c60c055dd188fdab51c4..34a19131b1a0f5c485ea1a4b874324c4cd56e78a 100644
+index 7f4a0ba59df6d5870248c60c055dd188fdab51c4..bad6b34d042ea7f8c5de49075eb555aa3e05dd13 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts
 +++ b/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts
-@@ -773,6 +773,12 @@ export interface Conversation {
+@@ -773,6 +773,17 @@ export interface Conversation {
       * it is, after placing queued items; a busy conversation rejects it with `ConversationBusy`, as it never queues.
       */
      submit(submission: SubmissionDraft, context: Context): Promise<Submission>;
-+    /** Admit a finite input snapshot atomically before scheduling; an empty snapshot advances an idle inbox. */
-+    submitMany(inputs: readonly InputSubmissionDraft[], context: Context): Promise<{
++    /**
++     * Admit a finite input snapshot atomically; an empty snapshot advances an idle inbox.
++     * Set `deferScheduling` to leave scheduler state unchanged. If scheduling is paused, call `Harness.resume()` to enable it.
++     */
++    submitMany(inputs: readonly InputSubmissionDraft[], context: Context, options?: {
++        readonly deferScheduling?: boolean;
++    }): Promise<{
 +        readonly submissions: readonly Submission[];
 +        readonly busy: boolean;
 +        readonly inputId?: SubmissionId;

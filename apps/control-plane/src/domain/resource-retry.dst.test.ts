@@ -40,8 +40,10 @@ function retryHarness(resourceFailed = true, work = false) {
         v: 1,
         orbId: "orb",
         runtimeInstanceId: "central",
-        status: "initializing",
-        phase: "booting",
+        status: "ready",
+        checkoutCommit: null,
+        sessionId: "central",
+        activity: "idle",
       }),
     deliverMessage: (_task, orb, request) => {
       calls.deliveries.push(orb.agentAdmissionVersion);

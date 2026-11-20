@@ -1702,7 +1702,8 @@ async function dispatchQueuedMessages(
         if (inspected.value) return { type: "progressed" };
         deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
       }
-      if (delivered.error.retryable) {
+      // Cancelling a central delivery waiter does not establish a terminal inbox outcome.
+      if (delivered.error.retryable || (central && delivered.error.code === "cancelled")) {
         outcome = retryable(delivered.error);
         continue;
       }
@@ -2614,41 +2615,35 @@ export async function reconcileCentralAgent(
         task,
         deps.constants.runtimeRequestTimeoutMs,
         "central agent activity",
-        (context) => agentHealth(task, deps, centralOrb, "", context),
+        (context) =>
+          deps.agentPlane?.pollHealth?.(task, centralOrb, context) ??
+          agentHealth(task, deps, centralOrb, "", context),
       );
-      const rejected = noteCentralStartup(
-        task,
-        deps,
-        centralOrb,
-        health.isErr() ? health.error : undefined,
-      );
-      if (
-        deps.control.noteCondition(
-          `central-health:${orbId}`,
-          health.isErr() && !rejected && !persistedRecovery,
-        ) &&
-        health.isErr()
-      )
-        logOrbEvent(task, orbId, "central-agent-unavailable", { message: health.error.message });
-      if (persistedRecovery && health.isErr())
-        return err(centralRecoveryFailed(task, deps, orb, "open", health.error));
-      if (persistedRecovery && health.isOk() && health.value.status === "failed")
-        return err(
-          centralRecoveryFailed(task, deps, orb, "open", {
-            type: "runtime_client_error",
-            code: "initialization_failed",
-            answered: true,
-            message: health.value.error.message,
-            retryable: health.value.error.retryable,
-            initializationError: health.value.error,
-          }),
-        );
-      if (health.isOk() && health.value.status === "ready")
-        deps.control.noteAgentRecoveryError(orbId, null);
+      const failure: RuntimeClientError | undefined = health.isErr()
+        ? health.error
+        : health.value.status === "failed"
+          ? {
+              type: "runtime_client_error",
+              code: "initialization_failed",
+              answered: true,
+              message: health.value.error.message,
+              retryable: health.value.error.retryable,
+              initializationError: health.value.error,
+            }
+          : undefined;
+      const rejected = noteCentralStartup(task, deps, centralOrb, failure);
+      const unavailable = failure !== undefined && !rejected && !persistedRecovery;
+      if (deps.control.noteCondition(`central-health:${orbId}`, unavailable) && unavailable)
+        logOrbEvent(task, orbId, "central-agent-unavailable", { message: failure.message });
+      if (persistedRecovery && failure !== undefined)
+        return err(centralRecoveryFailed(task, deps, orb, "open", failure));
+      const ready = health.isOk() && health.value.status === "ready";
+      if (ready) deps.control.noteAgentRecoveryError(orbId, null);
       const busy = deps.agentPlane?.session(orbId)?.workActive?.() === true;
       deps.control.noteAgentWork(orbId, busy);
       if (busy) await deps.store.touchLastBusy(task, { orbId, now: task.wallNow() });
-      if (orb.sleepId === null && orb.stopReason !== "sleep") {
+      // Definitive startup refusals still reach the authority-checked terminal batch path.
+      if ((ready || rejected) && orb.sleepId === null && orb.stopReason !== "sleep") {
         const delivered = await dispatchQueuedMessages(task, deps, orb, "");
         const blocked = delivered?.type === "retryable";
         if (deps.control.noteCondition(`central-delivery:${orbId}`, blocked) && blocked)

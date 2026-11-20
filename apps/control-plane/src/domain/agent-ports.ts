@@ -107,6 +107,12 @@ export interface AgentPlane {
     orb: OrbRow,
     context: OperationContext,
   ): ResultAsync<RuntimeHealth, RuntimeClientError>;
+  /** Central poll probe; may report initializing while startup continues independently. */
+  pollHealth?(
+    task: SimulationTask,
+    orb: OrbRow,
+    context: OperationContext,
+  ): ResultAsync<RuntimeHealth, RuntimeClientError>;
   /** Validate execution readiness and admission before publishing ready compute. */
   executionReady?(
     task: SimulationTask,

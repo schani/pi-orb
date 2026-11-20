@@ -66,7 +66,7 @@ const packages = [
     package: "node_modules/@earendil-works/pi-durable",
     version: "1.5.2",
     patch: "@earendil-works+pi-durable+1.5.2.patch",
-    sha: "96e628bdd02a7b5700ffff23fda8643156262ba8b2ed1ff353ee38bc1c8d5530",
+    sha: "d37cc749f132a1f7dc67838a5e8287f8376a6b53eaf6e19876fa23e3dd7aa137",
     files: {
       "node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js": [
         "5ff50eefde02cc17f4eeefc3fccba25551d4fd9245b7876ab03f8ca7015faffc",
@@ -86,15 +86,15 @@ const packages = [
       ],
       "node_modules/@earendil-works/pi-durable/dist/harness/harness.js": [
         "4096cbb0756c59606a0b6437909a879b5c603fde2d2a9bc25854398e30b25e47",
-        "2d55660c22a8f8bd662cb930ad65e144c0c8c7a153341abd83edd2f5c8a92137",
+        "af2d052776f81482ca69640dcd8968b1fc46227bc65deb2b764518c42546d82d",
       ],
       "node_modules/@earendil-works/pi-durable/dist/harness/submissions.js": [
         "ba88af50a76b5c3dcef990b6b3c37316da856f83cce24b1453ae5035c052d939",
-        "bce966cdd343862b2ea721f531b338599f34719b6c0d9bcfb67379bf8600a8e1",
+        "20b03f162939401e7eabb6afb0f916804eddd94ac2b1bbd56bf24778a74234f0",
       ],
       "node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts": [
         "413d8bf8623b52ad18ee5844e20edc977a47500961431a9b64e83bda70e92fbd",
-        "fcd7b82acd0db6c7c03deb1f17218be4072e945cfa4e7f2a1c368ce8288f0e51",
+        "8e348a7c9e43e6e68e83a49042e55d88002d6b9b8e0e08405ae43d482530b002",
       ],
       "node_modules/@earendil-works/pi-durable/dist/harness/util.js": [
         "5519388f097d51fbf8f5811edd11d04076523253a2a11ae8689082ae8e2df4d9",

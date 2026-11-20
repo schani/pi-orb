@@ -41,6 +41,10 @@ export class HarnessAgentPlane implements AgentPlane {
   health(task: SimulationTask, orb: OrbRow, context: OperationContext) {
     return this.select(orb).health(task, orb, context);
   }
+  pollHealth(task: SimulationTask, orb: OrbRow, context: OperationContext) {
+    const plane = this.select(orb);
+    return plane.pollHealth?.(task, orb, context) ?? plane.health(task, orb, context);
+  }
   executionReady(task: SimulationTask, orb: OrbRow, context: OperationContext) {
     return this.select(orb).executionReady?.(task, orb, context) ?? okAsync(undefined);
   }
