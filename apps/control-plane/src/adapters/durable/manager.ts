@@ -40,11 +40,37 @@ type Revocation = "superseded" | "suspend" | "dispose" | "shutdown";
 type Owned<T> = { state: "owned"; admissionVersion: number; agent: T };
 type AgentOwner<T> =
   | Owned<T>
-  | { state: "retiring"; admissionVersion: number; closed: ResultAsync<void, RuntimeClientError> };
+  | {
+      state: "retiring";
+      admissionVersion: number;
+      closed: ResultAsync<void, RuntimeClientError>;
+      refusal: RuntimeClientError | undefined;
+    };
 
 export type StartupFailure =
   | RuntimeClientError
-  | { type: "startup_cleanup_failed"; error: RuntimeClientError };
+  | {
+      type: "startup_cleanup_failed";
+      cleanupError: RuntimeClientError;
+      refusal: RuntimeClientError | undefined;
+    };
+
+export function definitiveStartupRefusal(error?: RuntimeClientError) {
+  return error?.code === "legacy_backend" || error?.code === "history_integrity"
+    ? error
+    : undefined;
+}
+
+export function startupCleanupFailure(
+  cleanupError: RuntimeClientError,
+  error?: RuntimeClientError,
+) {
+  return {
+    type: "startup_cleanup_failed" as const,
+    cleanupError,
+    refusal: definitiveStartupRefusal(error),
+  };
+}
 
 type Publish<T> = (agent: T, openSignal?: AbortSignal) => Result<void, RuntimeClientError>;
 type Open<T> = (signal: AbortSignal, publish: Publish<T>) => ResultAsync<T, StartupFailure>;
@@ -97,14 +123,23 @@ export class OrbAgentManager<T> {
     ).andThen((value) => value);
   }
 
-  private retire(orbId: string, owner: AgentOwner<T>): ResultAsync<void, RuntimeClientError> {
+  private retire(
+    orbId: string,
+    owner: AgentOwner<T>,
+    refusal?: RuntimeClientError,
+  ): ResultAsync<void, RuntimeClientError> {
     if (owner.state === "retiring") return owner.closed;
     const closed = this.ownership.close(owner.agent).map(() => {
       this.agents.delete(orbId);
       return undefined;
     });
-    this.agents.set(orbId, { ...owner, state: "retiring", closed });
+    this.agents.set(orbId, { ...owner, state: "retiring", closed, refusal });
     return closed;
+  }
+
+  startupRefusal(orbId: string): RuntimeClientError | undefined {
+    const owner = this.agents.get(orbId);
+    if (owner?.state === "retiring" && !this.isOpening(orbId)) return owner.refusal;
   }
 
   admit(
@@ -162,7 +197,10 @@ export class OrbAgentManager<T> {
         return ok(existing.agent);
       if (existing) {
         const closed = await this.retire(orbId, existing);
-        if (closed.isErr()) return err(closed.error);
+        if (closed.isErr())
+          return err(
+            (existing.state === "retiring" ? existing.refusal : undefined) ?? closed.error,
+          );
       }
       if (waiter?.aborted) return err(cancelledOpen(false));
       if (!admitted()) return err(durableError("agent admission superseded"));
@@ -190,13 +228,14 @@ export class OrbAgentManager<T> {
           (agent) => (candidate ? ok(agent) : publish(agent).map(() => agent)),
           (failure) => {
             if (failure.type !== "startup_cleanup_failed") return err(failure);
-            const { error } = failure;
+            const { cleanupError, refusal } = failure;
             this.agents.set(orbId, {
               state: "retiring",
               admissionVersion,
-              closed: errAsync(error),
+              closed: errAsync(cleanupError),
+              refusal,
             });
-            return err(error);
+            return err(refusal ?? cleanupError);
           },
         );
         if (opened.isErr() && opened.error.type === "startup_cleanup_failed") return result;
@@ -208,8 +247,9 @@ export class OrbAgentManager<T> {
         )
           return result;
         if (candidate) {
-          const closed = await this.retire(orbId, candidate);
-          if (closed.isErr()) return err(closed.error);
+          const refusal = result.isErr() ? definitiveStartupRefusal(result.error) : undefined;
+          const closed = await this.retire(orbId, candidate, refusal);
+          if (closed.isErr()) return err(refusal ?? closed.error);
         }
         return result.isErr()
           ? result
@@ -509,11 +549,7 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
             try {
               if (openSignal.aborted) {
                 const closed = await closeResources();
-                return err(
-                  closed.isErr()
-                    ? { type: "startup_cleanup_failed", error: closed.error }
-                    : cancelledOpen(),
-                );
+                return err(closed.isErr() ? startupCleanupFailure(closed.error) : cancelledOpen());
               }
               return await timed("harness_ms", async () => {
                 const built = await DurableAgent.build({
@@ -562,8 +598,16 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
               code: cleanup.error.code,
               admission_version: orb.agentAdmissionVersion,
             });
-            if (opened.isOk() || opened.error.type !== "startup_cleanup_failed")
-              return err({ type: "startup_cleanup_failed", error: cleanup.error });
+            const cleanupError = cleanup.error;
+            return opened.match<Result<DurableAgent, StartupFailure>>(
+              () => err(startupCleanupFailure(cleanupError)),
+              (failure) =>
+                err(
+                  failure.type === "startup_cleanup_failed"
+                    ? failure
+                    : startupCleanupFailure(cleanupError, failure),
+                ),
+            );
           }
         }
         return opened;
@@ -732,6 +776,8 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
       )
         return this.healthResult(orb, context, errAsync(previous.outcome.error));
     }
+    const refusal = this.manager.startupRefusal(orb.id);
+    if (refusal) return errAsync(refusal);
     const agent = this.manager.get(orb.id, orb.agentAdmissionVersion);
     if (agent?.accepting())
       return this.manager.isOpening(orb.id)

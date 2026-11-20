@@ -68,7 +68,13 @@ import type { OrbAgentError } from "../../domain/orb-agent-operations.ts";
 import type { DeliverMessageClientRequest } from "../../domain/ports.ts";
 import type { AuthorityError } from "../durable-pg/index.ts";
 import { storageAuthorityError } from "../durable-pg/storage-boundary.ts";
-import { cancelledOpen, durableError, type StartupFailure } from "./manager.ts";
+import {
+  cancelledOpen,
+  definitiveStartupRefusal,
+  durableError,
+  type StartupFailure,
+  startupCleanupFailure,
+} from "./manager.ts";
 import { fenceModels } from "./model-fence.ts";
 import { meterModels } from "./model-usage.ts";
 import { nativeInputContent } from "./native-input.ts";
@@ -302,12 +308,19 @@ export class DurableAgent implements AgentSessionFacade {
 
   static open(options: DurableAgentOptions): ResultAsync<DurableAgent, RuntimeClientError> {
     return DurableAgent.build(options)
-      .mapErr((error) => (error.type === "startup_cleanup_failed" ? error.error : error))
+      .mapErr((error) =>
+        error.type === "startup_cleanup_failed" ? (error.refusal ?? error.cleanupError) : error,
+      )
       .andThen((agent) =>
         agent
           .activate()
           .map(() => agent)
-          .orElse((error) => agent.close().andThen(() => errAsync(error))),
+          .orElse((error) =>
+            agent
+              .close()
+              .mapErr((cleanup) => definitiveStartupRefusal(error) ?? cleanup)
+              .andThen(() => errAsync(error)),
+          ),
       );
   }
 
@@ -590,13 +603,10 @@ export class DurableAgent implements AgentSessionFacade {
                   ]);
               await options.edge?.("harness.open_failed", { orbId: options.orbId, stage });
               return err<DurableAgent, StartupFailure>(
-                cleanup.isErr() ? { type: "startup_cleanup_failed", error: cleanup.error } : error,
+                cleanup.isErr() ? startupCleanupFailure(cleanup.error, error) : error,
               );
             })(),
-            (): StartupFailure => ({
-              type: "startup_cleanup_failed",
-              error: durableError("failed Harness cleanup failed"),
-            }),
+            () => startupCleanupFailure(durableError("failed Harness cleanup failed"), error),
           ).andThen((result) => result),
       );
   }

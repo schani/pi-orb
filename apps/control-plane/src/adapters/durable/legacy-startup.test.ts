@@ -563,8 +563,18 @@ it("preserves SDK terminal startup failure even when lease cleanup fails", async
     expect(
       log.mock.calls.filter(([line]) => String(line).includes("agent.startup_cleanup_failed")),
     ).toHaveLength(1);
+    expect((await plane.health(f.task, f.orb, operation))._unsafeUnwrapErr()).toEqual(
+      result._unsafeUnwrapErr(),
+    );
+    const stopped = await plane.suspend(f.task, f.orb.id, operation);
+    expect(stopped._unsafeUnwrapErr()).toMatchObject({
+      code: "history_unavailable",
+      message: "injected cleanup failure",
+    });
+    expect((await plane.close())._unsafeUnwrapErr()).toEqual(stopped._unsafeUnwrapErr());
   } finally {
     await plane.close();
+    await f.database.agentPersistence.close();
     await f.database.close();
   }
 });

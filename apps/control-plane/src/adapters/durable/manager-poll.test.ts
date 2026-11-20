@@ -578,6 +578,47 @@ it("fences replacements and fails Stop and shutdown if abandoned composition can
   }
 });
 
+it("keeps an activation refusal visible while failed retirement fences new starts", async () => {
+  const refusal: RuntimeClientError = {
+    type: "runtime_client_error",
+    code: "history_integrity",
+    message: "inconsistent history",
+    answered: true,
+    retryable: false,
+  };
+  const cleanupFailure = {
+    ...refusal,
+    code: "history_unavailable" as const,
+    message: "drain failed",
+  };
+  const openContext = vi.fn(() =>
+    okAsync({
+      ...agentOptions(),
+      checkAdmission: () => errAsync(refusal),
+      closeResources: () => errAsync(cleanupFailure),
+    }),
+  );
+  const { caller, ended, orb, plane, runStartup } = await fixture({ openContext });
+  const context = { signal: new AbortController().signal };
+  try {
+    expect((await plane.pollHealth(caller, orb, context))._unsafeUnwrap().status).toBe(
+      "initializing",
+    );
+    await ended.promise;
+    expect((await plane.pollHealth(caller, orb, context))._unsafeUnwrapErr()).toBe(refusal);
+    expect((await plane.pollHealth(caller, orb, context))._unsafeUnwrapErr()).toBe(refusal);
+    const replacement = { ...orb, agentAdmissionVersion: orb.agentAdmissionVersion + 1 };
+    expect((await plane.health(caller, replacement, context))._unsafeUnwrapErr()).toBe(refusal);
+    expect(openContext).toHaveBeenCalledTimes(1);
+    expect(runStartup).toHaveBeenCalledTimes(1);
+    expect(plane.session(orb.id)).toBeNull();
+    expect((await plane.suspend(caller, orb.id, context))._unsafeUnwrapErr()).toBe(cleanupFailure);
+    expect((await plane.close())._unsafeUnwrapErr()).toBe(cleanupFailure);
+  } finally {
+    await plane.close();
+  }
+});
+
 it("does not use a warm owner after the queued waiter cancels", async () => {
   const { caller, orb, plane } = await fixture();
   const waiter = new AbortController();
