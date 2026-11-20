@@ -36,6 +36,7 @@ const evidenceRoot =
   process.env["PI_ORB_E2E_EVIDENCE_DIR"] ??
   join(import.meta.dirname, "../test-failures/durable-independent-process");
 const stop = { type: "stop", status: "completed" };
+const stopRecoveryDone = "STOP_RECOVERY_DONE";
 const summary = {
   match: { userMessage: { regex: "^Write a single short desktop-notification sentence" } },
   steps: [{ type: "text", content: "Central work completed." }, stop],
@@ -239,21 +240,10 @@ export function registerIndependentCase(cancellation: IndependentCase, malformed
                 {
                   match: {
                     toolResultContains: {
-                      regex: "Tool codemode was interrupted and may have partially run",
+                      regex: "Tool (?:bash|codemode) was interrupted and may have partially run",
                     },
                   },
-                  steps: [
-                    { type: "reasoning", text: "STOP_RECOVERY_DONE" },
-                    { type: "text", content: "RESUMED_STREAM_BEFORE_COMPLETION" },
-                    {
-                      type: "toolCall",
-                      name: "codemode",
-                      arguments: {
-                        code: "text(await tools.read({path:'.agents/skills/pinned/SKILL.md'})); text('SNAPSHOT_REOPEN:' + await tools.read({path:'.agents/skills/pinned/asset.txt'})); text('SNAPSHOT_AFTER_STOP');",
-                      },
-                    },
-                    stop,
-                  ],
+                  steps: [{ type: "text", content: stopRecoveryDone }, stop],
                 },
                 summary,
               ]
@@ -969,9 +959,28 @@ export function registerIndependentCase(cancellation: IndependentCase, malformed
         expect(
           execFileSync("git", ["-C", workspace, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
         ).not.toBe(pinnedSha);
-        // New compute may warm, but resource reads must not wait for its setup hook.
+        // Authorize recovery before sending fresh input so the ordered summary cannot skip it.
         released = false;
         held = undefined;
+        const recoveryFrames = frames.length;
+        const recoveryLogStart = cp.logs.join("").length;
+        expect((await api(cp.baseUrl, "POST", `/api/v1/orbs/${orb}/start`)).status).toBe(202);
+        await expectPage(page.getByText(stopRecoveryDone, { exact: true })).toBeVisible();
+        await waitFor("recovered VM_EFFECT completes on the original subscription", async () =>
+          operationEvent(
+            frames.slice(recoveryFrames).filter((frame) => frame.socketGeneration === originalOwner),
+            operationId,
+            "operation_finished",
+            { outcome: "completed" },
+          ) ?? null,
+        );
+        await summarySettled(operationId, recoveryLogStart);
+
+        // New compute may warm, but resource reads must not wait for its setup hook.
+        await waitFor("replacement setup hook is held", async () =>
+          held && !held.writableEnded && !held.destroyed ? true : null,
+        );
+        expect(socketGeneration).toBe(originalOwner);
         const resumeFrames = frames.length;
         const composer = page.getByRole("textbox").first();
         await composer.fill("RESUME_STREAM");
@@ -1037,6 +1046,8 @@ export function registerIndependentCase(cancellation: IndependentCase, malformed
         expect(JSON.stringify(reopened.body)).toContain("SNAPSHOT_REOPEN:PINNED_RESOURCE_ASSET");
         expect(resourceAcquisitions).toBe(1);
         expect(released).toBe(false);
+        expect(existsSync(join(workspace, "MUST_NOT_EXIST"))).toBe(false);
+        expect(existsSync(join(workspace, "ALLOWED_AFTER_READY"))).toBe(false);
         release();
       }
       const requests = await fakeControl(fake.sessionKey, "/requests");

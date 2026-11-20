@@ -44,3 +44,22 @@ a profile we cannot say what code consumed the time or why.
 
 A query starting November 17 found seven identical open-cancelled events on two earlier
 revisions before cutover. This rollout did not introduce this class of failure.
+
+## Durable shard 2 Stop fixture
+
+The [first shard attempt on `79246c64`](https://github.com/schani/pi-orb/actions/runs/44652529197/job/136010667588)
+and its [fixture artifact](https://github.com/schani/pi-orb/actions/runs/44652529197/artifacts/14591866713)
+show Stop cancelling the waiting `bash` callback and settling while setup was held.
+On authorized reopen, the Durable harness recovered the unfinished `VM_EFFECT` turn.
+Activation resumes native work before the central poll can dispatch fresh inbox input.
+The first recovered request (#33) contained the outer codemode result reporting
+`Tool bash was interrupted and may have partially run`. The ordered mock matched only
+`Tool codemode …`, so it returned 400 `no_matching_rule`. The actual `RESUME_STREAM` turn
+(#34) still streamed and read the pinned snapshot on the original subscription; the final
+non-200 request assertion caught the earlier failure.
+
+The fixture now explicitly Starts, scripts a text-only acknowledgement of the
+interruption, and waits for the recovered operation and its summary before submitting
+`RESUME_STREAM`. The fresh turn still exercises the held stream and pinned snapshot
+on the original subscription while replacement setup is held. No startup or Stop
+behavior changed.
