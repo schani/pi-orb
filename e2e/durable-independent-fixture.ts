@@ -966,13 +966,17 @@ export function registerIndependentCase(cancellation: IndependentCase, malformed
         const recoveryLogStart = cp.logs.join("").length;
         expect((await api(cp.baseUrl, "POST", `/api/v1/orbs/${orb}/start`)).status).toBe(202);
         await expectPage(page.getByText(stopRecoveryDone, { exact: true })).toBeVisible();
-        await waitFor("recovered VM_EFFECT completes on the original subscription", async () =>
-          operationEvent(
-            frames.slice(recoveryFrames).filter((frame) => frame.socketGeneration === originalOwner),
-            operationId,
-            "operation_finished",
-            { outcome: "completed" },
-          ) ?? null,
+        await waitFor(
+          "recovered VM_EFFECT completes on the original subscription",
+          async () =>
+            operationEvent(
+              frames
+                .slice(recoveryFrames)
+                .filter((frame) => frame.socketGeneration === originalOwner),
+              operationId,
+              "operation_finished",
+              { outcome: "completed" },
+            ) ?? null,
         );
         await summarySettled(operationId, recoveryLogStart);
 
