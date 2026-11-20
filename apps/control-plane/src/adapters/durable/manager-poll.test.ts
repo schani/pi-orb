@@ -474,6 +474,114 @@ it("fences lease loss during Harness startup before activation", async () => {
   }
 });
 
+it.each(["clean", "failed", "owner-lost", "superseded", "manual"] as const)(
+  "reports completed Sleep proof only for the current admission (%s)",
+  async (outcome) => {
+    const entered = gate();
+    const release = gate();
+    const failure = {
+      type: "runtime_client_error",
+      code: "history_unavailable",
+      message: "resource drain failed",
+      answered: true,
+      retryable: false,
+    } as const;
+    const persistence = new MemoryAgentPersistence();
+    if (outcome === "owner-lost") {
+      const open = persistence.open.bind(persistence);
+      vi.spyOn(persistence, "open").mockImplementation((...args) =>
+        open(...args).map((lease) => ({
+          ...lease,
+          beginDrain: () =>
+            okAsync({
+              type: "owner_lost" as const,
+              cause: {
+                type: "authority_error" as const,
+                code: "stale_owner" as const,
+                message: "Agent ownership revoked",
+              },
+            }),
+        })),
+      );
+    }
+    const { caller, orb, plane, runStartup } = await fixture({
+      persistence,
+      openContext: () =>
+        okAsync({
+          ...agentOptions(),
+          closeResources: () => {
+            entered.resolve();
+            return ResultAsync.fromSafePromise(release.promise).andThen(() =>
+              outcome === "failed" ? errAsync(failure) : okAsync(undefined),
+            );
+          },
+        }),
+    });
+    const context = { signal: new AbortController().signal };
+    const sleeping = { ...orb, state: "stopping" as const, stopReason: "sleep" as const };
+    const wake = { ...orb, agentAdmissionVersion: orb.agentAdmissionVersion + 1 };
+    try {
+      (await plane.health(caller, orb, context))._unsafeUnwrap();
+      expect((await plane.pollHealth(caller, sleeping, context))._unsafeUnwrap().status).toBe(
+        "ready",
+      );
+      const stopping = plane.suspend(
+        caller,
+        orb.id,
+        context,
+        orb.agentAdmissionVersion,
+        outcome === "manual" ? undefined : "sleep",
+      );
+      await entered.promise;
+      expect((await plane.pollHealth(caller, sleeping, context)).isErr()).toBe(true);
+      const replacement = outcome === "superseded" ? plane.health(caller, wake, context) : null;
+      release.resolve();
+
+      const stopped = await stopping;
+      if (outcome === "failed") {
+        expect(stopped._unsafeUnwrapErr()).toBe(failure);
+        expect((await plane.pollHealth(caller, sleeping, context))._unsafeUnwrapErr()).toBe(
+          failure,
+        );
+        return;
+      }
+      stopped._unsafeUnwrap();
+      if (outcome === "owner-lost")
+        expect(
+          (await plane.pollHealth(caller, sleeping, context))._unsafeUnwrapErr(),
+        ).toMatchObject({
+          message: "Agent ownership revoked",
+        });
+      if (outcome === "clean") {
+        // Provider-stop retries do not repeat the agent close or erase its proof.
+        (
+          await plane.suspend(caller, orb.id, context, orb.agentAdmissionVersion, "sleep")
+        )._unsafeUnwrap();
+        expect((await plane.pollHealth(caller, sleeping, context))._unsafeUnwrap()).toEqual({
+          status: "sleep_suspended",
+        });
+        expect((await plane.pollHealth(caller, orb, context)).isErr()).toBe(true);
+        expect(runStartup).not.toHaveBeenCalled();
+        (await plane.dispose(caller, orb.id, false, context))._unsafeUnwrap();
+      }
+      expect((await plane.pollHealth(caller, sleeping, context)).isErr()).toBe(true);
+      if (replacement) {
+        expect((await replacement)._unsafeUnwrap().status).toBe("ready");
+        (
+          await plane.suspend(caller, orb.id, context, orb.agentAdmissionVersion, "sleep")
+        )._unsafeUnwrap();
+        const latestSleep = { ...sleeping, agentAdmissionVersion: wake.agentAdmissionVersion };
+        expect((await plane.pollHealth(caller, latestSleep, context))._unsafeUnwrap().status).toBe(
+          "ready",
+        );
+      }
+    } finally {
+      release.resolve();
+      await plane.close();
+    }
+  },
+);
+
 it("does not activate an admitted cold readonly owner and retires it before a fresh wake", async () => {
   const activateResources = vi.fn(() => () => undefined);
   const modes: (boolean | undefined)[] = [];

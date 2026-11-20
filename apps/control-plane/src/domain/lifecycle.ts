@@ -14,6 +14,7 @@ import {
   prepareAgentStop,
   suspendAgent,
 } from "./agent-orchestration.ts";
+import type { AgentPollHealth } from "./agent-ports.ts";
 import type { HookFailure, LivenessEntry } from "./control-state.ts";
 import { withDeadline } from "./dst.ts";
 import {
@@ -1993,7 +1994,7 @@ async function reconcileStopping(
       task,
       deps.constants.runtimeRequestTimeoutMs,
       "suspend drained sleeping agent",
-      (context) => suspendAgent(task, deps, orb.id, context, orb.agentAdmissionVersion),
+      (context) => suspendAgent(task, deps, orb.id, context, orb.agentAdmissionVersion, "sleep"),
     );
     if (suspended.isErr()) return retryable(suspended.error);
   }
@@ -2611,7 +2612,7 @@ export async function reconcileCentralAgent(
           persistedRecovery = true;
         }
       }
-      const health = await withDeadline(
+      const health = await withDeadline<AgentPollHealth, RuntimeClientError>(
         task,
         deps.constants.runtimeRequestTimeoutMs,
         "central agent activity",

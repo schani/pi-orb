@@ -4,7 +4,12 @@ import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import type { RuntimeHealth } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, type Result, ResultAsync } from "neverthrow";
-import type { AgentAlertWriter, AgentPlane, AgentSessionFacade } from "../../domain/agent-ports.ts";
+import type {
+  AgentAlertWriter,
+  AgentPlane,
+  AgentPollHealth,
+  AgentSessionFacade,
+} from "../../domain/agent-ports.ts";
 import type { RuntimeClientError } from "../../domain/errors.ts";
 import { logOrbEvent } from "../../domain/log.ts";
 import type { OrbRow } from "../../domain/orb.ts";
@@ -33,9 +38,15 @@ export interface AgentOwnership<T> {
   close(agent: T): ResultAsync<void, RuntimeClientError>;
   revoke?(agent: T): void;
   active?(agent: T): boolean;
+  sleepSuspensionFailure?(agent: T): RuntimeClientError | undefined;
 }
 
-type Revocation = "superseded" | "suspend" | "dispose" | "shutdown";
+type Revocation = "superseded" | "suspend" | "sleep" | "dispose" | "shutdown";
+
+type SleepSuspension = {
+  readonly admissionVersion: number;
+  result?: Result<{ readonly status: "sleep_suspended" }, RuntimeClientError>;
+};
 
 type Owned<T> = { state: "owned"; admissionVersion: number; agent: T };
 type AgentOwner<T> =
@@ -84,7 +95,7 @@ export class OrbAgentManager<T> {
   private readonly agents = new Map<string, AgentOwner<T>>();
   private readonly queues = new Map<string, Promise<void>>();
   private readonly disposed = new Set<string>();
-  private readonly suspended = new Map<string, boolean>();
+  private readonly suspended = new Map<string, "local" | "fenced" | SleepSuspension>();
   private readonly admissions = new Map<string, number>();
   private readonly tickets = new Map<string, number>();
   private readonly opening = new Map<string, AbortController>();
@@ -151,10 +162,11 @@ export class OrbAgentManager<T> {
     if (this.closing || this.disposed.has(orbId))
       return err(durableError("agent admissions are closed"));
     if (admissionVersion < floor) return err(durableError("stale agent admission authority"));
+    const suspension = this.suspended.get(orbId);
     if (
-      this.suspended.has(orbId) &&
+      suspension !== undefined &&
       (resume === "never" ||
-        (resume === "newer" && this.suspended.get(orbId) && admissionVersion === floor))
+        (resume === "newer" && suspension !== "local" && admissionVersion === floor))
     )
       return err(durableError("agent admissions are closed"));
     this.admissions.set(orbId, admissionVersion);
@@ -187,7 +199,10 @@ export class OrbAgentManager<T> {
     return this.serial(orbId, async () => {
       if (waiter?.aborted) return err(cancelledOpen(false));
       if (!admitted()) return err(durableError("agent admission superseded"));
-      if (resume && this.suspended.get(orbId) === false) this.suspended.delete(orbId);
+      const suspension = this.suspended.get(orbId);
+      if (resume && suspension === "local") this.suspended.delete(orbId);
+      // A same-admission readonly reopen keeps the fence but invalidates Sleep proof.
+      if (typeof suspension === "object") this.suspended.set(orbId, "fenced");
       const existing = this.agents.get(orbId);
       if (
         existing?.state === "owned" &&
@@ -270,6 +285,13 @@ export class OrbAgentManager<T> {
     return (this.admissions.get(orbId) ?? 0) > throughAdmissionVersion;
   }
 
+  sleepSuspension(orbId: string, admissionVersion: number) {
+    if (this.closing || this.disposed.has(orbId)) return undefined;
+    const suspension = this.suspended.get(orbId);
+    if (typeof suspension === "object" && suspension.admissionVersion === admissionVersion)
+      return suspension.result;
+  }
+
   suspend(
     orbId: string,
     throughAdmissionVersion?: number,
@@ -281,11 +303,22 @@ export class OrbAgentManager<T> {
     )
       return okAsync(undefined);
     if (throughAdmissionVersion !== undefined) this.admissions.set(orbId, throughAdmissionVersion);
-    this.suspended.set(
-      orbId,
-      throughAdmissionVersion !== undefined || this.suspended.get(orbId) === true,
-    );
+    const previous = this.suspended.get(orbId);
+    const sleep: SleepSuspension | undefined =
+      origin === "sleep" && throughAdmissionVersion !== undefined
+        ? typeof previous === "object" && previous.admissionVersion === throughAdmissionVersion
+          ? previous
+          : { admissionVersion: throughAdmissionVersion }
+        : undefined;
+    const fenced = throughAdmissionVersion !== undefined || (previous && previous !== "local");
+    this.suspended.set(orbId, sleep ?? (fenced ? "fenced" : "local"));
     const owned = this.agents.get(orbId);
+    const canProveSleep =
+      sleep !== undefined &&
+      owned?.state === "owned" &&
+      owned.admissionVersion === sleep.admissionVersion &&
+      !this.isOpening(orbId) &&
+      this.ownership.active?.(owned.agent) !== false;
     if (owned?.state === "owned") this.ownership.revoke?.(owned.agent);
     this.tickets.set(orbId, (this.tickets.get(orbId) ?? 0) + 1);
     this.opening.get(orbId)?.abort(origin);
@@ -297,7 +330,20 @@ export class OrbAgentManager<T> {
           existing.admissionVersion > throughAdmissionVersion)
       )
         return ok(undefined);
-      return this.retire(orbId, existing);
+      const closed = await this.retire(orbId, existing);
+      // A newer admission or non-Sleep suspension can supersede this close while it joins.
+      if (sleep && this.suspended.get(orbId) === sleep) {
+        if (closed.isErr()) {
+          sleep.result = err(
+            (existing.state === "retiring" ? existing.refusal : undefined) ?? closed.error,
+          );
+        } else if (existing === owned && owned.state === "owned") {
+          const failure = this.ownership.sleepSuspensionFailure?.(owned.agent);
+          if (failure) sleep.result = err(failure);
+          else if (canProveSleep) sleep.result = ok({ status: "sleep_suspended" });
+        }
+      }
+      return closed;
     });
   }
 
@@ -413,6 +459,7 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
     close: (agent) => agent.close(),
     revoke: (agent) => agent.revoke(),
     active: (agent) => agent.accepting(),
+    sleepSuspensionFailure: (agent) => agent.sleepSuspensionFailure(),
   });
   private readonly options: DurableAgentPlaneOptions;
   private constructor(options: DurableAgentPlaneOptions) {
@@ -747,8 +794,12 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
     task: SimulationTask,
     orb: OrbRow,
     context: OperationContext,
-  ): ResultAsync<RuntimeHealth, RuntimeClientError> {
+  ): ResultAsync<AgentPollHealth, RuntimeClientError> {
     if (context.signal.aborted) return errAsync(cancelledOpen(false));
+    if (orb.state === "stopping" && orb.stopReason === "sleep") {
+      const suspension = this.manager.sleepSuspension(orb.id, orb.agentAdmissionVersion);
+      if (suspension) return new ResultAsync(Promise.resolve(suspension));
+    }
     const runStartup = this.options.runStartup;
     if (!runStartup) return this.health(task, orb, context);
     const readOnly = this.readonlyMode(orb);
@@ -1068,13 +1119,14 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
     orbId: string,
     _context: OperationContext,
     throughAdmissionVersion?: number,
+    reason?: "sleep",
   ) {
     if (
       throughAdmissionVersion !== undefined &&
       this.manager.hasNewerAuthority(orbId, throughAdmissionVersion)
     )
       return okAsync(undefined);
-    const suspended = this.manager.suspend(orbId, throughAdmissionVersion);
+    const suspended = this.manager.suspend(orbId, throughAdmissionVersion, reason);
     const startup = this.invalidateStartup(orbId, "suspend", throughAdmissionVersion);
     return this.joinStartups(suspended, startup ? [startup] : []);
   }

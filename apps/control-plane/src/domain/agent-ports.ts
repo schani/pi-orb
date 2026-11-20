@@ -86,6 +86,9 @@ export interface AgentAlertWriter {
   ): ResultAsync<{ recordId: string; duplicate: boolean }, RuntimeClientError>;
 }
 
+/** Central-only observation, not a runtime wire health status. */
+export type AgentPollHealth = RuntimeHealth | { readonly status: "sleep_suspended" };
+
 /** Central application boundary; no Harness, Chord, socket or database types. */
 export interface AgentPlane {
   readonly placement: "central" | "host";
@@ -107,12 +110,12 @@ export interface AgentPlane {
     orb: OrbRow,
     context: OperationContext,
   ): ResultAsync<RuntimeHealth, RuntimeClientError>;
-  /** Central poll probe; may report initializing while startup continues independently. */
+  /** Central poll probe; can report in-flight startup or a completed Sleep suspension. */
   pollHealth?(
     task: SimulationTask,
     orb: OrbRow,
     context: OperationContext,
-  ): ResultAsync<RuntimeHealth, RuntimeClientError>;
+  ): ResultAsync<AgentPollHealth, RuntimeClientError>;
   /** Validate execution readiness and admission before publishing ready compute. */
   executionReady?(
     task: SimulationTask,
@@ -154,6 +157,7 @@ export interface AgentPlane {
     orbId: string,
     context: OperationContext,
     throughAdmissionVersion?: number,
+    reason?: "sleep",
   ): ResultAsync<void, RuntimeClientError>;
   /** Archive seals public history and removes private authority. */
   dispose(

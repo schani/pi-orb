@@ -63,3 +63,14 @@ interruption, and waits for the recovered operation and its summary before submi
 `RESUME_STREAM`. The fresh turn still exercises the held stream and pinned snapshot
 on the original subscription while replacement setup is held. No startup or Stop
 behavior changed.
+
+## Sleep suspension during the follow-up rollout
+
+The [follow-up monitor](https://github.com/schani/pi-orb/actions/runs/44661373468/artifacts/14598820686)
+recorded a successful startup and wake delivery on the same orb, then a separate
+`central-agent-unavailable` at 19:14:20 PT. The Sleep drain had finished successfully
+less than a second earlier; the VM did not reach `stopped` until 19:14:36 PT. A central
+poll treated the same-generation admission fence as unavailability during that gap.
+There were no blocked deliveries or HTTP errors in the monitor window. The regression
+test holds the VM in `stopping` after the drain and checks wake delivery and the
+separate failed-cleanup path.

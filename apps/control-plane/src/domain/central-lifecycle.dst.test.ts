@@ -1,14 +1,19 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { createModels } from "@earendil-works/pi-ai/models";
+import { createRegistry } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { NoSimulationTask, type SimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, ResultAsync } from "neverthrow";
 import { describe, expect, it, vi } from "vitest";
+import { DurableAgentPlane, durableError } from "../adapters/durable/manager.ts";
+import { MemoryAgentPersistence } from "../adapters/durable/memory-persistence.testkit.ts";
 import { LazyExecutionEnv } from "../adapters/execution-client/lazy-env.ts";
 import { makeHarness, makeOrbRow, makeProjectRow, seedRunningOrb } from "../testkit/fixtures.ts";
-import { runDst, waitUntil } from "../testkit/sim.ts";
+import { LogCapture, runDst, waitUntil } from "../testkit/sim.ts";
 import type { AgentPlane } from "./agent-ports.ts";
 import type { RuntimeClientError } from "./errors.ts";
 import { awaitExecutionBinding } from "./execution-admission.ts";
+import { HarnessAgentPlane } from "./harness-agent-plane.ts";
 import {
   admitAgentRecovery,
   reconcileCentralAgent,
@@ -590,6 +595,134 @@ describe("independent central lifecycle", () => {
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
     });
   });
+  it.each(["clean", "failed"] as const)(
+    "polls a Sleep-stopping VM after %s owner drain",
+    async (outcome) => {
+      const logs = new LogCapture();
+      await runDst(
+        { name: `central-sleep-poll-${outcome}`, iterations: 5, logCapture: logs },
+        async (sim) => {
+          const h = makeHarness();
+          const failure = durableError("Sleep owner cleanup failed");
+          let startupTask: SimulationTask;
+          const agent = (
+            await DurableAgentPlane.create({
+              persistence: new MemoryAgentPersistence(),
+              runStartup: (_id, run) => run(startupTask),
+              openContext: () =>
+                okAsync({
+                  models: createModels(),
+                  registry: createRegistry(),
+                  env: new NodeExecutionEnv({ cwd: "/tmp" }),
+                  checkoutCommit: "commit-0",
+                  instructions: "",
+                  closeResources: () =>
+                    outcome === "clean" ? okAsync(undefined) : errAsync(failure),
+                }),
+            })
+          )._unsafeUnwrap();
+          const deps = { ...h.deps, agentPlane: new HarnessAgentPlane(agent, agent, h.store) };
+          let holdVm = true;
+          deps.hostProvider.observe = (task, ref) => okAsync(h.world.observeHost(task, ref));
+          deps.hostProvider.stop = (_task, ref) => {
+            if (holdVm)
+              return errAsync({
+                type: "orb_host_provider_error",
+                provider: ref.provider,
+                operation: "stop",
+                code: "unavailable",
+                message: "fixture holds VM running",
+                retryable: true,
+              });
+            h.world.stopHost(ref);
+            return okAsync(undefined);
+          };
+          const deliver = vi
+            .spyOn(agent, "deliverMessage")
+            .mockImplementation((_task, _orb, request) =>
+              okAsync({
+                v: 1,
+                messageId: request.messageId,
+                status: "persisted",
+                delivery: "turn",
+                operationId: "turn",
+                duplicate: false,
+              }),
+            );
+          const result = await sim.runTasks([
+            {
+              name: "driver",
+              f: async (task) => {
+                try {
+                  startupTask = task;
+                  seedRunningOrb(task, h, "orb");
+                  const running = h.store.orbSnapshot("orb")!;
+                  const context = { signal: new AbortController().signal };
+                  (await agent.health(task, running, context))._unsafeUnwrap();
+                  const sleepId = "00000000-0000-4000-8000-000000000061";
+                  h.store.seedOrb({
+                    ...running,
+                    sleepId,
+                    sleepUntil: task.wallNow() + 60_000,
+                  });
+                  await reconcileOrbOnce(task, deps, "orb");
+                  expect(h.store.orbSnapshot("orb")).toMatchObject({
+                    state: "stopping",
+                    stopReason: "sleep",
+                    agentAdmissionVersion: running.agentAdmissionVersion,
+                  });
+                  expect((await reconcileOrbOnce(task, deps, "orb")).type).toBe("retryable");
+                  expect(h.store.orbSnapshot("orb")?.state).toBe("stopping");
+                  expect(h.world.hostStateOf("orb")).toBe("running");
+                  (await reconcileCentralAgent(task, deps, "orb"))._unsafeUnwrap();
+                  expect(deliver).not.toHaveBeenCalled();
+                  const unavailable = logs.matching("central-agent-unavailable");
+                  if (outcome === "failed") {
+                    expect(unavailable).toHaveLength(1);
+                    expect(unavailable[0]).toContain(failure.message);
+                    expect(logs.matching("drain-caught-up")).toHaveLength(0);
+                    return;
+                  }
+                  expect(unavailable).toHaveLength(0);
+                  expect(logs.matching("drain-caught-up")).toHaveLength(1);
+
+                  holdVm = false;
+                  await reconcileOrbOnce(task, deps, "orb");
+                  expect(h.store.orbSnapshot("orb")?.state).toBe("stopped");
+                  await task.sleep(60_000, "reach Sleep wake");
+                  await reconcileOrbOnce(task, deps, "orb");
+                  await reconcileOrbOnce(task, deps, "orb");
+                  const wake = (await reconcileCentralAgent(task, deps, "orb"))._unsafeUnwrap();
+                  expect(deliver).not.toHaveBeenCalled();
+                  // Join the poll-owned open, rather than waiting for a timer.
+                  expect((await agent.health(task, wake, context))._unsafeUnwrap().status).toBe(
+                    "ready",
+                  );
+                  (await reconcileCentralAgent(task, deps, "orb"))._unsafeUnwrap();
+                  expect(wake).toMatchObject({
+                    state: "starting",
+                    agentAdmissionVersion: running.agentAdmissionVersion + 1,
+                    stopReason: null,
+                  });
+                  expect(deliver).toHaveBeenCalledTimes(1);
+                  expect(deliver.mock.calls[0]?.[2]).toMatchObject({
+                    messageId: sleepId,
+                    messageIds: [sleepId],
+                    system: { kind: "sleep_wake" },
+                  });
+                  expect(h.store.messageSnapshots("orb")).toHaveLength(1);
+                  expect(logs.matching("central-agent-unavailable")).toHaveLength(0);
+                } finally {
+                  await agent.close();
+                }
+              },
+            },
+          ]);
+          expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        },
+      );
+    },
+  );
   it("persistent work and presence cannot clear a failed latch", async () => {
     await runDst({ name: "central-failed-demand", iterations: 5 }, async (sim) => {
       const harness = makeHarness();

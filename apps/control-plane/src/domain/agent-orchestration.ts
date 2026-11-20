@@ -87,8 +87,10 @@ export function suspendAgent(
   orbId: string,
   context: OperationContext,
   throughAdmissionVersion?: number,
+  ...reason: [reason?: "sleep"]
 ) {
   return (
-    deps.agentPlane?.suspend(task, orbId, context, throughAdmissionVersion) ?? okAsync(undefined)
+    deps.agentPlane?.suspend(task, orbId, context, throughAdmissionVersion, ...reason) ??
+    okAsync(undefined)
   );
 }

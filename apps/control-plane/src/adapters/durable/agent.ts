@@ -234,6 +234,7 @@ export class DurableAgent implements AgentSessionFacade {
   private revokeResources: (() => void) | undefined;
   private paused = true;
   private closeResult: ResultAsync<void, RuntimeClientError> | null = null;
+  private drainOwnershipFailure?: RuntimeClientError;
   private operationOutcome: "completed" | "aborted" | "failed" = "completed";
   private failure: RuntimeClientError | null = null;
   private view!: WatchHandle<ConversationView>;
@@ -1542,6 +1543,11 @@ export class DurableAgent implements AgentSessionFacade {
     ).andThen(() => (this.failure ? errAsync(this.failure) : okAsync(undefined)));
   }
 
+  sleepSuspensionFailure(): RuntimeClientError | undefined {
+    // Confirmed lease loss can close locally, but does not prove a clean Sleep drain.
+    return this.drainOwnershipFailure ?? this.failure ?? undefined;
+  }
+
   close(): ResultAsync<void, RuntimeClientError> {
     return this.closeAgent(true);
   }
@@ -1577,6 +1583,8 @@ export class DurableAgent implements AgentSessionFacade {
                 : undefined;
         const drainOutcome = draining?.isOk() ? draining.value : undefined;
         const drainCause = draining?.isErr() ? draining.error.cause : drainOutcome?.cause;
+        if (drainOutcome?.type === "owner_lost")
+          this.drainOwnershipFailure = startupRuntimeError(drainOutcome.cause);
         const edge = await this.options.edge?.(
           resources?.isErr() ? "harness.resources_close_failed" : "harness.suspended",
           {

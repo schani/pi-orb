@@ -86,6 +86,19 @@ class MonitorTest(unittest.TestCase):
                 self.assertIsNotNone(monitor.observe({}, output, clock=lambda: next(clock)).error)
             self.assertEqual(json.loads(output.read_text())['outcome'], 'regression')
 
+    def test_central_agent_unavailable_is_a_regression_even_without_http_errors(self):
+        lifecycle = monitor.lifecycle_counts([
+            {'textPayload': 'lifecycle: orb=fixture central-agent-unavailable message="storage offline"'},
+        ])
+        self.assertEqual(lifecycle, {'central-agent-unavailable': 1})
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'monitor.json'
+            clock = iter([0, 1090, 1090])
+            with patch.object(monitor, 'sample', return_value=Result({
+                    'health': 'ok', 'logs': {'errors': 0, 'http5xx': 0}, 'lifecycle': lifecycle})):
+                self.assertIsNotNone(monitor.observe({}, output, clock=lambda: next(clock)).error)
+            self.assertEqual(json.loads(output.read_text())['outcome'], 'regression')
+
     def test_ingress_429_is_retained_even_when_application_probes_succeed(self):
         self.assertEqual(monitor.log_counts([{'httpRequest': {'status': 429}}])['http429'], 1)
         with tempfile.TemporaryDirectory() as directory:

@@ -106,10 +106,12 @@ export class HarnessAgentPlane implements AgentPlane {
     orbId: string,
     context: OperationContext,
     throughAdmissionVersion?: number,
+    ...reason: [reason?: "sleep"]
   ) {
     return this.byId(task, orbId).andThen(
       (plane) =>
-        plane?.suspend(task, orbId, context, throughAdmissionVersion) ?? okAsync(undefined),
+        plane?.suspend(task, orbId, context, throughAdmissionVersion, ...reason) ??
+        okAsync(undefined),
     );
   }
   dispose(
