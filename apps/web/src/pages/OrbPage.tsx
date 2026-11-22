@@ -7,7 +7,6 @@ import {
   type HostedFilesResponse,
   type MessageInputBlock,
   type OrbMessageView,
-  type OrbModelOption,
   type OrbView,
   type RuntimeEvent,
   type ServerFrame,
@@ -24,7 +23,7 @@ import {
 } from "react";
 import { ClaudeAuthButton } from "../components/ClaudeAuth.tsx";
 import { Composer, type ComposerHandle, type ComposerImage } from "../components/Composer.tsx";
-import type { ComposerCommandAction } from "../components/command-options.ts";
+import type { ComposerCommandAction, ModelSelection } from "../components/command-options.ts";
 import type { ComposerMode } from "../components/composer-mode.ts";
 import type { DetailContext } from "../components/DetailBody.tsx";
 import { HistoryView, type LiveBlock, type ToolChip } from "../components/HistoryView.tsx";
@@ -60,7 +59,6 @@ import {
   enqueueOrbMessage,
   getOrb,
   getOrbHistory,
-  getOrbModelOptions,
   listHostedFiles,
   listOrbMessages,
   putPendingModel,
@@ -122,8 +120,6 @@ import { NotFoundPage } from "./NotFoundPage.tsx";
 
 const POLL_INTERVAL_MS = 2000;
 
-type ModelRef = AgentSettingsEvent["settings"]["model"];
-
 interface WelcomeInfo {
   runtimeInstanceId: string;
   sessionId: string;
@@ -159,7 +155,6 @@ interface OrbPageState {
   composerMode: ComposerMode;
   composerImages: ComposerImage[];
   settings: AgentSettingsEvent | null;
-  lastModel: (ModelRef & { name?: string }) | null;
   compacting: boolean;
   compaction: { operationId: string; afterId: string | null } | null;
   synced: boolean;
@@ -195,7 +190,8 @@ type OrbPageAction =
   | { type: "image_added"; image: ComposerImage }
   | { type: "image_removed"; id: string }
   | { type: "notice"; message: string }
-  | { type: "open_settings"; command: "model" | "thinking" | "effort" }
+  | ({ type: "open_settings" } & ({ command: "model" | "thinking" | "effort" } | { text: string }))
+  | { type: "command_finished"; requestId: string; error?: { code: string; message: string } }
   | {
       type: "request_sent";
       requestId: string;
@@ -231,7 +227,6 @@ export function initialState(orbId: string): OrbPageState {
     composerMode: draft?.mode ?? "message",
     composerImages: draft?.images ?? [],
     settings: null,
-    lastModel: null,
     compacting: false,
     compaction: null,
     synced: false,
@@ -260,7 +255,6 @@ function applyRuntimeEvent(state: OrbPageState, event: RuntimeEvent): OrbPageSta
       return {
         ...state,
         settings: event,
-        lastModel: findModel(event.models, event.settings.model) ?? event.settings.model,
         ...(adjusted
           ? {
               notice: `Thinking adjusted to ${event.settings.thinkingLevel} for this model.`,
@@ -453,21 +447,7 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
         frame.result.type === "settings_applied" ||
         (frame.result.type === "accepted" && state.pendingRequest.kind === "compact")
       ) {
-        const unchangedDraft =
-          state.composerMode === "command" &&
-          state.composerText === state.pendingRequest.submittedText;
-        return {
-          ...state,
-          pendingRequest: null,
-          requestError: null,
-          ...(unchangedDraft
-            ? {
-                composerText: state.commandDraft?.text ?? "",
-                composerMode: "message",
-                commandDraft: null,
-              }
-            : {}),
-        };
+        return finishCommand(state);
       }
       if (frame.result.type === "accepted") {
         return {
@@ -491,6 +471,22 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
         serverError: { code: frame.error.code, message: frame.error.message },
       };
   }
+}
+
+function finishCommand(state: OrbPageState): OrbPageState {
+  return {
+    ...state,
+    pendingRequest: null,
+    requestError: null,
+    ...(state.composerMode === "command" &&
+    state.composerText === state.pendingRequest?.submittedText
+      ? {
+          composerText: state.commandDraft?.text ?? "",
+          composerMode: "message",
+          commandDraft: null,
+        }
+      : {}),
+  };
 }
 
 export function canRunComposerCommand(
@@ -751,11 +747,16 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
         ...state,
         commandDraft:
           state.composerMode === "command" ? state.commandDraft : { text: state.composerText },
-        composerText: `${action.command} `,
+        composerText: "command" in action ? `${action.command} ` : action.text,
         composerMode: "command",
         requestError: null,
         notice: null,
       };
+    case "command_finished":
+      if (state.pendingRequest?.requestId !== action.requestId) return state;
+      return action.error
+        ? { ...state, pendingRequest: null, requestError: action.error }
+        : finishCommand(state);
     case "composer_changed":
       if (state.composerMode === "command" && action.mode === "message" && state.commandDraft)
         return {
@@ -867,53 +868,41 @@ function CopyCodeButton({ code }: { code: string }) {
   );
 }
 
-function findModel<T extends ModelRef>(models: readonly T[] | undefined, ref: ModelRef) {
-  return models?.find((model) => model.provider === ref.provider && model.id === ref.id);
-}
-
 export function OrbHeaderSettings({
   view,
-  offline = false,
-  lastModel,
-  modelCatalog,
-  pendingModel,
+  orb,
   pending,
   effortLabel,
   onOpen,
 }: {
   view: AgentSettingsEvent | null;
-  offline?: boolean;
-  lastModel?: OrbPageState["lastModel"];
-  modelCatalog?: readonly OrbModelOption[] | undefined;
-  pendingModel?: ModelRef | undefined;
+  orb?: ModelSelection | null;
   pending: boolean;
   effortLabel: "effort" | "thinking";
   onOpen: (command: "model" | "effort" | "thinking") => void;
 }) {
-  if (view === null && !offline && pendingModel === undefined) return null;
-  const liveModel = view === null ? undefined : findModel(view.models, view.settings.model);
-  const name =
-    pendingModel !== undefined
-      ? (findModel(modelCatalog, pendingModel) ?? findModel(view?.models, pendingModel))?.name
-      : offline
-        ? ((lastModel && findModel(modelCatalog, lastModel)?.name) ?? lastModel?.name)
-        : liveModel?.name;
-  const label = `${name || "Model"}${pendingModel !== undefined ? " (queued)" : ""}`;
+  const queued = orb?.pendingModel?.model;
+  if (view === null && orb?.queueableModels === undefined && !queued) return null;
+  const model = view?.models.find(
+    (model) =>
+      model.provider === view.settings.model.provider && model.id === view.settings.model.id,
+  );
+  const label = queued
+    ? `${orb?.queueableModels?.find((model) => model.provider === queued.provider && model.id === queued.id)?.name ?? "Model"} (queued)`
+    : (model?.name ?? view?.settings.model.id ?? "Model");
   return (
     <div className="orb-settings">
       <button
         type="button"
         title="Change model"
         aria-label="Change model"
-        aria-description={label}
-        disabled={pending || (!offline && view === null)}
+        aria-description={queued ? label : undefined}
+        disabled={pending || (orb?.queueableModels === undefined && view === null)}
         onClick={() => onOpen("model")}
       >
         {label}
       </button>
-      {!offline &&
-      view !== null &&
-      (effortLabel === "thinking" || liveModel?.thinkingLevels.length) ? (
+      {view !== null && (effortLabel === "thinking" || (model?.thinkingLevels.length ?? 0) > 0) && (
         <button
           type="button"
           title={`Change ${effortLabel}`}
@@ -923,7 +912,7 @@ export function OrbHeaderSettings({
         >
           {view.settings.thinkingLevel}
         </button>
-      ) : null}
+      )}
     </div>
   );
 }
@@ -1880,9 +1869,9 @@ function OrbConversation({
   };
 
   const connected = state.connection === "open";
-  const offlineModelAvailable = orb?.canQueueModel === true;
+  const queueableModels = orb?.queueableModels;
   const liveSettings =
-    !offlineModelAvailable &&
+    queueableModels === undefined &&
     orb !== null &&
     !["deleting", "archiving", "archived"].includes(orb.state) &&
     canConnectLive(orb) &&
@@ -1890,67 +1879,34 @@ function OrbConversation({
     state.synced
       ? state.settings
       : null;
-  const pendingModel = orb?.pendingModel?.model;
-  const showOfflineCatalog = offlineModelAvailable && state.composerMode === "command";
-  const [catalog, setCatalog] = useState<{ models?: OrbModelOption[]; error?: string } | null>(
-    null,
-  );
-  const shouldLoadCatalog =
-    showOfflineCatalog || (offlineModelAvailable && pendingModel !== undefined && catalog === null);
-  const [catalogAttempt, retryCatalog] = useReducer((attempt: number) => attempt + 1, 0);
-  const [queuingModel, setQueuingModel] = useState(false);
-  const queueInFlight = useRef(false);
-  const [queueModelError, setQueueModelError] = useState<string | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: Retry explicitly starts another catalog read.
-  useEffect(() => {
-    if (!shouldLoadCatalog) return;
-    const controller = new AbortController();
-    void getOrbModelOptions(orbId, controller.signal).then((result) => {
-      if (controller.signal.aborted) return;
-      setCatalog((previous) =>
-        result.isOk()
-          ? result.value
-          : { ...previous, error: `Could not load models: ${describeApiError(result.error)}` },
-      );
-    });
-    return () => controller.abort();
-  }, [orbId, shouldLoadCatalog, catalogAttempt]);
+  const settingsDisabled =
+    queueableModels === undefined
+      ? !canRunComposerCommand(orb?.state, state, orb?.centralAgent)
+      : state.pendingRequest !== null;
 
-  const retryModelOptions = () => {
-    setCatalog((previous) => (previous?.models === undefined ? null : { models: previous.models }));
-    retryCatalog();
-  };
-
-  const changeSettings = async (action: ComposerCommandAction) => {
-    if (action.type === "queue_model") {
-      if (!offlineModelAvailable || queueInFlight.current) return;
-      queueInFlight.current = true;
-      setQueuingModel(true);
-      setQueueModelError(null);
+  const changeSettings = (action: ComposerCommandAction) => {
+    if (settingsDisabled) return;
+    if (queueableModels !== undefined) {
+      if (action.type !== "set_model") return;
+      const requestId = generateUuid();
+      dispatch({ type: "request_sent", requestId, kind: "settings" });
       ++metadataRevision.current;
-      const result = await putPendingModel(orbId, { model: action.model });
-      ++metadataRevision.current;
-      queueInFlight.current = false;
-      setQueuingModel(false);
-      if (result.isErr()) {
-        setQueueModelError(`Could not queue model: ${describeApiError(result.error)}`);
-        return;
-      }
-      if (missingRef.current) return;
-      if (result.value.stateVersion >= (orbRef.current?.stateVersion ?? 0))
-        setObservedOrb(result.value);
-      const current = transcriptRef.current;
-      if (
-        current.composerMode === "command" &&
-        current.composerText === state.composerText &&
-        current.commandDraft === state.commandDraft
-      ) {
-        dispatch({ type: "composer_changed", mode: "message", text: "" });
-      }
+      void putPendingModel(orbId, { model: action.model }).then((result) => {
+        ++metadataRevision.current;
+        if (result.isErr()) {
+          dispatch({
+            type: "command_finished",
+            requestId,
+            error: { code: "queue_model", message: describeApiError(result.error) },
+          });
+          return;
+        }
+        if (!missingRef.current && result.value.stateVersion >= (orbRef.current?.stateVersion ?? 0))
+          setObservedOrb(result.value);
+        dispatch({ type: "command_finished", requestId });
+      });
       return;
     }
-    if (offlineModelAvailable || !canRunComposerCommand(orb?.state, state, orb?.centralAgent))
-      return;
     const requestId = liveRef.current?.sendRequest(action);
     if (!requestId) dispatch({ type: "send_unavailable" });
     else
@@ -2030,9 +1986,6 @@ function OrbConversation({
 
   const canStart = orb !== null && (orb.state === "stopped" || orb.state === "failed");
   const canStop = orb !== null && canStopOrb(orb);
-  const settingsDisabled = offlineModelAvailable
-    ? queuingModel
-    : !canRunComposerCommand(orb?.state, state, orb?.centralAgent);
   const canSend = canSendComposer(orb, state);
   const canAbort = canAbortComposer(state, queuedMessages, orb?.centralAgent ?? false);
 
@@ -2145,16 +2098,10 @@ function OrbConversation({
           </button>
           <OrbHeaderSettings
             view={liveSettings}
-            offline={offlineModelAvailable}
-            lastModel={state.lastModel}
-            modelCatalog={catalog?.models}
-            pendingModel={pendingModel}
-            pending={offlineModelAvailable ? queuingModel : state.pendingRequest !== null}
+            orb={orb}
+            pending={state.pendingRequest !== null}
             effortLabel={orb?.harness === "claude" ? "effort" : "thinking"}
-            onOpen={(command) => {
-              setQueueModelError(null);
-              dispatch({ type: "open_settings", command });
-            }}
+            onOpen={(command) => dispatch({ type: "open_settings", command })}
           />
           <div className="orb-header-actions">
             <OrbTerminal
@@ -2423,27 +2370,12 @@ function OrbConversation({
           ref={composerRef}
           effortLabel={orb?.harness === "claude" ? "effort" : "thinking"}
           settings={liveSettings}
-          offlineModels={
-            offlineModelAvailable
-              ? {
-                  models: catalog?.models ?? [],
-                  queued: pendingModel,
-                  status:
-                    catalog === null
-                      ? { message: "Loading models…" }
-                      : catalog.error !== undefined
-                        ? { message: catalog.error, retry: retryModelOptions }
-                        : undefined,
-                }
-              : undefined
-          }
+          orb={orb}
           settingsDisabled={settingsDisabled}
-          settingsPending={queuingModel || state.pendingRequest?.kind === "settings"}
-          onSettingsChange={(action) => void changeSettings(action)}
+          settingsPending={state.pendingRequest?.kind === "settings"}
+          onSettingsChange={changeSettings}
           feedback={{
             message: [
-              queuingModel ? "Queuing model…" : null,
-              offlineModelAvailable ? queueModelError : null,
               state.pendingRequest?.kind === "settings" ? "Applying settings…" : null,
               state.serverError === null
                 ? null
@@ -2455,14 +2387,19 @@ function OrbConversation({
             ]
               .filter((message) => message !== null)
               .join(" · "),
-            error:
-              (offlineModelAvailable && queueModelError !== null) ||
-              state.serverError !== null ||
-              state.requestError !== null,
+            error: state.serverError !== null || state.requestError !== null,
           }}
           text={state.composerText}
           mode={state.composerMode}
-          onValueChange={(text, mode) => dispatch({ type: "composer_changed", text, mode })}
+          onValueChange={(text, mode) => {
+            if (
+              queueableModels !== undefined &&
+              state.composerMode === "message" &&
+              mode === "command"
+            )
+              dispatch({ type: "open_settings", text: text === state.composerText ? "" : text });
+            else dispatch({ type: "composer_changed", text, mode });
+          }}
           images={state.composerImages}
           onImageAdd={addImage}
           onAttachmentError={(message) => setDropFeedback(message)}

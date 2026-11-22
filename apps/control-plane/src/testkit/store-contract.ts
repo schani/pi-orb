@@ -84,6 +84,7 @@ const orb: OrbRow = {
   createdAt: 1_000,
   updatedAt: 1_000,
 };
+const queuedModel = { changeId: "first-choice", model: { provider: "test", id: "model" } };
 const unicodeStrings = ["\u0000", "\ud800", "\udfff", "\\u0000", "😀"];
 const unicodeOverflow = Object.fromEntries(unicodeStrings.map((text) => [text, { [text]: text }]));
 
@@ -173,274 +174,81 @@ export function storeSemanticsContractTests(
       await subject.close();
     });
 
-    async function seed(): Promise<void> {
+    async function seed(row = orb): Promise<void> {
       expect((await store.insertProject(task, project)).isOk()).toBe(true);
-      expect((await store.insertOrb(task, orb)).isOk()).toBe(true);
+      expect((await store.insertOrb(task, row)).isOk()).toBe(true);
     }
 
-    const queuedModel = {
-      changeId: "first-choice",
-      model: { provider: "claude", id: "sonnet" },
-    };
-    const replacementModel = {
-      changeId: "second-choice",
-      model: { provider: "claude", id: "opus" },
-    };
-
-    it("queues only for terminal Claude or durably inhibited terminal Pi", async () => {
-      (await store.insertProject(task, project))._unsafeUnwrap();
-      const cases = [
-        ["claude", "stopped", null, true],
-        ["claude", "failed", null, true],
-        ["pi", "stopped", "manual", true],
-        ["pi", "failed", "sleep", true],
-        ["pi", "stopped", null, false],
-        ["pi", "failed", "idle", false],
-        ["pi", "stopping", "manual", false],
-        ["claude", "starting", null, false],
-        ["claude", "archived", null, false],
-      ] as const;
-      for (const [index, [harness, state, stopReason, eligible]] of cases.entries()) {
-        const id = `00000000-0000-4000-8000-00000000010${index}`;
-        (await store.insertOrb(task, { ...orb, id, harness, state, stopReason }))._unsafeUnwrap();
-        expect(
-          (await store.queueModel(task, id, queuedModel))._unsafeUnwrap(),
-          `${harness}/${state}/${stopReason}`,
-        ).toBe(eligible);
-        expect((await store.getOrb(task, id))._unsafeUnwrap()?.pendingModel).toEqual(
-          eligible ? queuedModel : null,
-        );
-      }
-    });
-
-    it("reads the last queued choice from locked Claude boot context and clears it by incarnation and change", async () => {
-      await store.insertProject(task, project);
+    it("takes the last offline choice and compare-clears it at Claude boot", async () => {
       const caller = { runtimeTokenHash: "runtime", hostIncarnation: 2 };
+      const replacement = { ...queuedModel, changeId: "replacement" };
+      await seed({ ...orb, ...caller, harness: "claude", state: "failed" });
+      const queue = (choice: typeof queuedModel) => store.queueModel(task, orb.id, choice);
+      expect((await queue(queuedModel))._unsafeUnwrap()).toBe(true);
+      expect((await queue(replacement))._unsafeUnwrap()).toBe(true);
+      const clear = (changeId: string, authority = caller) =>
+        store.clearPendingModel(task, orb.id, changeId, authority);
+      expect((await clear(replacement.changeId))._unsafeUnwrap()).toBe(false);
       (
-        await store.insertOrb(task, { ...orb, ...caller, harness: "claude", state: "failed" })
-      )._unsafeUnwrap();
-      expect((await store.queueModel(task, orb.id, queuedModel))._unsafeUnwrap()).toBe(true);
-      const sent = (
-        await store.enqueueOrbMessage(task, {
+        await store.casTransition(task, {
           orbId: orb.id,
-          messageId: "00000000-0000-4000-8000-000000000103",
-          content: [{ type: "text", text: "wake Claude" }],
-          now: 1_999,
-        })
-      )._unsafeUnwrap();
-      expect((await store.queueModel(task, orb.id, replacementModel))._unsafeUnwrap()).toBe(true);
-      expect(
-        (
-          await store.clearPendingModel(task, orb.id, replacementModel.changeId, caller)
-        )._unsafeUnwrap(),
-      ).toBe(false);
-      const started = (
-        await store.casStartOrbForQueuedMessage(task, {
-          orbId: orb.id,
-          expectedStateVersion: sent.orb.stateVersion,
+          expectedStateVersion: orb.stateVersion,
+          toState: "starting",
           now: 2_000,
         })
       )._unsafeUnwrap();
-      expect(started).toMatchObject({ state: "starting", pendingModel: replacementModel });
-      expect((await store.queueModel(task, orb.id, queuedModel))._unsafeUnwrap()).toBe(false);
+      expect((await queue(queuedModel))._unsafeUnwrap()).toBe(false);
       expect(
         (await store.readOrbBootContext(task, { orbId: orb.id, caller }))._unsafeUnwrap(),
-      ).toEqual({
-        context: null,
-        pendingModel: replacementModel,
-      });
-      for (const [changeId, authority] of [
-        [queuedModel.changeId, caller],
-        [replacementModel.changeId, { ...caller, hostIncarnation: 1 }],
-        [replacementModel.changeId, { ...caller, runtimeTokenHash: "stale" }],
-      ] as const) {
-        expect(
-          (await store.clearPendingModel(task, orb.id, changeId, authority))._unsafeUnwrap(),
-        ).toBe(false);
-      }
+      ).toEqual({ context: null, pendingModel: replacement });
+      expect((await clear(queuedModel.changeId))._unsafeUnwrap()).toBe(false);
       expect(
-        (
-          await store.clearPendingModel(task, orb.id, replacementModel.changeId, caller)
-        )._unsafeUnwrap(),
-      ).toBe(true);
-      expect(
-        (
-          await store.clearPendingModel(task, orb.id, replacementModel.changeId, caller)
-        )._unsafeUnwrap(),
+        (await clear(replacement.changeId, { ...caller, hostIncarnation: 1 }))._unsafeUnwrap(),
       ).toBe(false);
-      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.initialModel).toBeNull();
+      expect((await clear(replacement.changeId))._unsafeUnwrap()).toBe(true);
+      expect((await clear(replacement.changeId))._unsafeUnwrap()).toBe(false);
     });
 
-    it("queues with interrupted work, fences stale Pi authority, and closes eligibility on Send", async () => {
-      await store.insertProject(task, project);
-      (
-        await store.insertOrb(task, {
-          ...orb,
-          state: "stopped",
-          stopReason: "manual",
-          agentAdmissionVersion: 2,
-        })
-      )._unsafeUnwrap();
-      const message = {
-        orbId: orb.id,
-        messageId: "00000000-0000-4000-8000-000000000103",
-        content: [{ type: "text" as const, text: "retained work" }],
-        now: 2_000,
-      };
-      (
-        await store.enqueueOrbMessage(task, { ...message, wake: false, cancelSleep: false })
-      )._unsafeUnwrap();
-      expect((await store.queueModel(task, orb.id, queuedModel))._unsafeUnwrap()).toBe(true);
-      const sent = (
-        await store.enqueueOrbMessage(task, {
-          ...message,
-          messageId: "00000000-0000-4000-8000-000000000104",
-        })
-      )._unsafeUnwrap();
-      expect(sent.orb.pendingModel).toEqual(queuedModel);
-      expect((await store.queueModel(task, orb.id, replacementModel))._unsafeUnwrap()).toBe(false);
-      const caller: CentralAgentCaller = {
-        kind: "central",
-        orbId: orb.id,
-        projectId: project.id,
-        ownerUserId: OWNER,
-        agentAdmissionVersion: sent.orb.agentAdmissionVersion,
-      };
-      for (const authority of [
-        { ...caller, agentAdmissionVersion: 2 },
-        { ...caller, ownerUserId: project.id },
-      ]) {
-        expect(
-          (
-            await store.clearPendingModel(task, orb.id, queuedModel.changeId, authority)
-          )._unsafeUnwrap(),
-        ).toBe(false);
-      }
-      expect(
-        (await store.clearPendingModel(task, orb.id, queuedModel.changeId, caller))._unsafeUnwrap(),
-      ).toBe(true);
-    });
-
-    it("retains the queued Pi choice through automatic wake from Sleep", async () => {
-      await store.insertProject(task, project);
-      const sleepId = "00000000-0000-4000-8000-000000000105";
-      (
-        await store.insertOrb(task, {
-          ...orb,
-          state: "stopped",
-          stopReason: "sleep",
-          sleepId,
-          sleepUntil: 2_000,
-        })
-      )._unsafeUnwrap();
-      expect((await store.queueModel(task, orb.id, queuedModel))._unsafeUnwrap()).toBe(true);
-      const sleeping = (await store.getOrb(task, orb.id))._unsafeUnwrap();
-      assert(sleeping);
-      expect(
-        (
-          await store.processDueOrbSleep(task, {
-            orbId: orb.id,
-            sleepId,
-            expectedStateVersion: sleeping.stateVersion,
-            now: 2_001,
-          })
-        )._unsafeUnwrap(),
-      ).toBe("wake");
-      const waking = (await store.getOrb(task, orb.id))._unsafeUnwrap();
-      assert(waking);
-      expect((await store.queueModel(task, orb.id, replacementModel))._unsafeUnwrap()).toBe(true);
-      const started = (
-        await store.casStartOrbForQueuedMessage(task, {
+    it("requires Pi Stop inhibition to queue and fresh admission to acknowledge after Send", async () => {
+      await seed({ ...orb, state: "stopped", stopReason: "idle" });
+      const queue = () => store.queueModel(task, orb.id, queuedModel);
+      expect((await queue())._unsafeUnwrap()).toBe(false);
+      const { orb: stopped } = (
+        await store.requestOrbStop(task, {
           orbId: orb.id,
-          expectedStateVersion: waking.stateVersion,
-          now: 2_002,
+          expectedStateVersion: orb.stateVersion,
+          now: 2_000,
         })
       )._unsafeUnwrap();
-      expect(started).toMatchObject({ state: "starting", pendingModel: replacementModel });
-      expect((await store.queueModel(task, orb.id, queuedModel))._unsafeUnwrap()).toBe(false);
-    });
-
-    it("fences queued-model failure against a replaced choice at the same state version", async () => {
-      (await store.insertProject(task, project))._unsafeUnwrap();
-      const stopped = (
-        await store.insertOrb(task, { ...orb, state: "stopped", stopReason: "manual" })
+      expect((await queue())._unsafeUnwrap()).toBe(true);
+      const { orb: sent } = (
+        await store.enqueueOrbMessage(task, {
+          orbId: orb.id,
+          messageId: "00000000-0000-4000-8000-000000000103",
+          content: [{ type: "text", text: "wake" }],
+          now: 2_001,
+        })
       )._unsafeUnwrap();
-      expect((await store.queueModel(task, orb.id, queuedModel))._unsafeUnwrap()).toBe(true);
-      expect((await store.queueModel(task, orb.id, replacementModel))._unsafeUnwrap()).toBe(true);
-      const params = {
-        orbId: orb.id,
-        expectedStateVersion: stopped.stateVersion,
-        now: 2_000,
-        lastError: "pending_model_unavailable: queued model rejected",
-        suspendAgent: true,
-      };
+      expect((await queue())._unsafeUnwrap()).toBe(false);
+      const clear = (agentAdmissionVersion: number) =>
+        store.clearPendingModel(task, orb.id, queuedModel.changeId, {
+          ...peerCentralCaller(orb.id),
+          agentAdmissionVersion,
+        });
+      expect((await clear(stopped.agentAdmissionVersion))._unsafeUnwrap()).toBe(false);
+      expect((await clear(sent.agentAdmissionVersion))._unsafeUnwrap()).toBe(true);
       expect(
         (
           await store.failOrbAndRequestComputeDiscard(task, {
-            ...params,
+            orbId: orb.id,
+            expectedStateVersion: sent.stateVersion,
+            now: 2_002,
+            lastError: "queued model unavailable",
+            suspendAgent: true,
             expectedPendingModelChangeId: queuedModel.changeId,
           })
         )._unsafeUnwrapErr(),
       ).toMatchObject({ type: "state_conflict" });
-      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toMatchObject({
-        state: "stopped",
-        stateVersion: stopped.stateVersion,
-        pendingModel: replacementModel,
-        lastError: null,
-      });
-      expect(
-        (
-          await store.failOrbAndRequestComputeDiscard(task, {
-            ...params,
-            expectedPendingModelChangeId: replacementModel.changeId,
-          })
-        )._unsafeUnwrap(),
-      ).toMatchObject({
-        state: "failed",
-        stopReason: "manual",
-        agentAdmissionVersion: stopped.agentAdmissionVersion + 1,
-        pendingModel: replacementModel,
-        lastError: params.lastError,
-      });
-    });
-
-    it("discards queued choices on archive, individual delete, and project delete", async () => {
-      await store.insertProject(task, project);
-      const otherId = "00000000-0000-4000-8000-000000000003";
-      const childId = "00000000-0000-4000-8000-000000000004";
-      const caller = { runtimeTokenHash: "runtime", hostIncarnation: 2 };
-      for (const id of [orb.id, otherId, childId]) {
-        (
-          await store.insertOrb(task, {
-            ...orb,
-            ...caller,
-            id,
-            harness: "claude",
-            state: "stopped",
-          })
-        )._unsafeUnwrap();
-        expect((await store.queueModel(task, id, queuedModel))._unsafeUnwrap()).toBe(true);
-      }
-      const cleanup = { expectedStateVersion: orb.stateVersion, now: 2_000, cleanupAfter: 3_000 };
-      expect(
-        (await store.requestOrbArchive(task, { ...cleanup, orbId: orb.id }))._unsafeUnwrap(),
-      ).toMatchObject({ state: "archiving", pendingModel: null });
-      expect(
-        (await store.readOrbBootContext(task, { orbId: orb.id, caller }))._unsafeUnwrap(),
-      ).toEqual({ context: null, pendingModel: null });
-      expect(
-        (await store.requestOrbDeletion(task, { ...cleanup, orbId: otherId }))._unsafeUnwrap(),
-      ).toMatchObject({ state: "deleting", pendingModel: null });
-      const deleting = (
-        await store.requestProjectDeletion(task, { ...cleanup, projectId: project.id })
-      )._unsafeUnwrap();
-      expect(deleting.orbs).toContainEqual(
-        expect.objectContaining({
-          id: childId,
-          state: "deleting",
-          pendingModel: null,
-        }),
-      );
     });
 
     async function seedPreview() {
@@ -980,6 +788,7 @@ export function storeSemanticsContractTests(
         orbId: orb.id,
         expectedStateVersion: 1,
         toState: "stopped",
+        stopReason: "sleep",
         now: 2500,
       });
       expect(stopped.isOk()).toBe(true);
@@ -1013,6 +822,7 @@ export function storeSemanticsContractTests(
           })
         )._unsafeUnwrap(),
       ).toBe("stale");
+      expect((await store.queueModel(task, orb.id, queuedModel))._unsafeUnwrap()).toBe(true);
       const messages = (await store.listOrbMessages(task, orb.id))._unsafeUnwrap();
       expect(messages).toHaveLength(1);
       expect(messages[0]).toMatchObject({
@@ -1041,7 +851,7 @@ export function storeSemanticsContractTests(
           messageIds: [sleepId],
           system: { kind: "sleep_wake" },
         },
-        pendingModel: null,
+        pendingModel: queuedModel,
       });
       expect(
         (await store.readOrbBootContext(task, bootRequest))._unsafeUnwrap().context?.messageId,
@@ -3427,7 +3237,7 @@ export function storeSemanticsContractTests(
     });
 
     it("atomically fences project creation, fans out deletion, and finalizes last", async () => {
-      await seed();
+      await seed({ ...orb, pendingModel: queuedModel });
       const requested = await store.requestProjectDeletion(task, {
         projectId: project.id,
         now: 2_000,
@@ -3435,6 +3245,7 @@ export function storeSemanticsContractTests(
       });
       expect(requested.isOk() && requested.value.newlyRequested).toBe(true);
       expect(requested.isOk() && requested.value.orbs[0]?.state).toBe("deleting");
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.pendingModel).toBeNull();
       expect((await store.getOrbDeletion(task, orb.id))._unsafeUnwrap()?.kind).toBe("delete");
 
       const lateOrb = { ...orb, id: "00000000-0000-4000-8000-000000000003" };
@@ -3491,7 +3302,7 @@ export function storeSemanticsContractTests(
     });
 
     it("upgrades an in-progress archive when its project is deleted", async () => {
-      await seed();
+      await seed({ ...orb, pendingModel: queuedModel });
       const archived = await store.requestOrbArchive(task, {
         orbId: orb.id,
         expectedStateVersion: 0,
@@ -3499,6 +3310,7 @@ export function storeSemanticsContractTests(
         cleanupAfter: 3_000,
       });
       expect(archived.isOk()).toBe(true);
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.pendingModel).toBeNull();
       const projectDelete = await store.requestProjectDeletion(task, {
         projectId: project.id,
         now: 2_500,
@@ -3511,7 +3323,7 @@ export function storeSemanticsContractTests(
     });
 
     it("atomically requests and finalizes permanent deletion with history", async () => {
-      await seed();
+      await seed({ ...orb, pendingModel: queuedModel });
       expect(
         (
           await store.commitPullBatch(task, {
@@ -3531,6 +3343,7 @@ export function storeSemanticsContractTests(
         cleanupAfter: 3_000,
       });
       expect(requested.isOk() && requested.value.state).toBe("deleting");
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.pendingModel).toBeNull();
       expect((await store.getOrbDeletion(task, orb.id)).isOk()).toBe(true);
       if (requested.isErr()) return;
       expect(

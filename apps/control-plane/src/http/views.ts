@@ -6,6 +6,7 @@ import {
   type ProjectDeletionProgress,
   type ProjectRow,
 } from "../domain/orb.ts";
+import { offlineModelOptions } from "../domain/orb-models.ts";
 
 /** Static deployment configuration the view layer derives fields from. */
 export interface ViewConfig {
@@ -170,7 +171,7 @@ export function orbView(
     name: orb.name,
     state: orb.state,
     stateVersion: orb.stateVersion,
-    canQueueModel: canQueueModel(orb),
+    ...(canQueueModel(orb) ? { queueableModels: offlineModelOptions[orb.harness] } : {}),
     pendingModel: orb.pendingModel ?? null,
     ...(spawnedByOrb !== null ? { spawnedByOrb } : {}),
     ...(config.centralAgent ? { centralAgent: true } : {}),

@@ -431,9 +431,10 @@ async function failOrb(
   orb: OrbRow,
   code: OrbFailureCode,
   message: string,
-  options?: { evidence?: string | null; expectedPendingModelChangeId?: string },
+  evidence?: string | null,
 ): Promise<ReconcileOutcome> {
-  const { evidence, expectedPendingModelChangeId } = options ?? {};
+  const rejectedChoice = code === "pending_model_unavailable";
+  if (rejectedChoice && !orb.pendingModel) return { type: "conflict" };
   // Terminal diagnosis must precede the failure/discard transaction: after it
   // commits, another reconciler is entitled to delete the compute immediately.
   const terminalEvidence =
@@ -454,10 +455,11 @@ async function failOrb(
     lastError: formatOrbFailure(code, failureMessage),
     evidence: boundedEvidence,
     // `failed` alone does not stop central admission or autonomous recovery.
-    ...(code === "restart_budget_exhausted" || code === "pending_model_unavailable"
-      ? { suspendAgent: true }
+    ...(code === "restart_budget_exhausted" || rejectedChoice ? { suspendAgent: true } : {}),
+    // Acknowledgement does not bump stateVersion.
+    ...(rejectedChoice && orb.pendingModel
+      ? { expectedPendingModelChangeId: orb.pendingModel.changeId }
       : {}),
-    ...(expectedPendingModelChangeId === undefined ? {} : { expectedPendingModelChangeId }),
   });
   if (cas.isErr()) {
     return cas.error.type === "state_conflict" ? { type: "conflict" } : retryable(cas.error);
@@ -1096,7 +1098,7 @@ async function reconcileCreateStart(
             `host ran for ${seconds}s but the runtime never answered ` +
               `(${probe.attempts} probes; last error: ${health.error.message})` +
               (evidence !== null && evidence !== "" ? `; host diagnostics: ${evidence}` : ""),
-            { evidence },
+            evidence,
           );
         }
         return waiting("readiness");
@@ -2637,24 +2639,16 @@ export async function reconcileCentralAgent(
             }
           : undefined;
       if (failure?.code === "pending_model_unavailable") {
-        const changeId = failure.pendingModelChangeId;
         if (
           failure.retryable ||
-          !changeId ||
-          centralOrb.pendingModel?.changeId !== changeId ||
+          !centralOrb.pendingModel ||
+          centralOrb.pendingModel.changeId !== failure.pendingModelChangeId ||
           centralOrb.harness !== "pi" ||
           centralOrb.sleepId !== null ||
           centralOrb.stopReason === "sleep"
         )
           return err(retryable(failure));
-        // State CAS fences renewed authority; the choice may be acknowledged
-        // without a state change, so require both in the same write.
-        return err(
-          await failOrb(task, deps, centralOrb, failure.code, failure.message, {
-            evidence: null,
-            expectedPendingModelChangeId: changeId,
-          }),
-        );
+        return err(await failOrb(task, deps, centralOrb, failure.code, failure.message, null));
       }
       const rejected = noteCentralStartup(task, deps, centralOrb, failure);
       const unavailable = failure !== undefined && !rejected && !persistedRecovery;
@@ -2916,9 +2910,11 @@ export function acknowledgeOrbPendingModel(
   return deps.store
     .clearPendingModel(task, orbId, changeId, caller)
     .mapErr((error) =>
-      error.retryable
-        ? commandError("unavailable", "pending model acknowledgement unavailable", true)
-        : commandError("internal", "pending model acknowledgement failed", false),
+      commandError(
+        error.retryable ? "unavailable" : "internal",
+        "model acknowledgement failed",
+        error.retryable,
+      ),
     )
     .andThen((cleared) => {
       if (!cleared)

@@ -21,12 +21,8 @@ import {
 import { latestUserMessage } from "./testkit/durable-model-fixture.ts";
 
 const stop = { type: "stop", status: "completed" } as const;
-const resumes = [
-  { wake: "send", modelId: "gpt-6.2-astra", reply: "QUEUED_SEND_REPLY" },
-  { wake: "start", modelId: "gpt-6.2-sol", reply: "QUEUED_START_REPLY" },
-] as const;
 
-it("viewing an idle-stopped Pi orb leaves it stopped; Send and Start apply a manually stopped orb's queued model", async () => {
+it("viewing an idle-stopped Pi orb leaves it stopped; Send wakes it and applies a queued model after manual Stop", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-idle-view-e2e-"));
   const projectId = randomUUID();
   const orbId = randomUUID();
@@ -45,10 +41,6 @@ it("viewing an idle-stopped Pi orb leaves it stopped; Send and Start apply a man
             match: { userMessage: { regex: "^wake on send$" } },
             steps: [{ type: "text", content: "IDLE_VIEW_REPLY" }, stop],
           },
-          ...resumes.map(({ wake, reply }) => ({
-            match: { userMessage: { regex: `^check model after ${wake}$` } },
-            steps: [{ type: "text", content: reply }, stop],
-          })),
           { match: { default: true }, steps: [{ type: "text", content: "Idle view." }, stop] },
         ],
       },
@@ -74,7 +66,25 @@ it("viewing an idle-stopped Pi orb leaves it stopped; Send and Start apply a man
     const activeCp = cp;
     const clock = activeCp.clock;
     if (clock === undefined) throw new Error("controlled clock was not attached");
-    const view = async () => (await api(activeCp.baseUrl, "GET", `/api/v1/orbs/${orbId}`)).body;
+    const orbPath = `/api/v1/orbs/${orbId}`;
+    const orbApi = (method: "GET" | "PUT" | "POST", path: string, body?: unknown) =>
+      api(activeCp.baseUrl, method, orbPath + path, body);
+    const view = async () => (await orbApi("GET", "")).body;
+    const waitForStopped = (description: string) =>
+      waitFor(
+        description,
+        async () => {
+          const current = await view();
+          return current["state"] === "stopped" ? current : null;
+        },
+        { timeoutMs: 120_000, intervalMs: 500 },
+      );
+    const send = async (text: string) => {
+      const response = await orbApi("PUT", `/messages/${randomUUID()}`, {
+        content: [{ type: "text", text }],
+      });
+      expect(response.status, JSON.stringify(response.body)).toBe(202);
+    };
 
     expect(
       (
@@ -109,15 +119,9 @@ it("viewing an idle-stopped Pi orb leaves it stopped; Send and Start apply a man
       Date.now() + DEFAULT_LIFECYCLE_CONSTANTS.idleStopAfterMs + 60_000,
     );
     if (advanced.isErr()) throw new Error(`clock advance failed: ${advanced.error.type}`);
-    await waitFor(
-      "idle auto-stop",
-      async () => {
-        const current = await view();
-        return current["state"] === "stopped" ? current : null;
-      },
-      { timeoutMs: 120_000, intervalMs: 500 },
-    );
-    expect(await view()).toMatchObject({ stopReason: "idle", canQueueModel: false });
+    const idle = await waitForStopped("idle auto-stop");
+    expect(idle["stopReason"]).toBe("idle");
+    expect(idle).not.toHaveProperty("queueableModels");
 
     const frames: ServerFrame[] = [];
     socket = new WebSocket(`${activeCp.baseUrl.replace(/^http/, "ws")}/api/v1/orbs/${orbId}/live`, [
@@ -150,17 +154,11 @@ it("viewing an idle-stopped Pi orb leaves it stopped; Send and Start apply a man
       expect(current["stopReason"]).toBe("idle");
     }
 
-    expect(
-      (
-        await api(cp.baseUrl, "PUT", `/api/v1/orbs/${orbId}/messages/${randomUUID()}`, {
-          content: [{ type: "text", text: "wake on send" }],
-        })
-      ).status,
-    ).toBe(202);
+    await send("wake on send");
     await waitFor(
       "message starts the orb and is answered",
       async () => {
-        const history = await api(activeCp.baseUrl, "GET", `/api/v1/orbs/${orbId}/history`);
+        const history = await orbApi("GET", "/history");
         return (await view())["state"] === "running" &&
           JSON.stringify(history.body["records"]).includes("IDLE_VIEW_REPLY")
           ? true
@@ -168,87 +166,34 @@ it("viewing an idle-stopped Pi orb leaves it stopped; Send and Start apply a man
       },
       { timeoutMs: 300_000, intervalMs: 500 },
     );
-    const orbPath = `/api/v1/orbs/${orbId}`;
-    const orbApi = (method: "GET" | "PUT" | "POST", path: string, body?: unknown) =>
-      api(activeCp.baseUrl, method, orbPath + path, body);
-    const providerCalls = activeCp.modelRequests ?? expect.fail("missing model request recorder");
-    const waitForView = (
-      description: string,
-      matches: (current: Record<string, unknown>) => boolean | Promise<boolean>,
-    ) =>
-      waitFor(
-        description,
-        async () => {
-          const current = await view();
-          if (current["state"] === "failed")
-            throw new FatalProbeError(String(current["lastError"]));
-          return (await matches(current)) ? current : null;
-        },
-        { timeoutMs: 120_000, intervalMs: 500 },
-      );
 
-    for (const { wake, modelId, reply } of resumes) {
-      const stopped = await orbApi("POST", "/stop");
-      expect(stopped.status, JSON.stringify(stopped.body)).toBe(202);
-      const before = await waitForView(
-        `Pi manually stopped before ${wake}`,
-        (current) => current["state"] === "stopped",
-      );
-      expect(before).toMatchObject({
-        stopReason: "manual",
-        canQueueModel: true,
-        pendingModel: null,
-      });
+    expect((await orbApi("POST", "/stop")).status).toBe(202);
+    const stopped = await waitForStopped("manual Stop");
+    expect(stopped["stopReason"]).toBe("manual");
+    const model = { provider: "openai-codex", id: "gpt-6.2-astra" };
+    expect(stopped["queueableModels"]).toContainEqual(expect.objectContaining(model));
+    const calls = activeCp.modelRequests ?? expect.fail("missing model request recorder");
+    const beforeSend = calls.length;
 
-      const callsBeforeWake = providerCalls.length;
-      const model = { provider: "openai-codex", id: modelId };
-      const options = await orbApi("GET", "/model-options");
-      expect(options.status, JSON.stringify(options.body)).toBe(200);
-      expect(options.body["models"]).toContainEqual(expect.objectContaining(model));
+    const queued = await orbApi("PUT", "/pending-model", { model });
+    expect(queued.status, JSON.stringify(queued.body)).toBe(200);
+    expect(queued.body["pendingModel"]).toEqual({ changeId: expect.any(String), model });
+    await forceReconcilePass(activeCp, orbId);
+    expect(await view()).toMatchObject({
+      state: "stopped",
+      stateVersion: stopped["stateVersion"],
+      pendingModel: queued.body["pendingModel"],
+    });
+    expect(calls).toHaveLength(beforeSend);
 
-      const queued = await orbApi("PUT", "/pending-model", { model });
-      expect(queued.status, JSON.stringify(queued.body)).toBe(200);
-      expect(queued.body["pendingModel"]).toEqual({ changeId: expect.any(String), model });
-      await forceReconcilePass(activeCp, orbId);
-      expect(await view()).toMatchObject({
-        state: "stopped",
-        stateVersion: before["stateVersion"],
-        stopReason: "manual",
-        pendingModel: queued.body["pendingModel"],
-      });
-
-      expect(providerCalls).toHaveLength(callsBeforeWake);
-      if (wake === "start") {
-        const started = await orbApi("POST", "/start");
-        expect(started.status, JSON.stringify(started.body)).toBe(202);
-        await waitForView(
-          "explicit Start applies queued model without a message",
-          (current) => current["state"] === "running" && current["pendingModel"] === null,
-        );
-        expect(providerCalls).toHaveLength(callsBeforeWake);
-      }
-
-      // In the Send leg this is the only wake action.
-      const prompt = `check model after ${wake}`;
-      const sent = await orbApi("PUT", `/messages/${randomUUID()}`, {
-        content: [{ type: "text", text: prompt }],
-      });
-      expect(sent.status, JSON.stringify(sent.body)).toBe(202);
-      const firstTurn = await waitFor(
-        `first Pi provider request after ${wake}`,
-        async () => providerCalls[callsBeforeWake] ?? null,
-        { timeoutMs: 60_000, intervalMs: 200 },
-      );
-      expect(firstTurn["model"]).toBe(modelId);
-      expect(latestUserMessage(firstTurn)).toBe(prompt);
-      await waitForView(`${reply} retained after ${wake}`, async (current) => {
-        const history = await orbApi("GET", "/history");
-        return (
-          current["state"] === "running" && JSON.stringify(history.body["records"]).includes(reply)
-        );
-      });
-      expect((await view())["pendingModel"]).toBeNull();
-    }
+    const prompt = "check queued model";
+    await send(prompt);
+    const first = await waitFor(
+      "first Pi request after Send",
+      async () => calls[beforeSend] ?? null,
+    );
+    expect(first["model"]).toBe(model.id);
+    expect(latestUserMessage(first)).toBe(prompt);
   } catch (error) {
     failure = error;
     if (cp !== undefined) console.error(cp.logs.slice(-60).join(""));

@@ -216,7 +216,7 @@ function bearerHash(authorization: unknown): string | null {
  * incarnation is dead, which is both false and unrecoverable from its side.
  */
 type BearerAuth =
-  | { readonly kind: "orb"; readonly orb: OrbRow }
+  | { readonly kind: "orb"; readonly orb: OrbRow; readonly tokenHash: string }
   | { readonly kind: "unauthorized" }
   | { readonly kind: "unavailable"; readonly message: string; readonly error: StoreError };
 
@@ -303,7 +303,7 @@ export function registerRuntimeRoutes(
     ) {
       return UNAUTHENTICATED;
     }
-    return { kind: "orb", orb };
+    return { kind: "orb", orb, tokenHash };
   };
 
   app.post("/runtime/v1/claude-subscription", async (request, reply) => {
@@ -531,38 +531,35 @@ export function registerRuntimeRoutes(
     });
   });
 
+  const bootError = (
+    reply: FastifyReply,
+    status: number,
+    code: string,
+    message: string,
+    retryable = false,
+  ) => reply.status(status).send({ error: { code, message, retryable } });
+
   app.post(ORB_BOOT_CONTEXT_PATH, async (request, reply) => {
     reply.header("cache-control", "no-store");
     const auth = await authenticate(request.headers.authorization);
+    if (auth.kind === "unavailable")
+      return bootError(reply, 503, "unavailable", "boot context unavailable", true);
     if (auth.kind !== "orb")
-      return reply.status(auth.kind === "unavailable" ? 503 : 401).send({
-        error: {
-          code: auth.kind === "unavailable" ? "unavailable" : "unauthorized",
-          message:
-            auth.kind === "unavailable" ? "boot context unavailable" : "runtime identity rejected",
-          retryable: auth.kind === "unavailable",
-        },
-      });
+      return bootError(reply, 401, "unauthorized", "runtime identity rejected");
     if (!Check(OrbBootContextRequestSchema, request.body))
-      return reply.status(400).send({
-        error: {
-          code: "invalid_request",
-          message: "invalid boot context request",
-          retryable: false,
-        },
-      });
+      return bootError(reply, 400, "invalid_request", "invalid boot context request");
     const context = await deps.readBootContext(task, auth.orb.id, {
-      runtimeTokenHash: auth.orb.runtimeTokenHash as string,
+      runtimeTokenHash: auth.tokenHash,
       hostIncarnation: auth.orb.hostIncarnation,
     });
     if (context.isErr())
-      return reply.status(context.error.code === "internal" ? 500 : 503).send({
-        error: {
-          code: context.error.code,
-          message: "boot context unavailable",
-          retryable: context.error.retryable,
-        },
-      });
+      return bootError(
+        reply,
+        context.error.code === "internal" ? 500 : 503,
+        context.error.code,
+        "boot context unavailable",
+        context.error.retryable,
+      );
     return reply.send({
       v: 1,
       context: context.value.context,
@@ -574,23 +571,26 @@ export function registerRuntimeRoutes(
 
   app.post(ORB_PENDING_MODEL_ACK_PATH, async (request, reply) => {
     reply.header("cache-control", "no-store");
-    const reject = (status: number, code: string, message: string, retryable = false) =>
-      reply.status(status).send({ error: { code, message, retryable } });
-
     const auth = await authenticate(request.headers.authorization);
     if (auth.kind === "unavailable")
-      return reject(503, "unavailable", "pending model acknowledgement unavailable", true);
+      return bootError(
+        reply,
+        503,
+        "unavailable",
+        "pending model acknowledgement unavailable",
+        true,
+      );
     if (auth.kind !== "orb" || auth.orb.harness !== "claude")
-      return reject(401, "unauthorized", "runtime identity rejected");
+      return bootError(reply, 401, "unauthorized", "runtime identity rejected");
     if (!Check(OrbPendingModelAckRequestSchema, request.body))
-      return reject(400, "invalid_request", "invalid pending model acknowledgement");
+      return bootError(reply, 400, "invalid_request", "invalid pending model acknowledgement");
 
     const result = await acknowledgeOrbPendingModel(
       task,
       deps,
       auth.orb.id,
       {
-        runtimeTokenHash: auth.orb.runtimeTokenHash as string,
+        runtimeTokenHash: auth.tokenHash,
         hostIncarnation: auth.orb.hostIncarnation,
       },
       request.body.changeId,
@@ -598,7 +598,7 @@ export function registerRuntimeRoutes(
     if (result.isErr()) {
       const { code, message, retryable } = result.error;
       const status = { not_found: 404, conflict: 409, unavailable: 503, internal: 500 }[code];
-      return reject(status, code, message, retryable);
+      return bootError(reply, status, code, message, retryable);
     }
     return reply.send({ v: 1 });
   });

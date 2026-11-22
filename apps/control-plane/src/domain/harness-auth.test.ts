@@ -1,7 +1,7 @@
 import { NoSimulationTask } from "determined";
 import { errAsync, okAsync } from "neverthrow";
 import { describe, expect, it, vi } from "vitest";
-import { createOrbModelCatalog, createSpawnModelCheck } from "../adapters/spawn-models.ts";
+import { createSpawnModelCheck } from "../adapters/spawn-models.ts";
 import { FakePointerStore, FakeSecretStore } from "../testkit/broker.ts";
 import { makeHarness, makeOrbRow, makeProjectRow } from "../testkit/fixtures.ts";
 import { CLAUDE_SUBSCRIPTION_PROVIDER, ClaudeSubscriptionAuth } from "./claude-auth.ts";
@@ -87,7 +87,7 @@ describe("harness authentication", () => {
   });
 });
 
-const sdk = vi.hoisted(() => ({ query: vi.fn(), supportedModels: vi.fn(), return: vi.fn() }));
+const sdk = vi.hoisted(() => ({ query: vi.fn(), supportedModels: vi.fn(), close: vi.fn() }));
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({ query: sdk.query }));
 
 it.each([
@@ -96,7 +96,7 @@ it.each([
   ["claude", "opus", "disconnected", "disconnected"],
   ["claude", "opus", "lookup", "unavailable"],
   ["claude", "opus", "query", "unavailable"],
-  ["claude", "opus", "cleanup", "unavailable"],
+  ["claude", "opus", "close", "unavailable"],
   ["openai-codex", "gpt-6.2-sol", "available", null],
   ["openai-codex", "gpt-6.2-astra", "available", null],
   ["openai-codex", "gpt-6.1-sol", "available", "invalid"],
@@ -109,15 +109,12 @@ it.each([
     if (mode === "query") throw new Error("private");
     return sdk;
   });
-  sdk.return.mockReset().mockImplementation(async () => {
-    if (mode === "cleanup") throw new Error("private");
+  sdk.close.mockReset().mockImplementation(() => {
+    if (mode === "close") throw new Error("private");
   });
   sdk.supportedModels.mockReset().mockImplementation(async () => {
     if (mode === "lookup") throw new Error("private");
-    return [
-      { value: "claude-opus-4-8", displayName: "Pinned Opus", description: "" },
-      { value: "opus", displayName: "Opus", description: "", supportedEffortLevels: ["high"] },
-    ];
+    return [{ value: "opus", displayName: "Opus", description: "" }];
   });
   const pointers = new FakePointerStore(),
     secrets = new FakeSecretStore();
@@ -140,13 +137,15 @@ it.each([
     start: () => errAsync({ code: "unavailable", message: "unexpected login" }),
   });
   const read = vi.spyOn(pointers, "readPointer");
-  const brokerForUser = (owner: string) => ({
-    pointers: forUser(owner),
-    secrets,
-    upstreams: {},
-    constants: DEFAULT_BROKER_CONSTANTS,
-  });
-  const check = createSpawnModelCheck(brokerForUser, auth);
+  const check = createSpawnModelCheck(
+    (owner) => ({
+      pointers: forUser(owner),
+      secrets,
+      upstreams: {},
+      constants: DEFAULT_BROKER_CONSTANTS,
+    }),
+    auth,
+  );
   const result = await check(task, "owner", { provider, id });
   expect(result.isErr() ? result.error.reason : null).toBe(reason);
   expect(JSON.stringify(result)).not.toContain("private");
@@ -161,20 +160,6 @@ it.each([
       env: { CLAUDE_CODE_OAUTH_TOKEN: "owner-token" },
     });
     expect(await call.prompt.next()).toMatchObject({ done: true });
-    expect(sdk.return).toHaveBeenCalledTimes(1);
-  }
-  if (mode === "available" && reason === null) {
-    const catalog = createOrbModelCatalog(brokerForUser, auth);
-    const options = await catalog(task, "owner", provider === "claude" ? "claude" : "pi");
-    expect(options._unsafeUnwrap()).toEqual(
-      provider === "claude"
-        ? [{ provider, id: "opus", name: "Opus" }]
-        : [
-            { provider, id: "gpt-6.2-astra", name: "Astra" },
-            { provider, id: "gpt-6.2-sol", name: "Sol" },
-            { provider, id: "gpt-5.6-terra", name: "Terra" },
-            { provider, id: "gpt-6-luna", name: "Luna" },
-          ],
-    );
+    expect(sdk.close).toHaveBeenCalledTimes(1);
   }
 });

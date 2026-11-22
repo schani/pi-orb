@@ -3,7 +3,6 @@ import { ModelRefSchema } from "./agent-settings.ts";
 
 const closed = { additionalProperties: false } as const;
 
-export const ORB_MODEL_OPTIONS_PATH = "/api/v1/orbs/:orbId/model-options";
 export const ORB_PENDING_MODEL_PATH = "/api/v1/orbs/:orbId/pending-model";
 
 export const PendingModelSchema = Type.Object(
@@ -23,9 +22,3 @@ export const OrbModelOptionSchema = Type.Object(
   closed,
 );
 export type OrbModelOption = Static<typeof OrbModelOptionSchema>;
-
-export const OrbModelOptionsResponseSchema = Type.Object(
-  { models: Type.Array(OrbModelOptionSchema) },
-  closed,
-);
-export type OrbModelOptionsResponse = Static<typeof OrbModelOptionsResponseSchema>;

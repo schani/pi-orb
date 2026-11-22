@@ -13,6 +13,7 @@ import type {
 } from "../../domain/activity-headline-store.ts";
 import {
   acceptsOrbAgentCaller,
+  acceptsOrbBootCaller,
   acceptsPendingModelCaller,
 } from "../../domain/agent-authorization.ts";
 import type {
@@ -27,15 +28,14 @@ import { jsonEqual } from "../../domain/json-equal.ts";
 import { logOrbEvent } from "../../domain/log.ts";
 import { messageBatchId } from "../../domain/message-batch.ts";
 import { claudeModelCall } from "../../domain/model-usage.ts";
-import {
-  canQueueModel,
-  type OrbDeletionRow,
-  type OrbListRow,
-  type OrbMessageMetadataRow,
-  type OrbMessagePoll,
-  type OrbMessageRow,
-  type OrbRow,
-  type ProjectRow,
+import type {
+  OrbDeletionRow,
+  OrbListRow,
+  OrbMessageMetadataRow,
+  OrbMessagePoll,
+  OrbMessageRow,
+  OrbRow,
+  ProjectRow,
 } from "../../domain/orb.ts";
 import type {
   ArchiveCaller,
@@ -46,6 +46,7 @@ import type {
   EnqueueOrbMessageParams,
   FailOrbAndRequestComputeDiscardParams,
   FinalizeHostDiscardParams,
+  GuestAgentCaller,
   HistorySearchPage,
   HistorySearchParams,
   MintSlotClaim,
@@ -127,36 +128,21 @@ export async function clearPendingModelInTransaction(
   changeId: string,
   authority: ArchiveCaller,
 ): Promise<Result<boolean, StoreError>> {
-  const locked = await query("SELECT * FROM orbs WHERE id = $1 FOR UPDATE", [orbId]);
+  // Project deletion locks project then orb. Lock only the orb, which it also updates.
+  const locked = await query(
+    `SELECT o.*, p.owner_user_id FROM orbs o JOIN projects p ON p.id = o.project_id
+     WHERE o.id = $1 AND o.pending_model->>'changeId' = $2 AND p.state = 'active'
+     FOR UPDATE OF o`,
+    [orbId, changeId],
+  );
   if (locked.isErr()) return err(locked.error);
-  if (!locked.value.rows[0]) return ok(false);
-  const orb = mapOrbRow(locked.value.rows[0]);
-  if (orb.pendingModel?.changeId !== changeId) return ok(false);
-  // Project deletion changes child state under the same orb lock. Don't acquire
-  // a project lock here: deletion takes it before the orb, and Pi already owns the orb lock.
-  const project = await query("SELECT state, owner_user_id FROM projects WHERE id = $1", [
-    orb.projectId,
-  ]);
-  if (project.isErr()) return err(project.error);
-  const owner = project.value.rows[0];
-  if (
-    owner?.["state"] !== "active" ||
-    !acceptsPendingModelCaller(orb, String(owner["owner_user_id"]), authority)
-  )
+  const row = locked.value.rows[0];
+  if (!row || !acceptsPendingModelCaller(mapOrbRow(row), String(row["owner_user_id"]), authority))
     return ok(false);
-  const cleared = await query("UPDATE orbs SET pending_model = NULL WHERE id = $1 RETURNING id", [
-    orbId,
-  ]);
-  return cleared.map((result) => result.rows.length > 0);
+  return (await query("UPDATE orbs SET pending_model = NULL WHERE id = $1", [orbId])).map(
+    (result) => result.rowCount === 1,
+  );
 }
-
-const BOOT_CONTEXT_STATES: readonly OrbState[] = [
-  "creating",
-  "starting",
-  "running",
-  "stopping",
-  "archiving",
-];
 
 function toMs(value: unknown): number {
   if (value instanceof Date) return value.getTime();
@@ -1039,19 +1025,16 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     orbId: string,
     pending: PendingModel,
   ): ResultAsync<boolean, StoreError> {
-    return this.db.transaction<boolean, StoreError>(async (query) => {
-      // Start, Send and scheduled wake all serialize on this row. No version
-      // bump: the choice must not invalidate an already admitted wake intent.
-      const locked = await query("SELECT * FROM orbs WHERE id = $1 FOR UPDATE", [orbId]);
-      if (locked.isErr()) return err(locked.error);
-      const row = locked.value.rows[0];
-      if (row === undefined || !canQueueModel(mapOrbRow(row))) return ok(false);
-      const queued = await query(
-        "UPDATE orbs SET pending_model = $2::jsonb WHERE id = $1 RETURNING id",
+    // UPDATE locks the row and rechecks eligibility after concurrent Start/Send/wake.
+    // Match canQueueModel; don't invalidate an already admitted wake by bumping its version.
+    return this.db
+      .query(
+        `UPDATE orbs SET pending_model = $2::jsonb
+         WHERE id = $1 AND state IN ('stopped', 'failed')
+           AND (harness = 'claude' OR stop_reason IN ('manual', 'sleep'))`,
         [orbId, jsonParam(pending)],
-      );
-      return queued.map((result) => result.rows.length > 0);
-    });
+      )
+      .map((result) => result.rowCount === 1);
   }
 
   clearPendingModel(
@@ -1684,22 +1667,12 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     );
   }
 
-  readOrbBootContext(
-    _task: SimulationTask,
-    params: { orbId: string; caller: { runtimeTokenHash: string; hostIncarnation: number } },
-  ) {
+  readOrbBootContext(_task: SimulationTask, params: { orbId: string; caller: GuestAgentCaller }) {
     return this.db.transaction<StoredOrbBootContext, StoreError | StateConflict>(async (query) => {
       const locked = await query("SELECT * FROM orbs WHERE id = $1 FOR UPDATE", [params.orbId]);
       if (locked.isErr()) return err(locked.error);
       const orb = locked.value.rows[0];
-      if (
-        orb === undefined ||
-        orb["runtime_token_hash"] !== params.caller.runtimeTokenHash ||
-        Number(orb["host_incarnation"]) !== params.caller.hostIncarnation ||
-        orb["host_discard_through_incarnation"] !== null ||
-        !BOOT_CONTEXT_STATES.includes(String(orb["state"]) as OrbState)
-      )
-        return err(stateConflict());
+      if (!orb || !acceptsOrbBootCaller(mapOrbRow(orb), params.caller)) return err(stateConflict());
       const head = await query(
         `SELECT * FROM orb_messages WHERE orb_id = $1 AND status IN ('queued', 'delivering')
          ORDER BY ordinal LIMIT 1 FOR UPDATE`,
@@ -2354,7 +2327,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         params.evidence ?? null,
         params.expectedPendingModelChangeId ?? null,
       ],
-      "($6::text IS NULL OR pending_model->>\'changeId\' = $6)",
+      "($6::text IS NULL OR pending_model->>'changeId' = $6)",
     );
   }
 

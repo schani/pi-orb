@@ -11,7 +11,11 @@ import type {
   ActivityHeadlineRef,
   StoredActivityHeadline,
 } from "../domain/activity-headline-store.ts";
-import { acceptsOrbAgentCaller, acceptsPendingModelCaller } from "../domain/agent-authorization.ts";
+import {
+  acceptsOrbAgentCaller,
+  acceptsOrbBootCaller,
+  acceptsPendingModelCaller,
+} from "../domain/agent-authorization.ts";
 import type {
   CommitPullError,
   ProjectConflict,
@@ -41,6 +45,7 @@ import type {
   EnqueueOrbMessageParams,
   FailOrbAndRequestComputeDiscardParams,
   FinalizeHostDiscardParams,
+  GuestAgentCaller,
   MintSlotClaim,
   OrbMessageTargetNotFound,
   RecordHostDiscardStatusParams,
@@ -53,14 +58,6 @@ import type {
   StoredOrbBootContext,
 } from "../domain/ports.ts";
 import { FAILPOINTS } from "./failpoints.ts";
-
-const BOOT_CONTEXT_STATES: readonly OrbState[] = [
-  "creating",
-  "starting",
-  "running",
-  "stopping",
-  "archiving",
-];
 
 interface OrbReplica {
   records: Map<string, HistoryRecord>;
@@ -1421,44 +1418,31 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     });
   }
 
-  readOrbBootContext(
-    task: SimulationTask,
-    params: { orbId: string; caller: { runtimeTokenHash: string; hostIncarnation: number } },
-  ) {
-    return this.access<StoredOrbBootContext | null>(
-      task,
-      FAILPOINTS.storeWrite,
-      "read orb boot context",
-      () => {
-        const orb = this.orbs.get(params.orbId);
-        if (
-          orb === undefined ||
-          orb.runtimeTokenHash !== params.caller.runtimeTokenHash ||
-          orb.hostIncarnation !== params.caller.hostIncarnation ||
-          orb.hostDiscardThroughIncarnation !== null ||
-          !BOOT_CONTEXT_STATES.includes(orb.state)
-        )
-          return null;
-        const rows = this.messages.get(params.orbId) ?? [];
-        const head = rows.find((row) => row.status === "queued" || row.status === "delivering");
-        if (head?.system?.kind !== "sleep_wake")
-          return { context: null, pendingModel: orb.pendingModel };
-        if (head.deliveryBatchId === null) {
-          const index = rows.indexOf(head);
-          rows[index] = { ...head, status: "delivering", deliveryBatchId: head.messageId };
-        }
-        return {
-          pendingModel: orb.pendingModel,
-          context: {
-            messageId: head.messageId,
-            messageIds: [head.messageId],
-            content: [...head.content],
-            system: { kind: "sleep_wake" as const, sleepUntil: head.system.sleepUntil },
-          },
-        };
-      },
-    ).andThen((result) =>
-      result === null ? errAsync({ type: "state_conflict" as const }) : okAsync(result),
+  readOrbBootContext(task: SimulationTask, params: { orbId: string; caller: GuestAgentCaller }) {
+    const read = (): StoredOrbBootContext | null => {
+      const orb = this.orbs.get(params.orbId);
+      if (!orb || !acceptsOrbBootCaller(orb, params.caller)) return null;
+      const rows = this.messages.get(params.orbId) ?? [];
+      const head = rows.find((row) => row.status === "queued" || row.status === "delivering");
+      const { pendingModel } = orb;
+      if (head?.system?.kind !== "sleep_wake") return { context: null, pendingModel };
+      if (head.deliveryBatchId === null) {
+        const index = rows.indexOf(head);
+        rows[index] = { ...head, status: "delivering", deliveryBatchId: head.messageId };
+      }
+      return {
+        pendingModel,
+        context: {
+          messageId: head.messageId,
+          messageIds: [head.messageId],
+          content: [...head.content],
+          system: { kind: "sleep_wake", sleepUntil: head.system.sleepUntil },
+        },
+      };
+    };
+    return this.access(task, FAILPOINTS.storeWrite, "read orb boot context", read).andThen(
+      (result) =>
+        result === null ? errAsync({ type: "state_conflict" as const }) : okAsync(result),
     );
   }
 

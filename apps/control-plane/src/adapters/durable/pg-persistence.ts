@@ -211,7 +211,10 @@ export class PgAgentPersistence implements AgentPersistence {
                       .ownedTransaction(owner, (query) =>
                         clearPendingModelInTransaction(query, owner.orbId, changeId, caller),
                       )
-                      .mapErr(startupRuntimeError),
+                      .mapErr(startupRuntimeError)
+                      .andTee((cleared) => {
+                        if (cleared) logOrbEvent(task, orb.id, "model-applied", { changeId });
+                      }),
               checkInputAdmission: (browser: boolean) =>
                 checkNativeInputAdmission(this.db.query.bind(this.db), orb.id, browser).mapErr(
                   (error): InputAdmissionError =>

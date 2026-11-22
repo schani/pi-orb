@@ -750,13 +750,9 @@ export class ClaudeOrbAgent implements OrbAgent {
       .andThen(() => this.finishMetadata("attach"))
       .andThen(() => {
         if (pendingModel === undefined) return ok(undefined);
-        if (!this.accepting) return err({ message: "Claude session is not accepting work." });
         const broker = this.options.broker;
-        if (broker === null) {
-          const message = "Cannot acknowledge the queued Claude model without a runtime broker.";
-          this.fail("claude_pending_model_ack_failed", message);
-          return err({ message });
-        }
+        if (!this.accepting || broker === null)
+          return err({ message: "Claude session cannot acknowledge the queued model." });
         return acknowledgePendingModel(broker, pendingModel.changeId).mapErr((error) => {
           this.fail("claude_pending_model_ack_failed", error.message, error.retryable);
           return error;
@@ -1258,15 +1254,15 @@ export class ClaudeOrbAgent implements OrbAgent {
           progress.stage = "effort";
           const advertised = available.supportedEffortLevels ?? [];
           const retainedEffort = this.state.effort;
-          const defaultEffort = advertised.includes("high") ? "high" : advertised[0];
           const effort =
             advertised.length === 0
               ? undefined
-              : queuedModel !== undefined &&
-                  retainedEffort !== undefined &&
-                  !advertised.includes(retainedEffort)
-                ? defaultEffort
-                : (retainedEffort ?? defaultEffort);
+              : retainedEffort !== undefined &&
+                  (queuedModel === undefined || advertised.includes(retainedEffort))
+                ? retainedEffort
+                : advertised.includes("high")
+                  ? "high"
+                  : advertised[0];
           if (advertised.length > 0 && (effort === undefined || !advertised.includes(effort)))
             return err({
               message: "Selected Claude model has no qualified native effort setting.",

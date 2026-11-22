@@ -366,7 +366,7 @@ export interface ControlPlaneStore extends ActivityHeadlineStore, OrbLinkStore, 
   ): ResultAsync<"wake" | "expired" | "waiting" | "stale", StoreError>;
   readOrbBootContext(
     task: SimulationTask,
-    params: { orbId: string; caller: ArchiveCaller },
+    params: { orbId: string; caller: GuestAgentCaller },
   ): ResultAsync<StoredOrbBootContext, StoreError | StateConflict>;
   /** Atomically freezes every outstanding FIFO group, preserving existing claims; sleep blocks the snapshot. */
   claimOrbMessageBacklog(
@@ -1270,7 +1270,6 @@ export interface OrbNameGenerator {
 
 export interface ControlPlaneDeps {
   readonly checkSpawnModel: import("./orb-spawning.ts").CheckSpawnModel;
-  readonly listOrbModelOptions: import("./orb-models.ts").ListOrbModelOptions;
   readonly workspaceUploadRuntime?: (
     task: SimulationTask,
   ) => import("./workspace-uploads.ts").UploadRuntime;

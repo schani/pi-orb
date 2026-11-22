@@ -4,9 +4,9 @@ import {
   type OrbBootContextResponse,
   OrbBootContextResponseSchema,
   OrbPendingModelAckResponseSchema,
-  type PendingModel,
 } from "@pi-orb/protocol";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
+import type { Static, TSchema } from "typebox";
 import { Check } from "typebox/value";
 import type { BrokerEnv } from "../broker/endpoint.ts";
 
@@ -15,8 +15,8 @@ export const BOOT_CONTEXT_BOOT_RETRY_WINDOW_MS = 180_000;
 const BOOT_CONTEXT_RETRY_BASE_MS = 1_000;
 const BOOT_CONTEXT_RETRY_CAP_MS = 4_000;
 
-export interface BootContextError {
-  readonly type: "boot_context_error";
+interface BootRequestError {
+  readonly type: "boot_request_error";
   readonly message: string;
   readonly retryable: boolean;
 }
@@ -26,13 +26,6 @@ export interface BootContextRetryOptions {
   readonly now?: () => number;
   readonly sleep?: (ms: number) => Promise<void>;
 }
-
-const unavailable = (detail?: string): BootContextError => ({
-  type: "boot_context_error",
-  message:
-    detail === undefined ? "boot context is unavailable" : `boot context is unavailable: ${detail}`,
-  retryable: true,
-});
 
 function responseError(payload: unknown): { message: string; retryable: boolean } | null {
   if (typeof payload !== "object" || payload === null) return null;
@@ -44,17 +37,27 @@ function responseError(payload: unknown): { message: string; retryable: boolean 
     : null;
 }
 
-/** Immediate HTTP adapter: no thrown fetch, JSON, or schema failure crosses this boundary. */
-function requestBootContext(env: BrokerEnv): ResultAsync<OrbBootContextResponse, BootContextError> {
+function bootRequest<S extends TSchema>(
+  env: BrokerEnv,
+  path: string,
+  body: object,
+  schema: S,
+  label: string,
+): ResultAsync<Static<S>, BootRequestError> {
+  const failure = (detail: string, retryable: boolean): BootRequestError => ({
+    type: "boot_request_error",
+    message: `${label}: ${detail}`,
+    retryable,
+  });
   return ResultAsync.fromThrowable(
     async () => {
-      const response = await fetch(`${env.controlPlaneUrl}${ORB_BOOT_CONTEXT_PATH}`, {
+      const response = await fetch(`${env.controlPlaneUrl}${path}`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${env.runtimeToken}`,
           "content-type": "application/json",
         },
-        body: JSON.stringify({ v: 1 }),
+        body: JSON.stringify({ v: 1, ...body }),
         signal: AbortSignal.timeout(BOOT_CONTEXT_REQUEST_TIMEOUT_MS),
       });
       const payload: unknown = await response.json();
@@ -62,18 +65,16 @@ function requestBootContext(env: BrokerEnv): ResultAsync<OrbBootContextResponse,
     },
     (cause) =>
       cause instanceof SyntaxError
-        ? { ...unavailable("malformed response"), retryable: false }
-        : unavailable(cause instanceof Error ? cause.message : String(cause)),
+        ? failure("malformed response", false)
+        : failure("request failed", true),
   )().andThen(({ status, payload }) => {
-    if (status === 200 && Check(OrbBootContextResponseSchema, payload)) return ok(payload);
-    const failure = responseError(payload);
-    if (failure !== null)
-      return err({
-        type: "boot_context_error" as const,
-        message: `boot context is unavailable: ${failure.message}`,
-        retryable: failure.retryable,
-      });
-    return err({ ...unavailable("malformed response"), retryable: false });
+    if (status === 200 && Check(schema, payload)) return ok(payload);
+    const rejection = responseError(payload);
+    return err(
+      rejection
+        ? failure(rejection.message, rejection.retryable)
+        : failure("malformed response", false),
+    );
   });
 }
 
@@ -81,16 +82,22 @@ function requestBootContext(env: BrokerEnv): ResultAsync<OrbBootContextResponse,
 export function fetchBootContext(
   env: BrokerEnv,
   options: BootContextRetryOptions = {},
-): ResultAsync<OrbBootContextResponse, BootContextError> {
+): ResultAsync<OrbBootContextResponse, BootRequestError> {
   const now = options.now ?? Date.now;
   const sleep =
     options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const deadline = now() + (options.retryWindowMs ?? BOOT_CONTEXT_BOOT_RETRY_WINDOW_MS);
 
-  const run = async (): Promise<Result<OrbBootContextResponse, BootContextError>> => {
+  const run = async (): Promise<Result<OrbBootContextResponse, BootRequestError>> => {
     let delayMs = BOOT_CONTEXT_RETRY_BASE_MS;
     while (true) {
-      const result = await requestBootContext(env);
+      const result = await bootRequest(
+        env,
+        ORB_BOOT_CONTEXT_PATH,
+        {},
+        OrbBootContextResponseSchema,
+        "boot context is unavailable",
+      );
       if (result.isOk() || !result.error.retryable || now() >= deadline) return result;
 
       await sleep(Math.min(delayMs, deadline - now()));
@@ -102,47 +109,13 @@ export function fetchBootContext(
   return new ResultAsync(run());
 }
 
-export interface PendingModelAckError {
-  readonly type: "pending_model_ack_error";
-  readonly message: string;
-  readonly retryable: boolean;
-}
-
-/** A lost response is ambiguous: only a fresh locked boot read can resolve it. */
-export function acknowledgePendingModel(
-  env: BrokerEnv,
-  changeId: PendingModel["changeId"],
-): ResultAsync<void, PendingModelAckError> {
-  const failure = (message: string, retryable: boolean): PendingModelAckError => ({
-    type: "pending_model_ack_error",
-    message: `Cannot acknowledge the queued Claude model: ${message}`,
-    retryable,
-  });
-  return ResultAsync.fromThrowable(
-    async () => {
-      const response = await fetch(`${env.controlPlaneUrl}${ORB_PENDING_MODEL_ACK_PATH}`, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${env.runtimeToken}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ v: 1, changeId }),
-        signal: AbortSignal.timeout(BOOT_CONTEXT_REQUEST_TIMEOUT_MS),
-      });
-      const payload: unknown = await response.json();
-      return { status: response.status, payload };
-    },
-    (cause) =>
-      cause instanceof SyntaxError
-        ? failure("malformed response", false)
-        : failure("request failed", true),
-  )().andThen(({ status, payload }) => {
-    if (status === 200 && Check(OrbPendingModelAckResponseSchema, payload)) return ok(undefined);
-    const rejection = responseError(payload);
-    return err(
-      rejection === null
-        ? failure("malformed response", false)
-        : failure(rejection.message, rejection.retryable),
-    );
-  });
+/** Do not retry an ambiguous ack; the next boot reads the authoritative choice again. */
+export function acknowledgePendingModel(env: BrokerEnv, changeId: string) {
+  return bootRequest(
+    env,
+    ORB_PENDING_MODEL_ACK_PATH,
+    { changeId },
+    OrbPendingModelAckResponseSchema,
+    "Cannot acknowledge the queued Claude model",
+  );
 }

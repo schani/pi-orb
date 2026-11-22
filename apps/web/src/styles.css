@@ -3870,7 +3870,7 @@ button.orb-phone-menu {
   min-height: 0;
   overflow-y: auto;
 }
-.command-options button {
+.command-picker button {
   display: flex;
   justify-content: space-between;
   gap: 16px;
@@ -3879,11 +3879,11 @@ button.orb-phone-menu {
   padding: 4px 8px;
   border: 0;
 }
-.command-options button.selected {
+.command-picker button.selected {
   background: var(--k);
   color: var(--w);
 }
-.command-options button:disabled {
+.command-picker button:disabled {
   color: var(--g2);
 }
 .command-feedback {
@@ -3894,14 +3894,8 @@ button.orb-phone-menu {
   padding: 4px 8px;
   color: var(--g3);
 }
-.command-feedback [role="alert"] {
+.command-feedback[role="alert"] {
   color: var(--bad);
-}
-.command-catalog-feedback {
-  display: flex;
-  justify-content: space-between;
-  align-items: start;
-  gap: 8px;
 }
 .composer[data-settings-pending="true"] .composer-phone-feedback {
   display: block;

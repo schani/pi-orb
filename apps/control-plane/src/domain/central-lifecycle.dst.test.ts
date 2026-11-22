@@ -8,13 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DurableAgentPlane, durableError } from "../adapters/durable/manager.ts";
 import { MemoryAgentPersistence } from "../adapters/durable/memory-persistence.testkit.ts";
 import { LazyExecutionEnv } from "../adapters/execution-client/lazy-env.ts";
-import {
-  makeHarness,
-  makeOrbRow,
-  makeProjectRow,
-  seedRunningOrb,
-  TEST_USER_ID,
-} from "../testkit/fixtures.ts";
+import { makeHarness, makeOrbRow, makeProjectRow, seedRunningOrb } from "../testkit/fixtures.ts";
 import { LogCapture, runDst, waitUntil } from "../testkit/sim.ts";
 import type { AgentPlane } from "./agent-ports.ts";
 import type { RuntimeClientError } from "./errors.ts";
@@ -91,142 +85,89 @@ const terminalReadiness: RuntimeClientError = {
   },
 };
 
-describe("central queued model rejection", () => {
-  const pendingModel = { changeId: "obsolete-choice", model: { provider: "test", id: "missing" } };
-  const rejectionBase: RuntimeClientError = {
-    type: "runtime_client_error",
-    code: "pending_model_unavailable",
-    answered: false,
-    retryable: false,
-    message: "Queued model is unavailable; choose another model and start again.",
-  };
-
-  const rejection = { ...rejectionBase, pendingModelChangeId: pendingModel.changeId };
-
-  async function fixture() {
-    const h = makeHarness();
+it.each(["current", "acknowledged", "stopped", "superseded"] as const)(
+  "latches a queued Pi rejection only while choice and authority are current (%s)",
+  async (scenario) => {
+    const { store, deps: baseDeps } = makeHarness();
     const task = new NoSimulationTask("queued model rejection", false);
-    h.store.seedProject(makeProjectRow("p"));
-    h.store.seedOrb(makeOrbRow("orb", "p", "starting", { pendingModel, agentAdmissionVersion: 2 }));
-    const message = (
-      await h.store.enqueueOrbMessage(task, {
-        orbId: "orb",
+    const pendingModel = { changeId: "obsolete", model: { provider: "test", id: "missing" } };
+    const row = makeOrbRow("orb", "p", "starting", { pendingModel });
+    const project = makeProjectRow(row.projectId);
+    store.seedProject(project);
+    store.seedOrb(row);
+    const content = [{ type: "text" as const, text: "keep this input" }];
+    (
+      await store.enqueueOrbMessage(task, {
+        orbId: row.id,
         messageId: "retained",
-        content: [{ type: "text", text: "keep this input" }],
+        content,
         now: task.wallNow(),
       })
-    )._unsafeUnwrap().message;
-    const row = h.store.orbSnapshot("orb");
-    if (row === null) throw new Error("orb not seeded");
+    )._unsafeUnwrap();
     const deliver = vi.fn();
-    const base = plane(deliver);
-    const pollHealth = vi
-      .fn<NonNullable<AgentPlane["pollHealth"]>>(base.health)
-      .mockReturnValueOnce(errAsync(rejection));
-    const suspend = vi.fn<AgentPlane["suspend"]>(() => okAsync(undefined));
-    const deps = { ...h.deps, agentPlane: { ...base, pollHealth, suspend } };
-    return { h, task, row, message, deliver, pollHealth, suspend, deps };
-  }
+    const suspend = vi.fn(() => okAsync(undefined));
+    const poll = async () => {
+      if (scenario === "acknowledged") {
+        (
+          await store.clearPendingModel(task, row.id, pendingModel.changeId, {
+            kind: "central",
+            orbId: row.id,
+            projectId: row.projectId,
+            ownerUserId: project.ownerUserId,
+            agentAdmissionVersion: row.agentAdmissionVersion,
+          })
+        )._unsafeUnwrap();
+      } else if (scenario === "stopped") {
+        (await requestOrbStop(task, baseDeps, row.id))._unsafeUnwrap();
+      }
+      return err({
+        type: "runtime_client_error",
+        code: "pending_model_unavailable",
+        answered: false,
+        retryable: false,
+        message: "Choose another model.",
+        pendingModelChangeId: scenario === "superseded" ? "older" : pendingModel.changeId,
+      } satisfies RuntimeClientError);
+    };
+    const pollHealth = vi.fn(() => new ResultAsync(poll()));
+    const deps = { ...baseDeps, agentPlane: { ...plane(deliver), pollHealth, suspend } };
 
-  it("fails and suspends before dispatch, retaining the editable choice and inbox", async () => {
-    const { h, task, row, message, deliver, pollHealth, suspend, deps } = await fixture();
-    expect((await reconcileCentralAgent(task, deps, row.id))._unsafeUnwrapErr()).toEqual({
-      type: "transitioned",
-      toState: "failed",
-    });
-    const failed = h.store.orbSnapshot(row.id);
-    expect(failed).toMatchObject({
+    const before = store.orbSnapshot(row.id);
+    const outcome = (await reconcileCentralAgent(task, deps, row.id))._unsafeUnwrapErr();
+    expect((await store.listOrbMessages(task, row.id))._unsafeUnwrap()).toMatchObject([
+      { status: "queued", content },
+    ]);
+    expect(deliver).not.toHaveBeenCalled();
+    if (scenario === "superseded") {
+      expect(outcome.type).toBe("retryable");
+      expect(store.orbSnapshot(row.id)).toEqual(before);
+      return;
+    }
+    if (scenario !== "current") {
+      expect(outcome).toEqual({ type: "conflict" });
+      expect(store.orbSnapshot(row.id)).toMatchObject(
+        scenario === "acknowledged"
+          ? { state: "starting", pendingModel: null }
+          : { state: "stopping", stopReason: "manual", pendingModel },
+      );
+      return;
+    }
+
+    expect(outcome).toEqual({ type: "transitioned", toState: "failed" });
+    expect(store.orbSnapshot(row.id)).toMatchObject({
       state: "failed",
       stopReason: "manual",
       agentAdmissionVersion: row.agentAdmissionVersion + 1,
       pendingModel,
-      lastError: `pending_model_unavailable: ${rejection.message}`,
+      lastError: "pending_model_unavailable: Choose another model.",
     });
-    expect((await h.store.listOrbMessages(task, row.id))._unsafeUnwrap()).toEqual([message]);
-    expect((await reconcileCentralAgent(task, deps, row.id)).isOk()).toBe(true);
-    expect(suspend).toHaveBeenCalledWith(
-      task,
-      row.id,
-      expect.anything(),
-      failed?.agentAdmissionVersion,
-    );
+    (await reconcileCentralAgent(task, deps, row.id))._unsafeUnwrap();
+    expect(suspend).toHaveBeenCalled();
     expect(pollHealth).toHaveBeenCalledTimes(1);
-    expect(deliver).not.toHaveBeenCalled();
-
-    const replacement = { changeId: "new-choice", model: { provider: "test", id: "available" } };
-    expect((await h.store.queueModel(task, row.id, replacement))._unsafeUnwrap()).toBe(true);
-    expect((await requestOrbStart(task, deps, row.id))._unsafeUnwrap()).toMatchObject({
-      state: "starting",
-      stopReason: null,
-      pendingModel: replacement,
-      lastError: null,
-    });
-    expect((await reconcileCentralAgent(task, deps, row.id)).isOk()).toBe(true);
-    expect(deliver).toHaveBeenCalledTimes(1);
-  });
-
-  it.each([
-    ["missing change ID", rejectionBase],
-    ["stale change ID", { ...rejection, pendingModelChangeId: "old-choice" }],
-    ["retryable error", { ...rejection, retryable: true }],
-    ["same message, different code", { ...rejection, code: "unreachable" }],
-  ] as const)("does not latch a rejection with %s", async (_scenario, failure) => {
-    const { h, task, row, message, deliver, pollHealth, deps } = await fixture();
-    pollHealth
-      .mockReset()
-      .mockReturnValueOnce(errAsync(failure))
-      .mockImplementation(plane(deliver).health);
-    await reconcileCentralAgent(task, deps, row.id);
-    expect(h.store.orbSnapshot(row.id)).toEqual(row);
-    expect((await h.store.listOrbMessages(task, row.id))._unsafeUnwrap()).toEqual([message]);
-    expect(deliver).not.toHaveBeenCalled();
-    expect((await reconcileCentralAgent(task, deps, row.id)).isOk()).toBe(true);
-    expect(deliver).toHaveBeenCalledTimes(1);
-  });
-
-  it.each(["acknowledgement", "Stop"] as const)(
-    "a concurrent %s wins over a delayed queued-model rejection",
-    async (winner) => {
-      const { h, task, row, message, deliver, pollHealth, deps } = await fixture();
-      pollHealth.mockReset().mockImplementationOnce(
-        () =>
-          new ResultAsync(
-            (async () => {
-              if (winner === "acknowledgement") {
-                expect(
-                  (
-                    await h.store.clearPendingModel(task, row.id, pendingModel.changeId, {
-                      kind: "central",
-                      orbId: row.id,
-                      projectId: row.projectId,
-                      ownerUserId: TEST_USER_ID,
-                      agentAdmissionVersion: row.agentAdmissionVersion,
-                    })
-                  )._unsafeUnwrap(),
-                ).toBe(true);
-                expect(h.store.orbSnapshot(row.id)?.stateVersion).toBe(row.stateVersion);
-              } else {
-                (await requestOrbStop(task, deps, row.id))._unsafeUnwrap();
-              }
-              return err(rejection);
-            })(),
-          ),
-      );
-      expect((await reconcileCentralAgent(task, deps, row.id))._unsafeUnwrapErr()).toEqual({
-        type: "conflict",
-      });
-      expect(h.store.orbSnapshot(row.id)).toMatchObject(
-        winner === "acknowledgement"
-          ? { state: "starting", pendingModel: null, lastError: null }
-          : { state: "stopping", stopReason: "manual", pendingModel, lastError: null },
-      );
-      expect((await h.store.listOrbMessages(task, row.id))._unsafeUnwrap()).toMatchObject([
-        { messageId: message.messageId, status: "queued" },
-      ]);
-      expect(deliver).not.toHaveBeenCalled();
-    },
-  );
-});
+    const replacement = { ...pendingModel, changeId: "replacement" };
+    expect((await store.queueModel(task, row.id, replacement))._unsafeUnwrap()).toBe(true);
+  },
+);
 
 describe("independent central lifecycle", () => {
   it("retries stopped-host unloading once work becomes quiescent without reopening or suspending", async () => {

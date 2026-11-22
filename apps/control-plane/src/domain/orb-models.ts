@@ -1,109 +1,57 @@
 import type { HarnessKind, OrbModelOption, PendingModel } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import { err, errAsync, ok, type ResultAsync } from "neverthrow";
+import { err, ok, type ResultAsync } from "neverthrow";
+import {
+  CLAUDE_MODEL_FAMILIES,
+  claudeModelDisplayName,
+} from "../../../orb-runtime/src/claude/models.ts";
+import { SELECTABLE_CODEX_MODELS } from "../../../orb-runtime/src/domain/model-select.ts";
 import type { StoreError } from "./errors.ts";
 import { logOrbEvent } from "./log.ts";
-import { canQueueModel, type OrbListRow, type OrbRow } from "./orb.ts";
+import { canQueueModel, type OrbListRow } from "./orb.ts";
 import { readOrb } from "./orb-read.ts";
-import type { ControlPlaneDeps } from "./ports.ts";
+import type { ControlPlaneStore } from "./ports.ts";
 
-export type ModelCatalogError = {
-  readonly type: "model_catalog_error";
-  readonly reason:
-    | "disconnected"
-    | "unavailable"
-    | "probe_timeout"
-    | "probe_failed"
-    | "cleanup_failed";
+export const offlineModelOptions: Record<HarnessKind, OrbModelOption[]> = {
+  claude: CLAUDE_MODEL_FAMILIES.map((id) => ({
+    provider: "claude",
+    id,
+    name: claudeModelDisplayName(id),
+  })),
+  pi: SELECTABLE_CODEX_MODELS.map((model) => ({ provider: "openai-codex", ...model })),
 };
 
-export type ListOrbModelOptions = (
-  task: SimulationTask,
-  ownerUserId: string,
-  harness: HarnessKind,
-) => ResultAsync<OrbModelOption[], ModelCatalogError>;
-
-type OrbModelRefusal = {
+type Refusal = {
   readonly type: "orb_model_refusal";
   readonly code: "not_found" | "conflict" | "invalid_request";
-  readonly message: string;
 };
-export type OrbModelError = StoreError | ModelCatalogError | OrbModelRefusal;
-
-type OrbModelDeps = Pick<ControlPlaneDeps, "store" | "listOrbModelOptions">;
-
-const notFound = (): OrbModelRefusal => ({
-  type: "orb_model_refusal",
-  code: "not_found",
-  message: "orb not found",
-});
-const conflict = (): OrbModelRefusal => ({
-  type: "orb_model_refusal",
-  code: "conflict",
-  message: "orb no longer accepts offline model selection",
-});
-const invalidModel = (): OrbModelRefusal => ({
-  type: "orb_model_refusal",
-  code: "invalid_request",
-  message: "model is not available for this orb's harness",
-});
-
-export function modelProviderForHarness(harness: HarnessKind): "claude" | "openai-codex" {
-  return harness === "claude" ? "claude" : "openai-codex";
-}
-
-function lookupEligibleOrb(
-  task: SimulationTask,
-  store: ControlPlaneDeps["store"],
-  orbId: string,
-): ResultAsync<{ orb: OrbRow; ownerUserId: string }, StoreError | OrbModelRefusal> {
-  return store.getOrb(task, orbId).andThen((orb) => {
-    if (orb === null) return errAsync(notFound());
-    if (!canQueueModel(orb)) return errAsync(conflict());
-    return store.getProject(task, orb.projectId).andThen((project) => {
-      if (project === null) return err(notFound());
-      if (project.state !== "active") return err(conflict());
-      return ok({ orb, ownerUserId: project.ownerUserId });
-    });
-  });
-}
-
-export function readOrbModelOptions(
-  task: SimulationTask,
-  deps: OrbModelDeps,
-  orbId: string,
-): ResultAsync<OrbModelOption[], OrbModelError> {
-  return lookupEligibleOrb(task, deps.store, orbId).andThen(({ orb, ownerUserId }) =>
-    deps.listOrbModelOptions(task, ownerUserId, orb.harness),
-  );
-}
+const refuse = (code: Refusal["code"]) => err({ type: "orb_model_refusal", code } as const);
 
 export function queueOrbModel(
   task: SimulationTask,
-  deps: OrbModelDeps,
+  store: ControlPlaneStore,
   orbId: string,
   pending: PendingModel,
-): ResultAsync<OrbListRow, OrbModelError> {
+): ResultAsync<OrbListRow, StoreError | Refusal> {
   const { provider, id } = pending.model;
-  return lookupEligibleOrb(task, deps.store, orbId)
-    .andThen(({ orb, ownerUserId }) =>
-      provider !== modelProviderForHarness(orb.harness)
-        ? errAsync(invalidModel())
-        : deps.listOrbModelOptions(task, ownerUserId, orb.harness),
+  return store.getOrb(task, orbId).andThen((orb) => {
+    if (orb === null) return refuse("not_found");
+    if (!canQueueModel(orb)) return refuse("conflict");
+    if (
+      !offlineModelOptions[orb.harness].some(
+        (model) => model.provider === provider && model.id === id,
+      )
     )
-    .andThen((models) =>
-      models.some((option) => option.id === id && option.provider === provider)
-        ? deps.store.queueModel(task, orbId, pending)
-        : errAsync(invalidModel()),
-    )
-    .andThen((queued) => {
-      if (!queued) return errAsync(conflict());
+      return refuse("invalid_request");
+    return store.queueModel(task, orbId, pending).andThen((queued) => {
+      if (!queued) return refuse("conflict");
       logOrbEvent(task, orbId, "model-queued", {
         changeId: pending.changeId,
         model: `${provider}/${id}`,
       });
-      return readOrb(task, deps.store, orbId).andThen((orb) =>
-        orb === null ? err(notFound()) : ok(orb),
+      return readOrb(task, store, orbId).andThen((updated) =>
+        updated === null ? refuse("not_found") : ok(updated),
       );
     });
+  });
 }

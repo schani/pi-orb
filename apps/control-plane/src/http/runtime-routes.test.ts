@@ -4,9 +4,11 @@ import {
   IdTokenErrorSchema,
   IdTokenResponseSchema,
   MCP_RUNTIME_PATH,
+  ORB_BOOT_CONTEXT_PATH,
   ORB_INSPECTION_LIST_PATH,
   ORB_LINKS_RUNTIME_PATH,
   ORB_NAME_TRIGGER_PATH,
+  ORB_PENDING_MODEL_ACK_PATH,
   ORB_SELF_PATH,
   ORB_SEND_PATH,
   OrbInspectionErrorSchema,
@@ -1089,56 +1091,78 @@ describe("runtime broker routes", () => {
       expect(store.orbSnapshot(ORB)?.sleepId).toBeNull();
     });
 
-    it.each(["replacement", "discard"] as const)(
-      "revalidates the authenticated incarnation before freezing boot context after %s",
+    const pendingModel = { changeId: "queued-choice", model: { provider: "claude", id: "sonnet" } };
+    const seedPending = () => {
+      const orb = makeOrbRow(ORB, PROJECT, "starting", {
+        harness: "claude",
+        runtimeTokenHash: sha256(TOKEN),
+        hostIncarnation: 3,
+        pendingModel,
+      });
+      store.seedOrb(orb);
+      return orb;
+    };
+    const readBoot = () =>
+      app.inject({
+        method: "POST",
+        url: ORB_BOOT_CONTEXT_PATH,
+        headers: { authorization: `Bearer ${TOKEN}` },
+        payload: { v: 1 },
+      });
+    const ack = (changeId = pendingModel.changeId, token = TOKEN) =>
+      app.inject({
+        method: "POST",
+        url: ORB_PENDING_MODEL_ACK_PATH,
+        headers: { authorization: `Bearer ${token}` },
+        payload: { v: 1, changeId },
+      });
+
+    it.each([
+      { runtimeTokenHash: sha256("replacement"), hostIncarnation: 4 },
+      { hostDiscardThroughIncarnation: 3 },
+    ])(
+      "revalidates the authenticated incarnation under the boot and ack locks (%j)",
       async (change) => {
-        const authenticated = makeOrbRow(ORB, PROJECT, "starting", {
-          runtimeTokenHash: sha256(TOKEN),
-          hostIncarnation: 3,
-        });
-        store.seedOrb(authenticated);
+        const orb = seedPending();
         store.seedSystemMessage(
           ORB,
           "00000000-0000-4000-8000-000000000023",
           { kind: "sleep_wake", sleepUntil: new Date(20_000).toISOString() },
           20_000,
         );
-        const readAuthenticated = store.getOrbByRuntimeTokenHash.bind(store);
+        const read = store.getOrbByRuntimeTokenHash.bind(store);
         vi.spyOn(store, "getOrbByRuntimeTokenHash").mockImplementation((task, hash) =>
-          readAuthenticated(task, hash).map((orb) => {
-            store.seedOrb(
-              change === "replacement"
-                ? {
-                    ...authenticated,
-                    runtimeTokenHash: sha256("replacement-token"),
-                    hostIncarnation: 4,
-                    stateVersion: authenticated.stateVersion + 1,
-                  }
-                : {
-                    ...authenticated,
-                    hostDiscardThroughIncarnation: authenticated.hostIncarnation,
-                    stateVersion: authenticated.stateVersion + 1,
-                  },
-            );
-            return orb;
-          }),
+          read(task, hash).andTee(() => store.seedOrb({ ...orb, ...change })),
         );
-
-        const response = await app.inject({
-          method: "POST",
-          url: "/runtime/v1/orb/boot-context",
-          headers: { authorization: `Bearer ${TOKEN}` },
-          payload: { v: 1 },
-        });
-
-        expect(response.statusCode).toBe(503);
+        expect((await readBoot()).statusCode).toBe(503);
         expect(store.messageSnapshots(ORB)[0]).toMatchObject({
-          messageId: "00000000-0000-4000-8000-000000000023",
           status: "queued",
           deliveryBatchId: null,
         });
+        store.seedOrb(orb);
+        expect((await ack()).statusCode).toBe(409);
+        expect(store.orbSnapshot(ORB)?.pendingModel).toEqual(pendingModel);
       },
     );
+
+    it("reads the locked pending choice and compare-clears only the matching ack", async () => {
+      const orb = seedPending();
+      const latest = { ...pendingModel, changeId: "replacement" };
+      const read = store.getOrbByRuntimeTokenHash.bind(store);
+      vi.spyOn(store, "getOrbByRuntimeTokenHash").mockImplementationOnce((task, hash) =>
+        read(task, hash).andTee(() => store.seedOrb({ ...orb, pendingModel: latest })),
+      );
+      expect((await readBoot()).json()).toMatchObject({ context: null, pendingModel: latest });
+      expect((await ack(latest.changeId, "wrong-token")).statusCode).toBe(401);
+      expect((await ack("")).statusCode).toBe(400);
+      expect((await ack()).statusCode).toBe(409);
+      const cleared = await ack(latest.changeId);
+      expect(cleared.statusCode).toBe(200);
+      expect(cleared.headers["cache-control"]).toBe("no-store");
+      expect(cleared.json()).toEqual({ v: 1 });
+      expect((await readBoot()).json()).not.toHaveProperty("pendingModel");
+      expect((await ack(latest.changeId)).statusCode).toBe(409);
+    });
 
     it.each([null, { provider: "claude", id: "sonnet" }])("boot context %j", async (model) => {
       store.seedOrb(
@@ -1161,117 +1185,6 @@ describe("runtime broker routes", () => {
         userTimeZone: null,
       });
     });
-
-    const pendingModel = {
-      changeId: "5618e482-6fe2-4be3-bbb3-31c1534cda16",
-      model: { provider: "claude", id: "sonnet" },
-    };
-    const seedPending = () => {
-      const row = makeOrbRow(ORB, PROJECT, "starting", {
-        harness: "claude",
-        runtimeTokenHash: sha256(TOKEN),
-        hostIncarnation: 3,
-        pendingModel,
-      });
-      store.seedOrb(row);
-      return row;
-    };
-    const readBoot = () =>
-      app.inject({
-        method: "POST",
-        url: "/runtime/v1/orb/boot-context",
-        headers: { authorization: `Bearer ${TOKEN}` },
-        payload: { v: 1 },
-      });
-    const modelAck = (payload: object = { v: 1, changeId: pendingModel.changeId }, token = TOKEN) =>
-      app.inject({
-        method: "POST",
-        url: "/runtime/v1/orb/pending-model/ack",
-        headers: { authorization: `Bearer ${token}` },
-        payload,
-      });
-
-    it("returns the locked pending model, clearing it only for the exact authorized ack", async () => {
-      seedPending();
-      expect((await readBoot()).json()).toMatchObject({ context: null, pendingModel });
-      expect((await modelAck(undefined, "wrong-token")).statusCode).toBe(401);
-      expect((await modelAck({ v: 1, changeId: "" })).statusCode).toBe(400);
-      expect(
-        (await modelAck({ v: 1, changeId: "7a6937c3-2d62-4fcb-b777-34543f5abb5d" })).statusCode,
-      ).toBe(409);
-      expect((await readBoot()).json()).toMatchObject({ pendingModel });
-
-      const ack = await modelAck();
-      expect(ack.statusCode).toBe(200);
-      expect(ack.headers["cache-control"]).toBe("no-store");
-      expect(ack.json()).toEqual({ v: 1 });
-      expect((await readBoot()).json()).not.toHaveProperty("pendingModel");
-      expect((await modelAck()).statusCode).toBe(409);
-    });
-
-    it.each([true, false])(
-      "returns a bounded ack error when the store fails (retryable=%s)",
-      async (retryable) => {
-        seedPending();
-        vi.spyOn(store, "clearPendingModel").mockReturnValueOnce(
-          errAsync({
-            type: "store_error",
-            code: retryable ? "unavailable" : "invariant",
-            message: "private SQL details",
-            retryable,
-          }),
-        );
-        const response = await modelAck();
-        expect(response.statusCode).toBe(retryable ? 503 : 500);
-        expect(response.json()).toMatchObject({ error: { retryable } });
-        expect(response.body).not.toContain("private SQL details");
-        expect((await readBoot()).json()).toMatchObject({ pendingModel });
-      },
-    );
-
-    it("reads the current choice under the boot context lock, not from bearer lookup", async () => {
-      const original = seedPending();
-      const latest = {
-        changeId: "7a6937c3-2d62-4fcb-b777-34543f5abb5d",
-        model: { provider: "claude", id: "haiku" },
-      };
-      const readAuthenticated = store.getOrbByRuntimeTokenHash.bind(store);
-      vi.spyOn(store, "getOrbByRuntimeTokenHash").mockImplementation((task, hash) =>
-        readAuthenticated(task, hash).map((orb) => {
-          store.seedOrb({
-            ...original,
-            pendingModel: latest,
-            stateVersion: original.stateVersion + 1,
-          });
-          return orb;
-        }),
-      );
-      expect((await readBoot()).json()).toMatchObject({ pendingModel: latest });
-    });
-
-    it.each(["replacement", "discard", "stopping", "archiving"] as const)(
-      "cannot acknowledge a pending model after %s between bearer lookup and the store clear",
-      async (change) => {
-        const original = seedPending();
-        const readAuthenticated = store.getOrbByRuntimeTokenHash.bind(store);
-        vi.spyOn(store, "getOrbByRuntimeTokenHash").mockImplementationOnce((task, hash) =>
-          readAuthenticated(task, hash).map((orb) => {
-            store.seedOrb({
-              ...original,
-              ...(change === "replacement"
-                ? { runtimeTokenHash: sha256("replacement"), hostIncarnation: 4 }
-                : change === "discard"
-                  ? { hostDiscardThroughIncarnation: 3 }
-                  : { state: change }),
-              stateVersion: original.stateVersion + 1,
-            });
-            return orb;
-          }),
-        );
-        expect((await modelAck()).statusCode).toBe(409);
-        expect((await store.getOrb(task, ORB))._unsafeUnwrap()?.pendingModel).toEqual(pendingModel);
-      },
-    );
 
     it("returns only a FIFO-head sleep wake and does not acknowledge it", async () => {
       store.seedOrb(

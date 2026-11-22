@@ -60,7 +60,7 @@ import { createSealedAuthCookies } from "./adapters/sealed-auth-cookies.ts";
 import { createSealedPreviewAuth } from "./adapters/sealed-preview-cookies.ts";
 import { FileSecretStore } from "./adapters/secrets/file-store.ts";
 import { GsmSecretStore } from "./adapters/secrets/gsm-store.ts";
-import { createOrbModelCatalog, createSpawnModelCheck } from "./adapters/spawn-models.ts";
+import { createSpawnModelCheck } from "./adapters/spawn-models.ts";
 import { CryptoUserIdSource } from "./adapters/user-id.ts";
 import { uploadRequest } from "./adapters/workspace-upload-http.ts";
 import {
@@ -530,7 +530,6 @@ export async function main(
     }),
     store: database.store,
     checkSpawnModel: createSpawnModelCheck(brokerForUser, claudeAuth),
-    listOrbModelOptions: createOrbModelCatalog(brokerForUser, claudeAuth),
     hostProvider,
     runtimeClient: new FetchRuntimeClient(),
     authGate: new SerializedAuthGate(

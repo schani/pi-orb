@@ -18,7 +18,6 @@ import {
   ListResponseSchema,
   type LiveDisplayDetail,
   LiveDisplayDetailSchema,
-  ORB_MODEL_OPTIONS_PATH,
   ORB_PENDING_MODEL_PATH,
   type OrbLinkStepsResponse,
   OrbLinkStepsResponseSchema,
@@ -27,7 +26,6 @@ import {
   OrbMessageListViewSchema,
   type OrbMessageView,
   OrbMessageViewSchema,
-  OrbModelOptionsResponseSchema,
   type OrbView,
   OrbViewSchema,
   OWNER_SECRETS_PATH,
@@ -524,14 +522,6 @@ export function acknowledgeOrbAlert(orbId: string, recordId: string) {
 
 export function getOrb(orbId: string): Promise<Result<OrbView, ApiError>> {
   return apiFetch(OrbViewSchema, `/api/v1/orbs/${encodeURIComponent(orbId)}`);
-}
-
-export function getOrbModelOptions(orbId: string, signal: AbortSignal) {
-  return apiFetch(
-    OrbModelOptionsResponseSchema,
-    ORB_MODEL_OPTIONS_PATH.replace(":orbId", () => encodeURIComponent(orbId)),
-    { signal, cache: "no-store" },
-  );
 }
 
 export function putPendingModel(

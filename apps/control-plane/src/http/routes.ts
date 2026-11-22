@@ -6,7 +6,6 @@ import {
   CreateProjectRequestSchema,
   EnqueueOrbMessageRequestSchema,
   GIT_IDENTITY_PATH,
-  ORB_MODEL_OPTIONS_PATH,
   ORB_PENDING_MODEL_PATH,
   ORB_SPAWN_UUID,
   OWNER_SECRETS_PATH,
@@ -48,7 +47,7 @@ import {
 import { logOrbEvent } from "../domain/log.ts";
 import type { OrbMessageMetadataRow, OrbMessageRow, ProjectRow } from "../domain/orb.ts";
 import { ackOrbAlert } from "../domain/orb-alerts.ts";
-import { type OrbModelError, queueOrbModel, readOrbModelOptions } from "../domain/orb-models.ts";
+import { queueOrbModel } from "../domain/orb-models.ts";
 import { normalizeOrbName, setOrbName } from "../domain/orb-naming.ts";
 import { readOrb, readProjectOrbs } from "../domain/orb-read.ts";
 import {
@@ -195,28 +194,6 @@ function sendProjectSecretError(reply: FastifyReply, error: ProjectSecretError):
     case "project_secret_corruption":
       return reply.status(500).send(httpError("internal", error.message, false));
   }
-}
-
-function sendOrbModelError(
-  task: SimulationTask,
-  reply: FastifyReply,
-  orbId: string,
-  op: "model-options" | "pending-model",
-  error: OrbModelError,
-): FastifyReply {
-  logOrbEvent(task, ORB_SPAWN_UUID.test(orbId) ? orbId : "invalid", "offline-model-failed", {
-    op,
-    ...(error.type === "model_catalog_error" ? { reason: error.reason } : { code: error.code }),
-  });
-  if (error.type === "store_error")
-    return sendStoreError(reply, { ...error, message: "model selection unavailable" });
-  if (error.type === "model_catalog_error") {
-    return error.reason === "disconnected"
-      ? reply.status(409).send(httpError("conflict", "model provider is not connected", false))
-      : reply.status(503).send(httpError("unavailable", "model catalog unavailable", true));
-  }
-  const statuses = { invalid_request: 400, not_found: 404, conflict: 409 };
-  return reply.status(statuses[error.code]).send(httpError(error.code, error.message, false));
 }
 
 function sendCommandError(
@@ -823,30 +800,38 @@ export function registerRoutes(
     );
   });
 
-  app.get<{ Params: { orbId: string } }>(ORB_MODEL_OPTIONS_PATH, async (request, reply) => {
-    reply.header("cache-control", "no-store");
-    const models = await readOrbModelOptions(task, deps, request.params.orbId);
-    if (models.isErr())
-      return sendOrbModelError(task, reply, request.params.orbId, "model-options", models.error);
-    return reply.send({ models: models.value });
-  });
-
   app.put<{ Params: { orbId: string } }>(ORB_PENDING_MODEL_PATH, async (request, reply) => {
     reply.header("cache-control", "no-store");
+    const { orbId } = request.params;
+    if (!ORB_SPAWN_UUID.test(orbId))
+      return reply.status(404).send(httpError("not_found", "orb not found", false));
     if (!Check(PutPendingModelRequestSchema, request.body))
-      return sendOrbModelError(task, reply, request.params.orbId, "pending-model", {
-        type: "orb_model_refusal",
-        code: "invalid_request",
-        message: "invalid pending model body",
-      });
-    const queued = await queueOrbModel(task, deps, request.params.orbId, {
+      return reply
+        .status(400)
+        .send(httpError("invalid_request", "invalid pending model body", false));
+
+    const queued = await queueOrbModel(task, deps.store, orbId, {
       changeId: randomUUID(),
       model: request.body.model,
     });
-    if (queued.isErr())
-      return sendOrbModelError(task, reply, request.params.orbId, "pending-model", queued.error);
-    const orb = queued.value;
-    return reply.send(orbView(orb, deps.control, config, viewerUserId(request), orb.spawnedByOrb));
+    if (queued.isOk()) {
+      const orb = queued.value;
+      return reply.send(
+        orbView(orb, deps.control, config, viewerUserId(request), orb.spawnedByOrb),
+      );
+    }
+
+    const error = queued.error;
+    logOrbEvent(task, orbId, "offline-model-failed", { op: "pending-model", code: error.code });
+    if (error.type === "store_error")
+      return sendStoreError(reply, { ...error, message: "model selection unavailable" });
+    const responses = {
+      invalid_request: [400, "model is not available for this orb's harness"],
+      not_found: [404, "orb not found"],
+      conflict: [409, "orb no longer accepts offline model selection"],
+    } as const;
+    const [status, message] = responses[error.code];
+    return reply.status(status).send(httpError(error.code, message, false));
   });
 
   app.post<{ Params: { orbId: string } }>(

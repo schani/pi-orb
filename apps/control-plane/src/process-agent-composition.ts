@@ -626,6 +626,9 @@ export function createProcessAgentContext(
       );
       if (composed.isErr()) return err(composed.error);
       const admitted = await deps.store.getOrb(task, orb.id);
+      const resume = !readOnly && orb.stopReason !== "manual" && orb.stopReason !== "sleep";
+      const pendingModel = resume && admitted.isOk() ? admitted.value?.pendingModel : null;
+      const clearPendingModel = lease.clearPendingModel;
       if (
         admitted.isErr() ||
         !admitted.value ||
@@ -633,19 +636,14 @@ export function createProcessAgentContext(
         admitted.value.state === "deleting" ||
         (admitted.value.state === "archiving" && !readOnly) ||
         admitted.value.state === "archived" ||
+        (pendingModel &&
+          (!clearPendingModel ||
+            !acceptsPendingModelCaller(admitted.value, ownerUserId, authority))) ||
         operation.signal.aborted
       ) {
         resourcesAbort.abort();
         await closeProcessAgentResources(tools, env);
         return err(durableError("agent admission superseded"));
-      }
-      // Only inhibited rows can queue a choice. Waking bumps the admission version, so a
-      // read-only owner cannot resume with a stale choice. Reuse this fresh admission read.
-      const pendingModel = readOnly ? null : admitted.value.pendingModel;
-      if (pendingModel && !acceptsPendingModelCaller(admitted.value, ownerUserId, authority)) {
-        resourcesAbort.abort();
-        await closeProcessAgentResources(tools, env);
-        return err(durableError("Queued Pi model admission superseded", true));
       }
       const registry = createRegistry();
       if (catalog.value.servers.length)
@@ -773,26 +771,12 @@ export function createProcessAgentContext(
         checkoutCommit: prepared.value.commitSha,
         checkExecutionReady,
         executionActive: () => env.active(),
-        resume: !readOnly && orb.stopReason !== "manual" && orb.stopReason !== "sleep",
-        ...(pendingModel
+        resume,
+        ...(pendingModel && clearPendingModel
           ? {
               pendingModel: {
-                value: pendingModel,
-                clear: (changeId: string) =>
-                  (
-                    lease.clearPendingModel?.(changeId, authority) ??
-                    lease
-                      .check()
-                      .andThen(() =>
-                        deps.store
-                          .clearPendingModel(task, orb.id, changeId, authority)
-                          .mapErr(() =>
-                            durableError("Could not acknowledge the queued Pi model", true),
-                          ),
-                      )
-                  ).andTee((cleared) => {
-                    if (cleared) logOrbEvent(task, orb.id, "model-applied", { changeId });
-                  }),
+                ...pendingModel,
+                acknowledge: () => clearPendingModel(pendingModel.changeId, authority),
               },
             }
           : {}),

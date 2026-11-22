@@ -1,4 +1,4 @@
-import type { AgentSettingsEvent, OrbModelOption, PutPendingModelRequest } from "@pi-orb/protocol";
+import type { AgentSettingsEvent } from "@pi-orb/protocol";
 import { Result } from "neverthrow";
 import {
   type ClipboardEvent,
@@ -15,6 +15,7 @@ import {
   type CommandOption,
   type ComposerCommandAction,
   commandOptions,
+  type ModelSelection,
 } from "./command-options.ts";
 import { type ComposerMode, composerModeGlyph, normalizeComposerChange } from "./composer-mode.ts";
 import { Icon } from "./Icons.tsx";
@@ -53,13 +54,7 @@ interface ComposerProps {
   /** Operation feedback in the picker, or beside the composer on phones and during settings requests. */
   feedback?: { message: string; error: boolean };
   settings?: AgentSettingsEvent | null;
-  offlineModels?:
-    | {
-        models: readonly OrbModelOption[];
-        queued: PutPendingModelRequest["model"] | undefined;
-        status: { message: string; retry?: () => void } | undefined;
-      }
-    | undefined;
+  orb?: ModelSelection | null;
   effortLabel?: "thinking" | "effort";
   settingsDisabled?: boolean;
   settingsPending?: boolean;
@@ -82,7 +77,7 @@ export function Composer({
   onAbort,
   feedback,
   settings = null,
-  offlineModels,
+  orb,
   effortLabel = "thinking",
   settingsDisabled = true,
   settingsPending = false,
@@ -93,26 +88,14 @@ export function Composer({
   const phone = usePhoneLayout();
   const [expanded, setExpanded] = useState(false);
   const pickerOpen = isCommand && (!phone || expanded);
-  const catalogStatus = offlineModels?.status;
   const choices = commandOptions(
     text,
     settings,
     effortLabel,
-    offlineModels?.models,
-    phone ? offlineModels?.queued : undefined,
+    orb?.queueableModels,
+    phone ? orb?.pendingModel?.model : undefined,
   );
   const selectedCommand = Math.min(commandIndex, Math.max(0, choices.length - 1));
-  const emptyMessage =
-    choices.length > 0
-      ? null
-      : offlineModels !== undefined
-        ? "No matching model."
-        : settings === null
-          ? "Settings unavailable — connect to a running orb."
-          : "No matching command or value.";
-  const operationMessage =
-    feedback?.message ||
-    (settings !== null && settingsDisabled ? "Wait for the current operation to finish." : null);
   const chooseCommand = (choice: CommandOption | undefined) => {
     if (choice?.text !== undefined) {
       onValueChange(choice.text, "command");
@@ -272,7 +255,7 @@ export function Composer({
         </div>
       )}
       {!pickerOpen && feedback?.message && (
-        <div className="composer-phone-feedback" role={feedback.error ? "alert" : "status"}>
+        <div className="composer-phone-feedback" role="status">
           {feedback.message}
         </div>
       )}
@@ -341,16 +324,13 @@ export function Composer({
                   id={`command-choice-${index}`}
                   aria-selected={index === selectedCommand}
                   key={
-                    choice.action?.type === "queue_model"
-                      ? JSON.stringify([choice.action.model.provider, choice.action.model.id])
+                    choice.action?.type === "set_model"
+                      ? `${choice.action.model.provider}/${choice.action.model.id}`
                       : choice.label
                   }
                   className={index === selectedCommand ? "selected" : ""}
                   onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => {
-                    setCommandIndex(index);
-                    chooseCommand(choice);
-                  }}
+                  onClick={() => chooseCommand(choice)}
                   disabled={choice.action !== undefined && settingsDisabled}
                 >
                   <span>{choice.label}</span>
@@ -358,33 +338,19 @@ export function Composer({
                 </button>
               ))}
             </div>
-            {(catalogStatus || emptyMessage || operationMessage) && (
-              <div className="command-feedback">
-                {catalogStatus ? (
-                  <div className="command-catalog-feedback">
-                    <div role={catalogStatus.retry ? "alert" : "status"}>
-                      {catalogStatus.message}
-                    </div>
-                    {catalogStatus.retry && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          catalogStatus.retry?.();
-                          inputRef.current?.focus({ preventScroll: true });
-                        }}
-                      >
-                        Retry
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  emptyMessage && <div>{emptyMessage}</div>
-                )}
-                {operationMessage && (
-                  <div role={feedback?.error ? "alert" : "status"}>{operationMessage}</div>
-                )}
+            {feedback?.message ? (
+              <div className="command-feedback" role={feedback.error ? "alert" : "status"}>
+                {feedback.message}
               </div>
-            )}
+            ) : choices.length === 0 || (settings !== null && settingsDisabled) ? (
+              <div className="command-feedback">
+                {settings !== null && settingsDisabled
+                  ? "Wait for the current operation to finish."
+                  : settings === null && orb?.queueableModels === undefined
+                    ? "Settings unavailable — connect to a running orb."
+                    : "No matching command or value."}
+              </div>
+            ) : null}
           </div>
         )}
         <span className="composer-prefix">{composerModeGlyph(mode)}</span>
@@ -423,13 +389,9 @@ export function Composer({
                   );
                   return;
                 }
-                if (
-                  event.key === "Enter" ||
-                  (event.key === "Tab" && !event.shiftKey && choices.length > 0)
-                ) {
+                if (event.key === "Enter" || (event.key === "Tab" && !event.shiftKey)) {
                   event.preventDefault();
-                  if (choices.length === 0 && catalogStatus?.retry) catalogStatus.retry();
-                  else chooseCommand(choices[selectedCommand]);
+                  chooseCommand(choices[selectedCommand]);
                   return;
                 }
               }

@@ -53,38 +53,6 @@ it("compact executes directly and accepts optional instructions without settings
     customInstructions: "preserve decisions\n and paths",
   });
 });
-it("offers only catalog-backed model choices in offline mode, even with read-only live settings", () => {
-  const offlineModels = [{ provider: "test", id: "next", name: "Next model" }];
-  const settings = { ...view, writable: false };
-  expect(commandOptions("", settings, "thinking", offlineModels)).toEqual([
-    { label: "model", text: "model " },
-  ]);
-  expect(commandOptions("model test/next", settings, "thinking", offlineModels)).toEqual([
-    {
-      label: "Next model",
-      action: { type: "queue_model", model: { provider: "test", id: "next" } },
-    },
-  ]);
-  for (const text of ["model a", "thinking ", "effort ", "compact"]) {
-    expect(commandOptions(text, settings, "thinking", offlineModels)).toEqual([]);
-  }
-});
-
-it("marks only the queued model in the phone picker when it is in the catalog", () => {
-  const queued = { provider: "test", id: "next" };
-  const models = [
-    { ...queued, name: "Next model" },
-    { ...queued, provider: "other", name: "Another model" },
-  ];
-  expect(commandOptions("model ", null, "thinking", models, queued).map((x) => x.label)).toEqual([
-    "Next model (queued)",
-    "Another model",
-  ]);
-  expect(
-    commandOptions("model another", null, "thinking", models, queued).map((x) => x.label),
-  ).toEqual(["Another model"]);
-});
-
 it("offers only supported choices and never converts an unknown command to a prompt", () => {
   expect(commandOptions("", view).map((x) => x.label)).toEqual(["model", "thinking", "compact"]);
   expect(commandOptions("thinking ", view).map((x) => x.label)).toEqual(["low", "high"]);

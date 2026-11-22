@@ -1,9 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  acknowledgePendingModel,
-  BOOT_CONTEXT_REQUEST_TIMEOUT_MS,
-  fetchBootContext,
-} from "./boot-context.ts";
+import { fetchBootContext } from "./boot-context.ts";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -68,22 +64,6 @@ describe("boot context client", () => {
       userTimeZone: "Europe/Paris",
     });
   });
-
-  it.each(["throw", "reject"])(
-    "maps a fetch %s to a typed visible prerequisite failure",
-    async (mode) => {
-      vi.stubGlobal("fetch", () => {
-        if (mode === "throw") throw new Error("network down");
-        return Promise.reject(new Error("network down"));
-      });
-      const result = await fetchBootContext(broker, { retryWindowMs: 0 });
-      expect(result._unsafeUnwrapErr()).toMatchObject({
-        type: "boot_context_error",
-        retryable: true,
-      });
-      expect(result._unsafeUnwrapErr().message).toContain("boot context");
-    },
-  );
 
   it("recovers from retryable failures with bounded 1/2/4-second backoff", async () => {
     let attempts = 0;
@@ -193,24 +173,17 @@ describe("boot context client", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("lets an attempt admitted before the retry deadline use its full timeout", async () => {
-    let attempts = 0;
+  it.each([
+    () => {
+      throw new TypeError("network down");
+    },
+    () => Promise.reject(new DOMException("request timed out", "TimeoutError")),
+  ])("gives each retry attempt its full timeout even near the retry deadline", async (fail) => {
     let now = 0;
-    vi.stubGlobal("fetch", async () => {
-      attempts += 1;
-      if (attempts === 1) {
-        return new Response(
-          JSON.stringify({
-            error: { code: "unavailable", message: "warming", retryable: true },
-          }),
-          { status: 503 },
-        );
-      }
-      now += BOOT_CONTEXT_REQUEST_TIMEOUT_MS;
-      return new Response(JSON.stringify({ v: 1, context: null, userTimeZone: null }), {
-        status: 200,
-      });
-    });
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    const fetch = vi.fn(async () => Response.json({ v: 1, context: null, userTimeZone: null }));
+    fetch.mockImplementationOnce(fail);
+    vi.stubGlobal("fetch", fetch);
 
     const result = await fetchBootContext(broker, {
       retryWindowMs: 500,
@@ -219,72 +192,9 @@ describe("boot context client", () => {
         now = 499;
       },
     });
-
-    expect(result._unsafeUnwrap()).toEqual({ v: 1, context: null, userTimeZone: null });
-    expect(attempts).toBe(2);
-    expect(now).toBe(10_499);
-  });
-
-  it.each([
-    ["timeout", new DOMException("request timed out", "TimeoutError")],
-    ["network rejection", new TypeError("fetch failed")],
-  ])("recovers after a retryable %s", async (_kind, failure) => {
-    let attempts = 0;
-    let now = 0;
-    const delays: number[] = [];
-    vi.stubGlobal("fetch", async () => {
-      attempts += 1;
-      if (attempts === 1) {
-        now += 10_000;
-        throw failure;
-      }
-      return new Response(JSON.stringify({ v: 1, context: null, userTimeZone: null }), {
-        status: 200,
-      });
-    });
-
-    const result = await fetchBootContext(broker, {
-      now: () => now,
-      sleep: async (ms) => {
-        delays.push(ms);
-        now += ms;
-      },
-    });
-
-    expect(result._unsafeUnwrap()).toEqual({ v: 1, context: null, userTimeZone: null });
-    expect(attempts).toBe(2);
-    expect(delays).toEqual([1_000]);
-  });
-
-  it("retains a 10-second timeout for every request attempt", async () => {
-    let attempts = 0;
-    let now = 0;
-    const timeout = vi.spyOn(AbortSignal, "timeout");
-    vi.stubGlobal("fetch", async () => {
-      attempts += 1;
-      return attempts === 1
-        ? new Response(
-            JSON.stringify({
-              error: { code: "unavailable", message: "warming", retryable: true },
-            }),
-            { status: 503 },
-          )
-        : new Response(JSON.stringify({ v: 1, context: null, userTimeZone: null }), {
-            status: 200,
-          });
-    });
-
-    await fetchBootContext(broker, {
-      now: () => now,
-      sleep: async (ms) => {
-        now += ms;
-      },
-    });
-
-    expect(timeout).toHaveBeenCalledTimes(2);
-    expect(timeout).toHaveBeenNthCalledWith(1, BOOT_CONTEXT_REQUEST_TIMEOUT_MS);
-    expect(timeout).toHaveBeenNthCalledWith(2, BOOT_CONTEXT_REQUEST_TIMEOUT_MS);
-    expect(BOOT_CONTEXT_REQUEST_TIMEOUT_MS).toBe(10_000);
+    expect(result.isOk()).toBe(true);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(timeout.mock.calls).toEqual([[10_000], [10_000]]);
   });
 
   it.each([
@@ -303,26 +213,10 @@ describe("boot context client", () => {
       sleep,
     });
     expect(result._unsafeUnwrapErr()).toMatchObject({
-      type: "boot_context_error",
+      type: "boot_request_error",
       retryable: false,
     });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(sleep).not.toHaveBeenCalled();
   });
-});
-
-describe("pending model acknowledgement", () => {
-  it.each([null, { v: 2 }, { v: 1, cleared: false }])(
-    "rejects unexpected HTTP 200 body %j without reissuing the acknowledgement",
-    async (payload) => {
-      const fetch = vi.fn(async () => Response.json(payload));
-      vi.stubGlobal("fetch", fetch);
-      expect((await acknowledgePendingModel(broker, "choice"))._unsafeUnwrapErr()).toEqual({
-        type: "pending_model_ack_error",
-        retryable: false,
-        message: "Cannot acknowledge the queued Claude model: malformed response",
-      });
-      expect(fetch).toHaveBeenCalledTimes(1);
-    },
-  );
 });

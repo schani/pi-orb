@@ -122,7 +122,7 @@ One sticky line of cells (layout: `docs/design-system.md`).
 
 - Rename replaces the name with a focused form. The project name is not repeated (the index shows it).
 - The state word is the lifecycle state, with `· busy` from live activity, or the preview word (`docs/http-exposure.md`).
-- Model and thinking (Claude: `effort`) cells show live runtime settings; clicking one opens its composer command picker. Claude effort appears only when the selected model advertises levels. On desktop, eligible offline orbs use the same `Change model` button and picker, without the thinking control even if live settings are readable. The button marks a pending choice with `(queued)` because it is not yet the effective model. Settings authority: `docs/agent-context.md`.
+- Model and thinking (Claude: `effort`) cells show live runtime settings; clicking one opens its composer command picker. Claude effort appears only when the selected model advertises levels. On desktop, the offline picker uses the same `Change model` button, with no thinking control. A pending choice is labelled `(queued)`. Settings authority: `docs/agent-context.md`.
 - Unavailable groups are hidden, not left as empty cells. Terminal and Upload appear only while running; Start/Stop only when the state accepts them; Archive disables once archiving/archived; Delete disables while deleting. Rename, Archive and Delete flows: `docs/teardown.md`.
 - Omitted as clutter: orb ID, state version, commit, ports, connection text, notification controls.
 
@@ -215,7 +215,7 @@ Sticky at the bottom of the transcript column. One row: the mode prefix (`>` mes
 - **Caret.** The native caret. The textarea owns editing, selection, IME and reveal-scroll. Rejected: a mirrored overlay caret (intermittently invisible in the Safari Dock app; `docs/postmortems/2026-09-19-composer-caret-ordering.md`) and `caret-shape: block`.
 - **Focus.** On non-touch desktops the textarea gets focus on arrival and when the tab becomes visible again, without scrolling; submitting keeps focus. Devices with any touch capability (including desktop-width tablets) never get unsolicited focus; viewport width describes layout, not input. Open dialogs keep focus.
 - **Abort** sends the exact current operation ID through the existing admission path and retains the draft. On central Pi with no current operation, it targets the first queued human message as `inbox:<UUID>` (`docs/inbox.md`).
-- **Command admission** (`canRunComposerCommand`): live settings and `/compact` require a writable-settings, synchronized open connection, idle activity, no children, no compaction and no pending request (running lifecycle unless central Pi). When offline selection is eligible, only `/model` is available. Catalog, queue and live setting errors appear once inside the open picker, separate from the scrolling choices. Use `Retry` to reload the catalog or select the model again to retry a failed change; neither requires closing the picker or retyping the filter. Success restores any draft saved by opening the picker from the header.
+- **Command admission** (`canRunComposerCommand`): live settings and `/compact` require a writable-settings, synchronized open connection, idle activity, no children, no compaction and no pending request (running lifecycle unless central Pi). Offline selection offers only `/model`. A change error stays inside the picker, outside the choices, so the user can retry without losing the filter.
 
 ### Phone layout (≤600px)
 

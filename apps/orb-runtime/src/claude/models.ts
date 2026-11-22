@@ -4,6 +4,10 @@ import type { ModelOption } from "@pi-orb/protocol";
 export const DEFAULT_CLAUDE_MODEL = "opus";
 export const CLAUDE_MODEL_FAMILIES = ["fable", "opus", "sonnet", "haiku"] as const;
 
+export function claudeModelDisplayName(family: (typeof CLAUDE_MODEL_FAMILIES)[number]): string {
+  return family.charAt(0).toUpperCase() + family.slice(1);
+}
+
 export function latestClaudeModels(models: readonly ModelInfo[]): ModelOption[] {
   return CLAUDE_MODEL_FAMILIES.flatMap((family) => {
     const model = models.find((model) => model.value === family);
@@ -13,7 +17,7 @@ export function latestClaudeModels(models: readonly ModelInfo[]): ModelOption[] 
           {
             provider: "claude",
             id: model.value,
-            name: family.charAt(0).toUpperCase() + family.slice(1),
+            name: claudeModelDisplayName(family),
             thinkingLevels: model.supportedEffortLevels ?? [],
           },
         ];
