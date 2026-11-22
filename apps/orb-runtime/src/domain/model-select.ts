@@ -3,7 +3,7 @@ export const PINNED_CODEX_MODEL_ID = "gpt-6.2-sol";
 export const SELECTABLE_CODEX_MODELS = [
   { id: "gpt-6.2-astra", name: "Astra" },
   { id: "gpt-6.2-sol", name: "Sol" },
-  { id: "gpt-5.6-terra", name: "Terra" },
+  { id: "gpt-6.1-terra", name: "Terra" },
   { id: "gpt-6-luna", name: "Luna" },
 ] as const;
 

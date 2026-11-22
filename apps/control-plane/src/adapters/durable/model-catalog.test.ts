@@ -39,7 +39,7 @@ describe("Durable public model catalog", () => {
       expect(settings?.models.map(({ provider, id }) => ({ provider, id }))).toEqual([
         { provider: "openai-codex", id: "gpt-6.2-astra" },
         { provider: "openai-codex", id: "gpt-6.2-sol" },
-        { provider: "openai-codex", id: "gpt-5.6-terra" },
+        { provider: "openai-codex", id: "gpt-6.1-terra" },
         { provider: "openai-codex", id: "gpt-6-luna" },
       ]);
       for (const option of settings?.models ?? []) {
@@ -52,19 +52,19 @@ describe("Durable public model catalog", () => {
         model: { provider: "openai-codex", id: "gpt-6.2-sol" },
         thinkingLevel: "high",
       });
-      const sol = settings.models[1];
-      assert(sol);
+      const terra = settings.models.find(({ name }) => name === "Terra");
+      assert(terra);
       expect(
-        (await agent.request("sol", { type: "set_model", model: sol }))._unsafeUnwrap(),
+        (await agent.request("terra", { type: "set_model", model: terra }))._unsafeUnwrap(),
       ).toMatchObject({
         type: "settings_applied",
       });
       expect(agent.snapshot()._unsafeUnwrap().settings?.settings.model).toEqual({
-        provider: sol.provider,
-        id: sol.id,
+        provider: terra.provider,
+        id: terra.id,
       });
       // The public catalog does not prune the inference registry or rename model IDs.
-      expect(runtime.getModel("openai-codex", "gpt-6-sol")?.name).toBe("GPT-6 Sol");
+      expect(runtime.getModel("openai-codex", "gpt-5.6-terra")?.name).toBe("GPT-5.6 Terra");
     } finally {
       await agent.close();
     }
@@ -85,18 +85,18 @@ describe("Durable public model catalog", () => {
         instructions: "",
         initialSettings: { model: { provider: "openai-codex", id }, thinkingLevel: "high" },
       });
-    const original = (await open("gpt-6-sol"))._unsafeUnwrap();
+    const original = (await open("gpt-5.6-terra"))._unsafeUnwrap();
     expect(original.snapshot()._unsafeUnwrap().settings?.settings.model).toEqual({
       provider: "openai-codex",
-      id: "gpt-6-sol",
+      id: "gpt-5.6-terra",
     });
     await original.close();
     const resumed = (await open("removed-initial-intent"))._unsafeUnwrap();
     try {
       const settings = resumed.snapshot()._unsafeUnwrap().settings;
-      expect(settings?.settings.model).toEqual({ provider: "openai-codex", id: "gpt-6-sol" });
+      expect(settings?.settings.model).toEqual({ provider: "openai-codex", id: "gpt-5.6-terra" });
       expect(settings?.models.map(({ name }) => name)).toEqual(["Astra", "Sol", "Terra", "Luna"]);
-      expect(settings?.models.find(({ name }) => name === "Sol")?.id).toBe("gpt-6.2-sol");
+      expect(settings?.models.find(({ name }) => name === "Terra")?.id).toBe("gpt-6.1-terra");
       const stream = vi.spyOn(runtime, "streamSimple");
       const storage = new MemoryStorage();
       const fresh = (await open("removed-after-spawn", storage))._unsafeUnwrap();
