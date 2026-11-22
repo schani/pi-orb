@@ -2654,7 +2654,7 @@ function settingsFor(
         [
           ["gpt-6.2-astra", "Astra"],
           ["gpt-6.2-sol", "Sol"],
-          ["gpt-5.6-terra", "Terra"],
+          ["gpt-6.1-terra", "Terra"],
           ["gpt-6-luna", "Luna"],
         ] as const
       ).map(([id, name]) => ({

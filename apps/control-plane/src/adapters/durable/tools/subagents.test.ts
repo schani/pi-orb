@@ -368,7 +368,7 @@ it("starts a child on the selected model and rejects an unavailable one before c
         provider: "openai-codex",
         models: [
           { id: "gpt-6.1-sol", input: ["text", "image"] },
-          { id: "gpt-5.6-terra", input: ["text", "image"] },
+          { id: "gpt-6.1-terra", input: ["text", "image"] },
         ],
       },
     },
@@ -385,7 +385,7 @@ it("starts a child on the selected model and rejects an unavailable one before c
     });
     harness.resume();
     await (await root.submit({ type: "input", content: "parent" }, ctx)).wait(ctx);
-    expect(childModels).toEqual(["gpt-5.6-terra"]);
+    expect(childModels).toEqual(["gpt-6.1-terra"]);
     expect(results[1]).toContain("Model unavailable: Luna");
     expect(results[2]).toContain('\\"model\\":\\"Terra\\"');
     const conversations = await storage.scanConversations({}, 100, undefined, ctx);
