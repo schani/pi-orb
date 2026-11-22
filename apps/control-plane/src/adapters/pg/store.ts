@@ -1266,8 +1266,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         }
         const now = new Date(params.orb.createdAt);
         const inserted = await query(
-          `INSERT INTO orbs (id, project_id, name, user_time_zone, state, host_kind, last_busy_at, state_changed_at, created_at, updated_at, harness, initial_model, pending_model)
-        VALUES ($1,$2,$3,$4,'creating',$5,$6,$6,$6,$6,$7,$8::jsonb,$9::jsonb) ON CONFLICT (id) DO NOTHING RETURNING id`,
+          `INSERT INTO orbs (id, project_id, name, user_time_zone, state, host_kind, last_busy_at, state_changed_at, created_at, updated_at, harness, initial_model)
+        VALUES ($1,$2,$3,$4,'creating',$5,$6,$6,$6,$6,$7,$8::jsonb) ON CONFLICT (id) DO NOTHING RETURNING id`,
           [
             params.orb.id,
             params.orb.projectId,
@@ -1277,7 +1277,6 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
             now,
             params.orb.initialModel === null ? source["harness"] : params.orb.harness,
             jsonParam(params.orb.initialModel),
-            jsonParam(params.orb.pendingModel),
           ],
         );
         if (inserted.isErr()) return err(inserted.error);

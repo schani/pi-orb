@@ -2116,6 +2116,7 @@ function OrbConversation({
                 className="icon-button"
                 aria-label="Start orb"
                 title="start"
+                disabled={state.pendingRequest?.kind === "settings"}
                 onClick={() => runLifecycle(startOrb)}
               >
                 <Icon name="start" />

@@ -84,6 +84,10 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       if (/^\/(pending-model|model-options|start|messages\/(?!poll$))/.test(suffix))
         requests.push(suffix);
     });
+    let allowModelResponse: (() => void) | undefined;
+    const modelResponseAllowed = new Promise<void>((resolve) => {
+      allowModelResponse = resolve;
+    });
     try {
       const url = `${origin}${path}`;
       const fixtureOrb: OrbView = await (await page.request.get(url)).json();
@@ -98,13 +102,15 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       await page.route(`${url}/pending-model`, async (route) => {
         expectPage(route.request().method()).toBe("PUT");
         expectPage(route.request().postDataJSON()).toEqual({ model });
-        if (++attempts === 1)
+        if (++attempts === 1) {
+          await modelResponseAllowed;
           return route.fulfill({
             status: 409,
             json: {
               error: { code: "conflict", message: "Could not save selection", retryable: false },
             },
           });
+        }
         orb = { ...orb, pendingModel: { changeId: "queued-model", model } };
         return route.fulfill({ json: orb });
       });
@@ -112,11 +118,17 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       const input = page.getByRole("textbox", { name: "Message the orb" });
       const picker = page.locator(".command-picker");
       const choose = picker.getByRole("option", { name: "Next model", exact: true });
+      await page.getByRole("button", { name: "Orb actions" }).click();
+      const start = page.getByRole("button", { name: "Start orb" });
+      await expectPage(start).toBeEnabled();
       await page.getByRole("button", { name: "Write message" }).click();
       await input.fill("keep my draft");
       await input.fill("/model ");
       await choose.click();
+      await expectPage(start).toBeDisabled();
+      allowModelResponse?.();
       await expectPage(picker.getByRole("alert")).toBeInViewport({ ratio: 1 });
+      await expectPage(start).toBeEnabled();
       await expectPage(picker.getByRole("alert")).toContainText("Could not save selection");
       await expectPage(input).toHaveValue("model ");
       await choose.click();
@@ -131,6 +143,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       await expectPage(choose).toBeVisible();
       expectPage(requests).toEqual(["/pending-model", "/pending-model"]);
     } finally {
+      allowModelResponse?.();
       await closeRoutedPage(page);
     }
   });
