@@ -6,6 +6,7 @@ import type {
   OrbMessageStatus,
   OrbMessageSystem,
   OrbState,
+  PendingModel,
   ProjectState,
   ResourceWarning,
   StopReason,
@@ -25,6 +26,8 @@ export interface OrbRow {
   readonly projectId: string;
   readonly harness: HarnessKind;
   readonly initialModel: AgentSettings["model"] | null;
+  /** Last accepted offline model choice; consumed only by an authorized startup. */
+  readonly pendingModel: PendingModel | null;
   readonly name: string | null;
   readonly userTimeZone: string | null;
   readonly autoNameLeaseUntil: number | null;
@@ -163,4 +166,12 @@ export interface ProjectDeletionProgress {
 /** Never reached runtime-ready and has no harness session (docs/lifecycle.md drain skip). */
 export function hasNeverBeenReady(orb: OrbRow): boolean {
   return orb.lastReadyAt === null && orb.harnessSessionId === null;
+}
+
+/** Idle-stopped Pi compute can have a live central agent. Only a durable Stop or Sleep inhibits it. */
+export function canQueueModel(orb: Pick<OrbRow, "state" | "harness" | "stopReason">): boolean {
+  return (
+    (orb.state === "stopped" || orb.state === "failed") &&
+    (orb.harness === "claude" || orb.stopReason === "manual" || orb.stopReason === "sleep")
+  );
 }

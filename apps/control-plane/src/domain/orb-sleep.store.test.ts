@@ -90,7 +90,7 @@ describe("scheduled sleep store", () => {
     );
     expect(
       (await store.readOrbBootContext(task, { orbId: "orb", caller }))._unsafeUnwrap(),
-    ).toBeNull();
+    ).toEqual({ context: null, pendingModel: null });
     const claimed = await store.claimNextOrbMessageBatch(task, { orbId: "orb", now: 3 });
     expect(claimed._unsafeUnwrap().map((row) => row.messageId)).toEqual(["human"]);
   });

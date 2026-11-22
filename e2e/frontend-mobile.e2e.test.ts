@@ -71,6 +71,83 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     await vite?.close();
   });
 
+  it("queues a model from the phone picker without waking a stopped orb", async () => {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true });
+    const orbId = "frontend-fixture-orb";
+    const path = `/api/v1/orbs/${orbId}`;
+    const model = { provider: "test", id: "next" };
+    const requests: string[] = [];
+    page.on("request", (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (!pathname.startsWith(`${path}/`)) return;
+      const suffix = pathname.slice(path.length);
+      if (/^\/(pending-model|model-options|start|messages\/(?!poll$))/.test(suffix))
+        requests.push(suffix);
+    });
+    let allowModelResponse: (() => void) | undefined;
+    const modelResponseAllowed = new Promise<void>((resolve) => {
+      allowModelResponse = resolve;
+    });
+    try {
+      const url = `${origin}${path}`;
+      const fixtureOrb: OrbView = await (await page.request.get(url)).json();
+      let orb: OrbView = {
+        ...fixtureOrb,
+        state: "stopped",
+        stopReason: "sleep",
+        queueableModels: [{ ...model, name: "Next model" }],
+      };
+      await page.route(url, (route) => route.fulfill({ json: orb }));
+      let attempts = 0;
+      await page.route(`${url}/pending-model`, async (route) => {
+        expectPage(route.request().method()).toBe("PUT");
+        expectPage(route.request().postDataJSON()).toEqual({ model });
+        if (++attempts === 1) {
+          await modelResponseAllowed;
+          return route.fulfill({
+            status: 409,
+            json: {
+              error: { code: "conflict", message: "Could not save selection", retryable: false },
+            },
+          });
+        }
+        orb = { ...orb, pendingModel: { changeId: "queued-model", model } };
+        return route.fulfill({ json: orb });
+      });
+      await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, orbId);
+      const input = page.getByRole("textbox", { name: "Message the orb" });
+      const picker = page.locator(".command-picker");
+      const choose = picker.getByRole("option", { name: "Next model", exact: true });
+      await page.getByRole("button", { name: "Orb actions" }).click();
+      const start = page.getByRole("button", { name: "Start orb" });
+      await expectPage(start).toBeEnabled();
+      await page.getByRole("button", { name: "Write message" }).click();
+      await input.fill("keep my draft");
+      await input.fill("/model ");
+      await choose.click();
+      await expectPage(start).toBeDisabled();
+      allowModelResponse?.();
+      await expectPage(picker.getByRole("alert")).toBeInViewport({ ratio: 1 });
+      await expectPage(start).toBeEnabled();
+      await expectPage(picker.getByRole("alert")).toContainText("Could not save selection");
+      await expectPage(input).toHaveValue("model ");
+      await choose.click();
+      await expectPage(input).toHaveValue("keep my draft");
+      await input.fill("/model ");
+      await expectPage(picker.getByRole("option", { name: "Next model (queued)" })).toBeVisible();
+      await page.setViewportSize({ width: 1280, height: 844 });
+      await input.press("Escape");
+      const header = page.getByRole("button", { name: "Change model" });
+      await expectPage(header).toHaveText("Next model (queued)");
+      await header.click();
+      await expectPage(choose).toBeVisible();
+      expectPage(requests).toEqual(["/pending-model", "/pending-model"]);
+    } finally {
+      allowModelResponse?.();
+      await closeRoutedPage(page);
+    }
+  });
+
   it.each([1280, 320])(
     "keeps required GitHub login visible at the transcript tail at %ipx",
     async (width) => {

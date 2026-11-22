@@ -85,6 +85,90 @@ const terminalReadiness: RuntimeClientError = {
   },
 };
 
+it.each(["current", "acknowledged", "stopped", "superseded"] as const)(
+  "latches a queued Pi rejection only while choice and authority are current (%s)",
+  async (scenario) => {
+    const { store, deps: baseDeps } = makeHarness();
+    const task = new NoSimulationTask("queued model rejection", false);
+    const pendingModel = { changeId: "obsolete", model: { provider: "test", id: "missing" } };
+    const row = makeOrbRow("orb", "p", "starting", { pendingModel });
+    const project = makeProjectRow(row.projectId);
+    store.seedProject(project);
+    store.seedOrb(row);
+    const content = [{ type: "text" as const, text: "keep this input" }];
+    (
+      await store.enqueueOrbMessage(task, {
+        orbId: row.id,
+        messageId: "retained",
+        content,
+        now: task.wallNow(),
+      })
+    )._unsafeUnwrap();
+    const deliver = vi.fn();
+    const suspend = vi.fn(() => okAsync(undefined));
+    const poll = async () => {
+      if (scenario === "acknowledged") {
+        (
+          await store.clearPendingModel(task, row.id, pendingModel.changeId, {
+            kind: "central",
+            orbId: row.id,
+            projectId: row.projectId,
+            ownerUserId: project.ownerUserId,
+            agentAdmissionVersion: row.agentAdmissionVersion,
+          })
+        )._unsafeUnwrap();
+      } else if (scenario === "stopped") {
+        (await requestOrbStop(task, baseDeps, row.id))._unsafeUnwrap();
+      }
+      return err({
+        type: "runtime_client_error",
+        code: "pending_model_unavailable",
+        answered: false,
+        retryable: false,
+        message: "Choose another model.",
+        pendingModelChangeId: scenario === "superseded" ? "older" : pendingModel.changeId,
+      } satisfies RuntimeClientError);
+    };
+    const pollHealth = vi.fn(() => new ResultAsync(poll()));
+    const deps = { ...baseDeps, agentPlane: { ...plane(deliver), pollHealth, suspend } };
+
+    const before = store.orbSnapshot(row.id);
+    const outcome = (await reconcileCentralAgent(task, deps, row.id))._unsafeUnwrapErr();
+    expect((await store.listOrbMessages(task, row.id))._unsafeUnwrap()).toMatchObject([
+      { status: "queued", content },
+    ]);
+    expect(deliver).not.toHaveBeenCalled();
+    if (scenario === "superseded") {
+      expect(outcome.type).toBe("retryable");
+      expect(store.orbSnapshot(row.id)).toEqual(before);
+      return;
+    }
+    if (scenario !== "current") {
+      expect(outcome).toEqual({ type: "conflict" });
+      expect(store.orbSnapshot(row.id)).toMatchObject(
+        scenario === "acknowledged"
+          ? { state: "starting", pendingModel: null }
+          : { state: "stopping", stopReason: "manual", pendingModel },
+      );
+      return;
+    }
+
+    expect(outcome).toEqual({ type: "transitioned", toState: "failed" });
+    expect(store.orbSnapshot(row.id)).toMatchObject({
+      state: "failed",
+      stopReason: "manual",
+      agentAdmissionVersion: row.agentAdmissionVersion + 1,
+      pendingModel,
+      lastError: "pending_model_unavailable: Choose another model.",
+    });
+    (await reconcileCentralAgent(task, deps, row.id))._unsafeUnwrap();
+    expect(suspend).toHaveBeenCalled();
+    expect(pollHealth).toHaveBeenCalledTimes(1);
+    const replacement = { ...pendingModel, changeId: "replacement" };
+    expect((await store.queueModel(task, row.id, replacement))._unsafeUnwrap()).toBe(true);
+  },
+);
+
 describe("independent central lifecycle", () => {
   it("retries stopped-host unloading once work becomes quiescent without reopening or suspending", async () => {
     await runDst({ name: "central-stopped-unload", iterations: 10 }, async (sim) => {

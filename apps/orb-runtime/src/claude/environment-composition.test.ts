@@ -1,10 +1,20 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
+import { ORB_BOOT_CONTEXT_PATH, ORB_PENDING_MODEL_ACK_PATH } from "@pi-orb/protocol";
 import { err, errAsync, ok, okAsync } from "neverthrow";
-import { expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { environmentPrompt } from "../environment-prompt.ts";
+import { ScheduledClaudeQuery } from "../testkit/claude-composed.ts";
 import { ClaudeOrbAgent } from "./agent.ts";
 import { claudeEnvironmentPrompt, claudePortExposurePrompt } from "./environment-prompt.ts";
 
@@ -26,8 +36,8 @@ vi.mock("../mcp/boot.ts", () => ({ fetchMcpCatalog: () => okAsync({ servers: [] 
 vi.mock("../personal-instructions/endpoint.ts", () => ({
   fetchPersonalInstructions: () => okAsync({ content: "PERSONAL", revision: 1 }),
 }));
-const ownerSkills = vi.hoisted(() => ({
-  reply: (): unknown => ({
+const ownerSkills = vi.hoisted(() => {
+  const snapshot = (): unknown => ({
     skills: [
       {
         name: "owner-notes",
@@ -36,8 +46,9 @@ const ownerSkills = vi.hoisted(() => ({
         content: "---\nname: owner-notes\ndescription: d\n---\n",
       },
     ],
-  }),
-}));
+  });
+  return { snapshot, reply: snapshot };
+});
 vi.mock("../owner-skills/endpoint.ts", () => ({
   fetchOwnerSkills: () => {
     const reply = ownerSkills.reply();
@@ -49,9 +60,13 @@ vi.mock("../owner-skills/endpoint.ts", () => ({
 vi.mock("../project-instructions/endpoint.ts", () => ({
   fetchProjectInstructions: () => okAsync({ content: "PROJECT", revision: 1 }),
 }));
-vi.mock("./boot-context.ts", () => ({
-  fetchBootContext: () => okAsync({ context: null, userTimeZone: "America/Los_Angeles" }),
-}));
+const bootContext = { v: 1, context: null, userTimeZone: "America/Los_Angeles" };
+
+beforeEach(() => {
+  ownerSkills.reply = ownerSkills.snapshot;
+  vi.stubGlobal("fetch", async () => Response.json(bootContext));
+});
+afterEach(() => vi.unstubAllGlobals());
 vi.mock("./auth.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./auth.ts")>()),
   fetchClaudeSubscription: () => okAsync({ token: "test-token", generation: 1 }),
@@ -176,3 +191,108 @@ it("installs owner skills as Claude user skills before the session, or blocks bo
     rmSync(workDir, { recursive: true, force: true });
   }
 });
+
+it.each(["denied", "lost"] as const)(
+  "starts no Claude turn when ack is %s, then replays safely",
+  async (failure) => {
+    const workDir = mkdtempSync(join(tmpdir(), "claude-pending-model-"));
+    const journal = join(workDir, "claude", "session.json");
+    const pendingModel = { changeId: "choice", model: { provider: "claude", id: "sonnet" } };
+    mkdirSync(join(workDir, "claude"));
+    writeFileSync(
+      journal,
+      JSON.stringify({
+        id: "11111111-1111-4111-8111-111111111111",
+        cwd: join(workDir, "repo"),
+        timestamp: "2026-10-04T00:00:00Z",
+        deliveries: {},
+        model: "opus",
+        effort: "max",
+      }),
+    );
+    let pending = true;
+    let acks = 0;
+    const turns: ScheduledClaudeQuery[] = [];
+    vi.stubGlobal("fetch", async (url: string, options: RequestInit) => {
+      if (url.endsWith(ORB_BOOT_CONTEXT_PATH))
+        return Response.json({
+          ...bootContext,
+          ...(pending ? { pendingModel } : {}),
+          context: {
+            messageId: "wake",
+            messageIds: ["wake"],
+            content: [{ type: "text", text: "Scheduled wake." }],
+            system: { kind: "sleep_wake", sleepUntil: "2026-10-04T01:00:00Z" },
+          },
+        });
+      expect(url).toBe(`http://unused.invalid${ORB_PENDING_MODEL_ACK_PATH}`);
+      expect(options.body).toBe(JSON.stringify({ v: 1, changeId: pendingModel.changeId }));
+      expect(JSON.parse(readFileSync(journal, "utf8"))).toMatchObject({
+        model: "sonnet",
+        effort: "high",
+      });
+      expect(turns).toHaveLength(0);
+      if (++acks === 1 && failure === "denied")
+        return Response.json(
+          { error: { message: "stale authority", retryable: false } },
+          { status: 409 },
+        );
+      pending = false;
+      if (acks === 1) return Promise.reject(new TypeError("ack response lost"));
+      return Response.json({ v: 1 });
+    });
+    const agents: ClaudeOrbAgent[] = [];
+    try {
+      for (const replay of [false, true]) {
+        let metadata = true;
+        const agent = new ClaudeOrbAgent({
+          orbId: "orb",
+          repositoryUrl: null,
+          workDir,
+          skillsDir: null,
+          broker: { controlPlaneUrl: "http://unused.invalid", runtimeToken: "unused" },
+          sdkFactory: (input, options) => {
+            const query = new ScheduledClaudeQuery(input, options, true);
+            query.supportedModels = async () => [
+              {
+                value: "sonnet",
+                displayName: "Sonnet",
+                description: "",
+                supportedEffortLevels: ["high"],
+              },
+            ];
+            if (!metadata) turns.push(query);
+            metadata = false;
+            return ok({
+              query,
+              exited: query.processExit.promise,
+              stdoutEnded: query.stdoutEnded,
+              requestShutdown: () => query.requestShutdown(),
+            });
+          },
+        });
+        agents.push(agent);
+        await agent.boot();
+        if (!replay) {
+          expect(agent.getHealth()).toMatchObject({
+            status: "failed",
+            error: { code: "claude_pending_model_ack_failed" },
+          });
+          expect(
+            (await agent.submitMessage([{ type: "text", text: "blocked" }], "blocked")).isErr(),
+          ).toBe(true);
+          expect(turns).toHaveLength(0);
+        }
+      }
+      expect(acks).toBe(failure === "denied" ? 2 : 1);
+      expect(turns).toHaveLength(1);
+      expect(turns[0]?.options.model).toBe("sonnet");
+      expect(JSON.stringify((await turns[0]?.input.next())?.value)).toContain("Scheduled wake.");
+    } finally {
+      for (const agent of agents) agent.shutdownHooks();
+      for (const turn of turns) turn.requestShutdown();
+      await Promise.all(agents.map((agent) => agent.waitForStream()));
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  },
+);

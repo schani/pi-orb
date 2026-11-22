@@ -23,7 +23,7 @@ import {
 } from "react";
 import { ClaudeAuthButton } from "../components/ClaudeAuth.tsx";
 import { Composer, type ComposerHandle, type ComposerImage } from "../components/Composer.tsx";
-import type { ComposerCommandAction } from "../components/command-options.ts";
+import type { ComposerCommandAction, ModelSelection } from "../components/command-options.ts";
 import type { ComposerMode } from "../components/composer-mode.ts";
 import type { DetailContext } from "../components/DetailBody.tsx";
 import { HistoryView, type LiveBlock, type ToolChip } from "../components/HistoryView.tsx";
@@ -61,6 +61,7 @@ import {
   getOrbHistory,
   listHostedFiles,
   listOrbMessages,
+  putPendingModel,
   startOrb,
   stopOrb,
   updateOrb,
@@ -189,7 +190,8 @@ type OrbPageAction =
   | { type: "image_added"; image: ComposerImage }
   | { type: "image_removed"; id: string }
   | { type: "notice"; message: string }
-  | { type: "open_settings"; command: "model" | "thinking" | "effort" }
+  | ({ type: "open_settings" } & ({ command: "model" | "thinking" | "effort" } | { text: string }))
+  | { type: "command_finished"; requestId: string; error?: { code: string; message: string } }
   | {
       type: "request_sent";
       requestId: string;
@@ -445,21 +447,7 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
         frame.result.type === "settings_applied" ||
         (frame.result.type === "accepted" && state.pendingRequest.kind === "compact")
       ) {
-        const unchangedDraft =
-          state.composerMode === "command" &&
-          state.composerText === state.pendingRequest.submittedText;
-        return {
-          ...state,
-          pendingRequest: null,
-          requestError: null,
-          ...(unchangedDraft
-            ? {
-                composerText: state.commandDraft?.text ?? "",
-                composerMode: "message",
-                commandDraft: null,
-              }
-            : {}),
-        };
+        return finishCommand(state);
       }
       if (frame.result.type === "accepted") {
         return {
@@ -483,6 +471,22 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
         serverError: { code: frame.error.code, message: frame.error.message },
       };
   }
+}
+
+function finishCommand(state: OrbPageState): OrbPageState {
+  return {
+    ...state,
+    pendingRequest: null,
+    requestError: null,
+    ...(state.composerMode === "command" &&
+    state.composerText === state.pendingRequest?.submittedText
+      ? {
+          composerText: state.commandDraft?.text ?? "",
+          composerMode: "message",
+          commandDraft: null,
+        }
+      : {}),
+  };
 }
 
 export function canRunComposerCommand(
@@ -743,11 +747,16 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
         ...state,
         commandDraft:
           state.composerMode === "command" ? state.commandDraft : { text: state.composerText },
-        composerText: `${action.command} `,
+        composerText: "command" in action ? `${action.command} ` : action.text,
         composerMode: "command",
         requestError: null,
         notice: null,
       };
+    case "command_finished":
+      if (state.pendingRequest?.requestId !== action.requestId) return state;
+      return action.error
+        ? { ...state, pendingRequest: null, requestError: action.error }
+        : finishCommand(state);
     case "composer_changed":
       if (state.composerMode === "command" && action.mode === "message" && state.commandDraft)
         return {
@@ -861,33 +870,39 @@ function CopyCodeButton({ code }: { code: string }) {
 
 export function OrbHeaderSettings({
   view,
+  orb,
   pending,
   effortLabel,
   onOpen,
 }: {
   view: AgentSettingsEvent | null;
+  orb?: ModelSelection | null;
   pending: boolean;
   effortLabel: "effort" | "thinking";
   onOpen: (command: "model" | "effort" | "thinking") => void;
 }) {
-  if (view === null) return null;
-  const model = view.models.find(
+  const queued = orb?.pendingModel?.model;
+  if (view === null && orb?.queueableModels === undefined && !queued) return null;
+  const model = view?.models.find(
     (model) =>
       model.provider === view.settings.model.provider && model.id === view.settings.model.id,
   );
-  const effortAvailable = effortLabel === "thinking" || (model?.thinkingLevels.length ?? 0) > 0;
+  const label = queued
+    ? `${orb?.queueableModels?.find((model) => model.provider === queued.provider && model.id === queued.id)?.name ?? "Model"} (queued)`
+    : (model?.name ?? view?.settings.model.id ?? "Model");
   return (
     <div className="orb-settings">
       <button
         type="button"
         title="Change model"
         aria-label="Change model"
-        disabled={pending}
+        aria-description={queued ? label : undefined}
+        disabled={pending || (orb?.queueableModels === undefined && view === null)}
         onClick={() => onOpen("model")}
       >
-        {model?.name ?? view.settings.model.id}
+        {label}
       </button>
-      {effortAvailable && (
+      {view !== null && (effortLabel === "thinking" || (model?.thinkingLevels.length ?? 0) > 0) && (
         <button
           type="button"
           title={`Change ${effortLabel}`}
@@ -1853,8 +1868,45 @@ function OrbConversation({
     });
   };
 
+  const connected = state.connection === "open";
+  const queueableModels = orb?.queueableModels;
+  const liveSettings =
+    queueableModels === undefined &&
+    orb !== null &&
+    !["deleting", "archiving", "archived"].includes(orb.state) &&
+    canConnectLive(orb) &&
+    connected &&
+    state.synced
+      ? state.settings
+      : null;
+  const settingsDisabled =
+    queueableModels === undefined
+      ? !canRunComposerCommand(orb?.state, state, orb?.centralAgent)
+      : state.pendingRequest !== null;
+
   const changeSettings = (action: ComposerCommandAction) => {
-    if (!canRunComposerCommand(orb?.state, state, orb?.centralAgent)) return;
+    if (settingsDisabled) return;
+    if (queueableModels !== undefined) {
+      if (action.type !== "set_model") return;
+      const requestId = generateUuid();
+      dispatch({ type: "request_sent", requestId, kind: "settings" });
+      ++metadataRevision.current;
+      void putPendingModel(orbId, { model: action.model }).then((result) => {
+        ++metadataRevision.current;
+        if (result.isErr()) {
+          dispatch({
+            type: "command_finished",
+            requestId,
+            error: { code: "queue_model", message: describeApiError(result.error) },
+          });
+          return;
+        }
+        if (!missingRef.current && result.value.stateVersion >= (orbRef.current?.stateVersion ?? 0))
+          setObservedOrb(result.value);
+        dispatch({ type: "command_finished", requestId });
+      });
+      return;
+    }
     const requestId = liveRef.current?.sendRequest(action);
     if (!requestId) dispatch({ type: "send_unavailable" });
     else
@@ -1934,15 +1986,6 @@ function OrbConversation({
 
   const canStart = orb !== null && (orb.state === "stopped" || orb.state === "failed");
   const canStop = orb !== null && canStopOrb(orb);
-  const connected = state.connection === "open";
-  const settingsAvailable =
-    orb !== null &&
-    !["deleting", "archiving", "archived"].includes(orb.state) &&
-    canConnectLive(orb) &&
-    state.connection === "open" &&
-    state.synced &&
-    state.settings !== null;
-  const settingsDisabled = !canRunComposerCommand(orb?.state, state, orb?.centralAgent);
   const canSend = canSendComposer(orb, state);
   const canAbort = canAbortComposer(state, queuedMessages, orb?.centralAgent ?? false);
 
@@ -2054,7 +2097,8 @@ function OrbConversation({
             <Icon name="more" />
           </button>
           <OrbHeaderSettings
-            view={settingsAvailable ? state.settings : null}
+            view={liveSettings}
+            orb={orb}
             pending={state.pendingRequest !== null}
             effortLabel={orb?.harness === "claude" ? "effort" : "thinking"}
             onOpen={(command) => dispatch({ type: "open_settings", command })}
@@ -2072,6 +2116,7 @@ function OrbConversation({
                 className="icon-button"
                 aria-label="Start orb"
                 title="start"
+                disabled={state.pendingRequest?.kind === "settings"}
                 onClick={() => runLifecycle(startOrb)}
               >
                 <Icon name="start" />
@@ -2325,25 +2370,37 @@ function OrbConversation({
         <Composer
           ref={composerRef}
           effortLabel={orb?.harness === "claude" ? "effort" : "thinking"}
-          settings={settingsAvailable ? state.settings : null}
+          settings={liveSettings}
+          orb={orb}
           settingsDisabled={settingsDisabled}
           settingsPending={state.pendingRequest?.kind === "settings"}
           onSettingsChange={changeSettings}
-          feedback={[
-            state.pendingRequest?.kind === "settings" ? "Applying settings…" : null,
-            state.serverError === null
-              ? null
-              : `runtime error ${state.serverError.code}: ${state.serverError.message}`,
-            state.requestError === null
-              ? null
-              : `request rejected (${state.requestError.code}): ${state.requestError.message}`,
-            state.notice,
-          ]
-            .filter((message) => message !== null)
-            .join(" · ")}
+          feedback={{
+            message: [
+              state.pendingRequest?.kind === "settings" ? "Applying settings…" : null,
+              state.serverError === null
+                ? null
+                : `runtime error ${state.serverError.code}: ${state.serverError.message}`,
+              state.requestError === null
+                ? null
+                : `request rejected (${state.requestError.code}): ${state.requestError.message}`,
+              state.notice,
+            ]
+              .filter((message) => message !== null)
+              .join(" · "),
+            error: state.serverError !== null || state.requestError !== null,
+          }}
           text={state.composerText}
           mode={state.composerMode}
-          onValueChange={(text, mode) => dispatch({ type: "composer_changed", text, mode })}
+          onValueChange={(text, mode) => {
+            if (
+              queueableModels !== undefined &&
+              state.composerMode === "message" &&
+              mode === "command"
+            )
+              dispatch({ type: "open_settings", text: text === state.composerText ? "" : text });
+            else dispatch({ type: "composer_changed", text, mode });
+          }}
           images={state.composerImages}
           onImageAdd={addImage}
           onAttachmentError={(message) => setDropFeedback(message)}

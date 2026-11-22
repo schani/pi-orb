@@ -39,6 +39,7 @@ import { LazyExecutionEnv } from "./adapters/execution-client/lazy-env.ts";
 import { LunaTurnSummarizer } from "./adapters/luna-summarizer.ts";
 import { modelCall } from "./adapters/model-usage.ts";
 import type { PgResourceGate } from "./adapters/pg/resource-gate.ts";
+import { acceptsPendingModelCaller } from "./domain/agent-authorization.ts";
 import { CODEX_PROVIDER, getToken, type TokenGrant, type TokenRequest } from "./domain/broker.ts";
 import type { RuntimeClientError } from "./domain/errors.ts";
 import { awaitExecutionBinding, type ExecutionBinding } from "./domain/execution-admission.ts";
@@ -53,7 +54,7 @@ import {
   type OrbAgentOptions,
 } from "./domain/orb-agent-operations.ts";
 import { readOwnerSkillsSnapshot } from "./domain/owner-skills.ts";
-import type { BrokerDeps, ControlPlaneDeps } from "./domain/ports.ts";
+import type { BrokerDeps, CentralAgentCaller, ControlPlaneDeps } from "./domain/ports.ts";
 import { getProjectSecretSnapshot } from "./domain/project-secrets.ts";
 import { resourceError } from "./domain/resources.ts";
 
@@ -437,17 +438,14 @@ export function createProcessAgentContext(
         ...(inferenceBaseUrl ? { inferenceBaseUrl } : {}),
       });
       if (models.isErr()) return err(models.error);
-      const service = createCentralOrbAgentOperations(
-        task,
-        deps,
-        {
-          ownerUserId,
-          projectId: orb.projectId,
-          orbId: orb.id,
-          agentAdmissionVersion: orb.agentAdmissionVersion,
-        },
-        options,
-      );
+      const authority: CentralAgentCaller = {
+        kind: "central",
+        ownerUserId,
+        projectId: orb.projectId,
+        orbId: orb.id,
+        agentAdmissionVersion: orb.agentAdmissionVersion,
+      };
+      const service = createCentralOrbAgentOperations(task, deps, authority, options);
       let workspaceReady = false;
       const files = createAgentToolFiles({
         reader: prepared.value.reader,
@@ -628,6 +626,9 @@ export function createProcessAgentContext(
       );
       if (composed.isErr()) return err(composed.error);
       const admitted = await deps.store.getOrb(task, orb.id);
+      const resume = !readOnly && orb.stopReason !== "manual" && orb.stopReason !== "sleep";
+      const pendingModel = resume && admitted.isOk() ? admitted.value?.pendingModel : null;
+      const clearPendingModel = lease.clearPendingModel;
       if (
         admitted.isErr() ||
         !admitted.value ||
@@ -635,6 +636,9 @@ export function createProcessAgentContext(
         admitted.value.state === "deleting" ||
         (admitted.value.state === "archiving" && !readOnly) ||
         admitted.value.state === "archived" ||
+        (pendingModel &&
+          (!clearPendingModel ||
+            !acceptsPendingModelCaller(admitted.value, ownerUserId, authority))) ||
         operation.signal.aborted
       ) {
         resourcesAbort.abort();
@@ -767,7 +771,15 @@ export function createProcessAgentContext(
         checkoutCommit: prepared.value.commitSha,
         checkExecutionReady,
         executionActive: () => env.active(),
-        resume: !readOnly && orb.stopReason !== "manual" && orb.stopReason !== "sleep",
+        resume,
+        ...(pendingModel && clearPendingModel
+          ? {
+              pendingModel: {
+                ...pendingModel,
+                acknowledge: () => clearPendingModel(pendingModel.changeId, authority),
+              },
+            }
+          : {}),
         openSignal: operation.signal,
         admitRecovery: () => admitAgentRecovery(task, deps, orb.id),
         checkAdmission: () =>

@@ -2,11 +2,13 @@ import { type Static, Type } from "typebox";
 import { ModelRefSchema } from "./agent-settings.ts";
 import { MessageInputBlockSchema } from "./frames.ts";
 import { OrbMessageSenderIdSchema } from "./orb-message-context.ts";
+import { PendingModelSchema } from "./orb-model.ts";
 
 const closed = { additionalProperties: false } as const;
 
 export const ORB_SELF_SLEEP_PATH = "/runtime/v1/orb/sleep";
 export const ORB_BOOT_CONTEXT_PATH = "/runtime/v1/orb/boot-context";
+export const ORB_PENDING_MODEL_ACK_PATH = "/runtime/v1/orb/pending-model/ack";
 
 export const OrbMessageSystemSchema = Type.Union([
   Type.Object(
@@ -61,7 +63,14 @@ export const OrbBootContextResponseSchema = Type.Object(
     context: Type.Union([OrbBootContextSchema, Type.Null()]),
     userTimeZone: Type.Union([Type.String(), Type.Null()]),
     initialModel: Type.Optional(ModelRefSchema),
+    pendingModel: Type.Optional(PendingModelSchema),
   },
   closed,
 );
 export type OrbBootContextResponse = Static<typeof OrbBootContextResponseSchema>;
+
+export const OrbPendingModelAckRequestSchema = Type.Object(
+  { v: Type.Literal(1), changeId: PendingModelSchema.properties.changeId },
+  closed,
+);
+export const OrbPendingModelAckResponseSchema = Type.Object({ v: Type.Literal(1) }, closed);

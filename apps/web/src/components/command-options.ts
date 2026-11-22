@@ -1,4 +1,6 @@
-import type { AgentSettingsEvent, ClientAction, SettingsAction } from "@pi-orb/protocol";
+import type { AgentSettingsEvent, ClientAction, OrbView, SettingsAction } from "@pi-orb/protocol";
+
+export type ModelSelection = Pick<OrbView, "queueableModels" | "pendingModel">;
 export type ComposerCommandAction = SettingsAction | Extract<ClientAction, { type: "compact" }>;
 export interface CommandOption {
   label: string;
@@ -10,8 +12,10 @@ export function commandOptions(
   text: string,
   view: AgentSettingsEvent | null,
   effortLabel: "thinking" | "effort" = "thinking",
+  queueableModels?: ModelSelection["queueableModels"],
+  queued?: AgentSettingsEvent["settings"]["model"],
 ): CommandOption[] {
-  const compact = /^compact(?:\s+(.*))?$/is.exec(text);
+  const compact = queueableModels === undefined ? /^compact(?:\s+(.*))?$/is.exec(text) : null;
   if (compact) {
     const customInstructions = compact[1]?.trim();
     return [
@@ -22,10 +26,8 @@ export function commandOptions(
     ];
   }
   const match = /^(model|thinking|effort)\s+(.*)$/is.exec(text);
-  if (match && match[1]?.toLowerCase() !== "model" && match[1]?.toLowerCase() !== effortLabel)
-    return [];
   if (!match)
-    return ["model", effortLabel, "compact"]
+    return (queueableModels === undefined ? ["model", effortLabel, "compact"] : ["model"])
       .filter((name) => name.startsWith(text.toLowerCase()))
       .map(
         (name): CommandOption =>
@@ -33,19 +35,19 @@ export function commandOptions(
             ? { label: name, action: { type: "compact" } }
             : { label: name, text: `${name} ` },
       );
-  if (!view) return [];
   const query = (match[2] ?? "").toLowerCase();
-  if (match[1]?.toLowerCase() === "model")
-    return view.models
-      .filter((model) =>
-        `${model.provider}/${model.id} ${model.name}`.toLowerCase().includes(query),
-      )
-      .map((model) => ({
-        label: model.name,
-        action: { type: "set_model", model: { provider: model.provider, id: model.id } },
+  if (match[1]?.toLowerCase() === "model") {
+    const current = view?.settings.model;
+    return (queueableModels ?? view?.models ?? [])
+      .filter(({ provider, id, name }) => `${provider}/${id} ${name}`.toLowerCase().includes(query))
+      .map(({ provider, id, name }) => ({
+        label: queued?.provider === provider && queued.id === id ? `${name} (queued)` : name,
+        action: { type: "set_model", model: { provider, id } },
         current:
-          model.provider === view.settings.model.provider && model.id === view.settings.model.id,
+          queueableModels === undefined && current?.provider === provider && current.id === id,
       }));
+  }
+  if (!view || queueableModels !== undefined || match[1]?.toLowerCase() !== effortLabel) return [];
   return (
     view.models.find(
       (model) =>

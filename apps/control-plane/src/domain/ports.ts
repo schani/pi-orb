@@ -6,6 +6,7 @@ import type {
   OrbBootContext,
   OrbMessageSystem,
   OrbState,
+  PendingModel,
   PullHistoryResponse,
   RuntimeHealth,
   StopReason,
@@ -93,6 +94,8 @@ export interface FailOrbAndRequestComputeDiscardParams {
   readonly recoveryEpisode?: string;
   readonly orbId: string;
   readonly expectedStateVersion: number;
+  /** For terminal failure, also require this queued choice to remain unacknowledged. */
+  readonly expectedPendingModelChangeId?: string;
   readonly now: number;
   readonly lastError: string;
   /** Sanitized, size-bounded host evidence already available at the terminal decision. */
@@ -157,6 +160,11 @@ export interface CentralAgentCaller {
 }
 
 export type ArchiveCaller = GuestAgentCaller | CentralAgentCaller;
+
+export interface StoredOrbBootContext {
+  readonly context: OrbBootContext | null;
+  readonly pendingModel: PendingModel | null;
+}
 
 export interface OrbMessageSender {
   readonly orbId: string;
@@ -266,6 +274,19 @@ export interface ControlPlaneStore extends ActivityHeadlineStore, OrbLinkStore, 
   ): ResultAsync<void, StoreError | ProjectConflict>;
 
   getOrb(task: SimulationTask, orbId: string): ResultAsync<OrbRow | null, StoreError>;
+  /** Last write wins while still durably offline. No lifecycle transition or wake. */
+  queueModel(
+    task: SimulationTask,
+    orbId: string,
+    pending: PendingModel,
+  ): ResultAsync<boolean, StoreError>;
+  /** Exact acknowledgement, fenced by guest incarnation or central admission. Central startup also holds native ownership. */
+  clearPendingModel(
+    task: SimulationTask,
+    orbId: string,
+    changeId: string,
+    authority: ArchiveCaller,
+  ): ResultAsync<boolean, StoreError>;
   /** Bearer-token lookup for the runtime broker routes (indexed hash). */
   getOrbByRuntimeTokenHash(
     task: SimulationTask,
@@ -345,8 +366,8 @@ export interface ControlPlaneStore extends ActivityHeadlineStore, OrbLinkStore, 
   ): ResultAsync<"wake" | "expired" | "waiting" | "stale", StoreError>;
   readOrbBootContext(
     task: SimulationTask,
-    params: { orbId: string; caller: ArchiveCaller },
-  ): ResultAsync<OrbBootContext | null, StoreError | StateConflict>;
+    params: { orbId: string; caller: GuestAgentCaller },
+  ): ResultAsync<StoredOrbBootContext, StoreError | StateConflict>;
   /** Atomically freezes every outstanding FIFO group, preserving existing claims; sleep blocks the snapshot. */
   claimOrbMessageBacklog(
     task: SimulationTask,

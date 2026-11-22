@@ -2,6 +2,7 @@ import { type Static, type TSchema, Type } from "typebox";
 import { MessageInputBlockSchema } from "./frames.ts";
 import { HarnessKindSchema } from "./harness.ts";
 import { HarnessSessionMetadataSchema, HistoryRecordSchema } from "./history.ts";
+import { OrbModelOptionSchema, PendingModelSchema } from "./orb-model.ts";
 import { ORB_NAME_MAX_CHARS } from "./orb-naming.ts";
 import { OrbMessageSystemSchema } from "./orb-sleep.ts";
 
@@ -293,6 +294,10 @@ export const OrbViewSchema = Type.Object(
     name: Type.Union([Type.String(), Type.Null()]),
     state: OrbStateSchema,
     stateVersion: Type.Number(),
+    /** Present only when the orb accepts offline model selection. */
+    queueableModels: Type.Optional(Type.Array(OrbModelOptionSchema)),
+    /** Accepted selection waiting to be applied by the harness. */
+    pendingModel: Type.Optional(Type.Union([PendingModelSchema, Type.Null()])),
     /** Original spawn caller ID; browser reads derive it from acceptance provenance. */
     spawnedByOrb: Type.Optional(Type.String()),
     centralAgent: Type.Optional(Type.Boolean()),

@@ -95,6 +95,52 @@ it("uses the injected authority clock for lease deadlines and expiry", async () 
   }
 });
 
+it("cannot acknowledge a queued model after a same-admission owner handoff", async () => {
+  const db = new PGliteClient();
+  const database = composeControlPlaneDatabase(db);
+  const task = new NoSimulationTask("pg-pending-model-owner", false);
+  const project = makeProjectRow(randomUUID());
+  const pendingModel = { changeId: randomUUID(), model: { provider: "openai-codex", id: "sol" } };
+  const orb = makeOrbRow(randomUUID(), project.id, "starting", { pendingModel });
+  const caller = {
+    kind: "central" as const,
+    orbId: orb.id,
+    projectId: project.id,
+    ownerUserId: project.ownerUserId,
+    agentAdmissionVersion: orb.agentAdmissionVersion,
+  };
+  let now = 1_000;
+  const previous = new PgAgentPersistence(db, database.store, () => now);
+  const replacement = new PgAgentPersistence(db, database.store, () => now);
+  const context = { signal: new AbortController().signal };
+  try {
+    (await database.migrate())._unsafeUnwrap();
+    (await seedTestUser(task, database.users))._unsafeUnwrap();
+    (await database.store.insertProject(task, project))._unsafeUnwrap();
+    (await database.store.insertOrb(task, orb))._unsafeUnwrap();
+    const stale = (await previous.open(task, orb, context))._unsafeUnwrap();
+    (await stale.check())._unsafeUnwrap();
+    now += 60_001;
+    const current = (await replacement.open(task, orb, context))._unsafeUnwrap();
+    // No heartbeat has told the superseded owner it is stale; its check succeeded before handoff.
+    expect(stale.signal.aborted).toBe(false);
+    expect(await stale.clearPendingModel?.(pendingModel.changeId, caller)).toMatchObject({
+      error: { message: "Agent ownership revoked" },
+    });
+    const read = async () =>
+      (await database.store.getOrb(task, orb.id))._unsafeUnwrap()?.pendingModel;
+    expect(await read()).toEqual(pendingModel);
+    expect(
+      (await current.clearPendingModel?.(pendingModel.changeId, caller))?._unsafeUnwrap(),
+    ).toBe(true);
+    expect(await read()).toBeNull();
+  } finally {
+    await previous.close();
+    await replacement.close();
+    await database.close();
+  }
+});
+
 it("derives recovery demand from indexed Native status without acquiring ownership", async () => {
   const db = new PGliteClient();
   const database = composeControlPlaneDatabase(db);

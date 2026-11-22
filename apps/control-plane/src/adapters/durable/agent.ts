@@ -41,6 +41,7 @@ import type {
   DeliverOrbMessageResponse,
   HistoryRecord,
   OrbMessageSystem,
+  PendingModel,
   PullHistoryResponse,
   RequestResultFrame,
   RuntimeEvent,
@@ -163,6 +164,10 @@ export interface DurableAgentOptions {
   readonly envFor?: (target: EnvTarget) => ExecutionEnv;
   readonly resume?: boolean;
   readonly checkAdmission?: () => ResultAsync<void, RuntimeClientError>;
+  /** Bound to the admission for this active open. */
+  readonly pendingModel?: PendingModel & {
+    acknowledge(): ResultAsync<boolean, RuntimeClientError>;
+  };
   readonly checkInputAdmission?: (browser: boolean) => ResultAsync<void, InputAdmissionError>;
   /** Consulted before resuming unfinished work; an error leaves it suspended. */
   readonly admitRecovery?: () => ResultAsync<void, RuntimeClientError>;
@@ -548,6 +553,46 @@ export class DurableAgent implements AgentSessionFacade {
         const recoveredTasks = Object.keys(agent.tasks.tasks);
         const recovering = recoveredTasks.length > 0 || unfinishedSubmissions;
         if (openAborted()) return err(cancelledOpen());
+        if (options.resume !== false && options.pendingModel) {
+          stage = "pending model";
+          const { model, changeId, acknowledge } = options.pendingModel;
+          const admitted = await options.checkAdmission?.();
+          if (openAborted()) return err(cancelledOpen());
+          if (admitted?.isErr()) return err(admitted.error);
+          if (!options.models.getModel(model.provider, model.id))
+            return err({
+              ...durableError(
+                "The queued Pi model is unavailable. Choose another model and start again.",
+              ),
+              code: "pending_model_unavailable" as const,
+              pendingModelChangeId: changeId,
+            });
+
+          // The model and its history commit together. Replay produces no duplicate settings edge.
+          await root.commit(async (tx) => {
+            const previous = publicSettings(await tx.doc(AgentDoc, root.id));
+            await configure(tx, root.id, {
+              model: { provider: model.provider, modelId: model.id },
+            });
+            await appendSettingsHistory(
+              tx,
+              root.id,
+              previous,
+              publicSettings(await tx.doc(AgentDoc, root.id)),
+              agent.now(),
+            );
+          }, openContext);
+          if (openAborted()) return err(cancelledOpen());
+          const cleared = await acknowledge();
+          if (cleared.isErr()) return err(cleared.error);
+          if (!cleared.value)
+            return err(
+              durableError(
+                "The queued Pi model or agent authority changed; startup will retry",
+                true,
+              ),
+            );
+        }
         if (recovering && options.resume !== false) {
           stage = "recovery budget";
           const admitted = await options.admitRecovery?.();
@@ -585,7 +630,12 @@ export class DurableAgent implements AgentSessionFacade {
             : startupRuntimeError(terminal)
           : openAborted()
             ? cancelledOpen()
-            : durableError(`central Harness initialization failed (${stage})`);
+            : stage === "pending model"
+              ? durableError(
+                  "Could not save or acknowledge the queued Pi model; startup will retry",
+                  true,
+                )
+              : durableError(`central Harness initialization failed (${stage})`);
       },
     )
       .andThen((result) => result)

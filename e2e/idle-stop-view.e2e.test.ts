@@ -18,10 +18,11 @@ import {
   startControlPlane,
   waitFor,
 } from "./harness.ts";
+import { latestUserMessage } from "./testkit/durable-model-fixture.ts";
 
 const stop = { type: "stop", status: "completed" } as const;
 
-it("viewing an idle-stopped orb leaves it stopped; sending a message starts it", async () => {
+it("viewing an idle-stopped Pi orb leaves it stopped; Send wakes it and applies a queued model after manual Stop", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-idle-view-e2e-"));
   const projectId = randomUUID();
   const orbId = randomUUID();
@@ -59,12 +60,31 @@ it("viewing an idle-stopped orb leaves it stopped; sending a message starts it",
       authDir: join(root, "auth"),
       hostingRoot: join(root, "hosting"),
       controlledClockEpoch: Date.now(),
+      localSummaries: true, // Keep asynchronous summaries out of the ordered fake turn rules.
       extraEnv: { PI_ORB_E2E_RECONCILE_CHECKPOINTS: "1" },
     });
     const activeCp = cp;
     const clock = activeCp.clock;
     if (clock === undefined) throw new Error("controlled clock was not attached");
-    const view = async () => (await api(activeCp.baseUrl, "GET", `/api/v1/orbs/${orbId}`)).body;
+    const orbPath = `/api/v1/orbs/${orbId}`;
+    const orbApi = (method: "GET" | "PUT" | "POST", path: string, body?: unknown) =>
+      api(activeCp.baseUrl, method, orbPath + path, body);
+    const view = async () => (await orbApi("GET", "")).body;
+    const waitForStopped = (description: string) =>
+      waitFor(
+        description,
+        async () => {
+          const current = await view();
+          return current["state"] === "stopped" ? current : null;
+        },
+        { timeoutMs: 120_000, intervalMs: 500 },
+      );
+    const send = async (text: string) => {
+      const response = await orbApi("PUT", `/messages/${randomUUID()}`, {
+        content: [{ type: "text", text }],
+      });
+      expect(response.status, JSON.stringify(response.body)).toBe(202);
+    };
 
     expect(
       (
@@ -99,15 +119,9 @@ it("viewing an idle-stopped orb leaves it stopped; sending a message starts it",
       Date.now() + DEFAULT_LIFECYCLE_CONSTANTS.idleStopAfterMs + 60_000,
     );
     if (advanced.isErr()) throw new Error(`clock advance failed: ${advanced.error.type}`);
-    await waitFor(
-      "idle auto-stop",
-      async () => {
-        const current = await view();
-        return current["state"] === "stopped" ? current : null;
-      },
-      { timeoutMs: 120_000, intervalMs: 500 },
-    );
-    expect((await view())["stopReason"]).toBe("idle");
+    const idle = await waitForStopped("idle auto-stop");
+    expect(idle["stopReason"]).toBe("idle");
+    expect(idle).not.toHaveProperty("queueableModels");
 
     const frames: ServerFrame[] = [];
     socket = new WebSocket(`${activeCp.baseUrl.replace(/^http/, "ws")}/api/v1/orbs/${orbId}/live`, [
@@ -140,17 +154,11 @@ it("viewing an idle-stopped orb leaves it stopped; sending a message starts it",
       expect(current["stopReason"]).toBe("idle");
     }
 
-    expect(
-      (
-        await api(cp.baseUrl, "PUT", `/api/v1/orbs/${orbId}/messages/${randomUUID()}`, {
-          content: [{ type: "text", text: "wake on send" }],
-        })
-      ).status,
-    ).toBe(202);
+    await send("wake on send");
     await waitFor(
       "message starts the orb and is answered",
       async () => {
-        const history = await api(activeCp.baseUrl, "GET", `/api/v1/orbs/${orbId}/history`);
+        const history = await orbApi("GET", "/history");
         return (await view())["state"] === "running" &&
           JSON.stringify(history.body["records"]).includes("IDLE_VIEW_REPLY")
           ? true
@@ -158,8 +166,37 @@ it("viewing an idle-stopped orb leaves it stopped; sending a message starts it",
       },
       { timeoutMs: 300_000, intervalMs: 500 },
     );
+
+    expect((await orbApi("POST", "/stop")).status).toBe(202);
+    const stopped = await waitForStopped("manual Stop");
+    expect(stopped["stopReason"]).toBe("manual");
+    const model = { provider: "openai-codex", id: "gpt-6.2-astra" };
+    expect(stopped["queueableModels"]).toContainEqual(expect.objectContaining(model));
+    const calls = activeCp.modelRequests ?? expect.fail("missing model request recorder");
+    const beforeSend = calls.length;
+
+    const queued = await orbApi("PUT", "/pending-model", { model });
+    expect(queued.status, JSON.stringify(queued.body)).toBe(200);
+    expect(queued.body["pendingModel"]).toEqual({ changeId: expect.any(String), model });
+    await forceReconcilePass(activeCp, orbId);
+    expect(await view()).toMatchObject({
+      state: "stopped",
+      stateVersion: stopped["stateVersion"],
+      pendingModel: queued.body["pendingModel"],
+    });
+    expect(calls).toHaveLength(beforeSend);
+
+    const prompt = "check queued model";
+    await send(prompt);
+    const first = await waitFor(
+      "first Pi request after Send",
+      async () => calls[beforeSend] ?? null,
+    );
+    expect(first["model"]).toBe(model.id);
+    expect(latestUserMessage(first)).toBe(prompt);
   } catch (error) {
     failure = error;
+    if (cp !== undefined) console.error(cp.logs.slice(-60).join(""));
   } finally {
     socket?.close();
     const cleanup = await Promise.allSettled([

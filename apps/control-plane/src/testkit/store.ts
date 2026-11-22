@@ -2,6 +2,7 @@ import {
   type HarnessSessionMetadata,
   type HistoryRecord,
   type OrbState,
+  type PendingModel,
   UPLOAD_LEASE_MS,
 } from "@pi-orb/protocol";
 import { ApplicationFailure, type SimulationTask } from "determined";
@@ -10,7 +11,11 @@ import type {
   ActivityHeadlineRef,
   StoredActivityHeadline,
 } from "../domain/activity-headline-store.ts";
-import { acceptsOrbAgentCaller } from "../domain/agent-authorization.ts";
+import {
+  acceptsOrbAgentCaller,
+  acceptsOrbBootCaller,
+  acceptsPendingModelCaller,
+} from "../domain/agent-authorization.ts";
 import type {
   CommitPullError,
   ProjectConflict,
@@ -22,15 +27,17 @@ import { orderHistoryForPresentation } from "../domain/history-presentation.ts";
 import { jsonEqual } from "../domain/json-equal.ts";
 import { logOrbEvent } from "../domain/log.ts";
 import { messageBatchId } from "../domain/message-batch.ts";
-import type {
-  OrbDeletionRow,
-  OrbListRow,
-  OrbMessagePoll,
-  OrbMessageRow,
-  OrbRow,
-  ProjectRow,
+import {
+  canQueueModel,
+  type OrbDeletionRow,
+  type OrbListRow,
+  type OrbMessagePoll,
+  type OrbMessageRow,
+  type OrbRow,
+  type ProjectRow,
 } from "../domain/orb.ts";
 import type {
+  ArchiveCaller,
   CasTransitionParams,
   CasUpdateFieldsParams,
   CommitPullBatchParams,
@@ -38,6 +45,7 @@ import type {
   EnqueueOrbMessageParams,
   FailOrbAndRequestComputeDiscardParams,
   FinalizeHostDiscardParams,
+  GuestAgentCaller,
   MintSlotClaim,
   OrbMessageTargetNotFound,
   RecordHostDiscardStatusParams,
@@ -47,16 +55,9 @@ import type {
   RequestOrbDeletionParams,
   SpawnConflict,
   SpawnOrbParams,
+  StoredOrbBootContext,
 } from "../domain/ports.ts";
 import { FAILPOINTS } from "./failpoints.ts";
-
-const BOOT_CONTEXT_STATES: readonly OrbState[] = [
-  "creating",
-  "starting",
-  "running",
-  "stopping",
-  "archiving",
-];
 
 interface OrbReplica {
   records: Map<string, HistoryRecord>;
@@ -751,6 +752,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
             : {
                 ...orb,
                 state: "deleting",
+                pendingModel: null,
                 stateVersion: orb.stateVersion + 1,
                 agentAdmissionVersion: orb.agentAdmissionVersion + 1,
                 stateChangedAt: params.now,
@@ -848,6 +850,39 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
 
   getOrb(task: SimulationTask, orbId: string): ResultAsync<OrbRow | null, StoreError> {
     return this.access(task, FAILPOINTS.storeRead, "get orb", () => this.orbs.get(orbId) ?? null);
+  }
+
+  queueModel(
+    task: SimulationTask,
+    orbId: string,
+    pending: PendingModel,
+  ): ResultAsync<boolean, StoreError> {
+    return this.access(task, FAILPOINTS.storeWrite, "queue orb model", () => {
+      const orb = this.orbs.get(orbId);
+      if (orb === undefined || !canQueueModel(orb)) return false;
+      this.orbs.set(orbId, { ...orb, pendingModel: structuredClone(pending) });
+      return true;
+    });
+  }
+
+  clearPendingModel(
+    task: SimulationTask,
+    orbId: string,
+    changeId: string,
+    authority: ArchiveCaller,
+  ): ResultAsync<boolean, StoreError> {
+    return this.access(task, FAILPOINTS.storeWrite, "clear queued orb model", () => {
+      const orb = this.orbs.get(orbId);
+      if (orb === undefined || orb.pendingModel?.changeId !== changeId) return false;
+      const project = this.projects.get(orb.projectId);
+      if (
+        project?.state !== "active" ||
+        !acceptsPendingModelCaller(orb, project.ownerUserId, authority)
+      )
+        return false;
+      this.orbs.set(orbId, { ...orb, pendingModel: null });
+      return true;
+    });
   }
 
   getOrbByRuntimeTokenHash(
@@ -1383,38 +1418,31 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     });
   }
 
-  readOrbBootContext(
-    task: SimulationTask,
-    params: { orbId: string; caller: { runtimeTokenHash: string; hostIncarnation: number } },
-  ) {
-    return this.access(task, FAILPOINTS.storeWrite, "read orb boot context", () => {
+  readOrbBootContext(task: SimulationTask, params: { orbId: string; caller: GuestAgentCaller }) {
+    const read = (): StoredOrbBootContext | null => {
       const orb = this.orbs.get(params.orbId);
-      if (
-        orb === undefined ||
-        orb.runtimeTokenHash !== params.caller.runtimeTokenHash ||
-        orb.hostIncarnation !== params.caller.hostIncarnation ||
-        orb.hostDiscardThroughIncarnation !== null ||
-        !BOOT_CONTEXT_STATES.includes(orb.state)
-      )
-        return { authorized: false as const, context: null };
+      if (!orb || !acceptsOrbBootCaller(orb, params.caller)) return null;
       const rows = this.messages.get(params.orbId) ?? [];
       const head = rows.find((row) => row.status === "queued" || row.status === "delivering");
-      if (head?.system?.kind !== "sleep_wake") return { authorized: true as const, context: null };
+      const { pendingModel } = orb;
+      if (head?.system?.kind !== "sleep_wake") return { context: null, pendingModel };
       if (head.deliveryBatchId === null) {
         const index = rows.indexOf(head);
         rows[index] = { ...head, status: "delivering", deliveryBatchId: head.messageId };
       }
       return {
-        authorized: true as const,
+        pendingModel,
         context: {
           messageId: head.messageId,
           messageIds: [head.messageId],
           content: [...head.content],
-          system: { kind: "sleep_wake" as const, sleepUntil: head.system.sleepUntil },
+          system: { kind: "sleep_wake", sleepUntil: head.system.sleepUntil },
         },
       };
-    }).andThen((result) =>
-      result.authorized ? okAsync(result.context) : errAsync({ type: "state_conflict" as const }),
+    };
+    return this.access(task, FAILPOINTS.storeWrite, "read orb boot context", read).andThen(
+      (result) =>
+        result === null ? errAsync({ type: "state_conflict" as const }) : okAsync(result),
     );
   }
 
@@ -1774,6 +1802,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       const updated: OrbRow = {
         ...orb,
         state: "archiving",
+        pendingModel: null,
         stateVersion: orb.stateVersion + 1,
         stateChangedAt: params.now,
         updatedAt: params.now,
@@ -1909,6 +1938,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       const updated: OrbRow = {
         ...orb,
         state: "deleting",
+        pendingModel: null,
         stateVersion: orb.stateVersion + 1,
         agentAdmissionVersion: orb.agentAdmissionVersion + 1,
         stateChangedAt: params.now,
@@ -2012,7 +2042,13 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   ): ResultAsync<OrbRow, StoreError | StateConflict> {
     return this.access(task, FAILPOINTS.storeWrite, "fail orb and request compute discard", () => {
       const orb = this.orbs.get(params.orbId);
-      if (orb === undefined || orb.stateVersion !== params.expectedStateVersion) {
+      if (
+        orb === undefined ||
+        orb.stateVersion !== params.expectedStateVersion ||
+        (params.recoveryEpisode === undefined &&
+          params.expectedPendingModelChangeId !== undefined &&
+          orb.pendingModel?.changeId !== params.expectedPendingModelChangeId)
+      ) {
         return { conflict: true as const, currentState: orb?.state };
       }
       if (

@@ -43,6 +43,7 @@ const orb: OrbRow = {
   projectId: project.id,
   harness: "pi",
   initialModel: null,
+  pendingModel: null,
   name: null,
   userTimeZone: null,
   autoNameLeaseUntil: null,
@@ -83,6 +84,7 @@ const orb: OrbRow = {
   createdAt: 1_000,
   updatedAt: 1_000,
 };
+const queuedModel = { changeId: "first-choice", model: { provider: "test", id: "model" } };
 const unicodeStrings = ["\u0000", "\ud800", "\udfff", "\\u0000", "😀"];
 const unicodeOverflow = Object.fromEntries(unicodeStrings.map((text) => [text, { [text]: text }]));
 
@@ -172,10 +174,82 @@ export function storeSemanticsContractTests(
       await subject.close();
     });
 
-    async function seed(): Promise<void> {
+    async function seed(row = orb): Promise<void> {
       expect((await store.insertProject(task, project)).isOk()).toBe(true);
-      expect((await store.insertOrb(task, orb)).isOk()).toBe(true);
+      expect((await store.insertOrb(task, row)).isOk()).toBe(true);
     }
+
+    it("takes the last offline choice and compare-clears it at Claude boot", async () => {
+      const caller = { runtimeTokenHash: "runtime", hostIncarnation: 2 };
+      const replacement = { ...queuedModel, changeId: "replacement" };
+      await seed({ ...orb, ...caller, harness: "claude", state: "failed" });
+      const queue = (choice: typeof queuedModel) => store.queueModel(task, orb.id, choice);
+      expect((await queue(queuedModel))._unsafeUnwrap()).toBe(true);
+      expect((await queue(replacement))._unsafeUnwrap()).toBe(true);
+      const clear = (changeId: string, authority = caller) =>
+        store.clearPendingModel(task, orb.id, changeId, authority);
+      expect((await clear(replacement.changeId))._unsafeUnwrap()).toBe(false);
+      (
+        await store.casTransition(task, {
+          orbId: orb.id,
+          expectedStateVersion: orb.stateVersion,
+          toState: "starting",
+          now: 2_000,
+        })
+      )._unsafeUnwrap();
+      expect((await queue(queuedModel))._unsafeUnwrap()).toBe(false);
+      expect(
+        (await store.readOrbBootContext(task, { orbId: orb.id, caller }))._unsafeUnwrap(),
+      ).toEqual({ context: null, pendingModel: replacement });
+      expect((await clear(queuedModel.changeId))._unsafeUnwrap()).toBe(false);
+      expect(
+        (await clear(replacement.changeId, { ...caller, hostIncarnation: 1 }))._unsafeUnwrap(),
+      ).toBe(false);
+      expect((await clear(replacement.changeId))._unsafeUnwrap()).toBe(true);
+      expect((await clear(replacement.changeId))._unsafeUnwrap()).toBe(false);
+    });
+
+    it("requires Pi Stop inhibition to queue and fresh admission to acknowledge after Send", async () => {
+      await seed({ ...orb, state: "stopped", stopReason: "idle" });
+      const queue = () => store.queueModel(task, orb.id, queuedModel);
+      expect((await queue())._unsafeUnwrap()).toBe(false);
+      const { orb: stopped } = (
+        await store.requestOrbStop(task, {
+          orbId: orb.id,
+          expectedStateVersion: orb.stateVersion,
+          now: 2_000,
+        })
+      )._unsafeUnwrap();
+      expect((await queue())._unsafeUnwrap()).toBe(true);
+      const { orb: sent } = (
+        await store.enqueueOrbMessage(task, {
+          orbId: orb.id,
+          messageId: "00000000-0000-4000-8000-000000000103",
+          content: [{ type: "text", text: "wake" }],
+          now: 2_001,
+        })
+      )._unsafeUnwrap();
+      expect((await queue())._unsafeUnwrap()).toBe(false);
+      const clear = (agentAdmissionVersion: number) =>
+        store.clearPendingModel(task, orb.id, queuedModel.changeId, {
+          ...peerCentralCaller(orb.id),
+          agentAdmissionVersion,
+        });
+      expect((await clear(stopped.agentAdmissionVersion))._unsafeUnwrap()).toBe(false);
+      expect((await clear(sent.agentAdmissionVersion))._unsafeUnwrap()).toBe(true);
+      expect(
+        (
+          await store.failOrbAndRequestComputeDiscard(task, {
+            orbId: orb.id,
+            expectedStateVersion: sent.stateVersion,
+            now: 2_002,
+            lastError: "queued model unavailable",
+            suspendAgent: true,
+            expectedPendingModelChangeId: queuedModel.changeId,
+          })
+        )._unsafeUnwrapErr(),
+      ).toMatchObject({ type: "state_conflict" });
+    });
 
     async function seedPreview() {
       await seed();
@@ -714,6 +788,7 @@ export function storeSemanticsContractTests(
         orbId: orb.id,
         expectedStateVersion: 1,
         toState: "stopped",
+        stopReason: "sleep",
         now: 2500,
       });
       expect(stopped.isOk()).toBe(true);
@@ -747,6 +822,7 @@ export function storeSemanticsContractTests(
           })
         )._unsafeUnwrap(),
       ).toBe("stale");
+      expect((await store.queueModel(task, orb.id, queuedModel))._unsafeUnwrap()).toBe(true);
       const messages = (await store.listOrbMessages(task, orb.id))._unsafeUnwrap();
       expect(messages).toHaveLength(1);
       expect(messages[0]).toMatchObject({
@@ -770,13 +846,16 @@ export function storeSemanticsContractTests(
         caller: { runtimeTokenHash: "caller", hostIncarnation: 2 },
       };
       expect((await store.readOrbBootContext(task, bootRequest))._unsafeUnwrap()).toMatchObject({
-        messageId: sleepId,
-        messageIds: [sleepId],
-        system: { kind: "sleep_wake" },
+        context: {
+          messageId: sleepId,
+          messageIds: [sleepId],
+          system: { kind: "sleep_wake" },
+        },
+        pendingModel: queuedModel,
       });
-      expect((await store.readOrbBootContext(task, bootRequest))._unsafeUnwrap()?.messageId).toBe(
-        sleepId,
-      );
+      expect(
+        (await store.readOrbBootContext(task, bootRequest))._unsafeUnwrap().context?.messageId,
+      ).toBe(sleepId);
     });
 
     it("atomically registers immutable upload batch membership", async () => {
@@ -3158,7 +3237,7 @@ export function storeSemanticsContractTests(
     });
 
     it("atomically fences project creation, fans out deletion, and finalizes last", async () => {
-      await seed();
+      await seed({ ...orb, pendingModel: queuedModel });
       const requested = await store.requestProjectDeletion(task, {
         projectId: project.id,
         now: 2_000,
@@ -3166,6 +3245,7 @@ export function storeSemanticsContractTests(
       });
       expect(requested.isOk() && requested.value.newlyRequested).toBe(true);
       expect(requested.isOk() && requested.value.orbs[0]?.state).toBe("deleting");
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.pendingModel).toBeNull();
       expect((await store.getOrbDeletion(task, orb.id))._unsafeUnwrap()?.kind).toBe("delete");
 
       const lateOrb = { ...orb, id: "00000000-0000-4000-8000-000000000003" };
@@ -3222,7 +3302,7 @@ export function storeSemanticsContractTests(
     });
 
     it("upgrades an in-progress archive when its project is deleted", async () => {
-      await seed();
+      await seed({ ...orb, pendingModel: queuedModel });
       const archived = await store.requestOrbArchive(task, {
         orbId: orb.id,
         expectedStateVersion: 0,
@@ -3230,6 +3310,7 @@ export function storeSemanticsContractTests(
         cleanupAfter: 3_000,
       });
       expect(archived.isOk()).toBe(true);
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.pendingModel).toBeNull();
       const projectDelete = await store.requestProjectDeletion(task, {
         projectId: project.id,
         now: 2_500,
@@ -3242,7 +3323,7 @@ export function storeSemanticsContractTests(
     });
 
     it("atomically requests and finalizes permanent deletion with history", async () => {
-      await seed();
+      await seed({ ...orb, pendingModel: queuedModel });
       expect(
         (
           await store.commitPullBatch(task, {
@@ -3262,6 +3343,7 @@ export function storeSemanticsContractTests(
         cleanupAfter: 3_000,
       });
       expect(requested.isOk() && requested.value.state).toBe("deleting");
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.pendingModel).toBeNull();
       expect((await store.getOrbDeletion(task, orb.id)).isOk()).toBe(true);
       if (requested.isErr()) return;
       expect(

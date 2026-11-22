@@ -3859,11 +3859,16 @@ button.orb-phone-menu {
   bottom: calc(100% + 4px);
   left: 0;
   width: min(420px, 100%);
-  max-height: 280px;
-  overflow-y: auto;
+  max-height: min(280px, var(--visual-viewport-height, 100dvh) * 0.5);
+  display: flex;
+  flex-direction: column;
   padding: 4px;
   border: 1px solid var(--k);
   background: var(--w);
+}
+.command-options {
+  min-height: 0;
+  overflow-y: auto;
 }
 .command-picker button {
   display: flex;
@@ -3881,11 +3886,17 @@ button.orb-phone-menu {
 .command-picker button:disabled {
   color: var(--g2);
 }
-.command-empty {
+.command-feedback {
+  flex: none;
+  max-height: min(120px, var(--visual-viewport-height, 100dvh) * 0.2);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
   padding: 4px 8px;
   color: var(--g3);
 }
-.composer:has(.command-picker) .composer-phone-feedback,
+.command-feedback[role="alert"] {
+  color: var(--bad);
+}
 .composer[data-settings-pending="true"] .composer-phone-feedback {
   display: block;
 }
@@ -3991,7 +4002,7 @@ button.orb-phone-menu {
     height: 44px;
   }
   .command-picker {
-    max-height: min(240px, 35dvh);
+    max-height: min(240px, var(--visual-viewport-height, 100dvh) * 0.35);
   }
   .command-picker button {
     min-height: 44px;

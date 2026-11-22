@@ -33,6 +33,7 @@ const followingMigrations = [
   "053_owner_skill_files.sql",
   "054_orb_previews.sql",
   "055_orb_links.sql",
+  "056_orb_pending_model.sql",
 ];
 const first = {
   userId: "00000000-0000-4000-8000-000000000001",

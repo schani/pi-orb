@@ -1,6 +1,11 @@
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
-import { MemoryStorage, type ToolExecutionApi } from "@earendil-works/pi-durable";
+import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
+import {
+  MemoryStorage,
+  ROOT_CONVERSATION_ID,
+  type ToolExecutionApi,
+} from "@earendil-works/pi-durable";
 import { SERVER_INFO_META_KEY } from "@modelcontextprotocol/client";
 import { NoSimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, ResultAsync } from "neverthrow";
@@ -9,7 +14,9 @@ import { fetch as localFetch, MockAgent } from "undici";
 import { describe, expect, it, vi } from "vitest";
 import { DurableAgent } from "./adapters/durable/agent.ts";
 import { durableError } from "./adapters/durable/manager.ts";
+import { MemoryAgentPersistence } from "./adapters/durable/memory-persistence.testkit.ts";
 import * as durableModels from "./adapters/durable/models.ts";
+import type { AgentStorageLease } from "./adapters/durable/persistence.ts";
 import * as durableTools from "./adapters/durable/tools/index.ts";
 import { RemoteExecutionEnv } from "./adapters/execution-client/env.ts";
 import * as brokerDomain from "./domain/broker.ts";
@@ -28,6 +35,16 @@ import {
 import { makeHarness, makeOrbRow, makeProjectRow, TEST_USER_ID } from "./testkit/fixtures.ts";
 import { FakeProjectSecretPointerStore } from "./testkit/project-secrets.ts";
 
+const testLease = (storage = new MemoryStorage()): AgentStorageLease => ({
+  storage,
+  signal: new AbortController().signal,
+  check: () => okAsync(undefined),
+  checkInputAdmission: () => okAsync(undefined),
+  beginDrain: () => okAsync(undefined),
+  release: () => okAsync(undefined),
+  artifacts: { read: () => okAsync(null), write: () => okAsync("/orb-artifacts/fixture") },
+});
+
 function createProcessAgentContext(
   ...args: Parameters<typeof productionCreateProcessAgentContext>
 ) {
@@ -44,25 +61,117 @@ function createProcessAgentContext(
         }),
     },
   });
-  return (...inputs: Parameters<typeof open>) =>
-    open(
-      inputs[0],
-      inputs[1],
-      inputs[2],
-      inputs[3],
-      inputs[4] ?? {
-        storage: new MemoryStorage(),
-        signal: new AbortController().signal,
-        check: () => okAsync(undefined),
-        checkInputAdmission: () => okAsync(undefined),
-        beginDrain: () => okAsync(undefined),
-        release: () => okAsync(undefined),
-        artifacts: { read: () => okAsync(null), write: () => okAsync("/orb-artifacts/fixture") },
-      },
-    );
+  return (...[task, orb, context, readOnly, lease = testLease()]: Parameters<typeof open>) =>
+    open(task, orb, context, readOnly, lease);
 }
 
 describe("process agent composition", () => {
+  it("replays a queued Pi model before scheduling retained work, only after acknowledgment", async () => {
+    const h = makeHarness();
+    const task = new NoSimulationTask("pending-model", false);
+    const context = { signal: new AbortController().signal };
+    const initialModel = { provider: "faux", id: "old" };
+    const pendingModel = { changeId: "choice", model: { provider: "faux", id: "new" } };
+    const orb = makeOrbRow("orb", "project", "starting", { initialModel, pendingModel });
+    h.store.seedProject(makeProjectRow(orb.projectId));
+    h.store.seedOrb(orb);
+    const authority = new MemoryAgentPersistence();
+    const retained = (await authority.openOrb(orb.id, false))._unsafeUnwrap().storage;
+    const modelHistoryAtAck: number[] = [];
+    const clearPendingModel = () =>
+      ResultAsync.fromSafePromise(
+        retained.scanEntries(
+          { conversationId: ROOT_CONVERSATION_ID },
+          100,
+          undefined,
+          BACKGROUND_CONTEXT,
+        ),
+      ).map(({ items }) => {
+        modelHistoryAtAck.push(items.filter((entry) => entry.kind === "orb.model-change").length);
+        return modelHistoryAtAck.length === 2;
+      });
+    const lease = { ...testLease(), storage: retained, clearPendingModel };
+    const models = createModels();
+    const faux = fauxProvider({ models: [initialModel, pendingModel.model] });
+    const observed: string[] = [];
+    faux.setResponses([
+      (_context, _options, _state, model) => {
+        observed.push(model.id);
+        return fauxAssistantMessage("answer");
+      },
+    ]);
+    models.setProvider(faux.provider);
+    const mockModels = vi
+      .spyOn(durableModels, "createDurableModels")
+      .mockReturnValue(okAsync(models));
+    const compose = createProcessAgentContext(h.deps, {
+      mcp: { read: () => okAsync({ servers: [] }) },
+      modelUsage: { record: () => undefined },
+    } as never);
+    const open = async () => {
+      const options = (
+        await compose(task, { ...orb, pendingModel: null }, context, false, lease)
+      )._unsafeUnwrap();
+      return DurableAgent.open({ ...options, orbId: orb.id, storage: retained });
+    };
+    try {
+      // Retain a placed input without activating the scheduler.
+      const options = (await compose(task, orb, context, true, lease))._unsafeUnwrap();
+      let conversation:
+        | Parameters<NonNullable<typeof options.bindNativeConversation>>[0]
+        | undefined;
+      const reader = (
+        await DurableAgent.open({
+          ...options,
+          orbId: orb.id,
+          storage: retained,
+          bindNativeConversation: (resolve) => {
+            conversation = resolve;
+          },
+        })
+      )._unsafeUnwrap();
+      try {
+        const root = await conversation?.(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT);
+        expect(root).toBeDefined();
+        await root?.submitMany(
+          [
+            {
+              type: "input",
+              requestId: "retained",
+              content: [{ type: "text", text: "first question" }],
+            },
+          ],
+          BACKGROUND_CONTEXT,
+          { deferScheduling: true },
+        );
+      } finally {
+        await reader.close();
+      }
+      expect(modelHistoryAtAck).toEqual([]);
+      expect((await open()).isErr()).toBe(true);
+      expect(observed).toEqual([]);
+
+      const agent = (await open())._unsafeUnwrap();
+      try {
+        (await agent.waitForIdle())._unsafeUnwrap();
+        expect(observed).toEqual(["new"]);
+        expect(modelHistoryAtAck).toEqual([2, 2]);
+        expect(
+          agent
+            .snapshot()
+            ._unsafeUnwrap()
+            .records.filter(
+              (record) => record.type === "event" && record.eventType === "pi.model_change",
+            ),
+        ).toMatchObject(["old", "new"].map((modelId) => ({ overflow: { native: { modelId } } })));
+      } finally {
+        await agent.close();
+      }
+    } finally {
+      mockModels.mockRestore();
+    }
+  });
+
   it("uses fresh SDK auth admission after the opening operation is cancelled", async () => {
     const harness = makeHarness();
     const orb = makeOrbRow("central", "project", "starting", {

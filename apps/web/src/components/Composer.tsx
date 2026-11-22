@@ -15,6 +15,7 @@ import {
   type CommandOption,
   type ComposerCommandAction,
   commandOptions,
+  type ModelSelection,
 } from "./command-options.ts";
 import { type ComposerMode, composerModeGlyph, normalizeComposerChange } from "./composer-mode.ts";
 import { Icon } from "./Icons.tsx";
@@ -50,9 +51,10 @@ interface ComposerProps {
   onSend: () => void;
   canAbort: boolean;
   onAbort: () => void;
-  /** Operation feedback. Phone always shows it; desktop only while settings are pending or the command picker is open. */
-  feedback?: string;
+  /** Operation feedback in the picker, or beside the composer on phones and during settings requests. */
+  feedback?: { message: string; error: boolean };
   settings?: AgentSettingsEvent | null;
+  orb?: ModelSelection | null;
   effortLabel?: "thinking" | "effort";
   settingsDisabled?: boolean;
   settingsPending?: boolean;
@@ -75,6 +77,7 @@ export function Composer({
   onAbort,
   feedback,
   settings = null,
+  orb,
   effortLabel = "thinking",
   settingsDisabled = true,
   settingsPending = false,
@@ -82,7 +85,16 @@ export function Composer({
 }: ComposerProps) {
   const isCommand = mode === "command";
   const [commandIndex, setCommandIndex] = useState(0);
-  const choices = commandOptions(text, settings, effortLabel);
+  const phone = usePhoneLayout();
+  const [expanded, setExpanded] = useState(false);
+  const pickerOpen = isCommand && (!phone || expanded);
+  const choices = commandOptions(
+    text,
+    settings,
+    effortLabel,
+    orb?.queueableModels,
+    phone ? orb?.pendingModel?.model : undefined,
+  );
   const selectedCommand = Math.min(commandIndex, Math.max(0, choices.length - 1));
   const chooseCommand = (choice: CommandOption | undefined) => {
     if (choice?.text !== undefined) {
@@ -92,11 +104,9 @@ export function Composer({
   };
   const hasInput = text.trim() !== "" || images.length > 0;
   const sendEnabled = !isCommand && canSend && hasInput;
-  const phone = usePhoneLayout();
   const touchCapable =
     typeof window !== "undefined" &&
     (navigator.maxTouchPoints > 0 || window.matchMedia("(any-pointer: coarse)").matches);
-  const [expanded, setExpanded] = useState(false);
   const padRef = useRef<HTMLButtonElement>(null);
   const awaitingClear = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -126,7 +136,7 @@ export function Composer({
   }));
   const commandPickerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!isCommand || (phone && !expanded)) return;
+    if (!pickerOpen) return;
     const dismiss = () => {
       setCommandIndex(0);
       onValueChange("", "message");
@@ -153,7 +163,7 @@ export function Composer({
       document.removeEventListener("pointerdown", outside, true);
       document.removeEventListener("keydown", onEscape, true);
     };
-  }, [isCommand, phone, expanded, onValueChange]);
+  }, [pickerOpen, onValueChange]);
   const [mentionOffset, setMentionOffset] = useState<number | null>(null);
   const restoreCaret = useRef<number | null>(null);
   useEffect(() => {
@@ -244,9 +254,9 @@ export function Composer({
           <span>{dropLabel}</span>
         </div>
       )}
-      {feedback && (
+      {!pickerOpen && feedback?.message && (
         <div className="composer-phone-feedback" role="status">
-          {feedback}
+          {feedback.message}
         </div>
       )}
       <div className="composer-phone-pad">
@@ -299,40 +309,48 @@ export function Composer({
         </div>
       )}
       <div className="composer-line">
-        {isCommand && (!phone || expanded) && (
-          <div
-            ref={commandPickerRef}
-            className="command-picker"
-            role="listbox"
-            aria-label="Commands"
-            id="command-choices"
-          >
-            {choices.map((choice, index) => (
-              <button
-                type="button"
-                role="option"
-                id={`command-choice-${index}`}
-                aria-selected={index === selectedCommand}
-                key={choice.label}
-                className={index === selectedCommand ? "selected" : ""}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => chooseCommand(choice)}
-                disabled={choice.action !== undefined && settingsDisabled}
-              >
-                <span>{choice.label}</span>
-                <span aria-hidden="true">{choice.current ? "✓" : choice.text ? "→" : ""}</span>
-              </button>
-            ))}
-            {choices.length === 0 && (
-              <div className="command-empty">
-                {settings === null
-                  ? "Settings unavailable — connect to a running orb."
-                  : "No matching command or value."}
+        {pickerOpen && (
+          <div ref={commandPickerRef} className="command-picker">
+            <div
+              className="command-options"
+              role="listbox"
+              aria-label="Commands"
+              id="command-choices"
+            >
+              {choices.map((choice, index) => (
+                <button
+                  type="button"
+                  role="option"
+                  id={`command-choice-${index}`}
+                  aria-selected={index === selectedCommand}
+                  key={
+                    choice.action?.type === "set_model"
+                      ? `${choice.action.model.provider}/${choice.action.model.id}`
+                      : choice.label
+                  }
+                  className={index === selectedCommand ? "selected" : ""}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => chooseCommand(choice)}
+                  disabled={choice.action !== undefined && settingsDisabled}
+                >
+                  <span>{choice.label}</span>
+                  <span aria-hidden="true">{choice.current ? "✓" : choice.text ? "→" : ""}</span>
+                </button>
+              ))}
+            </div>
+            {feedback?.message ? (
+              <div className="command-feedback" role={feedback.error ? "alert" : "status"}>
+                {feedback.message}
               </div>
-            )}
-            {settings !== null && settingsDisabled && (
-              <div className="command-empty">Wait for the current operation to finish.</div>
-            )}
+            ) : choices.length === 0 || (settings !== null && settingsDisabled) ? (
+              <div className="command-feedback">
+                {settings !== null && settingsDisabled
+                  ? "Wait for the current operation to finish."
+                  : settings === null && orb?.queueableModels === undefined
+                    ? "Settings unavailable — connect to a running orb."
+                    : "No matching command or value."}
+              </div>
+            ) : null}
           </div>
         )}
         <span className="composer-prefix">{composerModeGlyph(mode)}</span>
@@ -410,9 +428,9 @@ export function Composer({
               }
             }}
             aria-label="Message the orb"
-            aria-controls={isCommand ? "command-choices" : undefined}
+            aria-controls={pickerOpen ? "command-choices" : undefined}
             aria-activedescendant={
-              isCommand && choices.length ? `command-choice-${selectedCommand}` : undefined
+              pickerOpen && choices.length ? `command-choice-${selectedCommand}` : undefined
             }
             rows={4}
           />

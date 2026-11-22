@@ -18,6 +18,7 @@ import {
   ListResponseSchema,
   type LiveDisplayDetail,
   LiveDisplayDetailSchema,
+  ORB_PENDING_MODEL_PATH,
   type OrbLinkStepsResponse,
   OrbLinkStepsResponseSchema,
   type OrbLinksResponse,
@@ -39,6 +40,7 @@ import {
   ProjectSecretListSchema,
   type ProjectView,
   ProjectViewSchema,
+  type PutPendingModelRequest,
   projectSecretPath,
   projectSecretsPath,
   SessionProbeSchema,
@@ -520,6 +522,17 @@ export function acknowledgeOrbAlert(orbId: string, recordId: string) {
 
 export function getOrb(orbId: string): Promise<Result<OrbView, ApiError>> {
   return apiFetch(OrbViewSchema, `/api/v1/orbs/${encodeURIComponent(orbId)}`);
+}
+
+export function putPendingModel(
+  orbId: string,
+  request: PutPendingModelRequest,
+): Promise<Result<OrbView, ApiError>> {
+  return apiFetch(
+    OrbViewSchema,
+    ORB_PENDING_MODEL_PATH.replace(":orbId", () => encodeURIComponent(orbId)),
+    { method: "PUT", headers: jsonHeaders, body: JSON.stringify(request) },
+  );
 }
 
 export function listHostedFiles(orbId: string): Promise<Result<HostedFilesResponse, ApiError>> {

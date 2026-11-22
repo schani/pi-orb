@@ -39,6 +39,7 @@ import type {
   OrbHostRef,
   OrbMessageSender,
   ProvisionedOrbHost,
+  StoredOrbBootContext,
 } from "./ports.ts";
 import { pollOrbUntilCaughtUp } from "./replication.ts";
 import { handleFailedRuntime, inspectFailedRuntime } from "./runtime-recovery.ts";
@@ -432,6 +433,8 @@ async function failOrb(
   message: string,
   evidence?: string | null,
 ): Promise<ReconcileOutcome> {
+  const rejectedChoice = code === "pending_model_unavailable";
+  if (rejectedChoice && !orb.pendingModel) return { type: "conflict" };
   // Terminal diagnosis must precede the failure/discard transaction: after it
   // commits, another reconciler is entitled to delete the compute immediately.
   const terminalEvidence =
@@ -451,9 +454,12 @@ async function failOrb(
     now: task.wallNow(),
     lastError: formatOrbFailure(code, failureMessage),
     evidence: boundedEvidence,
-    // `failed` alone leaves a central agent running; a budget failure must
-    // also stop its recovery loop until fresh human intent.
-    ...(code === "restart_budget_exhausted" ? { suspendAgent: true } : {}),
+    // `failed` alone does not stop central admission or autonomous recovery.
+    ...(code === "restart_budget_exhausted" || rejectedChoice ? { suspendAgent: true } : {}),
+    // Acknowledgement does not bump stateVersion.
+    ...(rejectedChoice && orb.pendingModel
+      ? { expectedPendingModelChangeId: orb.pendingModel.changeId }
+      : {}),
   });
   if (cas.isErr()) {
     return cas.error.type === "state_conflict" ? { type: "conflict" } : retryable(cas.error);
@@ -2632,6 +2638,18 @@ export async function reconcileCentralAgent(
               initializationError: health.value.error,
             }
           : undefined;
+      if (failure?.code === "pending_model_unavailable") {
+        if (
+          failure.retryable ||
+          !centralOrb.pendingModel ||
+          centralOrb.pendingModel.changeId !== failure.pendingModelChangeId ||
+          centralOrb.harness !== "pi" ||
+          centralOrb.sleepId !== null ||
+          centralOrb.stopReason === "sleep"
+        )
+          return err(retryable(failure));
+        return err(await failOrb(task, deps, centralOrb, failure.code, failure.message, null));
+      }
       const rejected = noteCentralStartup(task, deps, centralOrb, failure);
       const unavailable = failure !== undefined && !rejected && !persistedRecovery;
       if (deps.control.noteCondition(`central-health:${orbId}`, unavailable) && unavailable)
@@ -2872,7 +2890,7 @@ export function readOrbBootContext(
   deps: ControlPlaneDeps,
   orbId: string,
   caller: GuestAgentCaller,
-): ResultAsync<import("@pi-orb/protocol").OrbBootContext | null, CommandError> {
+): ResultAsync<StoredOrbBootContext, CommandError> {
   return deps.store
     .readOrbBootContext(task, { orbId, caller })
     .mapErr((error) =>
@@ -2880,6 +2898,36 @@ export function readOrbBootContext(
         ? commandError("conflict", "runtime incarnation changed during boot", true)
         : mapStoreError(error),
     );
+}
+
+export function acknowledgeOrbPendingModel(
+  task: SimulationTask,
+  deps: Pick<ControlPlaneDeps, "store">,
+  orbId: string,
+  caller: GuestAgentCaller,
+  changeId: string,
+): ResultAsync<void, CommandError> {
+  return deps.store
+    .clearPendingModel(task, orbId, changeId, caller)
+    .mapErr((error) =>
+      commandError(
+        error.retryable ? "unavailable" : "internal",
+        "model acknowledgement failed",
+        error.retryable,
+      ),
+    )
+    .andThen((cleared) => {
+      if (!cleared)
+        return err(
+          commandError(
+            "conflict",
+            "queued model or runtime authority changed; restart required",
+            false,
+          ),
+        );
+      logOrbEvent(task, orbId, "model-applied", { changeId });
+      return ok(undefined);
+    });
 }
 
 export function requestOrbSleep(
