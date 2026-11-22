@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -90,17 +91,24 @@ process.on("SIGTERM", async () => { await app.close(); process.exit(0); });
       const metadata = JSON.parse(
         readFileSync(join(root, "state", "crash", "host.json"), "utf8"),
       ) as { processGroupId: number };
-      process.kill(killedOwner === "guest" ? host.value.pid : metadata.processGroupId, "SIGKILL");
       if (killedOwner === "supervisor") {
-        process.kill(host.value.pid, "SIGKILL");
         await writeFile(
           join(root, "state", "crash", "drained.json"),
           JSON.stringify({ launch: "previous-launch" }),
         );
+        // Wait for kernel-confirmed death without letting Node deliver the exit event.
+        const killed = spawnSync("python3", [
+          "-c",
+          `import os, select, signal, sys
+fd = os.pidfd_open(int(sys.argv[1]))
+signal.pidfd_send_signal(fd, signal.SIGKILL)
+sys.exit(0 if select.select([fd], [], [], 5)[0] else 1)`,
+          String(metadata.processGroupId),
+        ]);
+        expect(killed.status, String(killed.error ?? killed.stderr)).toBe(0);
       }
-      const outcome = await command;
-      expect(outcome.ok).toBe(false);
-      if (!outcome.ok) expect(outcome.error.code).toBe("unknown");
+      process.kill(host.value.pid, "SIGKILL");
+      if (killedOwner === "guest") await command;
       const discarded = await provider.discardCompute(
         task,
         { orbId: "crash", throughIncarnation: 1 },
@@ -121,6 +129,9 @@ process.on("SIGTERM", async () => { await app.close(); process.exit(0); });
         expect(restarted.isErr()).toBe(true);
         if (restarted.isErr()) expect(restarted.error.message).toContain("refusing relaunch");
       }
+      const outcome = await command;
+      expect(outcome.ok).toBe(false);
+      if (!outcome.ok) expect(outcome.error.code).toBe("unknown");
       let state: string | undefined;
       try {
         state = /^\d+ \(.*\) ([A-Z]) /.exec(readFileSync(`/proc/${shellPid}/stat`, "utf8"))?.[1];

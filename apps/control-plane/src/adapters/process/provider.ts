@@ -377,11 +377,15 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       return Promise.resolve(err(hostError(operation, "cancelled", "provider is closing", true)));
     const existing = this.children.get(metadata.orbId);
     if (
-      existing !== undefined &&
+      existing?.child.pid !== undefined &&
       existing.child.exitCode === null &&
       existing.child.signalCode === null
     ) {
-      return Promise.resolve(ok(undefined));
+      // Node may not have delivered exit yet; verify the cached supervisor's birth.
+      const current = this.processBirth(existing.child.pid);
+      if (current.isErr()) return Promise.resolve(err({ ...current.error, operation }));
+      if (current.value !== null && current.value === existing.processBirth)
+        return Promise.resolve(ok(undefined));
     }
     if (metadata.drainToken !== null) {
       const proven = this.drainProven(operation, metadata.orbId, metadata.drainToken);
