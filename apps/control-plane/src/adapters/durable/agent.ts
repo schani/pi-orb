@@ -41,6 +41,7 @@ import type {
   DeliverOrbMessageResponse,
   HistoryRecord,
   OrbMessageSystem,
+  PendingModel,
   PullHistoryResponse,
   RequestResultFrame,
   RuntimeEvent,
@@ -163,6 +164,11 @@ export interface DurableAgentOptions {
   readonly envFor?: (target: EnvTarget) => ExecutionEnv;
   readonly resume?: boolean;
   readonly checkAdmission?: () => ResultAsync<void, RuntimeClientError>;
+  /** Bound to the admission for this active open. */
+  readonly pendingModel?: {
+    value: PendingModel;
+    clear: (changeId: string) => ResultAsync<boolean, RuntimeClientError>;
+  };
   readonly checkInputAdmission?: (browser: boolean) => ResultAsync<void, InputAdmissionError>;
   /** Consulted before resuming unfinished work; an error leaves it suspended. */
   readonly admitRecovery?: () => ResultAsync<void, RuntimeClientError>;
@@ -548,6 +554,11 @@ export class DurableAgent implements AgentSessionFacade {
         const recoveredTasks = Object.keys(agent.tasks.tasks);
         const recovering = recoveredTasks.length > 0 || unfinishedSubmissions;
         if (openAborted()) return err(cancelledOpen());
+        if (options.resume !== false && options.pendingModel) {
+          stage = "pending model";
+          const consumed = await agent.consumePendingModel(options.pendingModel, openContext);
+          if (consumed.isErr()) return err(consumed.error);
+        }
         if (recovering && options.resume !== false) {
           stage = "recovery budget";
           const admitted = await options.admitRecovery?.();
@@ -610,6 +621,65 @@ export class DurableAgent implements AgentSessionFacade {
             () => startupCleanupFailure(durableError("failed Harness cleanup failed"), error),
           ).andThen((result) => result),
       );
+  }
+
+  private async consumePendingModel(
+    selection: NonNullable<DurableAgentOptions["pendingModel"]>,
+    openContext: Context,
+  ): Promise<Result<void, RuntimeClientError>> {
+    const admit = async () => {
+      const admitted = await this.options.checkAdmission?.();
+      return openContext.abortSignal?.aborted || this.options.ownershipSignal?.aborted
+        ? err(cancelledOpen())
+        : (admitted ?? ok(undefined));
+    };
+    const admitted = await admit();
+    if (admitted.isErr()) return err(admitted.error);
+    const { changeId, model } = selection.value;
+    if (!this.options.models.getModel(model.provider, model.id))
+      return err({
+        ...durableError(
+          "The queued Pi model is unavailable. Choose another model and start again.",
+        ),
+        code: "pending_model_unavailable",
+        pendingModelChangeId: changeId,
+      });
+
+    // The committed setting is the replay evidence: if acknowledgment is lost,
+    // reapplying the same model changes neither the native document nor public history.
+    const applied = await ResultAsync.fromPromise(
+      this.root.commit(async (tx) => {
+        const previous = publicSettings(await tx.doc(AgentDoc, this.root.id));
+        await configure(tx, this.root.id, {
+          model: { provider: model.provider, modelId: model.id },
+        });
+        await appendSettingsHistory(
+          tx,
+          this.root.id,
+          previous,
+          publicSettings(await tx.doc(AgentDoc, this.root.id)),
+          this.now(),
+        );
+      }, openContext),
+      (error) => {
+        const authority = storageAuthorityError(error);
+        return authority
+          ? startupRuntimeError(authority)
+          : durableError("Could not save the queued Pi model; startup will retry", true);
+      },
+    );
+    if (applied.isErr()) return err(applied.error);
+
+    // Acknowledge the committed choice under the exact row and owner fences before scheduling.
+    const stillAdmitted = await admit();
+    if (stillAdmitted.isErr()) return err(stillAdmitted.error);
+    const cleared = await selection.clear(changeId);
+    if (cleared.isErr()) return err(cleared.error);
+    return cleared.value
+      ? ok(undefined)
+      : err(
+          durableError("The queued Pi model or agent authority changed; startup will retry", true),
+        );
   }
 
   /** Only a published owner may cross this boundary in the manager path. */

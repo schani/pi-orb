@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BOOT_CONTEXT_REQUEST_TIMEOUT_MS, fetchBootContext } from "./boot-context.ts";
+import {
+  acknowledgePendingModel,
+  BOOT_CONTEXT_REQUEST_TIMEOUT_MS,
+  fetchBootContext,
+} from "./boot-context.ts";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -305,4 +309,20 @@ describe("boot context client", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(sleep).not.toHaveBeenCalled();
   });
+});
+
+describe("pending model acknowledgement", () => {
+  it.each([null, { v: 2 }, { v: 1, cleared: false }])(
+    "rejects unexpected HTTP 200 body %j without reissuing the acknowledgement",
+    async (payload) => {
+      const fetch = vi.fn(async () => Response.json(payload));
+      vi.stubGlobal("fetch", fetch);
+      expect((await acknowledgePendingModel(broker, "choice"))._unsafeUnwrapErr()).toEqual({
+        type: "pending_model_ack_error",
+        retryable: false,
+        message: "Cannot acknowledge the queued Claude model: malformed response",
+      });
+      expect(fetch).toHaveBeenCalledTimes(1);
+    },
+  );
 });

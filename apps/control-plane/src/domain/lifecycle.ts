@@ -39,6 +39,7 @@ import type {
   OrbHostRef,
   OrbMessageSender,
   ProvisionedOrbHost,
+  StoredOrbBootContext,
 } from "./ports.ts";
 import { pollOrbUntilCaughtUp } from "./replication.ts";
 import { handleFailedRuntime, inspectFailedRuntime } from "./runtime-recovery.ts";
@@ -430,8 +431,9 @@ async function failOrb(
   orb: OrbRow,
   code: OrbFailureCode,
   message: string,
-  evidence?: string | null,
+  options?: { evidence?: string | null; expectedPendingModelChangeId?: string },
 ): Promise<ReconcileOutcome> {
+  const { evidence, expectedPendingModelChangeId } = options ?? {};
   // Terminal diagnosis must precede the failure/discard transaction: after it
   // commits, another reconciler is entitled to delete the compute immediately.
   const terminalEvidence =
@@ -451,9 +453,11 @@ async function failOrb(
     now: task.wallNow(),
     lastError: formatOrbFailure(code, failureMessage),
     evidence: boundedEvidence,
-    // `failed` alone leaves a central agent running; a budget failure must
-    // also stop its recovery loop until fresh human intent.
-    ...(code === "restart_budget_exhausted" ? { suspendAgent: true } : {}),
+    // `failed` alone does not stop central admission or autonomous recovery.
+    ...(code === "restart_budget_exhausted" || code === "pending_model_unavailable"
+      ? { suspendAgent: true }
+      : {}),
+    ...(expectedPendingModelChangeId === undefined ? {} : { expectedPendingModelChangeId }),
   });
   if (cas.isErr()) {
     return cas.error.type === "state_conflict" ? { type: "conflict" } : retryable(cas.error);
@@ -1092,7 +1096,7 @@ async function reconcileCreateStart(
             `host ran for ${seconds}s but the runtime never answered ` +
               `(${probe.attempts} probes; last error: ${health.error.message})` +
               (evidence !== null && evidence !== "" ? `; host diagnostics: ${evidence}` : ""),
-            evidence,
+            { evidence },
           );
         }
         return waiting("readiness");
@@ -2632,6 +2636,26 @@ export async function reconcileCentralAgent(
               initializationError: health.value.error,
             }
           : undefined;
+      if (failure?.code === "pending_model_unavailable") {
+        const changeId = failure.pendingModelChangeId;
+        if (
+          failure.retryable ||
+          !changeId ||
+          centralOrb.pendingModel?.changeId !== changeId ||
+          centralOrb.harness !== "pi" ||
+          centralOrb.sleepId !== null ||
+          centralOrb.stopReason === "sleep"
+        )
+          return err(retryable(failure));
+        // State CAS fences renewed authority; the choice may be acknowledged
+        // without a state change, so require both in the same write.
+        return err(
+          await failOrb(task, deps, centralOrb, failure.code, failure.message, {
+            evidence: null,
+            expectedPendingModelChangeId: changeId,
+          }),
+        );
+      }
       const rejected = noteCentralStartup(task, deps, centralOrb, failure);
       const unavailable = failure !== undefined && !rejected && !persistedRecovery;
       if (deps.control.noteCondition(`central-health:${orbId}`, unavailable) && unavailable)
@@ -2872,7 +2896,7 @@ export function readOrbBootContext(
   deps: ControlPlaneDeps,
   orbId: string,
   caller: GuestAgentCaller,
-): ResultAsync<import("@pi-orb/protocol").OrbBootContext | null, CommandError> {
+): ResultAsync<StoredOrbBootContext, CommandError> {
   return deps.store
     .readOrbBootContext(task, { orbId, caller })
     .mapErr((error) =>
@@ -2880,6 +2904,34 @@ export function readOrbBootContext(
         ? commandError("conflict", "runtime incarnation changed during boot", true)
         : mapStoreError(error),
     );
+}
+
+export function acknowledgeOrbPendingModel(
+  task: SimulationTask,
+  deps: Pick<ControlPlaneDeps, "store">,
+  orbId: string,
+  caller: GuestAgentCaller,
+  changeId: string,
+): ResultAsync<void, CommandError> {
+  return deps.store
+    .clearPendingModel(task, orbId, changeId, caller)
+    .mapErr((error) =>
+      error.retryable
+        ? commandError("unavailable", "pending model acknowledgement unavailable", true)
+        : commandError("internal", "pending model acknowledgement failed", false),
+    )
+    .andThen((cleared) => {
+      if (!cleared)
+        return err(
+          commandError(
+            "conflict",
+            "queued model or runtime authority changed; restart required",
+            false,
+          ),
+        );
+      logOrbEvent(task, orbId, "model-applied", { changeId });
+      return ok(undefined);
+    });
 }
 
 export function requestOrbSleep(

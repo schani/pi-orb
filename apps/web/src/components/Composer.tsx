@@ -1,4 +1,4 @@
-import type { AgentSettingsEvent } from "@pi-orb/protocol";
+import type { AgentSettingsEvent, OrbModelOption, PutPendingModelRequest } from "@pi-orb/protocol";
 import { Result } from "neverthrow";
 import {
   type ClipboardEvent,
@@ -50,9 +50,16 @@ interface ComposerProps {
   onSend: () => void;
   canAbort: boolean;
   onAbort: () => void;
-  /** Operation feedback. Phone always shows it; desktop only while settings are pending or the command picker is open. */
-  feedback?: string;
+  /** Operation feedback in the picker, or beside the composer on phones and during settings requests. */
+  feedback?: { message: string; error: boolean };
   settings?: AgentSettingsEvent | null;
+  offlineModels?:
+    | {
+        models: readonly OrbModelOption[];
+        queued: PutPendingModelRequest["model"] | undefined;
+        status: { message: string; retry?: () => void } | undefined;
+      }
+    | undefined;
   effortLabel?: "thinking" | "effort";
   settingsDisabled?: boolean;
   settingsPending?: boolean;
@@ -75,6 +82,7 @@ export function Composer({
   onAbort,
   feedback,
   settings = null,
+  offlineModels,
   effortLabel = "thinking",
   settingsDisabled = true,
   settingsPending = false,
@@ -82,8 +90,29 @@ export function Composer({
 }: ComposerProps) {
   const isCommand = mode === "command";
   const [commandIndex, setCommandIndex] = useState(0);
-  const choices = commandOptions(text, settings, effortLabel);
+  const phone = usePhoneLayout();
+  const [expanded, setExpanded] = useState(false);
+  const pickerOpen = isCommand && (!phone || expanded);
+  const catalogStatus = offlineModels?.status;
+  const choices = commandOptions(
+    text,
+    settings,
+    effortLabel,
+    offlineModels?.models,
+    phone ? offlineModels?.queued : undefined,
+  );
   const selectedCommand = Math.min(commandIndex, Math.max(0, choices.length - 1));
+  const emptyMessage =
+    choices.length > 0
+      ? null
+      : offlineModels !== undefined
+        ? "No matching model."
+        : settings === null
+          ? "Settings unavailable — connect to a running orb."
+          : "No matching command or value.";
+  const operationMessage =
+    feedback?.message ||
+    (settings !== null && settingsDisabled ? "Wait for the current operation to finish." : null);
   const chooseCommand = (choice: CommandOption | undefined) => {
     if (choice?.text !== undefined) {
       onValueChange(choice.text, "command");
@@ -92,11 +121,9 @@ export function Composer({
   };
   const hasInput = text.trim() !== "" || images.length > 0;
   const sendEnabled = !isCommand && canSend && hasInput;
-  const phone = usePhoneLayout();
   const touchCapable =
     typeof window !== "undefined" &&
     (navigator.maxTouchPoints > 0 || window.matchMedia("(any-pointer: coarse)").matches);
-  const [expanded, setExpanded] = useState(false);
   const padRef = useRef<HTMLButtonElement>(null);
   const awaitingClear = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -126,7 +153,7 @@ export function Composer({
   }));
   const commandPickerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!isCommand || (phone && !expanded)) return;
+    if (!pickerOpen) return;
     const dismiss = () => {
       setCommandIndex(0);
       onValueChange("", "message");
@@ -153,7 +180,7 @@ export function Composer({
       document.removeEventListener("pointerdown", outside, true);
       document.removeEventListener("keydown", onEscape, true);
     };
-  }, [isCommand, phone, expanded, onValueChange]);
+  }, [pickerOpen, onValueChange]);
   const [mentionOffset, setMentionOffset] = useState<number | null>(null);
   const restoreCaret = useRef<number | null>(null);
   useEffect(() => {
@@ -244,9 +271,9 @@ export function Composer({
           <span>{dropLabel}</span>
         </div>
       )}
-      {feedback && (
-        <div className="composer-phone-feedback" role="status">
-          {feedback}
+      {!pickerOpen && feedback?.message && (
+        <div className="composer-phone-feedback" role={feedback.error ? "alert" : "status"}>
+          {feedback.message}
         </div>
       )}
       <div className="composer-phone-pad">
@@ -299,39 +326,64 @@ export function Composer({
         </div>
       )}
       <div className="composer-line">
-        {isCommand && (!phone || expanded) && (
-          <div
-            ref={commandPickerRef}
-            className="command-picker"
-            role="listbox"
-            aria-label="Commands"
-            id="command-choices"
-          >
-            {choices.map((choice, index) => (
-              <button
-                type="button"
-                role="option"
-                id={`command-choice-${index}`}
-                aria-selected={index === selectedCommand}
-                key={choice.label}
-                className={index === selectedCommand ? "selected" : ""}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => chooseCommand(choice)}
-                disabled={choice.action !== undefined && settingsDisabled}
-              >
-                <span>{choice.label}</span>
-                <span aria-hidden="true">{choice.current ? "✓" : choice.text ? "→" : ""}</span>
-              </button>
-            ))}
-            {choices.length === 0 && (
-              <div className="command-empty">
-                {settings === null
-                  ? "Settings unavailable — connect to a running orb."
-                  : "No matching command or value."}
+        {pickerOpen && (
+          <div ref={commandPickerRef} className="command-picker">
+            <div
+              className="command-options"
+              role="listbox"
+              aria-label="Commands"
+              id="command-choices"
+            >
+              {choices.map((choice, index) => (
+                <button
+                  type="button"
+                  role="option"
+                  id={`command-choice-${index}`}
+                  aria-selected={index === selectedCommand}
+                  key={
+                    choice.action?.type === "queue_model"
+                      ? JSON.stringify([choice.action.model.provider, choice.action.model.id])
+                      : choice.label
+                  }
+                  className={index === selectedCommand ? "selected" : ""}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    setCommandIndex(index);
+                    chooseCommand(choice);
+                  }}
+                  disabled={choice.action !== undefined && settingsDisabled}
+                >
+                  <span>{choice.label}</span>
+                  <span aria-hidden="true">{choice.current ? "✓" : choice.text ? "→" : ""}</span>
+                </button>
+              ))}
+            </div>
+            {(catalogStatus || emptyMessage || operationMessage) && (
+              <div className="command-feedback">
+                {catalogStatus ? (
+                  <div className="command-catalog-feedback">
+                    <div role={catalogStatus.retry ? "alert" : "status"}>
+                      {catalogStatus.message}
+                    </div>
+                    {catalogStatus.retry && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          catalogStatus.retry?.();
+                          inputRef.current?.focus({ preventScroll: true });
+                        }}
+                      >
+                        Retry
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  emptyMessage && <div>{emptyMessage}</div>
+                )}
+                {operationMessage && (
+                  <div role={feedback?.error ? "alert" : "status"}>{operationMessage}</div>
+                )}
               </div>
-            )}
-            {settings !== null && settingsDisabled && (
-              <div className="command-empty">Wait for the current operation to finish.</div>
             )}
           </div>
         )}
@@ -371,9 +423,13 @@ export function Composer({
                   );
                   return;
                 }
-                if (event.key === "Enter" || (event.key === "Tab" && !event.shiftKey)) {
+                if (
+                  event.key === "Enter" ||
+                  (event.key === "Tab" && !event.shiftKey && choices.length > 0)
+                ) {
                   event.preventDefault();
-                  chooseCommand(choices[selectedCommand]);
+                  if (choices.length === 0 && catalogStatus?.retry) catalogStatus.retry();
+                  else chooseCommand(choices[selectedCommand]);
                   return;
                 }
               }
@@ -410,9 +466,9 @@ export function Composer({
               }
             }}
             aria-label="Message the orb"
-            aria-controls={isCommand ? "command-choices" : undefined}
+            aria-controls={pickerOpen ? "command-choices" : undefined}
             aria-activedescendant={
-              isCommand && choices.length ? `command-choice-${selectedCommand}` : undefined
+              pickerOpen && choices.length ? `command-choice-${selectedCommand}` : undefined
             }
             rows={4}
           />

@@ -97,7 +97,7 @@ function contract(name: string, open: () => Promise<ControlPlaneStore>): void {
             caller: bootCaller,
           })
         )._unsafeUnwrap(),
-      ).toBeNull();
+      ).toEqual({ context: null, pendingModel: null });
       expect(
         (await store.claimNextOrbMessageBatch(task, { orbId: ORB, now: 1_003 }))
           ._unsafeUnwrap()
@@ -110,7 +110,7 @@ function contract(name: string, open: () => Promise<ControlPlaneStore>): void {
             caller: bootCaller,
           })
         )._unsafeUnwrap(),
-      ).toBeNull();
+      ).toEqual({ context: null, pendingModel: null });
 
       const firstRecord: HistoryRecord = {
         id: "first-human-record",
@@ -135,7 +135,7 @@ function contract(name: string, open: () => Promise<ControlPlaneStore>): void {
         ).isOk(),
       ).toBe(true);
 
-      const context = (
+      const { context } = (
         await store.readOrbBootContext(task, { orbId: ORB, caller: bootCaller })
       )._unsafeUnwrap();
       expect(context).toMatchObject({ messageId: WAKE, messageIds: [WAKE] });

@@ -2,12 +2,14 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  type ClientFrame,
   DisplayHistoryViewSchema,
   type HistoryRecord,
   type OrbView,
   OrbViewSchema,
   type ProjectView,
   projectDisplayRecords,
+  type ServerFrame,
   type SessionProbe,
 } from "@pi-orb/protocol";
 import { chromium, expect as expectPage, webkit } from "@playwright/test";
@@ -17,6 +19,7 @@ import { build } from "vite";
 import { afterAll, beforeAll, expect, it, onTestFinished } from "vitest";
 import { registerWebAssets } from "../apps/control-plane/src/http/web-assets.ts";
 import { diagramFixtureRecords } from "../apps/web/dev/diagram-fixtures.ts";
+import { gotoFrontendHistory } from "./testkit/frontend-fixture.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pi-orb-built-shell-"));
 const app = Fastify({ logger: false });
@@ -935,3 +938,294 @@ flowchart LR
     expect(errors).toEqual([]);
   },
 );
+
+it.each([
+  ["stopped", 1280],
+  ["failed", 390],
+  ["running", 1280],
+  ["running", 390],
+] as const)("retries model picker errors in place on a %s orb at %ipx", async (state, width) => {
+  const origin = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
+  const page = await browser.newPage({ viewport: { width, height: 844 } });
+  onTestFinished(async () => {
+    await page.unrouteAll({ behavior: "wait" });
+    await page.close();
+  });
+  const desktop = width > 600;
+  const live = state === "running";
+  const orbId = "queued-model-orb";
+  const path = `**/api/v1/orbs/${orbId}`;
+  const url = `${origin}/orbs/${orbId}`;
+  const stamp = "2026-11-01T00:00:00Z";
+  const project: ProjectView = {
+    id: "queued-model-project",
+    name: "Queued model",
+    state: "active",
+    repositoryUrl: "https://github.com/example/queued-model",
+    createdAt: stamp,
+    updatedAt: stamp,
+  };
+  let orb: OrbView = {
+    id: orbId,
+    projectId: project.id,
+    name: "Offline picker",
+    harness: live ? "claude" : "pi",
+    createdAt: stamp,
+    updatedAt: stamp,
+    stateChangedAt: stamp,
+    state: desktop ? "running" : state,
+    stateVersion: 1,
+    ...(desktop && !live ? { centralAgent: true } : {}),
+    canQueueModel: !desktop && !live,
+    pendingModel: null,
+  };
+  const model = { provider: "test", id: "next" };
+  const oldModel = { provider: "test", id: "old" };
+  const models = [
+    { ...model, name: "Next model" },
+    ...Array.from({ length: 18 }, (_, i) => ({
+      provider: "test",
+      id: `model-${i}`,
+      name: `Model ${i}`,
+    })),
+  ];
+  const setterError = `Claude did not apply the model: ${"unbrokendetail".repeat(8)}`;
+  await page.route("**/api/v1/projects", (route) => route.fulfill({ json: { items: [project] } }));
+  await page.route(`**/api/v1/projects/${project.id}/orbs`, (route) =>
+    route.fulfill({ json: { items: [orb] } }),
+  );
+  await page.route(path, (route) => route.fulfill({ json: orb }));
+  const sessionId = "queued-model-session";
+  await page.route(`${path}/history`, (route) =>
+    route.fulfill({
+      json: { orbId, session: { id: sessionId }, records: [], cursor: null, headId: null },
+    }),
+  );
+  const liveRequests: ClientFrame[] = [];
+  if (desktop || live) {
+    await page.routeWebSocket(`${path}/live`, (socket) => {
+      const send = (frame: ServerFrame) => socket.send(JSON.stringify(frame));
+      const settings = (selected: typeof model): ServerFrame => ({
+        v: 1,
+        at: stamp,
+        type: "runtime.event",
+        event: {
+          type: "agent_settings",
+          settings: { model: selected, thinkingLevel: "high" },
+          models: [
+            { ...oldModel, name: "Old model", thinkingLevels: ["high"] },
+            ...(live
+              ? models.map((model) => ({ ...model, thinkingLevels: ["high" as const] }))
+              : []),
+          ],
+          writable: live,
+        },
+      });
+      socket.onMessage((data) => {
+        const frame: ClientFrame = JSON.parse(data.toString());
+        if (frame.type === "client.request") {
+          liveRequests.push(frame);
+          if (!live) return;
+          const reject = liveRequests.length === 1;
+          if (!reject) send(settings(model));
+          send({
+            v: 1,
+            at: stamp,
+            type: "request.result",
+            requestId: frame.requestId,
+            result: reject
+              ? {
+                  type: "rejected",
+                  error: { code: "internal", message: setterError, retryable: true },
+                }
+              : { type: "settings_applied", duplicate: false },
+          });
+        }
+        if (frame.type !== "client.hello") return;
+        const frames: ServerFrame[] = [
+          {
+            v: 1,
+            at: stamp,
+            type: "server.welcome",
+            connectionId: "queued-model-connection",
+            runtimeInstanceId: "queued-model-runtime",
+            orbId,
+            sessionId,
+            capabilities: [],
+            limits: { maxIncomingFrameBytes: 1_000_000, maxPromptBytes: 1_000_000 },
+          },
+          {
+            v: 1,
+            at: stamp,
+            type: "sync.started",
+            mode: "after",
+            afterRecordId: frame.afterRecordId,
+          },
+          settings(oldModel),
+          { v: 1, at: stamp, type: "runtime.event", event: { type: "status", activity: "idle" } },
+          { v: 1, at: stamp, type: "sync.completed", headId: null },
+        ];
+        for (const frame of frames) send(frame);
+      });
+    });
+  }
+  let rejectOptions = true;
+  const catalogError = "Catalog unavailable";
+  await page.route(`${path}/model-options`, (route) => {
+    expect(live).toBe(false);
+    expect(route.request().method()).toBe("GET");
+    return rejectOptions
+      ? route.fulfill({
+          status: 503,
+          json: {
+            error: { code: "unavailable", message: catalogError, retryable: true },
+          },
+        })
+      : route.fulfill({ json: { models } });
+  });
+  let rejectQueue = true;
+  const queueError = "Retry model selection";
+  await page.route(`${path}/pending-model`, (route) => {
+    expect(live).toBe(false);
+    expect(route.request().method()).toBe("PUT");
+    expect(route.request().postDataJSON()).toEqual({ model });
+    if (rejectQueue) {
+      return route.fulfill({
+        status: 409,
+        json: { error: { code: "conflict", message: queueError, retryable: false } },
+      });
+    }
+    orb = { ...orb, pendingModel: { changeId: "change-1", model } };
+    return route.fulfill({ json: orb });
+  });
+  const orbApiPath = `/api/v1/orbs/${orbId}`;
+  const lifecycleOrMessageRequests: string[] = [];
+  page.on("request", (request) => {
+    const pathname = new URL(request.url()).pathname;
+    if (
+      pathname === `${orbApiPath}/start` ||
+      pathname === `${orbApiPath}/messages` ||
+      (pathname.startsWith(`${orbApiPath}/messages/`) && pathname !== `${orbApiPath}/messages/poll`)
+    ) {
+      lifecycleOrMessageRequests.push(`${request.method()} ${pathname}`);
+    }
+  });
+
+  await gotoFrontendHistory(page, url, orbId);
+  page.setDefaultTimeout(10_000);
+  const changeModel = { name: "Change model", exact: true };
+  const modelButton = page.locator(".orb-header .orb-settings").getByRole("button", changeModel);
+  const liveThinking = page.getByRole("button", { name: "Change thinking", exact: true });
+  const picker = page.locator(".composer").getByRole("listbox", { name: "Commands" });
+  const input = page.getByRole("textbox", { name: "Message the orb", exact: true });
+  // On phones, Start lives in the collapsed actions row.
+  const start = page.getByRole("button", { name: "Start orb", exact: true, includeHidden: true });
+  const write = page.getByRole("button", { name: "Write message", exact: true });
+  const draft = desktop ? "keep my draft" : "";
+  const popup = page.locator(".command-picker");
+  const openPicker = async () => {
+    if (desktop) await modelButton.click();
+    else {
+      await input.press("/");
+      await picker.getByRole("option", { name: "model", exact: true }).click();
+    }
+    await expectPage(input).toHaveValue("model ");
+    await expectPage(popup).toBeVisible();
+  };
+  const expectPickerAlert = async (message: string) => {
+    const notice = popup.getByText(message, { exact: false });
+    await expectPage(notice).toBeInViewport({ ratio: 1 });
+    // Visibility alone does not catch the picker covering the text.
+    expect(
+      await notice.evaluate((element) => {
+        const { left, right, top, bottom } = element.getBoundingClientRect();
+        return [left + 2, right - 2].every((x) =>
+          [top + 2, bottom - 2].every((y) =>
+            element.contains(element.ownerDocument.elementFromPoint(x, y)),
+          ),
+        );
+      }),
+    ).toBe(true);
+    await expectPage(popup.getByRole("alert")).toContainText(message);
+    await expectPage(picker.getByRole("alert")).toHaveCount(0);
+    await expectPage(
+      page.getByText(message, { exact: false }).filter({ visible: true }),
+    ).toHaveCount(1);
+  };
+  const option = picker.getByRole("option", { name: "Next model", exact: true });
+  if (live) {
+    if (desktop) await input.fill(draft);
+    else await write.click();
+    await openPicker();
+    await input.fill("model test");
+    await expectPage(option).toBeEnabled();
+    await option.click();
+    await expectPickerAlert(setterError);
+    await expectPage(input).toHaveValue("model test");
+    await expectPage(option).toHaveAttribute("aria-selected", "true");
+    await expectPage(option).toBeEnabled();
+    await input.press("Enter");
+    await expectPage(input).toHaveValue(draft);
+    await expectPage(picker).toBeHidden();
+    await expectPage(page.getByText(setterError, { exact: false })).toHaveCount(0);
+    expect(liveRequests.map((frame) => frame.type === "client.request" && frame.action)).toEqual([
+      { type: "set_model", model },
+      { type: "set_model", model },
+    ]);
+    expect(lifecycleOrMessageRequests).toEqual([]);
+    return;
+  }
+  if (desktop) {
+    // Record the running orb's picker while the read-only socket is still supplying settings.
+    await expectPage(modelButton).toHaveText("Old model");
+    await expectPage(liveThinking).toBeVisible();
+    await input.fill(draft);
+    await openPicker();
+    await expectPage(picker.getByRole("option", { name: "Old model", exact: true })).toBeVisible();
+    await input.press("Escape");
+    await expectPage(input).toHaveValue(draft);
+    orb = { ...orb, state, stateVersion: 2, stopReason: "sleep", canQueueModel: true };
+    await expectPage(modelButton).toBeVisible();
+    await expectPage(liveThinking).toHaveCount(0);
+  } else {
+    await expectPage(page.getByRole("button", changeModel)).toBeHidden();
+    await write.click();
+  }
+  await expectPage(start).toHaveCount(1);
+  await openPicker();
+  await expectPickerAlert(catalogError);
+  rejectOptions = false;
+  await popup.getByRole("button", { name: "Retry", exact: true }).click();
+  await expectPage(input).toBeFocused();
+  await expectPage(popup).toBeVisible();
+  await expectPage(input).toHaveValue("model ");
+  await expectPage(option).toBeVisible();
+  await expectPage(popup.getByRole("alert")).toHaveCount(0);
+  await input.fill("model test");
+  await input.press("Enter");
+  await expectPickerAlert(queueError);
+  await expectPage(input).toHaveValue("model test");
+  await expectPage(option).toBeEnabled();
+  rejectQueue = false;
+  await option.click();
+  await expectPage(input).toHaveValue(draft);
+  await expectPage(picker).toBeHidden();
+  await expectPage(page.getByText(queueError, { exact: false })).toHaveCount(0);
+  await expectPage(start).toHaveCount(1);
+  const queuedLabel = "Next model (queued)";
+  if (desktop) await expectPage(modelButton).toHaveText(queuedLabel);
+  await expectPage(page.locator(".orb-header-scroll")).not.toContainText(/Queued:|\(queued\)/i);
+  await page.reload();
+  await expectPage(start).toHaveCount(1);
+  if (desktop) {
+    await expectPage(modelButton).toHaveText(queuedLabel);
+    orb = { ...orb, pendingModel: null, canQueueModel: false };
+    await expectPage(modelButton).toHaveText("Old model");
+  } else {
+    await write.click();
+    await openPicker();
+    await expectPage(picker.getByRole("option", { name: queuedLabel, exact: true })).toBeVisible();
+  }
+  expect(lifecycleOrMessageRequests).toEqual([]);
+  expect(liveRequests).toEqual([]);
+});

@@ -7,6 +7,7 @@ import {
   type HostedFilesResponse,
   type MessageInputBlock,
   type OrbMessageView,
+  type OrbModelOption,
   type OrbView,
   type RuntimeEvent,
   type ServerFrame,
@@ -59,8 +60,10 @@ import {
   enqueueOrbMessage,
   getOrb,
   getOrbHistory,
+  getOrbModelOptions,
   listHostedFiles,
   listOrbMessages,
+  putPendingModel,
   startOrb,
   stopOrb,
   updateOrb,
@@ -119,6 +122,8 @@ import { NotFoundPage } from "./NotFoundPage.tsx";
 
 const POLL_INTERVAL_MS = 2000;
 
+type ModelRef = AgentSettingsEvent["settings"]["model"];
+
 interface WelcomeInfo {
   runtimeInstanceId: string;
   sessionId: string;
@@ -154,6 +159,7 @@ interface OrbPageState {
   composerMode: ComposerMode;
   composerImages: ComposerImage[];
   settings: AgentSettingsEvent | null;
+  lastModel: (ModelRef & { name?: string }) | null;
   compacting: boolean;
   compaction: { operationId: string; afterId: string | null } | null;
   synced: boolean;
@@ -225,6 +231,7 @@ export function initialState(orbId: string): OrbPageState {
     composerMode: draft?.mode ?? "message",
     composerImages: draft?.images ?? [],
     settings: null,
+    lastModel: null,
     compacting: false,
     compaction: null,
     synced: false,
@@ -253,6 +260,7 @@ function applyRuntimeEvent(state: OrbPageState, event: RuntimeEvent): OrbPageSta
       return {
         ...state,
         settings: event,
+        lastModel: findModel(event.models, event.settings.model) ?? event.settings.model,
         ...(adjusted
           ? {
               notice: `Thinking adjusted to ${event.settings.thinkingLevel} for this model.`,
@@ -859,35 +867,53 @@ function CopyCodeButton({ code }: { code: string }) {
   );
 }
 
+function findModel<T extends ModelRef>(models: readonly T[] | undefined, ref: ModelRef) {
+  return models?.find((model) => model.provider === ref.provider && model.id === ref.id);
+}
+
 export function OrbHeaderSettings({
   view,
+  offline = false,
+  lastModel,
+  modelCatalog,
+  pendingModel,
   pending,
   effortLabel,
   onOpen,
 }: {
   view: AgentSettingsEvent | null;
+  offline?: boolean;
+  lastModel?: OrbPageState["lastModel"];
+  modelCatalog?: readonly OrbModelOption[] | undefined;
+  pendingModel?: ModelRef | undefined;
   pending: boolean;
   effortLabel: "effort" | "thinking";
   onOpen: (command: "model" | "effort" | "thinking") => void;
 }) {
-  if (view === null) return null;
-  const model = view.models.find(
-    (model) =>
-      model.provider === view.settings.model.provider && model.id === view.settings.model.id,
-  );
-  const effortAvailable = effortLabel === "thinking" || (model?.thinkingLevels.length ?? 0) > 0;
+  if (view === null && !offline && pendingModel === undefined) return null;
+  const liveModel = view === null ? undefined : findModel(view.models, view.settings.model);
+  const name =
+    pendingModel !== undefined
+      ? (findModel(modelCatalog, pendingModel) ?? findModel(view?.models, pendingModel))?.name
+      : offline
+        ? ((lastModel && findModel(modelCatalog, lastModel)?.name) ?? lastModel?.name)
+        : liveModel?.name;
+  const label = `${name || "Model"}${pendingModel !== undefined ? " (queued)" : ""}`;
   return (
     <div className="orb-settings">
       <button
         type="button"
         title="Change model"
         aria-label="Change model"
-        disabled={pending}
+        aria-description={label}
+        disabled={pending || (!offline && view === null)}
         onClick={() => onOpen("model")}
       >
-        {model?.name ?? view.settings.model.id}
+        {label}
       </button>
-      {effortAvailable && (
+      {!offline &&
+      view !== null &&
+      (effortLabel === "thinking" || liveModel?.thinkingLevels.length) ? (
         <button
           type="button"
           title={`Change ${effortLabel}`}
@@ -897,7 +923,7 @@ export function OrbHeaderSettings({
         >
           {view.settings.thinkingLevel}
         </button>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -1853,8 +1879,78 @@ function OrbConversation({
     });
   };
 
-  const changeSettings = (action: ComposerCommandAction) => {
-    if (!canRunComposerCommand(orb?.state, state, orb?.centralAgent)) return;
+  const connected = state.connection === "open";
+  const offlineModelAvailable = orb?.canQueueModel === true;
+  const liveSettings =
+    !offlineModelAvailable &&
+    orb !== null &&
+    !["deleting", "archiving", "archived"].includes(orb.state) &&
+    canConnectLive(orb) &&
+    connected &&
+    state.synced
+      ? state.settings
+      : null;
+  const pendingModel = orb?.pendingModel?.model;
+  const showOfflineCatalog = offlineModelAvailable && state.composerMode === "command";
+  const [catalog, setCatalog] = useState<{ models?: OrbModelOption[]; error?: string } | null>(
+    null,
+  );
+  const shouldLoadCatalog =
+    showOfflineCatalog || (offlineModelAvailable && pendingModel !== undefined && catalog === null);
+  const [catalogAttempt, retryCatalog] = useReducer((attempt: number) => attempt + 1, 0);
+  const [queuingModel, setQueuingModel] = useState(false);
+  const queueInFlight = useRef(false);
+  const [queueModelError, setQueueModelError] = useState<string | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Retry explicitly starts another catalog read.
+  useEffect(() => {
+    if (!shouldLoadCatalog) return;
+    const controller = new AbortController();
+    void getOrbModelOptions(orbId, controller.signal).then((result) => {
+      if (controller.signal.aborted) return;
+      setCatalog((previous) =>
+        result.isOk()
+          ? result.value
+          : { ...previous, error: `Could not load models: ${describeApiError(result.error)}` },
+      );
+    });
+    return () => controller.abort();
+  }, [orbId, shouldLoadCatalog, catalogAttempt]);
+
+  const retryModelOptions = () => {
+    setCatalog((previous) => (previous?.models === undefined ? null : { models: previous.models }));
+    retryCatalog();
+  };
+
+  const changeSettings = async (action: ComposerCommandAction) => {
+    if (action.type === "queue_model") {
+      if (!offlineModelAvailable || queueInFlight.current) return;
+      queueInFlight.current = true;
+      setQueuingModel(true);
+      setQueueModelError(null);
+      ++metadataRevision.current;
+      const result = await putPendingModel(orbId, { model: action.model });
+      ++metadataRevision.current;
+      queueInFlight.current = false;
+      setQueuingModel(false);
+      if (result.isErr()) {
+        setQueueModelError(`Could not queue model: ${describeApiError(result.error)}`);
+        return;
+      }
+      if (missingRef.current) return;
+      if (result.value.stateVersion >= (orbRef.current?.stateVersion ?? 0))
+        setObservedOrb(result.value);
+      const current = transcriptRef.current;
+      if (
+        current.composerMode === "command" &&
+        current.composerText === state.composerText &&
+        current.commandDraft === state.commandDraft
+      ) {
+        dispatch({ type: "composer_changed", mode: "message", text: "" });
+      }
+      return;
+    }
+    if (offlineModelAvailable || !canRunComposerCommand(orb?.state, state, orb?.centralAgent))
+      return;
     const requestId = liveRef.current?.sendRequest(action);
     if (!requestId) dispatch({ type: "send_unavailable" });
     else
@@ -1934,15 +2030,9 @@ function OrbConversation({
 
   const canStart = orb !== null && (orb.state === "stopped" || orb.state === "failed");
   const canStop = orb !== null && canStopOrb(orb);
-  const connected = state.connection === "open";
-  const settingsAvailable =
-    orb !== null &&
-    !["deleting", "archiving", "archived"].includes(orb.state) &&
-    canConnectLive(orb) &&
-    state.connection === "open" &&
-    state.synced &&
-    state.settings !== null;
-  const settingsDisabled = !canRunComposerCommand(orb?.state, state, orb?.centralAgent);
+  const settingsDisabled = offlineModelAvailable
+    ? queuingModel
+    : !canRunComposerCommand(orb?.state, state, orb?.centralAgent);
   const canSend = canSendComposer(orb, state);
   const canAbort = canAbortComposer(state, queuedMessages, orb?.centralAgent ?? false);
 
@@ -2054,10 +2144,17 @@ function OrbConversation({
             <Icon name="more" />
           </button>
           <OrbHeaderSettings
-            view={settingsAvailable ? state.settings : null}
-            pending={state.pendingRequest !== null}
+            view={liveSettings}
+            offline={offlineModelAvailable}
+            lastModel={state.lastModel}
+            modelCatalog={catalog?.models}
+            pendingModel={pendingModel}
+            pending={offlineModelAvailable ? queuingModel : state.pendingRequest !== null}
             effortLabel={orb?.harness === "claude" ? "effort" : "thinking"}
-            onOpen={(command) => dispatch({ type: "open_settings", command })}
+            onOpen={(command) => {
+              setQueueModelError(null);
+              dispatch({ type: "open_settings", command });
+            }}
           />
           <div className="orb-header-actions">
             <OrbTerminal
@@ -2325,22 +2422,44 @@ function OrbConversation({
         <Composer
           ref={composerRef}
           effortLabel={orb?.harness === "claude" ? "effort" : "thinking"}
-          settings={settingsAvailable ? state.settings : null}
+          settings={liveSettings}
+          offlineModels={
+            offlineModelAvailable
+              ? {
+                  models: catalog?.models ?? [],
+                  queued: pendingModel,
+                  status:
+                    catalog === null
+                      ? { message: "Loading models…" }
+                      : catalog.error !== undefined
+                        ? { message: catalog.error, retry: retryModelOptions }
+                        : undefined,
+                }
+              : undefined
+          }
           settingsDisabled={settingsDisabled}
-          settingsPending={state.pendingRequest?.kind === "settings"}
-          onSettingsChange={changeSettings}
-          feedback={[
-            state.pendingRequest?.kind === "settings" ? "Applying settings…" : null,
-            state.serverError === null
-              ? null
-              : `runtime error ${state.serverError.code}: ${state.serverError.message}`,
-            state.requestError === null
-              ? null
-              : `request rejected (${state.requestError.code}): ${state.requestError.message}`,
-            state.notice,
-          ]
-            .filter((message) => message !== null)
-            .join(" · ")}
+          settingsPending={queuingModel || state.pendingRequest?.kind === "settings"}
+          onSettingsChange={(action) => void changeSettings(action)}
+          feedback={{
+            message: [
+              queuingModel ? "Queuing model…" : null,
+              offlineModelAvailable ? queueModelError : null,
+              state.pendingRequest?.kind === "settings" ? "Applying settings…" : null,
+              state.serverError === null
+                ? null
+                : `runtime error ${state.serverError.code}: ${state.serverError.message}`,
+              state.requestError === null
+                ? null
+                : `request rejected (${state.requestError.code}): ${state.requestError.message}`,
+              state.notice,
+            ]
+              .filter((message) => message !== null)
+              .join(" · "),
+            error:
+              (offlineModelAvailable && queueModelError !== null) ||
+              state.serverError !== null ||
+              state.requestError !== null,
+          }}
           text={state.composerText}
           mode={state.composerMode}
           onValueChange={(text, mode) => dispatch({ type: "composer_changed", text, mode })}

@@ -4,7 +4,7 @@ import type { ResultAsync } from "neverthrow";
 import type { AgentSnapshot } from "../../domain/agent-ports.ts";
 import type { RuntimeClientError } from "../../domain/errors.ts";
 import type { OrbRow } from "../../domain/orb.ts";
-import type { OperationContext } from "../../domain/ports.ts";
+import type { CentralAgentCaller, OperationContext } from "../../domain/ports.ts";
 import type { AuthorityError, DrainOutcome } from "../durable-pg/index.ts";
 
 export interface AgentArtifacts {
@@ -24,6 +24,11 @@ export interface AgentStorageLease {
   readonly storage: Storage;
   /** Validates/renews the database owner and admission fence before inference/effects. */
   check(): ResultAsync<void, AgentLeaseError>;
+  /** Acknowledge an exact queued choice under the same database transaction as the owner fence. */
+  clearPendingModel?(
+    changeId: string,
+    caller: CentralAgentCaller,
+  ): ResultAsync<boolean, RuntimeClientError>;
   /** Read-only policy check; infrastructure/ownership failures remain fatal. */
   checkInputAdmission(browser: boolean): ResultAsync<void, InputAdmissionError>;
   /** Enables fenced cleanup, or confirms owner loss without authorizing writes. Teardown must still join. */

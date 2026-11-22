@@ -1,7 +1,10 @@
 import {
   ORB_BOOT_CONTEXT_PATH,
+  ORB_PENDING_MODEL_ACK_PATH,
   type OrbBootContextResponse,
   OrbBootContextResponseSchema,
+  OrbPendingModelAckResponseSchema,
+  type PendingModel,
 } from "@pi-orb/protocol";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
@@ -97,4 +100,49 @@ export function fetchBootContext(
   };
 
   return new ResultAsync(run());
+}
+
+export interface PendingModelAckError {
+  readonly type: "pending_model_ack_error";
+  readonly message: string;
+  readonly retryable: boolean;
+}
+
+/** A lost response is ambiguous: only a fresh locked boot read can resolve it. */
+export function acknowledgePendingModel(
+  env: BrokerEnv,
+  changeId: PendingModel["changeId"],
+): ResultAsync<void, PendingModelAckError> {
+  const failure = (message: string, retryable: boolean): PendingModelAckError => ({
+    type: "pending_model_ack_error",
+    message: `Cannot acknowledge the queued Claude model: ${message}`,
+    retryable,
+  });
+  return ResultAsync.fromThrowable(
+    async () => {
+      const response = await fetch(`${env.controlPlaneUrl}${ORB_PENDING_MODEL_ACK_PATH}`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${env.runtimeToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ v: 1, changeId }),
+        signal: AbortSignal.timeout(BOOT_CONTEXT_REQUEST_TIMEOUT_MS),
+      });
+      const payload: unknown = await response.json();
+      return { status: response.status, payload };
+    },
+    (cause) =>
+      cause instanceof SyntaxError
+        ? failure("malformed response", false)
+        : failure("request failed", true),
+  )().andThen(({ status, payload }) => {
+    if (status === 200 && Check(OrbPendingModelAckResponseSchema, payload)) return ok(undefined);
+    const rejection = responseError(payload);
+    return err(
+      rejection === null
+        ? failure("malformed response", false)
+        : failure(rejection.message, rejection.retryable),
+    );
+  });
 }

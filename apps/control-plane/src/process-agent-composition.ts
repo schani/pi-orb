@@ -39,6 +39,7 @@ import { LazyExecutionEnv } from "./adapters/execution-client/lazy-env.ts";
 import { LunaTurnSummarizer } from "./adapters/luna-summarizer.ts";
 import { modelCall } from "./adapters/model-usage.ts";
 import type { PgResourceGate } from "./adapters/pg/resource-gate.ts";
+import { acceptsPendingModelCaller } from "./domain/agent-authorization.ts";
 import { CODEX_PROVIDER, getToken, type TokenGrant, type TokenRequest } from "./domain/broker.ts";
 import type { RuntimeClientError } from "./domain/errors.ts";
 import { awaitExecutionBinding, type ExecutionBinding } from "./domain/execution-admission.ts";
@@ -53,7 +54,7 @@ import {
   type OrbAgentOptions,
 } from "./domain/orb-agent-operations.ts";
 import { readOwnerSkillsSnapshot } from "./domain/owner-skills.ts";
-import type { BrokerDeps, ControlPlaneDeps } from "./domain/ports.ts";
+import type { BrokerDeps, CentralAgentCaller, ControlPlaneDeps } from "./domain/ports.ts";
 import { getProjectSecretSnapshot } from "./domain/project-secrets.ts";
 import { resourceError } from "./domain/resources.ts";
 
@@ -437,17 +438,14 @@ export function createProcessAgentContext(
         ...(inferenceBaseUrl ? { inferenceBaseUrl } : {}),
       });
       if (models.isErr()) return err(models.error);
-      const service = createCentralOrbAgentOperations(
-        task,
-        deps,
-        {
-          ownerUserId,
-          projectId: orb.projectId,
-          orbId: orb.id,
-          agentAdmissionVersion: orb.agentAdmissionVersion,
-        },
-        options,
-      );
+      const authority: CentralAgentCaller = {
+        kind: "central",
+        ownerUserId,
+        projectId: orb.projectId,
+        orbId: orb.id,
+        agentAdmissionVersion: orb.agentAdmissionVersion,
+      };
+      const service = createCentralOrbAgentOperations(task, deps, authority, options);
       let workspaceReady = false;
       const files = createAgentToolFiles({
         reader: prepared.value.reader,
@@ -641,6 +639,14 @@ export function createProcessAgentContext(
         await closeProcessAgentResources(tools, env);
         return err(durableError("agent admission superseded"));
       }
+      // Only inhibited rows can queue a choice. Waking bumps the admission version, so a
+      // read-only owner cannot resume with a stale choice. Reuse this fresh admission read.
+      const pendingModel = readOnly ? null : admitted.value.pendingModel;
+      if (pendingModel && !acceptsPendingModelCaller(admitted.value, ownerUserId, authority)) {
+        resourcesAbort.abort();
+        await closeProcessAgentResources(tools, env);
+        return err(durableError("Queued Pi model admission superseded", true));
+      }
       const registry = createRegistry();
       if (catalog.value.servers.length)
         registry.install(
@@ -768,6 +774,28 @@ export function createProcessAgentContext(
         checkExecutionReady,
         executionActive: () => env.active(),
         resume: !readOnly && orb.stopReason !== "manual" && orb.stopReason !== "sleep",
+        ...(pendingModel
+          ? {
+              pendingModel: {
+                value: pendingModel,
+                clear: (changeId: string) =>
+                  (
+                    lease.clearPendingModel?.(changeId, authority) ??
+                    lease
+                      .check()
+                      .andThen(() =>
+                        deps.store
+                          .clearPendingModel(task, orb.id, changeId, authority)
+                          .mapErr(() =>
+                            durableError("Could not acknowledge the queued Pi model", true),
+                          ),
+                      )
+                  ).andTee((cleared) => {
+                    if (cleared) logOrbEvent(task, orb.id, "model-applied", { changeId });
+                  }),
+              },
+            }
+          : {}),
         openSignal: operation.signal,
         admitRecovery: () => admitAgentRecovery(task, deps, orb.id),
         checkAdmission: () =>

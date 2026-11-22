@@ -4,9 +4,14 @@ import { err, errAsync, okAsync, ResultAsync } from "neverthrow";
 import type { RuntimeClientError } from "../../domain/errors.ts";
 import { logOrbEvent } from "../../domain/log.ts";
 import type { OrbRow } from "../../domain/orb.ts";
-import type { ControlPlaneStore, OperationContext } from "../../domain/ports.ts";
+import type {
+  CentralAgentCaller,
+  ControlPlaneStore,
+  OperationContext,
+} from "../../domain/ports.ts";
 import { type AuthorityError, PgDurableAuthority } from "../durable-pg/index.ts";
 import type { PostgreSQLClient } from "../pg/client.ts";
+import { clearPendingModelInTransaction } from "../pg/store.ts";
 import { projectNativeCommit } from "./atomic-history.ts";
 import { checkNativeInputAdmission } from "./inbox-admission.ts";
 import type {
@@ -199,6 +204,14 @@ export class PgAgentPersistence implements AgentPersistence {
               storage,
               artifacts: new PgAgentArtifacts(authority, owner),
               check,
+              clearPendingModel: (changeId: string, caller: CentralAgentCaller) =>
+                released || abort.signal.aborted
+                  ? errAsync(failure("Agent ownership revoked"))
+                  : authority
+                      .ownedTransaction(owner, (query) =>
+                        clearPendingModelInTransaction(query, owner.orbId, changeId, caller),
+                      )
+                      .mapErr(startupRuntimeError),
               checkInputAdmission: (browser: boolean) =>
                 checkNativeInputAdmission(this.db.query.bind(this.db), orb.id, browser).mapErr(
                   (error): InputAdmissionError =>

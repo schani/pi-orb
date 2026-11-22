@@ -18,6 +18,7 @@ export function newOrbRow(
     projectId: params.projectId,
     harness: params.harness ?? "pi",
     initialModel: params.initialModel ?? null,
+    pendingModel: null,
     name: params.name ?? null,
     userTimeZone: params.userTimeZone ?? null,
     autoNameLeaseUntil: null,

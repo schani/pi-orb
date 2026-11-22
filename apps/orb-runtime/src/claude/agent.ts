@@ -28,6 +28,7 @@ import {
   type OrbBootContext,
   type OrbMessageSystem,
   OrbMessageSystemSchema,
+  type PendingModel,
   projectDisplayRecord,
   projectRecordDetail,
   projectRecordImage,
@@ -69,7 +70,7 @@ import { fetchProjectSecretSnapshotAtBoot } from "../project-secrets/endpoint.ts
 import { ClaudeActivity } from "./activity.ts";
 import { claudeChildEnvironment, fetchClaudeSubscription, verifyClaudeAccount } from "./auth.ts";
 import { validateClaudeAuthSettings } from "./auth-settings.ts";
-import { fetchBootContext } from "./boot-context.ts";
+import { acknowledgePendingModel, fetchBootContext } from "./boot-context.ts";
 import {
   bootNotificationModelText,
   claudeBootEntries,
@@ -694,6 +695,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       this.configDir,
       this.checkoutCommit,
       context.value.context,
+      context.value.pendingModel,
     );
     if (started.isErr()) {
       if (this.health.status !== "failed")
@@ -731,6 +733,7 @@ export class ClaudeOrbAgent implements OrbAgent {
     configDir: string,
     checkoutCommit: string | null,
     bootContext?: OrbBootContext | null,
+    pendingModel?: PendingModel,
   ): ResultAsync<void, { message: string }> {
     this.state = state;
     this.history = history;
@@ -742,11 +745,27 @@ export class ClaudeOrbAgent implements OrbAgent {
     this.activity.claim(`claude-initialization:${this.runtimeInstanceId}`);
     this.activity.beginDrain();
     this.recordModelUsageUnavailable();
-    return this.startQuery()
+    return this.startQuery(pendingModel?.model)
       .andThen(() => ResultAsync.fromSafePromise(this.closeExtensions("attach")))
+      .andThen(() => this.finishMetadata("attach"))
       .andThen(() => {
-        const finished = this.finishMetadata("attach");
-        if (finished.isErr()) return err(finished.error);
+        if (pendingModel === undefined) return ok(undefined);
+        if (!this.accepting) return err({ message: "Claude session is not accepting work." });
+        const broker = this.options.broker;
+        if (broker === null) {
+          const message = "Cannot acknowledge the queued Claude model without a runtime broker.";
+          this.fail("claude_pending_model_ack_failed", message);
+          return err({ message });
+        }
+        return acknowledgePendingModel(broker, pendingModel.changeId).mapErr((error) => {
+          this.fail("claude_pending_model_ack_failed", error.message, error.retryable);
+          return error;
+        });
+      })
+      .andThen(() => {
+        if (this.health.status === "failed") return err({ message: this.health.error.message });
+        if (pendingModel !== undefined && !this.accepting)
+          return err({ message: "Claude session is not accepting work." });
         this.health = {
           v: 1,
           orbId: this.options.orbId,
@@ -889,14 +908,14 @@ export class ClaudeOrbAgent implements OrbAgent {
       this.event(this.settings);
     }
   }
-  private startQuery(): ResultAsync<void, { message: string }> {
+  private startQuery(queuedModel?: PendingModel["model"]): ResultAsync<void, { message: string }> {
     if (!this.accepting || this.health.status === "failed")
       return errAsync({ message: "Claude session is not accepting work." });
     if (this.sdk !== null)
       return this.queryReady && this.closing === null
         ? ResultAsync.fromSafePromise(Promise.resolve())
         : errAsync({ message: "Claude query initialization or shutdown is pending." });
-    if (this.options.sdkFactory !== undefined) return this.createQuery();
+    if (this.options.sdkFactory !== undefined) return this.createQuery(queuedModel);
     if (this.options.broker === null)
       return errAsync({ message: "Claude subscription broker is unavailable." });
     return fetchClaudeSubscription(this.options.broker)
@@ -907,10 +926,10 @@ export class ClaudeOrbAgent implements OrbAgent {
       .andThen((grant) => {
         this.token = grant.token;
         this.generation = grant.generation;
-        return this.createQuery();
+        return this.createQuery(queuedModel);
       });
   }
-  private createQuery(): ResultAsync<void, { message: string }> {
+  private createQuery(queuedModel?: PendingModel["model"]): ResultAsync<void, { message: string }> {
     const progress = { stage: "preparation" };
     const diagnostics = new ClaudeDiagnostics([
       this.token,
@@ -920,7 +939,7 @@ export class ClaudeOrbAgent implements OrbAgent {
         .filter(([key]) => /token|secret|password|key|credential|auth/i.test(key))
         .map(([, value]) => value ?? ""),
     ]);
-    return this.initializeQuery(progress, diagnostics).orElse((error) => {
+    return this.initializeQuery(progress, diagnostics, queuedModel).orElse((error) => {
       if (this.compaction !== null && this.outcome === "aborted")
         return errAsync({ message: "Context compaction cancelled during initialization." });
       const code =
@@ -957,6 +976,7 @@ export class ClaudeOrbAgent implements OrbAgent {
   private initializeQuery(
     progress: { stage: string },
     diagnostics: ClaudeDiagnostics,
+    queuedModel?: PendingModel["model"],
   ): ResultAsync<void, ClaudeQueryError> {
     if (this.compaction !== null && this.outcome === "aborted")
       return errAsync({ message: "Context compaction cancelled before initialization." });
@@ -965,6 +985,9 @@ export class ClaudeOrbAgent implements OrbAgent {
     const state = this.state;
     if (state === null)
       return errAsync({ message: "Native Claude session pointer is unavailable." });
+    if (queuedModel !== undefined && queuedModel.provider !== "claude")
+      return errAsync({ message: "Queued model does not belong to the Claude harness." });
+    const selected = queuedModel?.id ?? state.model ?? DEFAULT_CLAUDE_MODEL;
     const nativePath = this.nativePath();
     if (nativePath.isErr()) return errAsync(nativePath.error);
     const authSettings = validateClaudeAuthSettings(state.cwd, this.configDir);
@@ -1038,8 +1061,8 @@ export class ClaudeOrbAgent implements OrbAgent {
           : {}),
       },
       ...(nativePath.value !== null ? { resume: state.id } : { sessionId: state.id }),
-      model: state.model ?? DEFAULT_CLAUDE_MODEL,
-      ...(state.effort === undefined ? {} : { effort: state.effort }),
+      model: selected,
+      ...(queuedModel !== undefined || state.effort === undefined ? {} : { effort: state.effort }),
       tools: { type: "preset", preset: "claude_code" },
       systemPrompt: {
         type: "preset",
@@ -1227,7 +1250,6 @@ export class ClaudeOrbAgent implements OrbAgent {
         progress.stage = "models";
         const models = await sdk.supportedModels();
         this.nativeModels = models;
-        const selected = this.state?.model ?? DEFAULT_CLAUDE_MODEL;
         if (this.state !== null) {
           progress.stage = "model";
           const available = findClaudeModel(models, selected);
@@ -1235,10 +1257,16 @@ export class ClaudeOrbAgent implements OrbAgent {
             return err({ message: `Selected Claude model is unavailable: ${selected}.` });
           progress.stage = "effort";
           const advertised = available.supportedEffortLevels ?? [];
+          const retainedEffort = this.state.effort;
+          const defaultEffort = advertised.includes("high") ? "high" : advertised[0];
           const effort =
             advertised.length === 0
               ? undefined
-              : (this.state.effort ?? (advertised.includes("high") ? "high" : advertised[0]));
+              : queuedModel !== undefined &&
+                  retainedEffort !== undefined &&
+                  !advertised.includes(retainedEffort)
+                ? defaultEffort
+                : (retainedEffort ?? defaultEffort);
           if (advertised.length > 0 && (effort === undefined || !advertised.includes(effort)))
             return err({
               message: "Selected Claude model has no qualified native effort setting.",
@@ -1246,7 +1274,8 @@ export class ClaudeOrbAgent implements OrbAgent {
           progress.stage = "set_model";
           await sdk.setModel(selected);
           progress.stage = "flags";
-          if (effort !== undefined) await sdk.applyFlagSettings({ effortLevel: effort });
+          if (effort !== undefined || queuedModel !== undefined)
+            await sdk.applyFlagSettings({ effortLevel: effort ?? null });
           this.state.authentication = {
             source: "CLAUDE_CODE_OAUTH_TOKEN",
             generation: this.generation,

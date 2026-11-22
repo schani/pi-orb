@@ -17,6 +17,7 @@ it("assigns each migration a unique sequence after shipped main migrations", () 
   expect(files).toContain("039_resource_events.sql");
   expect(files).toContain("029_history_record_shape.sql");
   expect(files).toContain("030_activity_headlines.sql");
+  expect(files).toContain("056_orb_pending_model.sql");
 });
 
 it("bounds 044 lock-only contention retries before DDL with edge telemetry", () => {

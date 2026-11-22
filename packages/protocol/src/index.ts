@@ -22,6 +22,7 @@ export * from "./orb-inspection.ts";
 export * from "./orb-links.ts";
 export * from "./orb-message-context.ts";
 export * from "./orb-messaging.ts";
+export * from "./orb-model.ts";
 export * from "./orb-naming.ts";
 export * from "./orb-sleep.ts";
 export * from "./orb-spawn.ts";

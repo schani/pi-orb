@@ -1,11 +1,20 @@
-import type { HarnessSessionMetadata, HistoryRecord, OrbState, StopReason } from "@pi-orb/protocol";
+import type {
+  HarnessSessionMetadata,
+  HistoryRecord,
+  OrbState,
+  PendingModel,
+  StopReason,
+} from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, Result, ResultAsync } from "neverthrow";
 import type {
   ActivityHeadlineRef,
   StoredActivityHeadline,
 } from "../../domain/activity-headline-store.ts";
-import { acceptsOrbAgentCaller } from "../../domain/agent-authorization.ts";
+import {
+  acceptsOrbAgentCaller,
+  acceptsPendingModelCaller,
+} from "../../domain/agent-authorization.ts";
 import type {
   CommitPullError,
   ProjectConflict,
@@ -18,16 +27,18 @@ import { jsonEqual } from "../../domain/json-equal.ts";
 import { logOrbEvent } from "../../domain/log.ts";
 import { messageBatchId } from "../../domain/message-batch.ts";
 import { claudeModelCall } from "../../domain/model-usage.ts";
-import type {
-  OrbDeletionRow,
-  OrbListRow,
-  OrbMessageMetadataRow,
-  OrbMessagePoll,
-  OrbMessageRow,
-  OrbRow,
-  ProjectRow,
+import {
+  canQueueModel,
+  type OrbDeletionRow,
+  type OrbListRow,
+  type OrbMessageMetadataRow,
+  type OrbMessagePoll,
+  type OrbMessageRow,
+  type OrbRow,
+  type ProjectRow,
 } from "../../domain/orb.ts";
 import type {
+  ArchiveCaller,
   CasTransitionParams,
   CasUpdateFieldsParams,
   CommitPullBatchParams,
@@ -46,6 +57,7 @@ import type {
   RequestOrbDeletionParams,
   SpawnConflict,
   SpawnOrbParams,
+  StoredOrbBootContext,
 } from "../../domain/ports.ts";
 import { hasNativeInboxAdmission } from "../durable-pg/inbox-admission.ts";
 import { removePrivateAgentState } from "./archive-private-state.ts";
@@ -108,6 +120,36 @@ async function authorizeDescendantCleanup(
   return ok(undefined);
 }
 
+/** Native Pi startup calls this from its ownership-guarded transaction. */
+export async function clearPendingModelInTransaction(
+  query: PostgreSQLClient["query"],
+  orbId: string,
+  changeId: string,
+  authority: ArchiveCaller,
+): Promise<Result<boolean, StoreError>> {
+  const locked = await query("SELECT * FROM orbs WHERE id = $1 FOR UPDATE", [orbId]);
+  if (locked.isErr()) return err(locked.error);
+  if (!locked.value.rows[0]) return ok(false);
+  const orb = mapOrbRow(locked.value.rows[0]);
+  if (orb.pendingModel?.changeId !== changeId) return ok(false);
+  // Project deletion changes child state under the same orb lock. Don't acquire
+  // a project lock here: deletion takes it before the orb, and Pi already owns the orb lock.
+  const project = await query("SELECT state, owner_user_id FROM projects WHERE id = $1", [
+    orb.projectId,
+  ]);
+  if (project.isErr()) return err(project.error);
+  const owner = project.value.rows[0];
+  if (
+    owner?.["state"] !== "active" ||
+    !acceptsPendingModelCaller(orb, String(owner["owner_user_id"]), authority)
+  )
+    return ok(false);
+  const cleared = await query("UPDATE orbs SET pending_model = NULL WHERE id = $1 RETURNING id", [
+    orbId,
+  ]);
+  return cleared.map((result) => result.rows.length > 0);
+}
+
 const BOOT_CONTEXT_STATES: readonly OrbState[] = [
   "creating",
   "starting",
@@ -146,6 +188,7 @@ function mapOrbRow(row: PgRow): OrbRow {
     projectId: String(row["project_id"]),
     harness: row["harness"] as OrbRow["harness"],
     initialModel: (row["initial_model"] ?? null) as OrbRow["initialModel"],
+    pendingModel: (row["pending_model"] ?? null) as PendingModel | null,
     name: row["name"] === null ? null : String(row["name"]),
     userTimeZone: row["user_time_zone"] == null ? null : String(row["user_time_zone"]),
     autoNameLeaseUntil:
@@ -875,7 +918,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         `UPDATE orbs SET state = 'deleting', state_version = state_version + 1,
            agent_admission_version = agent_admission_version + 1,
            state_changed_at = $2, updated_at = $2, last_error = NULL, stop_reason = NULL,
-           sleep_id = NULL, sleep_until = NULL,
+           sleep_id = NULL, sleep_until = NULL, pending_model = NULL,
            auto_name_lease_until = NULL, auto_name_next_attempt_at = NULL
          WHERE project_id = $1 AND state <> 'deleting'`,
         [params.projectId, new Date(params.now)],
@@ -991,6 +1034,37 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       .map((result) => (result.rows[0] !== undefined ? mapOrbRow(result.rows[0]) : null));
   }
 
+  queueModel(
+    _task: SimulationTask,
+    orbId: string,
+    pending: PendingModel,
+  ): ResultAsync<boolean, StoreError> {
+    return this.db.transaction<boolean, StoreError>(async (query) => {
+      // Start, Send and scheduled wake all serialize on this row. No version
+      // bump: the choice must not invalidate an already admitted wake intent.
+      const locked = await query("SELECT * FROM orbs WHERE id = $1 FOR UPDATE", [orbId]);
+      if (locked.isErr()) return err(locked.error);
+      const row = locked.value.rows[0];
+      if (row === undefined || !canQueueModel(mapOrbRow(row))) return ok(false);
+      const queued = await query(
+        "UPDATE orbs SET pending_model = $2::jsonb WHERE id = $1 RETURNING id",
+        [orbId, jsonParam(pending)],
+      );
+      return queued.map((result) => result.rows.length > 0);
+    });
+  }
+
+  clearPendingModel(
+    _task: SimulationTask,
+    orbId: string,
+    changeId: string,
+    authority: ArchiveCaller,
+  ): ResultAsync<boolean, StoreError> {
+    return this.db.transaction<boolean, StoreError>((query) =>
+      clearPendingModelInTransaction(query, orbId, changeId, authority),
+    );
+  }
+
   getOrbByRuntimeTokenHash(
     _task: SimulationTask,
     tokenHash: string,
@@ -1075,8 +1149,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
            checkout_commit, harness_session_id, harness_session_header, last_error,
            runtime_token_hash, replication_cursor, replicated_head_id, last_busy_at,
            stop_reason, sleep_id, sleep_until, last_mint_at,
-           state_changed_at, created_at, updated_at, user_time_zone, harness, agent_admission_version, last_ready_at, claude_recovery, auto_restart_times, initial_model, preview_active_until)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::json,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38::jsonb,$39,$40::jsonb,$41)
+           state_changed_at, created_at, updated_at, user_time_zone, harness, agent_admission_version, last_ready_at, claude_recovery, auto_restart_times, initial_model, preview_active_until, pending_model)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::json,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38::jsonb,$39,$40::jsonb,$41,$42::jsonb)
          ON CONFLICT (id) DO NOTHING RETURNING *`,
         [
           orb.id,
@@ -1120,6 +1194,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           arrayParam(orb.autoRestartTimes.map((at) => new Date(at))),
           jsonParam(orb.initialModel),
           orb.previewActiveUntil === null ? null : new Date(orb.previewActiveUntil),
+          jsonParam(orb.pendingModel),
         ],
       );
       if (inserted.isErr()) return err(inserted.error);
@@ -1208,8 +1283,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         }
         const now = new Date(params.orb.createdAt);
         const inserted = await query(
-          `INSERT INTO orbs (id, project_id, name, user_time_zone, state, host_kind, last_busy_at, state_changed_at, created_at, updated_at, harness, initial_model)
-        VALUES ($1,$2,$3,$4,'creating',$5,$6,$6,$6,$6,$7,$8::jsonb) ON CONFLICT (id) DO NOTHING RETURNING id`,
+          `INSERT INTO orbs (id, project_id, name, user_time_zone, state, host_kind, last_busy_at, state_changed_at, created_at, updated_at, harness, initial_model, pending_model)
+        VALUES ($1,$2,$3,$4,'creating',$5,$6,$6,$6,$6,$7,$8::jsonb,$9::jsonb) ON CONFLICT (id) DO NOTHING RETURNING id`,
           [
             params.orb.id,
             params.orb.projectId,
@@ -1219,6 +1294,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
             now,
             params.orb.initialModel === null ? source["harness"] : params.orb.harness,
             jsonParam(params.orb.initialModel),
+            jsonParam(params.orb.pendingModel),
           ],
         );
         if (inserted.isErr()) return err(inserted.error);
@@ -1612,10 +1688,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     _task: SimulationTask,
     params: { orbId: string; caller: { runtimeTokenHash: string; hostIncarnation: number } },
   ) {
-    return this.db.transaction<
-      import("@pi-orb/protocol").OrbBootContext | null,
-      StoreError | StateConflict
-    >(async (query) => {
+    return this.db.transaction<StoredOrbBootContext, StoreError | StateConflict>(async (query) => {
       const locked = await query("SELECT * FROM orbs WHERE id = $1 FOR UPDATE", [params.orbId]);
       if (locked.isErr()) return err(locked.error);
       const orb = locked.value.rows[0];
@@ -1635,7 +1708,9 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       if (head.isErr()) return err(head.error);
       const row = head.value.rows[0];
       const system = row?.["system"] as OrbMessageRow["system"] | undefined;
-      if (row === undefined || system?.kind !== "sleep_wake") return ok(null);
+      const pendingModel = (orb["pending_model"] ?? null) as PendingModel | null;
+      if (row === undefined || system?.kind !== "sleep_wake")
+        return ok({ context: null, pendingModel });
       if (row["delivery_batch_id"] === null) {
         const frozen = await query(
           `UPDATE orb_messages SET status = 'delivering', delivery_batch_id = message_id
@@ -1646,10 +1721,13 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       }
       const message = mapMessageRow(row);
       return ok({
-        messageId: message.messageId,
-        messageIds: [message.messageId],
-        content: [...message.content],
-        system: { kind: "sleep_wake" as const, sleepUntil: system.sleepUntil },
+        pendingModel,
+        context: {
+          messageId: message.messageId,
+          messageIds: [message.messageId],
+          content: [...message.content],
+          system: { kind: "sleep_wake" as const, sleepUntil: system.sleepUntil },
+        },
       });
     });
   }
@@ -1975,7 +2053,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       const updated = await query(
         `UPDATE orbs SET state = 'archiving', state_version = state_version + 1,
            state_changed_at = $3, updated_at = $3, last_error = NULL, stop_reason = NULL,
-           sleep_id = NULL, sleep_until = NULL,
+           sleep_id = NULL, sleep_until = NULL, pending_model = NULL,
            auto_name_lease_until = NULL, auto_name_next_attempt_at = NULL
          WHERE id = $1 AND state_version = $2 AND state NOT IN ('archiving', 'archived', 'deleting')
            AND (($6::uuid IS NULL AND ($4::text IS NULL OR (runtime_token_hash = $4 AND host_incarnation = $5
@@ -2101,7 +2179,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         `UPDATE orbs SET state = 'deleting', state_version = state_version + 1,
            agent_admission_version = agent_admission_version + 1,
            state_changed_at = $3, updated_at = $3, last_error = NULL, stop_reason = NULL,
-           sleep_id = NULL, sleep_until = NULL
+           sleep_id = NULL, sleep_until = NULL, pending_model = NULL
          WHERE id = $1 AND state_version = $2
            AND (($6::uuid IS NULL AND ($4::text IS NULL OR (runtime_token_hash = $4 AND host_incarnation = $5
              AND state = 'running' AND host_discard_through_incarnation IS NULL)))
@@ -2270,7 +2348,13 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           ? ["stop_reason = 'manual'", "agent_admission_version = agent_admission_version + 1"]
           : []),
       ],
-      [new Date(params.now), params.lastError, params.evidence ?? null],
+      [
+        new Date(params.now),
+        params.lastError,
+        params.evidence ?? null,
+        params.expectedPendingModelChangeId ?? null,
+      ],
+      "($6::text IS NULL OR pending_model->>\'changeId\' = $6)",
     );
   }
 

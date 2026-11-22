@@ -158,7 +158,7 @@ it.each(["chromium", "webkit"] as const)(
             <nav class="usage-periods"><button aria-pressed="true">7d</button></nav>
             <article class="rec rec-you"><div class="chat-markdown"><p><a class="you-link" href="#you">you</a></p><section class="markdown-table-scroll" tabindex="0"><table><thead><tr><th>A</th></tr></thead><tbody><tr><td>1</td></tr></tbody></table></section></div></article>
             <a class="app-search-result active" href="#found"><span class="app-search-age">1h</span></a>
-            <div class="command-picker" style="position: static"><button type="button" class="selected">/model</button></div>`,
+            <div class="command-picker" style="position: static"><div class="command-options"><button type="button" class="selected">/model</button></div></div>`,
           );
         });
         await expectFocus(page, page.locator(".project-config-tabs > button"), GRAY, PAPER);
@@ -166,7 +166,7 @@ it.each(["chromium", "webkit"] as const)(
         await expectFocus(page, page.locator("a.you-link"), GRAY, PAPER);
         await expectFocus(page, page.locator(".rec-you .markdown-table-scroll"), GRAY, PAPER);
         await expectFocus(page, page.locator(".app-search-result.active"), GRAY, PAPER);
-        await expectFocus(page, page.locator(".command-picker > button"), GRAY, PAPER);
+        await expectFocus(page, page.locator(".command-options > button"), GRAY, PAPER);
         await page.close();
 
         const phone = await browser.newPage({ viewport: { width: 390, height: 844 } });

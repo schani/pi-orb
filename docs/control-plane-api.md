@@ -57,6 +57,7 @@ The UI shows the message, so a deterministic bug is a visible failure, not an en
 | `GET\|POST /api/v1/projects/:projectId/orbs` | List; create orb | below |
 | `GET\|PATCH\|DELETE /api/v1/orbs/:orbId` | Read, rename, delete | below, `docs/teardown.md` |
 | `POST /api/v1/orbs/:orbId/start\|stop\|archive` | Lifecycle | below, `docs/lifecycle.md`, `docs/teardown.md` |
+| `GET /api/v1/orbs/:orbId/model-options`, `PUT …/pending-model` | Queue an offline model change | below, `docs/agent-context.md` |
 | `GET /api/v1/orbs/:orbId/history` | Display history | `docs/history.md` |
 | `GET …/details/:recordId/:detailKey?sessionId=` | Committed detail | `docs/history.md` |
 | `GET …/details/live/:operationId/:blockId?sessionId=` | Live detail | `docs/history.md` |
@@ -94,7 +95,8 @@ accepts a caller-selected identity.
 | `POST /runtime/v1/history/search` | History search | `docs/history.md` |
 | `PUT /runtime/v1/orbs/:orbId/spawn` | Spawn orb | `docs/inbox.md` |
 | `POST /runtime/v1/orb/send` | Peer message | `docs/inbox.md` |
-| `POST /runtime/v1/orb/sleep`, `POST /runtime/v1/orb/boot-context` | Scheduled sleep | `docs/lifecycle.md` |
+| `POST /runtime/v1/orb/sleep`, `POST /runtime/v1/orb/boot-context` | Scheduled sleep and boot context | `docs/lifecycle.md` |
+| `POST /runtime/v1/orb/pending-model/ack` | Acknowledge the applied boot model | below, `docs/agent-context.md` |
 | `POST /runtime/v1/orb/archive`, `POST /runtime/v1/orb/delete` | Orb cleanup | `docs/teardown.md` (In-orb cleanup) |
 | `PUT\|DELETE /runtime/previews/:port`, `GET /runtime/previews` | Preview registration | `docs/http-exposure.md` |
 | `POST\|GET\|DELETE /runtime/v1/hosting/files?path=` | Hosted files | `docs/http-exposure.md` |
@@ -169,6 +171,8 @@ interface OrbView {
   state: "creating" | "starting" | "running" | "stopping" | "stopped" | "failed"
     | "deleting" | "archiving" | "archived";
   stateVersion: number;
+  canQueueModel?: boolean;        // lifecycle eligibility hint; the write rechecks eligibility
+  pendingModel?: { changeId: string; model: { provider: string; id: string } } | null;
   spawnedByOrb?: string;          // immutable spawn caller ID; on list and single GETs, kept after
                                   // caller archive/delete, may be omitted on mutations (docs/inbox.md)
   centralAgent?: boolean;
@@ -240,6 +244,26 @@ content returns 409. No idempotency table. Specifically:
 - `userTimeZone` must be valid IANA (else 400). It is a per-orb creation snapshot
   (`orbs.user_time_zone`), not a preference; a different supplied zone on retry is 409, omission
   keeps it, concurrent creates keep the first.
+
+### Offline model selection
+
+Both browser routes are authenticated and return `Cache-Control: no-store`. `GET …/model-options`
+returns `200 {models: [{provider, id, name}]}`. `PUT …/pending-model` accepts only
+`{model: {provider, id}}` and returns `200` with the current `OrbView`. The server assigns a new
+`changeId` on each acceptance. Malformed or ineligible model IDs return 400; a missing orb returns
+404; ineligible lifecycle, project deletion or a disconnected provider returns 409; temporary catalog
+failure returns retryable 503. Eligibility and application order: `docs/agent-context.md`.
+
+Failures handled by these routes emit `lifecycle: orb=<id> offline-model-failed` with
+`op=model-options` or `op=pending-model` and a typed catalog `reason` or refusal/store `code`.
+Claude catalog reasons distinguish `probe_timeout`, `probe_failed`, and `cleanup_failed`
+(shutdown or temporary-directory cleanup). The event omits model refs, request contents, and raw
+errors. Successful reads and polls do not emit lifecycle events.
+
+For Claude, `POST /runtime/v1/orb/boot-context` includes `pendingModel` only when set.
+After persisting the choice, the runtime posts `{v:1, changeId}` to
+`/runtime/v1/orb/pending-model/ack` with its incarnation bearer. An exact authorized match clears
+it and returns no-store `200 {v:1}`; a stale choice or lifecycle fence returns 409.
 
 ### Status semantics
 

@@ -31,3 +31,19 @@ export function acceptsOrbAgentCaller(
         orb.hostIncarnation === caller.hostIncarnation &&
         orb.hostDiscardThroughIncarnation === null;
 }
+
+export function acceptsPendingModelCaller(
+  orb: OrbRow,
+  ownerUserId: string | undefined,
+  caller: ArchiveCaller,
+): boolean {
+  if (caller.kind === "central")
+    return orb.harness === "pi" && acceptsOrbAgentCaller(orb, ownerUserId, caller);
+  return (
+    orb.harness === "claude" &&
+    (orb.state === "creating" || orb.state === "starting" || orb.state === "running") &&
+    orb.runtimeTokenHash === caller.runtimeTokenHash &&
+    orb.hostIncarnation === caller.hostIncarnation &&
+    orb.hostDiscardThroughIncarnation === null
+  );
+}

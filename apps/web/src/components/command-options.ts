@@ -1,5 +1,15 @@
-import type { AgentSettingsEvent, ClientAction, SettingsAction } from "@pi-orb/protocol";
-export type ComposerCommandAction = SettingsAction | Extract<ClientAction, { type: "compact" }>;
+import type {
+  AgentSettingsEvent,
+  ClientAction,
+  OrbModelOption,
+  PutPendingModelRequest,
+  SettingsAction,
+} from "@pi-orb/protocol";
+
+export type ComposerCommandAction =
+  | SettingsAction
+  | Extract<ClientAction, { type: "compact" }>
+  | ({ type: "queue_model" } & PutPendingModelRequest);
 export interface CommandOption {
   label: string;
   text?: string;
@@ -10,7 +20,22 @@ export function commandOptions(
   text: string,
   view: AgentSettingsEvent | null,
   effortLabel: "thinking" | "effort" = "thinking",
+  offlineModels?: readonly OrbModelOption[],
+  queued?: PutPendingModelRequest["model"],
 ): CommandOption[] {
+  const modelMatches = (model: OrbModelOption, query: string) =>
+    `${model.provider}/${model.id} ${model.name}`.toLowerCase().includes(query);
+  if (offlineModels !== undefined) {
+    const query = /^model\s+(.*)$/is.exec(text)?.[1]?.toLowerCase();
+    if (query === undefined)
+      return "model".startsWith(text.toLowerCase()) ? [{ label: "model", text: "model " }] : [];
+    return offlineModels
+      .filter((model) => modelMatches(model, query))
+      .map(({ provider, id, name }) => ({
+        label: queued?.provider === provider && queued.id === id ? `${name} (queued)` : name,
+        action: { type: "queue_model", model: { provider, id } },
+      }));
+  }
   const compact = /^compact(?:\s+(.*))?$/is.exec(text);
   if (compact) {
     const customInstructions = compact[1]?.trim();
@@ -37,9 +62,7 @@ export function commandOptions(
   const query = (match[2] ?? "").toLowerCase();
   if (match[1]?.toLowerCase() === "model")
     return view.models
-      .filter((model) =>
-        `${model.provider}/${model.id} ${model.name}`.toLowerCase().includes(query),
-      )
+      .filter((model) => modelMatches(model, query))
       .map((model) => ({
         label: model.name,
         action: { type: "set_model", model: { provider: model.provider, id: model.id } },

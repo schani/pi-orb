@@ -1,7 +1,7 @@
 import type { AgentSettingsEvent } from "@pi-orb/protocol";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
-import { OrbHeaderSettings } from "./OrbPage.tsx";
+import { initialState, OrbHeaderSettings, reducer } from "./OrbPage.tsx";
 
 const settings: AgentSettingsEvent = {
   type: "agent_settings",
@@ -36,7 +36,7 @@ it("omits effort for a Claude model without native effort levels", () => {
 });
 it("does not infer Claude effort support for an unadvertised model", () => {
   const html = render({ ...settings, models: [] });
-  expect(html).toContain(">opus</button>");
+  expect(html).toContain(">Model</button>");
   expect(html).not.toContain('aria-label="Change effort"');
 });
 it("preserves Pi thinking controls including off", () => {
@@ -51,6 +51,63 @@ it("preserves Pi thinking controls including off", () => {
   expect(html).toContain('aria-label="Change thinking"');
   expect(html).toContain(">off</button>");
 });
+const sonnet = { provider: "claude", id: "sonnet-4-6", name: "Sonnet 4.6" };
+const renderOffline = (props: Partial<Parameters<typeof OrbHeaderSettings>[0]> = {}) =>
+  renderToStaticMarkup(
+    <OrbHeaderSettings
+      view={null}
+      offline
+      pending={false}
+      effortLabel="effort"
+      onOpen={() => {}}
+      {...props}
+    />,
+  );
+
+it("offers the same Change model button with a neutral label when offline and unknown", () => {
+  const html = renderOffline();
+  expect(html).toContain('class="orb-settings"');
+  expect(html).toContain('aria-label="Change model"');
+  expect(html).toContain(">Model</button>");
+  expect(html.match(/<button/g)).toHaveLength(1);
+  expect(html).not.toContain("(queued)");
+  expect(html).not.toContain("disabled");
+});
+
+it("keeps the last observed model name for the offline header without retaining live controls", () => {
+  const live = reducer(initialState("orb"), {
+    type: "frame",
+    frame: { v: 1, type: "runtime.event", at: "now", event: settings },
+  });
+  const offline = reducer(live, { type: "connection_status", status: "closed" });
+  expect(offline.settings).toBeNull();
+  const html = renderOffline({ lastModel: offline.lastModel, effortLabel: "thinking" });
+  expect(html).toContain(">Opus</button>");
+  expect(html.match(/<button/g)).toHaveLength(1);
+  expect(html).not.toContain("Change thinking");
+});
+
+it("shows the queued display name only once with one queued suffix in the model button", () => {
+  const html = renderOffline({
+    lastModel: { ...settings.settings.model, name: "Opus" },
+    modelCatalog: [{ ...sonnet, provider: "other", name: "Wrong model" }, sonnet],
+    pendingModel: sonnet,
+  });
+  expect(html).toContain(">Sonnet 4.6 (queued)</button>");
+  expect(html).not.toContain("Wrong model");
+  expect(html).not.toContain("Opus");
+  expect(html).not.toContain("Queued:");
+  expect(html).not.toContain("Queue model");
+  expect(html.replace(/<[^>]+>/g, "").match(/\(queued\)/g)).toHaveLength(1);
+});
+
+it("indicates an unknown queued model without exposing raw IDs during startup", () => {
+  const html = renderOffline({ offline: false, pendingModel: sonnet });
+  expect(html).toContain(">Model (queued)</button>");
+  expect(html).toContain("disabled");
+  expect(html).not.toContain("sonnet-4-6");
+});
+
 it("disables known controls while a request is pending", () => {
   const html = renderToStaticMarkup(
     <OrbHeaderSettings view={settings} pending effortLabel="effort" onOpen={() => {}} />,

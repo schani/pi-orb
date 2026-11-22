@@ -49,7 +49,10 @@ export interface RuntimeClientError {
     | "legacy_backend"
     | "history_integrity"
     | "initialization_failed"
+    | "pending_model_unavailable"
     | "cancelled";
+  /** The queued choice rejected during central model validation. */
+  readonly pendingModelChangeId?: string;
   readonly initializationError?: Extract<RuntimeHealth, { status: "failed" }>["error"];
   readonly initializationHealth?: Extract<RuntimeHealth, { status: "initializing" }>;
   readonly message: string;
@@ -80,7 +83,8 @@ export type OrbFailureCode =
   | "provider_failed"
   | "auth_failed"
   | "drain_runtime_unrecoverable"
-  | "restart_budget_exhausted";
+  | "restart_budget_exhausted"
+  | "pending_model_unavailable";
 
 export function formatOrbFailure(code: OrbFailureCode, message: string): string {
   return `${code}: ${message}`;

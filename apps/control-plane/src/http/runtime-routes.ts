@@ -14,6 +14,7 @@ import {
   ORB_NAME_MESSAGE_MAX_BYTES,
   ORB_NAME_README_MAX_BYTES,
   ORB_NAME_TRIGGER_PATH,
+  ORB_PENDING_MODEL_ACK_PATH,
   ORB_SELF_ARCHIVE_PATH,
   ORB_SELF_DELETE_PATH,
   ORB_SELF_PATH,
@@ -31,6 +32,7 @@ import {
   OrbLinkRequestSchema,
   type OrbNameTriggerResponse,
   OrbNameTriggerSchema,
+  OrbPendingModelAckRequestSchema,
   type OrbSendRequest,
   OrbSendRequestSchema,
   OrbSleepRequestSchema,
@@ -60,7 +62,7 @@ import {
 } from "../domain/broker.ts";
 import type { MintError, StoreError } from "../domain/errors.ts";
 import type { GitIdentityStore } from "../domain/git-identity.ts";
-import type { CommandError } from "../domain/lifecycle.ts";
+import { acknowledgeOrbPendingModel, type CommandError } from "../domain/lifecycle.ts";
 import type { McpStore } from "../domain/mcp.ts";
 import type { McpOAuth } from "../domain/mcp-oauth.ts";
 import type { OrbRow } from "../domain/orb.ts";
@@ -80,6 +82,7 @@ import type {
   OwnerSecretsDeps,
   ProjectSecretsDeps,
   SpawnConflict,
+  StoredOrbBootContext,
 } from "../domain/ports.ts";
 import type { ProjectInstructionsStore } from "../domain/project-instructions.ts";
 import { getOrbSecretSnapshot } from "../domain/project-secrets.ts";
@@ -132,7 +135,7 @@ export interface RuntimeRouteDeps {
     task: SimulationTask,
     orbId: string,
     caller: GuestAgentCaller,
-  ) => ResultAsync<import("@pi-orb/protocol").OrbBootContext | null, CommandError>;
+  ) => ResultAsync<StoredOrbBootContext, CommandError>;
   readonly store: ControlPlaneStore;
   readonly brokerForUser: (userId: string) => BrokerDeps;
   readonly nameGenerator: OrbNameGenerator;
@@ -562,10 +565,42 @@ export function registerRuntimeRoutes(
       });
     return reply.send({
       v: 1,
-      context: context.value,
+      context: context.value.context,
+      ...(context.value.pendingModel === null ? {} : { pendingModel: context.value.pendingModel }),
       userTimeZone: auth.orb.userTimeZone,
       ...(auth.orb.initialModel === null ? {} : { initialModel: auth.orb.initialModel }),
     });
+  });
+
+  app.post(ORB_PENDING_MODEL_ACK_PATH, async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const reject = (status: number, code: string, message: string, retryable = false) =>
+      reply.status(status).send({ error: { code, message, retryable } });
+
+    const auth = await authenticate(request.headers.authorization);
+    if (auth.kind === "unavailable")
+      return reject(503, "unavailable", "pending model acknowledgement unavailable", true);
+    if (auth.kind !== "orb" || auth.orb.harness !== "claude")
+      return reject(401, "unauthorized", "runtime identity rejected");
+    if (!Check(OrbPendingModelAckRequestSchema, request.body))
+      return reject(400, "invalid_request", "invalid pending model acknowledgement");
+
+    const result = await acknowledgeOrbPendingModel(
+      task,
+      deps,
+      auth.orb.id,
+      {
+        runtimeTokenHash: auth.orb.runtimeTokenHash as string,
+        hostIncarnation: auth.orb.hostIncarnation,
+      },
+      request.body.changeId,
+    );
+    if (result.isErr()) {
+      const { code, message, retryable } = result.error;
+      const status = { not_found: 404, conflict: 409, unavailable: 503, internal: 500 }[code];
+      return reject(status, code, message, retryable);
+    }
+    return reply.send({ v: 1 });
   });
 
   const cleanup: RouteHandlerMethod = async (request, reply) => {
