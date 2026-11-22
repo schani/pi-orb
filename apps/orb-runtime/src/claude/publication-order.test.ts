@@ -512,3 +512,201 @@ it
   },
   30_000,
 );
+
+it.each([
+  "confirmed",
+  "chain",
+  "no-retry",
+  "retry-before-stop",
+  "retry-http-error",
+  "retry-other-session",
+  "retry-child",
+  "another-root-request",
+  "completed-first",
+  "named-first",
+  "late-owner",
+  "duplicate-owner",
+  "native-first",
+  "no-success",
+  "no-successor",
+  "no-durable-stop",
+  "wrong-provider-id",
+  "wrong-role",
+] as const)("only discards a proven abandoned retry stream: %s", async (mode) => {
+  const f = fixture();
+  expect((await f.attach()).isOk()).toBe(true);
+  expect((await f.agent.submitMessage([{ type: "text", text: "start" }], "op")).isOk()).toBe(true);
+  const input = await f.takeInput();
+  if (input.done) throw new Error("missing accepted input");
+  f.persist({ type: "user", uuid: input.value.uuid, message: input.value.message });
+  const emit = (message: object) =>
+    f.emit({ session_id: f.state.id, parent_tool_use_id: null, ...message } as SDKMessage);
+  const stream = (uuid: string, event: object) => emit({ type: "stream_event", uuid, event });
+  const start = async (id: string) => {
+    await stream(id, { type: "message_start", message: { id } });
+    await stream(`${id}-block`, {
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "text", text: "partial" },
+    });
+  };
+  const delta = () =>
+    stream("delta", { type: "message_delta", delta: { stop_reason: "end_turn" } });
+  const stop = () => stream("stop", { type: "message_stop" });
+  const retry = (attempt = 1) =>
+    emit({
+      type: "system",
+      subtype: "api_retry",
+      session_id: mode === "retry-other-session" ? "other-session" : f.state.id,
+      parent_tool_use_id: mode === "retry-child" ? "child" : null,
+      attempt,
+      max_retries: mode === "chain" ? 2 : 1,
+      retry_delay_ms: 0,
+      error_status: mode === "retry-http-error" ? 503 : null,
+    });
+  const assistant = (id: string, uuid: string) => ({
+    type: "assistant",
+    uuid,
+    message: { id, role: "assistant", content: [{ type: "text", text: "complete" }] },
+  });
+  await start("first");
+  if (mode === "named-first") await emit(assistant("first", "first-owner"));
+  if (mode === "retry-before-stop") await retry();
+  await stream("block-stop", { type: "content_block_stop", index: 0 });
+  if (mode === "completed-first") await delta();
+  await stop();
+  if (mode !== "no-retry" && mode !== "retry-before-stop") await retry();
+  if (mode === "another-root-request")
+    await emit({ type: "system", subtype: "status", status: "requesting" });
+  if (mode === "chain") {
+    await start("intermediate");
+    await stream("block-stop", { type: "content_block_stop", index: 0 });
+    await stop();
+    await retry(2);
+  }
+  await start("second");
+  await emit(assistant("second", "second-owner"));
+  if (mode === "late-owner") await emit(assistant("first", "first-owner"));
+  if (mode === "duplicate-owner") await emit(assistant("second", "second-owner"));
+  await delta();
+  await stop();
+  await emit({
+    type: "result",
+    subtype: mode === "no-success" ? "error_during_execution" : "success",
+    is_error: mode === "no-success",
+    errors: [],
+    num_turns: 1,
+    queued_turn_count: 0,
+    stop_reason: "end_turn",
+    terminal_reason: mode === "no-success" ? "model_error" : "completed",
+  });
+  await f.awaitCloseRequest(2);
+  expect(f.agent.liveView()?.blocks.map((block) => block.blockId)).toContain("first-block:0");
+  if (mode === "native-first") f.persist(assistant("first", "first-owner"));
+  if (mode !== "no-successor")
+    f.persist({
+      ...assistant("second", "second-owner"),
+      type: mode === "wrong-role" ? "user" : "assistant",
+      message: {
+        ...assistant("second", "second-owner").message,
+        id: mode === "wrong-provider-id" ? "different-message" : "second",
+        stop_reason: mode === "no-durable-stop" ? null : "end_turn",
+      },
+    });
+  f.exit();
+  await f.agent.closeExtensions();
+  await f.agent.waitForStream();
+  if (mode !== "confirmed" && mode !== "chain") {
+    expect(gapDiagnostics(f.agent).blocks).toContainEqual(
+      expect.objectContaining({ id: "first-block:0" }),
+    );
+    return;
+  }
+  expect(f.agent.getHealth()).toMatchObject({ status: "ready", activity: "idle" });
+  expect(f.agent.liveView()).toBeNull();
+  const frames = f.frames;
+  expect(frames).toContainEqual(
+    expect.objectContaining({
+      type: "history.record",
+      record: expect.objectContaining({ id: "second-owner" }),
+      retiredBlockIds: ["second-block:0"],
+    }),
+  );
+  expect(frames).toContainEqual(
+    expect.objectContaining({
+      type: "history.record",
+      record: expect.objectContaining({ id: "claude.operation:op" }),
+      retiredBlockIds: [],
+    }),
+  );
+  expect(
+    f.history.view.find((record) => record.id === "claude.operation:op")?.overflow,
+  ).toMatchObject({ discardedRetryBlocks: mode === "chain" ? 2 : 1 });
+});
+
+it.skipIf(process.platform !== "linux" || process.arch !== "x64")(
+  "drains a real pinned CLI retry after discarding its partial thinking",
+  async () => {
+    let f: ReturnType<typeof fixture> | undefined;
+    try {
+      const probe = await probeSteering(
+        "stream-retry",
+        async (message) => {
+          if (f === undefined) throw new Error("missing admission");
+          await f.emit(message);
+        },
+        async (_kind, context) => {
+          f = fixture(context.sessionId);
+          expect((await f.attach()).isOk()).toBe(true);
+          expect(
+            (await f.agent.submitMessage([{ type: "text", text: "start" }], "op")).isOk(),
+          ).toBe(true);
+          const input = await f.takeInput();
+          if (input.done) throw new Error("missing accepted input");
+          return input.value;
+        },
+      );
+      if (f === undefined) throw new Error("missing admission");
+      expect(probe.requests).toBe(2);
+      const edges = probe.events.flatMap((message) =>
+        message.type === "stream_event"
+          ? [message.event.type]
+          : message.type === "system" && message.subtype === "api_retry"
+            ? ["api_retry"]
+            : message.type === "assistant"
+              ? ["assistant"]
+              : [],
+      );
+      expect(edges.slice(0, 7)).toEqual([
+        "message_start",
+        "content_block_start",
+        "content_block_delta",
+        "content_block_stop",
+        "message_stop",
+        "api_retry",
+        "message_start",
+      ]);
+      expect(probe.events.find((message) => message.type === "result")).toMatchObject({
+        subtype: "success",
+        stop_reason: "end_turn",
+        terminal_reason: "completed",
+      });
+      await f.awaitCloseRequest(2);
+      for (const line of probe.root.source.trim().split("\n")) f.persist(JSON.parse(line));
+      f.exit();
+      await f.agent.closeExtensions();
+      await f.agent.waitForStream();
+      expect(f.agent.getHealth()).toMatchObject({ status: "ready", activity: "idle" });
+      expect(f.agent.liveView()).toBeNull();
+      expect(
+        f.history.view.find((record) => record.id === "claude.operation:op")?.overflow,
+      ).toMatchObject({ discardedRetryBlocks: 1 });
+    } finally {
+      if (f !== undefined) {
+        f.exit();
+        await f.agent.closeExtensions();
+        await f.agent.waitForStream();
+      }
+    }
+  },
+);

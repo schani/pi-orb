@@ -113,7 +113,9 @@ export async function probeSteering(mode, onMessage, nextInput) {
         } else if (requests === 1 || (requests === 2 && mode === "tool-thinking")) {
           heldResponse = response;
           startResponse(response, {
-            type: mode === "thinking" || mode === "tool-thinking" ? "thinking" : "text",
+            type: ["thinking", "tool-thinking", "stream-retry"].includes(mode)
+              ? "thinking"
+              : "text",
             text: "Initial response is still streaming.",
           });
         } else {
@@ -147,6 +149,10 @@ export async function probeSteering(mode, onMessage, nextInput) {
         origin: { kind: "human" },
         message: { role: "user", content: "Run the fixed tool, then finish." },
       };
+      if (mode === "stream-retry") {
+        await endInput.promise;
+        return;
+      }
       await ready.promise;
       const steer = nextInput ? await nextInput("steer", { sessionId, marker }) : undefined;
       if (steer) steerUuid = steer.uuid;
@@ -256,8 +262,12 @@ export async function probeSteering(mode, onMessage, nextInput) {
         message.type === "stream_event" &&
         message.event.type === "content_block_delta" &&
         (mode !== "tool-thinking" || message.event.delta.type === "thinking_delta")
-      )
-        ready.resolve();
+      ) {
+        if (mode === "stream-retry") {
+          // End the first transport after the SDK observed its partial block, without SSE completion.
+          if (message.event.delta.type === "thinking_delta") heldResponse?.end();
+        } else ready.resolve();
+      }
       if (message.type !== "result") continue;
       results.push({
         subtype: message.subtype,
@@ -269,7 +279,7 @@ export async function probeSteering(mode, onMessage, nextInput) {
           steerUuid,
         ),
       });
-      if (results.at(-1).answersSteer) {
+      if (mode === "stream-retry" || results.at(-1).answersSteer) {
         endInput.resolve();
         break;
       }

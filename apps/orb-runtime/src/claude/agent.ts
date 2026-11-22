@@ -209,6 +209,14 @@ interface Delivery {
   system?: OrbMessageSystem;
   submitted: boolean;
 }
+interface StreamAttempt {
+  operationId: string;
+  id: string;
+  phase: "open" | "stopped" | "retry";
+  stopReason: string | null;
+  assistant: string | null;
+}
+
 interface ManualCompaction {
   readonly operationId: string;
   readonly commandUuid: string;
@@ -329,6 +337,12 @@ export class ClaudeOrbAgent implements OrbAgent {
   private readonly messageBlocks = new Map<string, string[]>();
   private readonly streamBlocks = new Map<number, string>();
   private readonly interruptedThinkingBlocks = new Set<string>();
+  private streamAttempt: StreamAttempt | null = null;
+  private streamRetry: {
+    abandoned: Set<string>;
+    blocks: Set<string>;
+    successor: { id: string; uuid: string } | null;
+  } | null = null;
   private readonly fence: FileIdleStopFence;
   private executionId: string | null = null;
   private mcpConfigs: readonly McpConfig[] = [];
@@ -1000,6 +1014,8 @@ export class ClaudeOrbAgent implements OrbAgent {
     this.input = input;
     this.queryId = randomUUID();
     this.passiveContextUuids.clear();
+    this.streamAttempt = null;
+    this.streamRetry = null;
     this.shutdownDiagnostics = new ClaudeShutdownDiagnostics();
     this.lastRootResult = null;
     this.rotationRootWork = null;
@@ -1407,7 +1423,118 @@ export class ClaudeOrbAgent implements OrbAgent {
     });
     if (recorded.isErr()) this.fail("claude_mcp_publication_failed", recorded.error.message);
   }
+  private observeStreamRetry(message: SDKMessage): void {
+    const operationId = this.activity.operationId;
+    if (operationId === null || this.compaction !== null) return;
+    const attempt = this.streamAttempt;
+    if (message.type === "system") {
+      if (message.subtype === "status" && message.status === "requesting") {
+        this.streamAttempt = null;
+        this.streamRetry = null;
+      }
+      if (
+        message.subtype === "api_retry" &&
+        (!("parent_tool_use_id" in message) || message.parent_tool_use_id === null) &&
+        message.session_id === this.state?.id &&
+        message.error_status === null &&
+        message.no_response === undefined &&
+        attempt?.operationId === operationId &&
+        attempt.phase === "stopped" &&
+        attempt.stopReason === null &&
+        attempt.assistant === null
+      )
+        attempt.phase = "retry";
+      return;
+    }
+    if (
+      message.type !== "result" &&
+      !(
+        (message.type === "stream_event" || message.type === "assistant") &&
+        message.parent_tool_use_id === null
+      )
+    )
+      return;
+    if (message.session_id !== this.state?.id) {
+      this.streamAttempt = null;
+      this.streamRetry = null;
+      return;
+    }
+
+    if (message.type === "result") {
+      if (
+        this.streamRetry !== null &&
+        attempt?.operationId === operationId &&
+        attempt.phase === "stopped" &&
+        attempt.stopReason === "end_turn" &&
+        attempt.assistant !== null &&
+        this.closing === null &&
+        message.subtype === "success" &&
+        !message.is_error &&
+        message.terminal_reason === "completed" &&
+        message.stop_reason === "end_turn" &&
+        message.num_turns > 0 &&
+        message.queued_turn_count === 0
+      )
+        this.streamRetry.successor = { id: attempt.id, uuid: attempt.assistant };
+      else this.streamRetry = null;
+      this.streamAttempt = null;
+      return;
+    }
+    if (message.type === "assistant") {
+      if (
+        attempt?.operationId === operationId &&
+        attempt.phase === "open" &&
+        attempt.id === message.message.id &&
+        attempt.assistant !== message.uuid &&
+        message.error === undefined
+      )
+        attempt.assistant = message.uuid;
+      else {
+        this.streamAttempt = null;
+        this.streamRetry = null;
+      }
+      return;
+    }
+    const event = message.event;
+    if (event.type === "message_start") {
+      const id = event.message?.id;
+      // A new start alone does not prove the old output was discarded. Carry pending
+      // blocks only across this explicitly announced transport retry.
+      if (
+        id &&
+        attempt?.operationId === operationId &&
+        attempt.phase === "retry" &&
+        attempt.id !== id &&
+        !this.streamRetry?.abandoned.has(id) &&
+        this.streamBlocks.size > 0 &&
+        [...this.streamBlocks.values()].every((blockId) => {
+          const block = this.blocks.get(blockId);
+          return block !== undefined && !block.redacted;
+        })
+      ) {
+        this.streamRetry ??= { abandoned: new Set(), blocks: new Set(), successor: null };
+        this.streamRetry.abandoned.add(attempt.id);
+        for (const block of this.streamBlocks.values()) this.streamRetry.blocks.add(block);
+      } else this.streamRetry = null;
+      this.streamAttempt = id
+        ? { operationId, id, phase: "open", stopReason: null, assistant: null }
+        : null;
+    } else if (attempt?.operationId === operationId && attempt.phase === "open") {
+      if (
+        event.type === "content_block_start" &&
+        this.streamRetry?.blocks.has(`${message.uuid}:${event.index}`)
+      )
+        this.streamRetry = null;
+      if (event.type === "message_delta" && event.delta.stop_reason !== null)
+        attempt.stopReason = event.delta.stop_reason;
+      if (event.type === "message_stop") attempt.phase = "stopped";
+    } else {
+      this.streamAttempt = null;
+      this.streamRetry = null;
+    }
+  }
   private onMessage(message: SDKMessage): void {
+    this.observeStreamRetry(message);
     if (message.type === "system" && message.subtype === "init")
       this.nativeMcpStatus(message.mcp_servers);
     if (this.closing !== null) this.shutdownDiagnostics.observe(message);
@@ -1895,6 +2022,7 @@ export class ClaudeOrbAgent implements OrbAgent {
         this.blocks.delete(id);
     }
     this.interruptedThinkingBlocks.clear();
+    const discardedRetryBlocks = this.discardRetriedStream();
     const flushed = this.flushHistory();
     if (flushed.isErr()) {
       this.fail("history_unavailable", flushed.error.message);
@@ -1977,6 +2105,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       {
         operationId,
         outcome: this.outcome,
+        ...(discardedRetryBlocks === 0 ? {} : { discardedRetryBlocks }),
         ...(compaction === null ? {} : { work: "compaction" }),
       },
       `claude.operation:${operationId}`,
@@ -2108,6 +2237,37 @@ export class ClaudeOrbAgent implements OrbAgent {
     this.fail(code, message);
     const recorded = this.platformEvent("claude.cleanup_failed", message, { code });
     if (recorded.isErr()) this.fail("claude_cleanup_publication_failed", recorded.error.message);
+  }
+  private discardRetriedStream(): number {
+    const retry = this.streamRetry;
+    this.streamRetry = null;
+    if (retry?.successor == null || this.outcome !== "completed" || this.health.status === "failed")
+      return 0;
+    // closeExtensions has finished scanning the fsynced journal. Only exact durable
+    // assistant identity proves the retry completed, even when publication is still held.
+    let durableSuccessor = false;
+    for (const record of this.history?.view ?? []) {
+      if (record.type !== "message" || record.role !== "assistant") continue;
+      const native = record.overflow.native;
+      if (native === null || typeof native !== "object" || Array.isArray(native)) continue;
+      const message = native.message;
+      if (message === null || typeof message !== "object" || Array.isArray(message)) continue;
+      if (typeof message.id === "string" && retry.abandoned.has(message.id)) return 0;
+      if (
+        record.id === retry.successor.uuid &&
+        message.id === retry.successor.id &&
+        record.finishReason === "end_turn"
+      )
+        durableSuccessor = true;
+    }
+    if (
+      !durableSuccessor ||
+      [...this.messageBlocks.values()].some((ids) => ids.some((id) => retry.blocks.has(id)))
+    )
+      return 0;
+    let discarded = 0;
+    for (const id of retry.blocks) if (this.blocks.delete(id)) discarded++;
+    return discarded;
   }
   private streamIdentityGapMessage(): string {
     const view = this.history?.view ?? [];
