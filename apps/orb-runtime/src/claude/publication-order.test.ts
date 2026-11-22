@@ -512,3 +512,93 @@ it
   },
   30_000,
 );
+
+it
+  .skipIf(process.platform !== "linux" || process.arch !== "x64")
+  .each(["exact", "wrong-provider-id", "extra-block"])(
+  "drains a pinned CLI transport retry only with one abandoned block and exact native identity: %s",
+  async (identity) => {
+    let f: ReturnType<typeof fixture> | undefined;
+    try {
+      const probe = await probeSteering(
+        "stream-retry",
+        async (message) => {
+          if (!f) throw new Error("missing admission");
+          await f.emit(message);
+          if (identity !== "extra-block" || message.type !== "stream_event") return;
+          const event = message.event;
+          if (event.type === "content_block_delta" && event.delta.type === "thinking_delta")
+            await f.emit({
+              ...message,
+              event: {
+                type: "content_block_start",
+                index: 1,
+                content_block: { type: "tool_use", id: "toolu_open", name: "open", input: {} },
+              },
+            } as const);
+        },
+        async (_kind, { sessionId }) => {
+          f = fixture(sessionId);
+          expect((await f.attach()).isOk()).toBe(true);
+          expect(
+            (await f.agent.submitMessage([{ type: "text", text: "start" }], "op")).isOk(),
+          ).toBe(true);
+          const input = await f.takeInput();
+          if (input.done) throw new Error("missing accepted input");
+          return input.value;
+        },
+      );
+      if (!f) throw new Error("missing admission");
+      expect(probe.requests).toBe(2);
+      const assistants = probe.events.filter((message) => message.type === "assistant");
+      expect(assistants).toHaveLength(2);
+      const [first, last] = assistants;
+      if (!first || !last) throw new Error("missing replacement assistants");
+      expect(first.uuid).not.toBe(last.uuid);
+      expect(first.message.id).toBe(last.message.id);
+      await f.awaitCloseRequest(2);
+      const blocks = f.agent.liveView()?.blocks ?? [];
+      const partial = blocks.find((block) => block.blockType === "reasoning");
+      expect(partial).toBeDefined();
+      const entries = probe.root.source
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      const saved = entries.find((entry) => entry.uuid === last.uuid);
+      expect(saved).toMatchObject({ type: "assistant", message: { id: last.message.id } });
+      if (identity === "wrong-provider-id") saved.message.id = "wrong-provider-id";
+      for (const entry of entries) f.persist(entry);
+      f.exit();
+      await f.agent.closeExtensions();
+      await f.agent.waitForStream();
+      if (identity !== "exact") {
+        expect(gapDiagnostics(f.agent).blocks).toContainEqual(
+          expect.objectContaining({ id: partial?.blockId, ownerCount: 0 }),
+        );
+      } else {
+        expect(f.agent.getHealth()).toMatchObject({ status: "ready", activity: "idle" });
+        expect(f.agent.liveView()).toBeNull();
+        expect(
+          f.history.view.find((record) => record.id === "claude.operation:op")?.overflow,
+        ).toMatchObject({ discardedRetryBlocks: 1 });
+        const replacements = blocks.filter((block) => block.blockType === "text");
+        expect(replacements).toHaveLength(2);
+        for (const [index, assistant] of assistants.entries())
+          expect(f.frames).toContainEqual(
+            expect.objectContaining({
+              type: "history.record",
+              record: expect.objectContaining({ id: assistant.uuid }),
+              retiredBlockIds: [replacements[index]?.blockId],
+            }),
+          );
+      }
+    } finally {
+      if (f) {
+        f.exit();
+        await f.agent.closeExtensions();
+        await f.agent.waitForStream();
+      }
+    }
+  },
+  30_000,
+);

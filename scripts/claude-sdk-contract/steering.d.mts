@@ -19,7 +19,7 @@ export interface SteeringProbeResult {
 }
 
 export function probeSteering(
-  mode: "tool" | "response" | "thinking" | "tool-thinking",
+  mode: "tool" | "response" | "thinking" | "tool-thinking" | "stream-retry",
   onMessage?: (message: SDKMessage) => Promise<void>,
   nextInput?: (
     kind: "first" | "steer",

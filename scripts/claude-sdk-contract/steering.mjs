@@ -16,7 +16,7 @@ function latch() {
   return { promise, resolve };
 }
 
-function startResponse(response, block) {
+function startResponse(response, block, secondText) {
   response.writeHead(200, { "content-type": "text/event-stream" });
   const emit = (type, data) =>
     response.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);
@@ -52,6 +52,11 @@ function startResponse(response, block) {
   });
   return () => {
     emit("content_block_stop", { index: 0 });
+    if (secondText !== undefined) {
+      emit("content_block_start", { index: 1, content_block: { type: "text", text: "" } });
+      emit("content_block_delta", { index: 1, delta: { type: "text_delta", text: secondText } });
+      emit("content_block_stop", { index: 1 });
+    }
     emit("message_delta", {
       delta: { stop_reason: block.type === "text" ? "end_turn" : "tool_use", stop_sequence: null },
       usage: { output_tokens: 8 },
@@ -113,11 +118,20 @@ export async function probeSteering(mode, onMessage, nextInput) {
         } else if (requests === 1 || (requests === 2 && mode === "tool-thinking")) {
           heldResponse = response;
           startResponse(response, {
-            type: mode === "thinking" || mode === "tool-thinking" ? "thinking" : "text",
+            type:
+              mode === "thinking" || mode === "tool-thinking" || mode === "stream-retry"
+                ? "thinking"
+                : "text",
             text: "Initial response is still streaming.",
           });
+          // EOF after the SDK has seen the partial block, without SSE completion.
+          if (mode === "stream-retry") void ready.promise.then(() => response.end());
         } else {
-          startResponse(response, { type: "text", text: "Steering acknowledged." })();
+          startResponse(
+            response,
+            { type: "text", text: "Steering acknowledged." },
+            mode === "stream-retry" ? "Replacement complete." : undefined,
+          )();
         }
       });
     } else if (request.url?.split("?")[0] === "/v1/messages/count_tokens") {
@@ -147,6 +161,10 @@ export async function probeSteering(mode, onMessage, nextInput) {
         origin: { kind: "human" },
         message: { role: "user", content: "Run the fixed tool, then finish." },
       };
+      if (mode === "stream-retry") {
+        await endInput.promise;
+        return;
+      }
       await ready.promise;
       const steer = nextInput ? await nextInput("steer", { sessionId, marker }) : undefined;
       if (steer) steerUuid = steer.uuid;
@@ -269,7 +287,7 @@ export async function probeSteering(mode, onMessage, nextInput) {
           steerUuid,
         ),
       });
-      if (results.at(-1).answersSteer) {
+      if (mode === "stream-retry" || results.at(-1).answersSteer) {
         endInput.resolve();
         break;
       }

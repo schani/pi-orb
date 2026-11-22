@@ -329,6 +329,13 @@ export class ClaudeOrbAgent implements OrbAgent {
   private readonly messageBlocks = new Map<string, string[]>();
   private readonly streamBlocks = new Map<number, string>();
   private readonly interruptedThinkingBlocks = new Set<string>();
+  private streamAttempt: {
+    id: string;
+    phase: "open" | "stopped" | "retry" | "completed";
+    abandoned: { id: string; block: string } | undefined;
+    sawBlock?: true;
+    assistant?: string;
+  } | null = null;
   private readonly fence: FileIdleStopFence;
   private executionId: string | null = null;
   private mcpConfigs: readonly McpConfig[] = [];
@@ -1000,6 +1007,7 @@ export class ClaudeOrbAgent implements OrbAgent {
     this.input = input;
     this.queryId = randomUUID();
     this.passiveContextUuids.clear();
+    this.streamAttempt = null;
     this.shutdownDiagnostics = new ClaudeShutdownDiagnostics();
     this.lastRootResult = null;
     this.rotationRootWork = null;
@@ -1408,6 +1416,8 @@ export class ClaudeOrbAgent implements OrbAgent {
     if (recorded.isErr()) this.fail("claude_mcp_publication_failed", recorded.error.message);
   }
   private onMessage(message: SDKMessage): void {
+    const attempt = this.streamAttempt;
+    const sameSession = message.session_id === this.state?.id;
     if (message.type === "system" && message.subtype === "init")
       this.nativeMcpStatus(message.mcp_servers);
     if (this.closing !== null) this.shutdownDiagnostics.observe(message);
@@ -1431,6 +1441,15 @@ export class ClaudeOrbAgent implements OrbAgent {
       this.operationError = "Native work started during query rotation; the session was stopped.";
     }
     if (message.type === "system") {
+      if (message.subtype === "status" && message.status === "requesting")
+        this.streamAttempt = null;
+      if (message.subtype === "api_retry" && attempt) {
+        const root = !("parent_tool_use_id" in message) || message.parent_tool_use_id === null;
+        const transport = message.error_status === null && !message.no_response;
+        if (sameSession && root && transport && attempt.phase === "stopped" && !attempt.abandoned)
+          attempt.phase = "retry";
+        else this.streamAttempt = null;
+      }
       if (message.subtype === "background_tasks_changed")
         this.activity.replaceTasks(
           message.tasks.map((task) => ({
@@ -1534,6 +1553,16 @@ export class ClaudeOrbAgent implements OrbAgent {
       message.parent_tool_use_id === null
     ) {
       this.activity.rootStarted();
+      if (
+        sameSession &&
+        attempt?.phase === "open" &&
+        attempt.abandoned &&
+        attempt.assistant !== message.uuid &&
+        message.message.id === attempt.id &&
+        !message.error
+      )
+        attempt.assistant = message.uuid;
+      else this.streamAttempt = null;
       this.messageBlocks.set(message.uuid, [...this.streamBlocks.values()]);
       this.streamBlocks.clear();
       for (const block of message.message.content)
@@ -1576,6 +1605,28 @@ export class ClaudeOrbAgent implements OrbAgent {
       this.activity.operationId !== null
     ) {
       const event = message.event;
+      if (!sameSession) this.streamAttempt = null;
+      else if (event.type === "message_start") {
+        const id = event.message?.id;
+        const block =
+          this.streamBlocks.size === 1 ? this.streamBlocks.values().next().value : undefined;
+        const abandoned =
+          block && attempt?.phase === "retry" && attempt.sawBlock && attempt.id !== id
+            ? { id: attempt.id, block }
+            : undefined;
+        this.streamAttempt = id ? { id, phase: "open", abandoned } : null;
+      } else if (attempt?.phase !== "open") this.streamAttempt = null;
+      else if (!attempt.abandoned && event.type === "content_block_start") {
+        // Count provider starts, including invisible blocks and reused indices.
+        if (attempt.sawBlock) this.streamAttempt = null;
+        else attempt.sawBlock = true;
+      } else if (event.type === "message_stop") attempt.phase = "stopped";
+      else if (
+        event.type === "message_delta" &&
+        !attempt.abandoned &&
+        event.delta.stop_reason != null
+      )
+        this.streamAttempt = null;
       const operationId = this.activity.operationId;
       const publish = (
         block: NonNullable<ReturnType<typeof this.blocks.get>>,
@@ -1616,6 +1667,7 @@ export class ClaudeOrbAgent implements OrbAgent {
           event.content_block.type === "redacted_thinking")
       ) {
         const blockId = `${message.uuid}:${event.index}`;
+        if (this.streamAttempt?.abandoned?.block === blockId) this.streamAttempt = null;
         const block = {
           blockId,
           blockType:
@@ -1649,6 +1701,20 @@ export class ClaudeOrbAgent implements OrbAgent {
       }
     }
     if (message.type === "result") {
+      if (
+        attempt?.phase === "stopped" &&
+        attempt.assistant &&
+        sameSession &&
+        this.closing === null &&
+        message.subtype === "success" &&
+        !message.is_error &&
+        message.terminal_reason === "completed" &&
+        message.stop_reason === "end_turn" &&
+        message.num_turns > 0 &&
+        message.queued_turn_count === 0
+      )
+        attempt.phase = "completed";
+      else this.streamAttempt = null;
       if (message.terminal_reason === "aborted_streaming")
         for (const id of this.streamBlocks.values()) {
           const block = this.blocks.get(id);
@@ -1895,6 +1961,7 @@ export class ClaudeOrbAgent implements OrbAgent {
         this.blocks.delete(id);
     }
     this.interruptedThinkingBlocks.clear();
+    const discardedRetryBlocks = this.discardRetriedStream();
     const flushed = this.flushHistory();
     if (flushed.isErr()) {
       this.fail("history_unavailable", flushed.error.message);
@@ -1977,6 +2044,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       {
         operationId,
         outcome: this.outcome,
+        ...(discardedRetryBlocks === 0 ? {} : { discardedRetryBlocks }),
         ...(compaction === null ? {} : { work: "compaction" }),
       },
       `claude.operation:${operationId}`,
@@ -2108,6 +2176,27 @@ export class ClaudeOrbAgent implements OrbAgent {
     this.fail(code, message);
     const recorded = this.platformEvent("claude.cleanup_failed", message, { code });
     if (recorded.isErr()) this.fail("claude_cleanup_publication_failed", recorded.error.message);
+  }
+  private discardRetriedStream(): number {
+    const attempt = this.streamAttempt;
+    this.streamAttempt = null;
+    const abandoned = attempt?.abandoned;
+    if (!abandoned || attempt.phase !== "completed") return 0;
+    if (this.outcome !== "completed" || this.health.status === "failed") return 0;
+    const block = abandoned.block;
+    if (this.blocks.get(block)?.redacted) return 0;
+    if ([...this.messageBlocks.values()].some((ids) => ids.includes(block))) return 0;
+    // Read the final fsynced scan, not the published prefix, which may still be held.
+    let saved = false;
+    for (const record of this.history?.view ?? []) {
+      if (record.type !== "message" || record.role !== "assistant") continue;
+      const native = record.overflow.native as JsonObject | undefined;
+      const providerId = (native?.message as JsonObject | undefined)?.id;
+      if (providerId === abandoned.id) return 0;
+      if (providerId === attempt.id && native?.uuid === attempt.assistant)
+        saved = record.finishReason === "end_turn";
+    }
+    return saved && this.blocks.delete(block) ? 1 : 0;
   }
   private streamIdentityGapMessage(): string {
     const view = this.history?.view ?? [];
