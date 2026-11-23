@@ -3,6 +3,7 @@ import {
   type ClientHello,
   type ClientPresence,
   type ClientRequest,
+  LIVE_PLANNED_EXPIRY_CODE,
   RUNTIME_SUBPROTOCOL,
   type ServerFrame,
   ServerFrameSchema,
@@ -260,11 +261,19 @@ export function openLiveConnection(options: LiveConnectionOptions): LiveConnecti
       handleFrame(ws, parsed);
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       if (ws !== socket) return;
       socket = null;
       if (disposed) {
         reportStatus("closed");
+      } else if (event?.code === LIVE_PLANNED_EXPIRY_CODE) {
+        devConsoleDebug.record({
+          event: "connection",
+          orbId: options.orbId,
+          connectionId,
+          outcome: "planned_expiry",
+        });
+        connect();
       } else {
         // Covers 1013 "try again later" and any other close cause; the page
         // disposes this connection once the orb is no longer running.

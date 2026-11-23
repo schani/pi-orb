@@ -1,6 +1,6 @@
 export type SessionExpiryScheduler = (delayMs: number, callback: () => void) => () => void;
 
-const scheduleExpiry: SessionExpiryScheduler = (delayMs, callback) => {
+export const scheduleExpiry: SessionExpiryScheduler = (delayMs, callback) => {
   const timer = setTimeout(callback, delayMs);
   timer.unref();
   return () => clearTimeout(timer);

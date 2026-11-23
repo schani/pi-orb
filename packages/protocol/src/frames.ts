@@ -5,6 +5,8 @@ import { JsonValueSchema } from "./json.ts";
 
 const closed = { additionalProperties: false } as const;
 
+export const LIVE_PLANNED_EXPIRY_CODE = 4001;
+
 /** WebSocket subprotocol negotiating the major wire version. */
 export const RUNTIME_SUBPROTOCOL = "pi-orb.runtime.v1";
 

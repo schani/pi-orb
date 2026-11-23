@@ -12,7 +12,7 @@ class Socket {
   completeClose = true;
   sent: Record<string, unknown>[] = [];
   onopen: (() => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((event: { code: number }) => void) | null = null;
   onmessage: ((event: { data: string }) => void) | null = null;
   constructor() {
     Socket.instances.push(this);
@@ -20,10 +20,10 @@ class Socket {
   send(text: string) {
     this.sent.push(JSON.parse(text));
   }
-  close() {
+  close(code = 1006) {
     if (!this.completeClose) return;
     this.readyState = 3;
-    this.onclose?.();
+    this.onclose?.({ code });
   }
   frame(frame: ServerFrame) {
     this.raw(JSON.stringify(frame));
@@ -87,6 +87,25 @@ function connectivityHarness() {
   };
 }
 
+it("reconnects immediately from the latest cursor on planned expiry and delays a failed reconnect", () => {
+  const h = connectivityHarness();
+  h.advanceCursor();
+  h.first.close(4001);
+  expect(devConsoleDebug.dump().trace).toContainEqual(
+    expect.objectContaining({ outcome: "planned_expiry" }),
+  );
+  expect(Socket.instances).toHaveLength(2);
+  const replacement = Socket.instances[1] ?? expect.fail("replacement missing");
+  replacement.onopen?.();
+  expect(replacement.sent[0]?.afterRecordId).toBe("two");
+  replacement.close(1013);
+  vi.advanceTimersByTime(1999);
+  expect(Socket.instances).toHaveLength(2);
+  vi.advanceTimersByTime(1);
+  expect(Socket.instances).toHaveLength(3);
+  h.live.dispose();
+});
+
 it("offline relinquishes live authority; online replaces a half-open socket using the latest cursor", () => {
   const h = connectivityHarness();
   const lateOpen = h.first.onopen;
@@ -108,7 +127,7 @@ it("offline relinquishes live authority; online replaces a half-open socket usin
   const beforeStatuses = [...h.statuses];
   const beforeSent = h.first.sent.length;
   lateOpen?.();
-  lateClose?.();
+  lateClose?.({ code: 4001 });
   lateMessage?.({ data: JSON.stringify(welcome("session")) });
   expect(h.first.sent).toHaveLength(beforeSent);
   expect(h.frames).toEqual([]);
@@ -203,7 +222,7 @@ it("disposal removes connectivity listeners, cancels retries, and fences late so
   h.browser.dispatchEvent(new Event("offline"));
   h.browser.dispatchEvent(new Event("online"));
   lateOpen?.();
-  lateClose?.();
+  lateClose?.({ code: 4001 });
   vi.advanceTimersByTime(10_000);
   expect(Socket.instances).toHaveLength(1);
   expect(h.statuses).toEqual(before);
