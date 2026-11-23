@@ -1,6 +1,7 @@
 import websocketPlugin from "@fastify/websocket";
 import {
   ClientPresenceSchema,
+  LIVE_PLANNED_EXPIRY_CODE,
   RUNTIME_SUBPROTOCOL,
   TERMINAL_MAX_INPUT_BYTES,
   TERMINAL_SUBPROTOCOL,
@@ -14,10 +15,16 @@ import { agentPlacement } from "../domain/harness-agent-plane.ts";
 import { logOrbEvent } from "../domain/log.ts";
 import type { ControlPlaneDeps } from "../domain/ports.ts";
 import { attachCentralLive } from "./central-live.ts";
-import { type SessionExpiryScheduler, watchSessionExpiry } from "./session-expiry.ts";
+import {
+  type SessionExpiryScheduler,
+  scheduleExpiry,
+  watchSessionExpiry,
+} from "./session-expiry.ts";
 import { monitorWebSocketLiveness } from "./websocket-heartbeat.ts";
 
 const TRY_AGAIN_LATER = 1013;
+const LIVE_MAX_LIFETIME_MS = 60_000;
+const LIVE_CLOSE_GRACE_MS = 1_000;
 const UNSUPPORTED_DATA = 1003;
 const TERMINAL_PROXY_BUFFER_BYTES = 1024 * 1024;
 
@@ -55,7 +62,7 @@ export async function registerLiveProxy(
   app: FastifyInstance,
   task: SimulationTask,
   deps: ControlPlaneDeps,
-  scheduleSessionExpiry?: SessionExpiryScheduler,
+  scheduleSocketTimer: SessionExpiryScheduler = scheduleExpiry,
 ): Promise<void> {
   if (!app.hasDecorator("websocketServer"))
     await app.register(websocketPlugin, {
@@ -101,11 +108,29 @@ export async function registerLiveProxy(
           browserClosed = true;
           closeBoth(1008, "session expired");
         },
-        scheduleSessionExpiry,
+        scheduleSocketTimer,
       );
       browserSocket.once("close", session.stop);
       browserSocket.once("error", session.stop);
       if (!session.admit()) return;
+      const cancelPlannedClose = scheduleSocketTimer(
+        LIVE_MAX_LIFETIME_MS - LIVE_CLOSE_GRACE_MS,
+        () => {
+          if (browserSocket.readyState !== WebSocket.OPEN || !session.admit()) return;
+          browserClosed = true;
+          closeBoth(LIVE_PLANNED_EXPIRY_CODE, "live connection expired");
+        },
+      );
+      const cancelDeadline = scheduleSocketTimer(LIVE_MAX_LIFETIME_MS, () => {
+        browserClosed = true;
+        logOrbEvent(task, orbId, "live-expiry-forced", { connectionId });
+        browserSocket.terminate();
+        upstream?.terminate();
+      });
+      browserSocket.once("close", () => {
+        cancelPlannedClose();
+        cancelDeadline();
+      });
       deps.control.registerBrowserConnection(orbId, connectionId, () =>
         closeBoth(TRY_AGAIN_LATER, "orb is being deleted"),
       );
@@ -273,7 +298,9 @@ export async function registerLiveProxy(
         browserSocket.send(data.toString());
       });
       runtimeSocket.on("close", (code, reason) => {
-        const forwardedCode = isWireCloseCode(code) ? code : TRY_AGAIN_LATER;
+        if (browserClosed) return;
+        const forwardedCode =
+          isWireCloseCode(code) && code !== LIVE_PLANNED_EXPIRY_CODE ? code : TRY_AGAIN_LATER;
         const fields = { connectionId, path: "live", originalCode: code, forwardedCode };
         if (forwardedCode !== code) logOrbEvent(task, orbId, "websocket-close-normalized", fields);
         try {
@@ -320,7 +347,7 @@ export async function registerLiveProxy(
           browserClosed = true;
           closeBoth(1008, "session expired");
         },
-        scheduleSessionExpiry,
+        scheduleSocketTimer,
       );
       browserSocket.once("close", session.stop);
       browserSocket.once("error", session.stop);

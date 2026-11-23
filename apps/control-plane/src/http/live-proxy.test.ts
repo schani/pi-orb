@@ -10,6 +10,7 @@ import type { AgentPlane } from "../domain/agent-ports.ts";
 import type { OrbHostProvider } from "../domain/ports.ts";
 import { makeHarness, makeOrbRow } from "../testkit/fixtures.ts";
 import { registerLiveProxy } from "./live-proxy.ts";
+import type { SessionExpiryScheduler } from "./session-expiry.ts";
 
 function delegatingProvider(
   delegate: OrbHostProvider,
@@ -29,6 +30,15 @@ function delegatingProvider(
   };
 }
 
+function manualSocketTimers() {
+  const callbacks = new Map<number, () => void>();
+  const schedule: SessionExpiryScheduler = (delay, callback) => {
+    callbacks.set(delay, callback);
+    return () => callbacks.delete(delay);
+  };
+  return { callbacks, schedule };
+}
+
 const openServers: Array<{ close: () => Promise<void> }> = [];
 
 async function closeWebSocketServer(server: WebSocketServer): Promise<void> {
@@ -44,7 +54,7 @@ describe.each([
   ["live", RUNTIME_SUBPROTOCOL],
   ["terminal", TERMINAL_SUBPROTOCOL],
 ])("%s upstream close recovery", (path, protocol) => {
-  async function connect() {
+  async function connect(schedule?: SessionExpiryScheduler) {
     const runtime = new WebSocketServer({ host: "127.0.0.1", port: 0 });
     openServers.push({ close: () => closeWebSocketServer(runtime) });
     await once(runtime, "listening");
@@ -76,20 +86,25 @@ describe.each([
       log.mock.calls.filter(
         ([message]) => typeof message === "string" && message.startsWith("lifecycle:"),
       );
-    await registerLiveProxy(app, task, {
-      ...harness.deps,
-      hostProvider: delegatingProvider(harness.deps.hostProvider, {
-        observe: (_task, ref) =>
-          okAsync({
-            ref,
-            orbId,
-            incarnation: 0,
-            specFingerprint: null,
-            state: "running" as const,
-            runtimeAddress: { baseUrl: `http://127.0.0.1:${runtimeAddress.port}` },
-          }),
-      }),
-    });
+    await registerLiveProxy(
+      app,
+      task,
+      {
+        ...harness.deps,
+        hostProvider: delegatingProvider(harness.deps.hostProvider, {
+          observe: (_task, ref) =>
+            okAsync({
+              ref,
+              orbId,
+              incarnation: 0,
+              specFingerprint: null,
+              state: "running" as const,
+              runtimeAddress: { baseUrl: `http://127.0.0.1:${runtimeAddress.port}` },
+            }),
+        }),
+      },
+      schedule,
+    );
     await app.listen({ host: "127.0.0.1", port: 0 });
     const address = app.server.address() as AddressInfo;
     const browser = new WebSocket(
@@ -113,6 +128,42 @@ describe.each([
     return { app, browser, proxyBrowser, upstream, log, edges, unregister, removed, orbId };
   }
 
+  it("bounds only live upgrades to one minute and releases their timers", async () => {
+    const { callbacks: timers, schedule } = manualSocketTimers();
+    const { browser, upstream, removed } = await connect(schedule);
+    if (path === "terminal") {
+      expect(timers.size).toBe(0);
+      return;
+    }
+    expect([...timers.keys()].sort()).toEqual([59_000, 60_000]);
+    const closed = once(browser, "close");
+    const upstreamClosed = once(upstream, "close");
+    timers.get(59_000)?.();
+    expect((await closed)[0]).toBe(4001);
+    await upstreamClosed;
+    await removed;
+    expect(timers.size).toBe(0);
+  });
+
+  if (path === "live") {
+    it("terminates the upgrade at the deadline if the peer never acknowledges the planned close", async () => {
+      const { callbacks: timers, schedule } = manualSocketTimers();
+      const { browser, proxyBrowser, edges } = await connect(schedule);
+      const closed = once(proxyBrowser, "close");
+      browser.pause();
+      try {
+        expect(timers.has(60_000)).toBe(true);
+        timers.get(59_000)?.();
+        timers.get(60_000)?.();
+        await closed;
+        expect(edges()).toEqual([[expect.stringContaining("live-expiry-forced")]]);
+        expect(timers.size).toBe(0);
+      } finally {
+        browser.resume();
+      }
+    });
+  }
+
   it("shuts down without waiting for an unresponsive browser to acknowledge WebSocket close", async () => {
     const { app, browser, upstream } = await connect();
     const browserClosed = once(browser, "close");
@@ -129,12 +180,13 @@ describe.each([
     expect(upstream.readyState).toBe(WebSocket.CLOSED);
   });
 
-  it.each([1005, 1006, 1011])(
+  it.each([1005, 1006, 1011, 4001])(
     "closes the browser when an established runtime ends with %i",
     async (code) => {
       const { browser, proxyBrowser, upstream, log, edges, unregister, removed, orbId } =
         await connect();
-      const expected = code === 1005 || code === 1006 ? 1013 : code;
+      const expected =
+        code === 1005 || code === 1006 || (path === "live" && code === 4001) ? 1013 : code;
       let attempted!: () => void;
       const forwarding = new Promise<void>((resolve) => {
         attempted = resolve;
@@ -232,7 +284,7 @@ describe("live proxy", () => {
     const started = new Promise<void>((resolve) => {
       observed = resolve;
     });
-    let expire: (() => void) | undefined;
+    const { callbacks: scheduled, schedule } = manualSocketTimers();
     let now = 100;
     const task = new NoSimulationTask("expiry routing", false);
     task.wallNow = () => now;
@@ -261,10 +313,7 @@ describe("live proxy", () => {
           },
         },
       },
-      (_delay, callback) => {
-        expire = callback;
-        return () => undefined;
-      },
+      schedule,
     );
     await app.listen({ host: "127.0.0.1", port: 0 });
     const address = app.server.address() as AddressInfo;
@@ -281,10 +330,10 @@ describe("live proxy", () => {
     await once(browser, "open");
     await started;
     try {
-      expect(expire).toBeTypeOf("function");
+      const expire = scheduled.get(100) ?? expect.fail("auth expiry was not scheduled");
       const closed = once(browser, "close");
       now = 200;
-      expire?.();
+      expire();
       const [code, reason] = await closed;
       expect(code).toBe(1008);
       expect(reason.toString()).toBe("session expired");
