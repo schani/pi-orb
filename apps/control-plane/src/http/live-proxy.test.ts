@@ -348,6 +348,8 @@ describe("live proxy", () => {
       const harness = makeHarness();
       const orbId = "central-orb";
       harness.store.seedOrb(makeOrbRow(orbId, "project-a", state, { hostRef: null }));
+      const { callbacks, schedule } = manualSocketTimers();
+      const unsubscribe = vi.fn();
       const session = {
         runtimeInstanceId: "central",
         snapshot: () =>
@@ -360,8 +362,10 @@ describe("live proxy", () => {
             headId: null,
           }),
         liveView: () => null,
-        subscribe: () => () => undefined,
-        request: () => okAsync({ type: "accepted" as const, operationId: "op", duplicate: false }),
+        subscribe: () => unsubscribe,
+        request: vi.fn(() =>
+          okAsync({ type: "accepted" as const, operationId: "op", duplicate: false }),
+        ),
       };
       let opened = false;
       const plane = {
@@ -377,10 +381,15 @@ describe("live proxy", () => {
       } as unknown as AgentPlane;
       const app = Fastify({ logger: false });
       openServers.push({ close: () => app.close() });
-      await registerLiveProxy(app, new NoSimulationTask("central attach", false), {
-        ...harness.deps,
-        agentPlane: plane,
-      });
+      await registerLiveProxy(
+        app,
+        new NoSimulationTask("central attach", false),
+        {
+          ...harness.deps,
+          agentPlane: plane,
+        },
+        schedule,
+      );
       await app.listen({ host: "127.0.0.1", port: 0 });
       const address = app.server.address() as AddressInfo;
       const browser = new WebSocket(
@@ -405,6 +414,26 @@ describe("live proxy", () => {
       expect(await first).toBe("server.welcome");
       expect(opened).toBe(true);
       await until(() => harness.deps.control.hasVisibleBrowser(orbId));
+      const peer = [...app.websocketServer.clients][0] ?? expect.fail("proxy peer missing");
+      const expire = callbacks.get(59_000) ?? expect.fail("planned expiry missing");
+      browser.pause();
+      try {
+        expire();
+        const delivered = once(peer, "message");
+        browser.send(
+          JSON.stringify({
+            v: 1,
+            type: "client.request",
+            requestId: "late",
+            action: { type: "abort", operationId: "op" },
+          }),
+        );
+        await delivered;
+        expect(session.request).not.toHaveBeenCalled();
+        expect(unsubscribe).toHaveBeenCalledOnce();
+      } finally {
+        browser.resume();
+      }
     },
   );
   it("rejects a connection covered by a concurrent stopping marker", async () => {

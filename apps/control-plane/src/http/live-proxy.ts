@@ -87,9 +87,11 @@ export async function registerLiveProxy(
       let upstream: WebSocket | null = null;
       let upstreamOpen = false;
       let browserClosed = false;
-      let centralAttached = false;
+      let detachCentral: (() => void) | undefined;
       const pendingToUpstream: string[] = [];
       const closeBoth = (code: number, reason: string): void => {
+        browserClosed = true;
+        detachCentral?.();
         try {
           browserSocket.close(code, reason);
         } catch {
@@ -105,7 +107,6 @@ export async function registerLiveProxy(
         request.authExpiresAt,
         () => task.wallNow(),
         () => {
-          browserClosed = true;
           closeBoth(1008, "session expired");
         },
         scheduleSocketTimer,
@@ -117,7 +118,6 @@ export async function registerLiveProxy(
         LIVE_MAX_LIFETIME_MS - LIVE_CLOSE_GRACE_MS,
         () => {
           if (browserSocket.readyState !== WebSocket.OPEN || !session.admit()) return;
-          browserClosed = true;
           closeBoth(LIVE_PLANNED_EXPIRY_CODE, "live connection expired");
         },
       );
@@ -143,7 +143,7 @@ export async function registerLiveProxy(
       // as its upgrade completes, while routing below crosses async adapter
       // boundaries. Queue frames until the runtime socket is open.
       browserSocket.on("message", (data: Buffer, isBinary: boolean) => {
-        if (!session.admit()) return;
+        if (browserClosed || !session.admit()) return;
         if (isBinary) {
           closeBoth(UNSUPPORTED_DATA, "binary frames are not accepted");
           return;
@@ -167,7 +167,7 @@ export async function registerLiveProxy(
           // Fire-and-forget: the timestamp is advisory (docs/lifecycle.md).
           void deps.store.touchLastBusy(task, { orbId, now: task.wallNow() });
         }
-        if (centralAttached) return;
+        if (detachCentral) return;
         if (upstreamOpen && upstream !== null) {
           upstream.send(text);
         } else {
@@ -226,12 +226,15 @@ export async function registerLiveProxy(
         }
         const session = opened.value;
         if (browserClosed) return;
-        centralAttached = true;
-        attachCentralLive(browserSocket, session, pendingToUpstream, (requestId, retryable) =>
-          request.log.warn(
-            { orbId, connectionId, requestId, retryable },
-            "central agent request failed",
-          ),
+        detachCentral = attachCentralLive(
+          browserSocket,
+          session,
+          pendingToUpstream,
+          (requestId, retryable) =>
+            request.log.warn(
+              { orbId, connectionId, requestId, retryable },
+              "central agent request failed",
+            ),
         );
         pendingToUpstream.length = 0;
         return;
@@ -290,7 +293,7 @@ export async function registerLiveProxy(
         pendingToUpstream.length = 0;
       });
       runtimeSocket.on("message", (data, isBinary) => {
-        if (!session.admit()) return;
+        if (browserClosed || !session.admit()) return;
         if (isBinary) {
           closeBoth(UNSUPPORTED_DATA, "binary frames are not accepted");
           return;
