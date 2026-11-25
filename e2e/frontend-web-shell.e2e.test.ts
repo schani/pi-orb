@@ -112,20 +112,27 @@ it.each(["/", "/orbs/missing-orb"])(
   },
 );
 
-it("prioritizes running, sleeping, then other working projects ahead of empty/archive-only projects across polls", async () => {
+it("ranks creating, starting and running projects together ahead of other projects across polls", async () => {
   const origin = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
   const page = await browser.newPage();
   await page.clock.install();
-  const projects: ProjectView[] = ["Archive", "Stopped", "Empty", "Idle", "Live", "Failed"].map(
-    (name) => ({
-      id: name.toLowerCase(),
-      name,
-      state: "active",
-      repositoryUrl: "https://github.com/example/ordering",
-      createdAt: "2026-10-01T00:00:00Z",
-      updatedAt: "2026-10-01T00:00:00Z",
-    }),
-  );
+  const projects: ProjectView[] = [
+    "Archive",
+    "Stopped",
+    "Empty",
+    "Creating",
+    "Idle",
+    "Starting",
+    "Live",
+    "Failed",
+  ].map((name) => ({
+    id: name.toLowerCase(),
+    name,
+    state: "active",
+    repositoryUrl: "https://github.com/example/ordering",
+    createdAt: "2026-10-01T00:00:00Z",
+    updatedAt: "2026-10-01T00:00:00Z",
+  }));
   const makeOrb = (projectId: string, state: OrbView["state"]): OrbView => ({
     id: `${projectId}-${state}`,
     projectId,
@@ -137,17 +144,21 @@ it("prioritizes running, sleeping, then other working projects ahead of empty/ar
     createdAt: "2026-10-01T00:00:00Z",
     updatedAt: "2026-10-01T00:00:00Z",
   });
+  const creating = makeOrb("creating", "creating");
+  const starting = makeOrb("starting", "starting");
   let incoming = projects;
   const lists: Record<string, OrbView[]> = {
     archive: (["archived", "archiving", "deleting"] as const).map((s) => makeOrb("archive", s)),
     stopped: [{ ...makeOrb("stopped", "stopped"), sleepUntil: "2100-01-01T00:00:00Z" }],
     empty: [],
+    creating: [creating],
     idle: [{ ...makeOrb("idle", "running"), activity: "idle" }],
+    starting: [starting],
     live: [
       { ...makeOrb("live", "running"), activity: "busy" },
       { ...makeOrb("live", "stopped"), sleepUntil: "2100-01-01T00:00:00Z" },
     ],
-    failed: (["failed", "creating", "starting", "stopping"] as const).map((s) => ({
+    failed: (["failed", "stopping"] as const).map((s) => ({
       ...makeOrb("failed", s),
       sleepUntil: "2100-01-01T00:00:00Z",
     })),
@@ -161,21 +172,48 @@ it("prioritizes running, sleeping, then other working projects ahead of empty/ar
     await page.goto(`${origin}/orbs/missing-orb`);
     const sections = page.locator(".orb-index .ix-project");
     const names = sections.locator(".project-name");
-    await expectPage(names).toHaveText(["Idle", "Live", "Stopped", "Failed", "Archive", "Empty"]);
+    const initialOrder = [
+      "Creating",
+      "Idle",
+      "Starting",
+      "Live",
+      "Stopped",
+      "Failed",
+      "Archive",
+      "Empty",
+    ];
+    await expectPage(names).toHaveText(initialOrder);
+    const creatingRow = sections.locator(`a[href="/orbs/${creating.id}"]`);
+    const startingRow = sections.locator(`a[href="/orbs/${starting.id}"]`);
+    await expectPage(creatingRow.locator(".glyph")).toHaveAttribute("alt", "creating");
+    await expectPage(startingRow.locator(".glyph")).toHaveAttribute("alt", "starting");
     const stoppedSection = await page
       .getByRole("region", { name: "Stopped", exact: true })
       .elementHandle();
     incoming = [...projects].reverse();
     lists.archive = [makeOrb("archive", "running")];
+    lists.creating = [{ ...creating, state: "starting", stateVersion: 2 }];
     lists.idle = [{ ...makeOrb("idle", "stopped"), sleepUntil: "2100-01-01T00:00:00Z" }];
+    lists.starting = [{ ...starting, state: "running", stateVersion: 2 }];
     await page.clock.runFor(2000);
-    await expectPage(names).toHaveText(["Archive", "Live", "Stopped", "Idle", "Failed", "Empty"]);
+    await expectPage(names).toHaveText([
+      "Archive",
+      "Creating",
+      "Starting",
+      "Live",
+      "Stopped",
+      "Idle",
+      "Failed",
+      "Empty",
+    ]);
+    await expectPage(creatingRow.locator(".glyph")).toHaveAttribute("alt", "starting");
+    await expectPage(startingRow.locator(".glyph")).toHaveAttribute("alt", "running");
     expect(await stoppedSection?.evaluate((node) => node.isConnected)).toBe(true);
     lists.archive = [makeOrb("archive", "archived")];
     lists.stopped = [makeOrb("stopped", "stopped")];
     lists.idle = [{ ...makeOrb("idle", "running"), activity: "busy" }];
     await page.clock.runFor(2000);
-    await expectPage(names).toHaveText(["Idle", "Live", "Stopped", "Failed", "Archive", "Empty"]);
+    await expectPage(names).toHaveText(initialOrder);
   } finally {
     await page.unrouteAll({ behavior: "wait" });
     await page.close();

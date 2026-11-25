@@ -330,7 +330,9 @@ export function OrbIndex({
         : [{ project, list }];
     }) ?? [];
   const priority = (list: OrbList) =>
-    list.items?.some((orb) => orb.state === "running")
+    list.items?.some(
+      ({ state }) => state === "creating" || state === "starting" || state === "running",
+    )
       ? 0
       : list.items?.some((orb) => orb.state === "stopped" && orb.sleepUntil != null)
         ? 1
