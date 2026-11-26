@@ -7,6 +7,7 @@ import {
   defineExtension,
   defineTool,
   MemoryStorage,
+  ToolTask,
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import type { ServerFrame } from "@pi-orb/protocol";
@@ -227,8 +228,9 @@ describe("native HTTP tool-round completion", () => {
         );
         expect(calls.items).toContainEqual(
           expect.objectContaining({
-            version: 3,
+            version: ToolTask.definition.version,
             input: expect.objectContaining({ kind: "model", callId: "call|fc" }),
+            state: { status: "running", checkpoint: expect.objectContaining({ phase: "execute" }) },
           }),
         );
         await setImmediate();

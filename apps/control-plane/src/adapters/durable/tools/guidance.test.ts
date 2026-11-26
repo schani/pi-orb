@@ -30,14 +30,14 @@ it("declares inherited subagent configuration with a named model selector", asyn
   }
 });
 
-it("offers only the literal skill bootstrap and preserves the native tool contract", () => {
+it("offers the skill bootstrap and native guidance and preserves the native tool contract", () => {
   const tool = codemodeTool(
     new CallableCatalog(createSubagentTools(() => okAsync(undefined))),
     new Set(),
   );
   const native = createCodemodeTool({ sandbox: new PiCodemodeSandbox(), models: false });
-  expect(tool.description).toBe(CODEMODE_BOOTSTRAP);
-  expect(tool.description).toBe(
+  expect(tool.description).toBe(`${CODEMODE_BOOTSTRAP}\n\n${native.description}`);
+  expect(CODEMODE_BOOTSTRAP).toBe(
     'Read the codemode skill first:\ntext(await tools.read({path:"/opt/pi-orb/skills/codemode/SKILL.md"}));',
   );
   for (const key of [
@@ -53,7 +53,6 @@ it("offers only the literal skill bootstrap and preserves the native tool contra
     type: "grammar",
     variants: { openai_lark: expect.stringContaining("start: options_source | plain_source") },
   });
-  expect(tool.description).not.toMatch(/Run JavaScript|Globals:|chart\(|8-outstanding|temp file/);
 });
 
 it("returns native images inline without writing to the environment or text artifact store", async () => {

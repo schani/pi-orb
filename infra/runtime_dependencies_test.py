@@ -369,7 +369,7 @@ if [ "$(basename "$0") $*" = "node -p process.arch" ]; then echo x64; fi
         for package in ['@gotgenes/pi-subagents', '@earendil-works/pi-coding-agent',
                         '@earendil-works/pi-tui', '@pi-orb/luna', '@pi-orb/mock-openai']:
             self.assertNotIn(package, dependencies)
-        self.assertEqual(dependencies['@earendil-works/pi-durable'], '1.5.2')
+        self.assertEqual(dependencies['@earendil-works/pi-durable'], '1.6.1')
         self.assertIn('@anthropic-ai/claude-agent-sdk', dependencies)
 
     def test_host_subagent_artifact_is_absent_from_lockfile(self):

@@ -84,6 +84,7 @@ import type { AgentStorageLease, InputAdmissionError } from "./persistence.ts";
 import { activeSubagents, type PublicEntryReceipt, projectHistory } from "./projection.ts";
 import { promptExtension } from "./prompt.ts";
 import { startupRuntimeError } from "./startup.ts";
+import { CHILD_ORB_GROUP } from "./tools/subagents.ts";
 
 const context = BACKGROUND_CONTEXT;
 type Receipt = {
@@ -427,7 +428,9 @@ export class DurableAgent implements AgentSessionFacade {
           {
             cwd: options.env.cwd,
             ...(options.modelTools ? { tools: null, modelTools: options.modelTools } : {}),
-            ...(options.childExtension ? { extensions: { remove: [options.childExtension] } } : {}),
+            ...(options.childExtension
+              ? { extensions: { remove: [options.childExtension, CHILD_ORB_GROUP] } }
+              : {}),
           },
           openContext,
         );

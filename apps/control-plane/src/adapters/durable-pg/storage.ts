@@ -278,8 +278,9 @@ export class PgStorage implements Storage {
     // SQL COMMIT succeeded: receipts are synchronous, ordered, and never precede durability.
     for (const [index, seq] of seqs.entries()) receive(index, seq);
     return refused === undefined
-      ? { stored: seqs.length }
+      ? { kind: "stored", stored: seqs.length }
       : {
+          kind: "refused",
           stored: seqs.length,
           refused: new Error(refused.message),
         };

@@ -20,6 +20,7 @@ import {
 } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { SimulationTask } from "determined";
+import { expect } from "vitest";
 import type { CallableCatalog } from "../catalog.ts";
 import { codemodeTool } from "../codemode.ts";
 import type { AgentToolFiles } from "../files.ts";
@@ -81,6 +82,7 @@ export async function openCodemodeHarness(
         ctx,
       );
       executing--;
+      if (result.kind !== undefined) return expect.fail("Code mode unexpectedly parked");
       options.onResult?.(args.code, result);
       if (batch) {
         batch.results.push(result);
@@ -105,9 +107,13 @@ export async function openCodemodeHarness(
     defineExtension({
       name: "native-test",
       ...(options.hooks ? { hooks: options.hooks } : {}),
-      tools: [...catalog.registrations(), registration],
+      tools: [...catalog.ungroupedRegistrations(), registration],
     }),
   );
+  const refreshNamespaces = () => {
+    for (const extension of catalog.namespaceExtensions("native-test")) registry.install(extension);
+  };
+  refreshNamespaces();
   const faux = fauxProvider();
   const models = createModels();
   models.setProvider(faux.provider);
@@ -135,6 +141,7 @@ export async function openCodemodeHarness(
         release.resolve();
         await pending;
       }
+      refreshNamespaces();
       batch = undefined;
       complete = deferred<ToolExecutionResult>();
       release = deferred<void>();
@@ -158,6 +165,7 @@ export async function openCodemodeHarness(
         release.resolve();
         await pending;
       }
+      refreshNamespaces();
       batch = { results: [], expected: sources.length, done: deferred<ToolExecutionResult[]>() };
       faux.setResponses([
         fauxAssistantMessage(

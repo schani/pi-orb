@@ -285,27 +285,62 @@ it("isolates only the exact summary prompt and envelope", async () => {
   const address = upstream.address();
   if (!address || typeof address === "string") throw new Error("missing listener");
   const relay = await durableFakeRelay(`http://127.0.0.1:${address.port}/backend-api`, true);
-  const post = async (instructions: string, prompt: string) =>
+  const post = async (input: unknown[], extras: Record<string, unknown> = {}) =>
     (
       await fetch(`${relay.baseUrl}/codex/responses`, {
         method: "POST",
         headers: { "content-encoding": "zstd", authorization: "Bearer fixture" },
         body: zstdCompressSync(
           Buffer.from(
-            JSON.stringify({
-              instructions,
-              input: [{ role: "user", content: prompt }],
-            }),
+            JSON.stringify({ model: "gpt-6-luna", tool_choice: "none", input, ...extras }),
           ),
         ),
       })
     ).text();
+  const developer = { role: "developer", content: summaryInstructions };
+  const user = {
+    role: "user",
+    content: [{ type: "input_text", text: summaryPrompt }],
+  };
   try {
-    expect(await post(summaryInstructions, summaryPrompt)).toContain("response.completed");
+    expect(await post([user], { instructions: summaryInstructions })).toContain(
+      "response.completed",
+    );
+    expect(await post([developer, user])).toContain("response.completed");
     expect(forwarded).toEqual([]);
-    expect(await post("ordinary inference", summaryPrompt)).toBe("FORWARDED");
-    expect(await post(summaryInstructions, "ordinary turn")).toBe("FORWARDED");
-    expect(forwarded).toHaveLength(2);
+
+    const extraDeveloper = { role: "developer", content: "Conflicting instruction." };
+    const toolResult = { type: "function_call_output", call_id: "call_1", output: "result" };
+    expect(await post([user], { instructions: "ordinary inference" })).toBe("FORWARDED");
+    expect(await post([developer, { role: "user", content: "ordinary turn" }])).toBe("FORWARDED");
+    expect(await post([user, developer, user])).toBe("FORWARDED");
+    expect(await post([developer, toolResult, user])).toBe("FORWARDED");
+    expect(await post([developer, extraDeveloper, user])).toBe("FORWARDED");
+    expect(await post([extraDeveloper, user], { instructions: summaryInstructions })).toBe(
+      "FORWARDED",
+    );
+    expect(await post([developer, user], { model: "gpt-6.2-sol" })).toBe("FORWARDED");
+    expect(await post([developer, user], { tools: [{ type: "custom", name: "codemode" }] })).toBe(
+      "FORWARDED",
+    );
+    expect(forwarded).toHaveLength(8);
+
+    const legacy = { instructions: summaryInstructions };
+    const tools = [{ type: "custom", name: "codemode" }];
+    expect
+      .soft(await post([user], { ...legacy, model: "gpt-6.2-sol" }), "legacy model")
+      .toBe("FORWARDED");
+    expect.soft(await post([user], { ...legacy, tools }), "legacy tools").toBe("FORWARDED");
+    expect
+      .soft(await post([developer, user], { tool_choice: "required" }), "Codex tool choice")
+      .toBe("FORWARDED");
+    expect
+      .soft(
+        await post([user], { ...legacy, tool_choice: undefined }),
+        "legacy requires explicit tool choice",
+      )
+      .toBe("FORWARDED");
+    expect(forwarded).toHaveLength(12);
     relay.check();
   } finally {
     await relay.close();

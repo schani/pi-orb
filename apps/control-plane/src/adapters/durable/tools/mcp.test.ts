@@ -333,12 +333,14 @@ it("discovers MCP, executes validated QuickJS calls with fresh scoped connection
         : defineTool({
             ...tool,
             execute: async (args, api, context) => {
-              result = await tool.execute(args, api, context);
-              return result;
+              const outcome = await tool.execute(args, api, context);
+              if (outcome.kind === undefined) result = outcome;
+              return outcome;
             },
           }),
     ),
   });
+  for (const extension of tools.namespaceExtensions) registry.install(extension);
   const harness = await Harness.open(new MemoryStorage(), { models, registry }, BACKGROUND_CONTEXT);
   try {
     const root = await harness.root(BACKGROUND_CONTEXT, {

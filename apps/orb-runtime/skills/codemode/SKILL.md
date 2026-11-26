@@ -43,7 +43,7 @@ Only emitted text/images and the final return value reach the model; nested repl
 
 Tools scripts can call (`await tools.<name>(args)`):
 
-Only codemode is offered to the model. The `tool-catalogue` section of the system prompt lists the tools scripts can call, by namespace, as far as space allows. Deferred tools are callable too. Discovery exposes their exact argument and result shapes, namespace instructions and identifiers:
+Only codemode is offered to the model. The `codemode` section of the system prompt lists the tools scripts can call, by namespace, as far as space allows. Deferred tools are callable too. Discovery exposes their exact argument and result shapes, namespace instructions and identifiers:
 
 ```js
 text(await searchTools("subagent"));

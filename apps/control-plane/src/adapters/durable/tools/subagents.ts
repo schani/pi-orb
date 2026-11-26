@@ -9,6 +9,7 @@ import {
   defineTool,
   InboxDoc,
   type ModelRef,
+  type RegistrySnapshot,
   ROOT_CONVERSATION_ID,
   type TaskId,
   type ToolExecutionApi,
@@ -22,6 +23,7 @@ import {
 import { errorResult, type ToolError } from "./catalog.ts";
 
 export const TOOLS_EXTENSION = "orb.tools";
+export const ROOT_ORB_EXTENSION = `${TOOLS_EXTENSION}.orb`;
 export const SUBAGENT_TOOL_NAMES: readonly string[] = [
   "subagent",
   "steer_subagent",
@@ -31,6 +33,21 @@ export const SUBAGENT_TOOL_NAMES: readonly string[] = [
 ];
 /** Selected only by children: their codemode lacks subagent tools, orb_spawn and orb_alert. */
 export const CHILD_TOOLS_EXTENSION = "orb.child-tools";
+export const CHILD_ORB_EXTENSION = `${CHILD_TOOLS_EXTENSION}.orb`;
+export const SHARED_NAMESPACE_PREFIX = "orb.namespace.";
+export const CHILD_ORB_GROUP = { name: CHILD_ORB_EXTENSION };
+export const ROOT_ORB_GROUP = { name: ROOT_ORB_EXTENSION };
+export function childTools(registry: RegistrySnapshot) {
+  return registry
+    .installed()
+    .flatMap((extension) =>
+      extension.name === CHILD_TOOLS_EXTENSION ||
+      extension.name === CHILD_ORB_EXTENSION ||
+      extension.name.startsWith(SHARED_NAMESPACE_PREFIX)
+        ? (extension.tools ?? [])
+        : [],
+    );
+}
 type Receipt = { anchor: number; prompt: string; description: string; model?: string };
 export const ChildReceipts = defineDoc<{ children: Record<string, Receipt> }>({
   kind: "orb.children",
@@ -70,11 +87,9 @@ export const ChildAnchor = defineTask<
           ownership: { kind: "task", taskId: runtime.taskId },
         });
         const agent = await tx.doc(AgentDoc, child.id);
-        agent.tools = (runtime.registry.extension(CHILD_TOOLS_EXTENSION)?.tools ?? [])
-          .map((tool) => tool.name)
-          .filter((name) => name !== "orb_spawn" && !SUBAGENT_TOOL_NAMES.includes(name));
+        agent.tools = childTools(runtime.registry).map((tool) => tool.name);
         agent.modelTools = ["codemode"];
-        agent.extensions = { remove: [TOOLS_EXTENSION] };
+        agent.extensions = { remove: [TOOLS_EXTENSION, ROOT_ORB_EXTENSION] };
         if (task.input.model) agent.model = task.input.model;
         await tx.appendEntry(ROOT_CONVERSATION_ID, {
           kind: "orb.subagent-task",

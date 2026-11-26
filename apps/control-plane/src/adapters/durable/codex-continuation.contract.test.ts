@@ -31,7 +31,12 @@ function completed(id: string) {
   ];
 }
 
-type Request = { input: unknown[]; previous_response_id?: string; store?: boolean };
+type Request = {
+  input: unknown[];
+  previous_response_id?: string;
+  instructions?: string;
+  store?: boolean;
+};
 function mockTransport(failure?: "connect" | "after-start" | "missing-continuation") {
   const requests: Request[] = [];
   const sockets: FakeWebSocket[] = [];
@@ -91,10 +96,18 @@ afterEach(() => {
 async function twoTurns(transport?: SimpleStreamOptions["transport"]) {
   const messages: Message[] = [{ role: "user", content: "first", timestamp: 0 }];
   const options = { apiKey, sessionId, env: {}, ...(transport === undefined ? {} : { transport }) };
-  const first = await streamSimple(model, normalizeContext({ messages }), options).result();
+  const first = await streamSimple(
+    model,
+    normalizeContext({ systemPrompt: "Offline fixture instructions", messages }),
+    options,
+  ).result();
   expect(first.stopReason).toBe("stop");
   messages.push(first, { role: "user", content: "second", timestamp: 0 });
-  const second = await streamSimple(model, normalizeContext({ messages }), options).result();
+  const second = await streamSimple(
+    model,
+    normalizeContext({ systemPrompt: "Offline fixture instructions", messages }),
+    options,
+  ).result();
   expect(second.stopReason).toBe("stop");
 }
 
@@ -108,9 +121,17 @@ it.each([
   await twoTurns(transport);
   expect(mock.sockets).toHaveLength(1);
   expect(mock.fetch).not.toHaveBeenCalled();
-  expect(mock.requests.map((request) => request.input.length)).toEqual([1, cached ? 1 : 3]);
+  expect(mock.requests.map((request) => request.input.length)).toEqual([2, cached ? 1 : 4]);
   expect(mock.requests[1]?.previous_response_id).toBe(cached ? "resp_1" : undefined);
   expect(mock.requests.every((request) => request.store === false)).toBe(true);
+  for (const request of mock.requests) {
+    expect(request).not.toHaveProperty("instructions");
+    if (request.previous_response_id === undefined)
+      expect(request.input[0]).toMatchObject({
+        role: "developer",
+        content: "Offline fixture instructions",
+      });
+  }
   expect(getOpenAICodexWebSocketDebugStats(sessionId)).toMatchObject({
     connectionsCreated: 1,
     connectionsReused: 1,
@@ -125,7 +146,7 @@ it.each(["auto", "websocket-cached"] as const)(
   async (transport) => {
     const mock = mockTransport("missing-continuation");
     await twoTurns(transport);
-    expect(mock.requests.map((request) => request.input.length)).toEqual([1, 1, 3]);
+    expect(mock.requests.map((request) => request.input.length)).toEqual([2, 1, 4]);
     expect(mock.requests[1]?.previous_response_id).toBe("resp_1");
     expect(mock.requests[2]?.previous_response_id).toBeUndefined();
     expect(mock.sockets).toHaveLength(2);

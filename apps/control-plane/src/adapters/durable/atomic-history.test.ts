@@ -128,7 +128,7 @@ it("projects grouped native deltas without a loaded agent and rejects invalid cu
         () => undefined,
         context,
       ),
-    ).toEqual({ stored: 2 });
+    ).toEqual({ kind: "stored", stored: 2 });
     const publicRows = (
       await db.query("SELECT record FROM history_records WHERE orb_id=$1 ORDER BY record_id", [
         orb.id,
@@ -213,7 +213,7 @@ it("projects grouped native deltas without a loaded agent and rejects invalid cu
         () => undefined,
         context,
       ),
-    ).toEqual({ stored: 1 });
+    ).toEqual({ kind: "stored", stored: 1 });
     expect(
       (
         await db.query("SELECT record FROM history_records WHERE orb_id=$1 ORDER BY record_id", [

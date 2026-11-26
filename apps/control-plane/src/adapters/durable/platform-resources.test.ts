@@ -171,7 +171,7 @@ it("provides all scripting guidance and caps in one bounded skill", async () => 
     /<console_output>/,
     /each nested tool retains its own replay policy/,
     /Only codemode is offered to the model/,
-    /The \x60tool-catalogue\x60 section of the system prompt lists/,
+    /The \x60codemode\x60 section of the system prompt lists/,
     /describeNamespace\("orb"\)/,
     /describeNamespace\("mcp"\)/,
     /exact namespace identifier[\s\S]*describeNamespace\("mcp__github"\)/i,

@@ -27,11 +27,6 @@ import type { AgentToolFiles } from "./files.ts";
 export const CODEMODE_BOOTSTRAP =
   'Read the codemode skill first:\ntext(await tools.read({path:"/opt/pi-orb/skills/codemode/SKILL.md"}));';
 
-export function formatToolCatalogue(text: string | undefined): string | undefined {
-  const intro = "Tools scripts can call (`await tools.<name>(args)`):\n\n";
-  return text?.startsWith(intro) ? text.slice(intro.length) : text;
-}
-
 function object(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -61,14 +56,11 @@ export function codemodeTool(
   const options = {
     sandbox: new PiCodemodeSandbox(),
     models: false,
-    get namespaces() {
-      return catalog.nativeNamespaces();
-    },
   };
   const native = createCodemodeTool(options);
   return defineTool({
     ...native,
-    description: CODEMODE_BOOTSTRAP,
+    description: `${CODEMODE_BOOTSTRAP}\n\n${native.description}`,
     execute: async (args, api, context) => {
       const parsed = Result.fromThrowable(
         () => parseCodemodeSource(args.code),
@@ -184,16 +176,17 @@ export function codemodeTool(
       const decorated: ToolExecutionApi = {
         ...api,
         env,
-        executeTool: (name, value, ctx, callOptions) => {
-          return api.executeTool(name, value, ctx, callOptions).then((result) => ({
-            ...result,
-            diagnostics: result.diagnostics.map((diagnostic) =>
-              diagnostic.code === "invalid_arguments"
-                ? { ...diagnostic, message: catalog.invalidArgumentsMessage(name, value) }
-                : diagnostic,
-            ),
-          }));
-        },
+        executeTool: ((name, value, ctx, callOptions) =>
+          callOptions?.wait === false
+            ? api.executeTool(name, value, ctx, callOptions)
+            : api.executeTool(name, value, ctx, callOptions).then((result) => ({
+                ...result,
+                diagnostics: result.diagnostics.map((diagnostic) =>
+                  diagnostic.code === "invalid_arguments"
+                    ? { ...diagnostic, message: catalog.invalidArgumentsMessage(name, value) }
+                    : diagnostic,
+                ),
+              }))) as typeof api.executeTool,
         commit: (change, ctx, commitOptions) =>
           api.commit(
             async (tx) => {
@@ -278,7 +271,7 @@ export function codemodeTool(
           ...(charts.length ? { details: { charts: copyJson(charts) } } : {}),
         };
       if (cleanup.isErr()) return errorResult(cleanup.error);
-      return present(executed.value);
+      return executed.value.kind === undefined ? present(executed.value) : executed.value;
     },
   });
 }
@@ -292,17 +285,9 @@ export function codemodeExtension(
   const extension = createCodemodeExtension({
     sandbox: new PiCodemodeSandbox(),
     models: false,
-    get namespaces() {
-      return catalog.nativeNamespaces();
-    },
   });
   return {
     ...extension,
     tools: [codemodeTool(catalog, running, files, orb)],
-    sections: (extension.sections ?? []).map((section) => ({
-      ...section,
-      key: "tool-catalogue",
-      render: async (input, context) => formatToolCatalogue(await section.render(input, context)),
-    })),
   };
 }

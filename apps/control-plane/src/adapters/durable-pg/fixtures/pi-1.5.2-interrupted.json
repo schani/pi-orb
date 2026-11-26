@@ -1,0 +1,311 @@
+{
+  "submission": 8,
+  "batches": [
+    [
+      { "type": "conversation", "value": { "id": 1 } },
+      {
+        "type": "document.create",
+        "record": {
+          "id": 2,
+          "kind": "pi.live",
+          "scope": { "kind": "conversation", "conversationId": 1 },
+          "history": "latest",
+          "fork": "initial"
+        },
+        "content": { "version": 3, "kind": "base", "value": {} }
+      },
+      {
+        "type": "document.create",
+        "record": {
+          "id": 3,
+          "kind": "pi.inbox",
+          "scope": { "kind": "conversation", "conversationId": 1 },
+          "history": "latest",
+          "fork": "initial"
+        },
+        "content": { "version": 1, "kind": "base", "value": { "items": [] } }
+      },
+      {
+        "type": "document.create",
+        "record": {
+          "id": 4,
+          "kind": "pi.usage",
+          "scope": { "kind": "conversation", "conversationId": 1 },
+          "history": "latest",
+          "fork": "initial"
+        },
+        "content": { "version": 1, "kind": "base", "value": { "models": {}, "tools": {} } }
+      },
+      {
+        "type": "document.create",
+        "record": {
+          "id": 5,
+          "kind": "pi.provider",
+          "scope": { "kind": "conversation", "conversationId": 1 },
+          "history": "latest",
+          "fork": "initial"
+        },
+        "content": {
+          "version": 1,
+          "kind": "base",
+          "value": { "sessionId": "01a2183e-514d-726a-8448-400cae7405f4" }
+        }
+      },
+      {
+        "type": "document.create",
+        "record": {
+          "id": 6,
+          "kind": "pi.agent",
+          "scope": { "kind": "conversation", "conversationId": 1 },
+          "history": "rewindable",
+          "fork": "asOf"
+        },
+        "content": {
+          "version": 1,
+          "kind": "base",
+          "value": { "model": { "provider": "faux", "modelId": "faux-1" } }
+        }
+      }
+    ],
+    [
+      {
+        "type": "entry",
+        "value": {
+          "model": [{ "role": "user", "content": "resume prior turn", "timestamp": 2000000000000 }],
+          "kind": "pi.user",
+          "id": 7,
+          "conversationId": 1
+        }
+      },
+      {
+        "type": "submission",
+        "value": { "conversationId": 1, "type": "input", "status": "placed", "entry": 7, "id": 8 }
+      },
+      {
+        "type": "task",
+        "value": {
+          "id": 9,
+          "conversationId": 1,
+          "kind": "pi.generation",
+          "version": 2,
+          "input": {},
+          "background": false,
+          "abortRequested": false,
+          "state": { "status": "pending", "checkpoint": { "phase": "prepare", "attempt": 1 } }
+        }
+      },
+      {
+        "type": "document.change",
+        "id": 2,
+        "content": {
+          "version": 3,
+          "kind": "base",
+          "value": { "run": { "taskId": 9, "inputs": [8], "turns": 0, "first": 7 } }
+        }
+      }
+    ],
+    [
+      {
+        "type": "task",
+        "value": {
+          "id": 9,
+          "conversationId": 1,
+          "kind": "pi.generation",
+          "version": 2,
+          "input": {},
+          "background": false,
+          "abortRequested": false,
+          "state": { "status": "running", "checkpoint": { "phase": "prepare", "attempt": 1 } },
+          "startedAt": 2000000000000
+        }
+      }
+    ],
+    [
+      {
+        "type": "entry",
+        "value": {
+          "model": [
+            {
+              "role": "system",
+              "content": "",
+              "toolsAdded": [
+                {
+                  "name": "fixture",
+                  "description": "Fixture tool",
+                  "parameters": { "type": "object", "properties": {} }
+                }
+              ],
+              "timestamp": 2000000000000
+            }
+          ],
+          "kind": "pi.system",
+          "id": 10,
+          "conversationId": 1,
+          "byTaskId": 9
+        }
+      },
+      {
+        "type": "task",
+        "value": {
+          "id": 9,
+          "conversationId": 1,
+          "kind": "pi.generation",
+          "version": 2,
+          "input": {},
+          "background": false,
+          "abortRequested": false,
+          "state": {
+            "status": "running",
+            "checkpoint": {
+              "phase": "request",
+              "attempt": 1,
+              "model": { "provider": "faux", "modelId": "faux-1" },
+              "thinkingLevel": "off",
+              "streamOptions": {},
+              "cutoff": 10
+            }
+          },
+          "startedAt": 2000000000000
+        }
+      }
+    ],
+    [
+      {
+        "type": "entry",
+        "value": {
+          "model": [
+            {
+              "role": "assistant",
+              "content": [
+                { "type": "toolCall", "id": "prior-call", "name": "fixture", "arguments": {} }
+              ],
+              "api": "faux:1795703066928:1ozgex8t7c9h",
+              "provider": "faux",
+              "model": "faux-1",
+              "usage": {
+                "input": 0,
+                "output": 3,
+                "cacheRead": 0,
+                "cacheWrite": 33,
+                "totalTokens": 36,
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+              },
+              "stopReason": "toolUse",
+              "timestamp": 1795703066928,
+              "thinkingLevel": "off"
+            }
+          ],
+          "kind": "pi.assistant",
+          "id": 11,
+          "conversationId": 1,
+          "byTaskId": 9
+        }
+      },
+      {
+        "type": "task",
+        "value": {
+          "id": 9,
+          "conversationId": 1,
+          "kind": "pi.generation",
+          "version": 2,
+          "input": {},
+          "background": false,
+          "abortRequested": false,
+          "state": {
+            "status": "waiting",
+            "checkpoint": { "phase": "tools", "assistant": 11, "tools": [12], "pending": [] },
+            "on": [12],
+            "policy": "allSettled"
+          },
+          "startedAt": 2000000000000
+        }
+      },
+      {
+        "type": "task",
+        "value": {
+          "id": 12,
+          "conversationId": 1,
+          "kind": "pi.tool",
+          "version": 3,
+          "input": { "kind": "model", "assistant": 11, "callId": "prior-call" },
+          "owner": 9,
+          "background": false,
+          "abortRequested": false,
+          "state": { "status": "pending", "checkpoint": { "phase": "call" } }
+        }
+      },
+      {
+        "type": "document.change",
+        "id": 2,
+        "content": {
+          "version": 3,
+          "kind": "base",
+          "value": {
+            "run": { "taskId": 9, "inputs": [8], "turns": 1, "first": 7 },
+            "tools": [
+              { "callId": "prior-call", "name": "fixture", "taskId": 12, "status": "pending" }
+            ]
+          }
+        }
+      },
+      {
+        "type": "document.change",
+        "id": 4,
+        "content": {
+          "version": 1,
+          "kind": "base",
+          "value": {
+            "models": {
+              "faux/faux-1": {
+                "input": 0,
+                "output": 3,
+                "cacheRead": 0,
+                "cacheWrite": 33,
+                "totalTokens": 36,
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+              }
+            },
+            "tools": {}
+          }
+        }
+      }
+    ],
+    [
+      {
+        "type": "task",
+        "value": {
+          "id": 12,
+          "conversationId": 1,
+          "kind": "pi.tool",
+          "version": 3,
+          "input": { "kind": "model", "assistant": 11, "callId": "prior-call" },
+          "owner": 9,
+          "background": false,
+          "abortRequested": false,
+          "state": { "status": "running", "checkpoint": { "phase": "call" } },
+          "startedAt": 2000000000000
+        }
+      }
+    ],
+    [
+      {
+        "type": "task",
+        "value": {
+          "id": 12,
+          "conversationId": 1,
+          "kind": "pi.tool",
+          "version": 3,
+          "input": { "kind": "model", "assistant": 11, "callId": "prior-call" },
+          "owner": 9,
+          "background": false,
+          "abortRequested": false,
+          "state": {
+            "status": "running",
+            "checkpoint": { "phase": "execute", "arguments": {}, "replay": "safe" }
+          },
+          "startedAt": 2000000000000
+        }
+      }
+    ]
+  ]
+}

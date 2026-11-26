@@ -225,15 +225,20 @@ describe("native codemode interrupted journal recovery", () => {
                             commitContext,
                             commitOptions,
                           ),
-                        executeTool: (name, value, callContext, options) => {
+                        executeTool: ((name, value, callContext, options) => {
                           callbacks.push({ name, key: options?.key, reopening });
                           trace("parent-executeTool", {
                             taskId: api.taskId,
                             name,
                             key: options?.key,
                           });
-                          return api.executeTool(name, value, callContext, options);
-                        },
+                          return Reflect.apply(api.executeTool, api, [
+                            name,
+                            value,
+                            callContext,
+                            options,
+                          ]);
+                        }) as typeof api.executeTool,
                       },
                       ctx,
                     );
@@ -242,7 +247,7 @@ describe("native codemode interrupted journal recovery", () => {
                       aborted: ctx.abortSignal?.aborted,
                       isError: value.isError,
                     });
-                    if (!ctx.abortSignal?.aborted) {
+                    if (!ctx.abortSignal?.aborted && value.kind === undefined) {
                       result = value;
                       completed.resolve();
                     }

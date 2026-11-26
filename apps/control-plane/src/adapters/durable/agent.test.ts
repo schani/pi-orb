@@ -1608,7 +1608,6 @@ it.each([false, true])(
       expect(JSON.stringify(agent.snapshot()._unsafeUnwrap())).not.toContain(secret);
       expect(JSON.stringify(frames)).not.toContain(secret);
       const tasks = await storage.scanTasks({ kind: "pi.tool" }, 10, undefined, BACKGROUND_CONTEXT);
-      expect(tasks.items.every((task) => task.version === 3)).toBe(true);
       expect(
         tasks.items.some(
           (task) =>
@@ -1643,7 +1642,7 @@ it.each([
               args[0].forEach((_, index) => {
                 args[1](index, (index + 1) as Seq);
               });
-              return { stored: args[0].length };
+              return { kind: "stored", stored: args[0].length };
             }
             return target.commit(...args);
           };

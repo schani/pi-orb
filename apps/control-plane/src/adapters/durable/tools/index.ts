@@ -23,6 +23,7 @@ import {
   CHILD_TOOLS_EXTENSION,
   ChildAnchor,
   createSubagentTools,
+  SHARED_NAMESPACE_PREFIX,
   TOOLS_EXTENSION,
 } from "./subagents.ts";
 
@@ -102,13 +103,13 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
       extension: defineExtension({
         ...native,
         name: TOOLS_EXTENSION,
-        tools: [...catalog.registrations(), code],
+        tools: [...catalog.ungroupedRegistrations(), code],
         tasks: [ChildAnchor],
       }),
       childExtension: defineExtension({
         ...childNative,
         name: CHILD_TOOLS_EXTENSION,
-        tools: [...child.registrations(), ...childNative.tools!],
+        tools: [...child.ungroupedRegistrations(), ...childNative.tools!],
       }),
       modelTools: [code] as const,
     };
@@ -118,6 +119,14 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
   let closed = false;
   const bundle = {
     ...extensions(),
+    get namespaceExtensions() {
+      const orb = (name: string) => name === "orb";
+      return [
+        ...catalog.namespaceExtensions(TOOLS_EXTENSION, orb),
+        ...child.namespaceExtensions(CHILD_TOOLS_EXTENSION, orb),
+        ...catalog.namespaceExtensions(SHARED_NAMESPACE_PREFIX.slice(0, -1), (name) => !orb(name)),
+      ];
+    },
     bindTaskAbort: (abort: Harness["abortTask"]) => {
       abortTask = abort;
     },

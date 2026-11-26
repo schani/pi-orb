@@ -252,7 +252,9 @@ it.each([1, 2])(
           expect.objectContaining({ kind: "task_interrupted", reason: "interrupted" }),
         );
       }
-      expect(await backend.task(seeded.taskId, context)).toMatchObject({ version: 2 });
+      expect(await backend.task(seeded.taskId, context)).toMatchObject({
+        version: GenerationTask.definition.version,
+      });
       expect((await backend.entry(seeded.entryId, context))?.entry).toMatchObject({
         model: [{ role: "user", content: "question", timestamp: 1000 }],
       });

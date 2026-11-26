@@ -66,23 +66,25 @@ describe("durable model usage capture", () => {
           request.headers["content-encoding"] === "zstd" ? zstdDecompressSync(bytes) : bytes
         ).toString();
         const body = JSON.parse(raw) as {
-          instructions?: string;
           input?: Array<{
             type?: string;
             role?: string;
-            content?: Array<{ type: string; text?: string }>;
+            content?: string | Array<{ type: string; text?: string }>;
           }>;
         };
         const userText = body.input
           ?.filter((item) => item.role === "user")
-          .flatMap((item) => item.content ?? [])
+          .flatMap((item) => (Array.isArray(item.content) ? item.content : []))
           .filter((part) => part.type === "input_text")
           .map((part) => part.text ?? "");
-        const owner = body.instructions?.includes("context summarization assistant")
-          ? "compaction"
-          : userText?.includes("CHILD_TASK")
-            ? "child"
-            : "root";
+        const instructions = body.input?.[0]?.content;
+        const owner =
+          typeof instructions === "string" &&
+          instructions.includes("context summarization assistant")
+            ? "compaction"
+            : userText?.includes("CHILD_TASK")
+              ? "child"
+              : "root";
         requests.push(owner);
         const outputs =
           body.input?.filter((item) => item.type === "custom_tool_call_output").length ?? 0;
