@@ -102,9 +102,9 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential python3 curl jq unzip uuid-runtime
-          archive="$RUNNER_TEMP/tofu_1.13.9_linux_amd64.zip"
-          curl --fail --silent --show-error --location https://github.com/opentofu/opentofu/releases/download/v1.13.9/tofu_1.13.9_linux_amd64.zip -o "$archive"
-          printf 'bc44eb6b06446ba83bd4072114891987f590f66cca712737a7f1147c50c539ce  %s\n' "$archive" | sha256sum --check --strict
+          archive="$RUNNER_TEMP/tofu_1.13.10_linux_amd64.zip"
+          curl --fail --silent --show-error --location https://github.com/opentofu/opentofu/releases/download/v1.13.10/tofu_1.13.10_linux_amd64.zip -o "$archive"
+          printf 'c1f0d6b34d8328f963d3b1ad10896fae30a6c6890596190ffef477dab991090f  %s\n' "$archive" | sha256sum --check --strict
           mkdir "$RUNNER_TEMP/tofu-bin"
           unzip -q "$archive" tofu -d "$RUNNER_TEMP/tofu-bin"
           echo "$RUNNER_TEMP/tofu-bin" >> "$GITHUB_PATH"
@@ -117,7 +117,7 @@ jobs:
       - name: Set up Google Cloud SDK
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
         with:
-          version: '594.0.0'
+          version: '594.0.1'
           install_components: beta
       - name: Configure keyless registry access
         run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
