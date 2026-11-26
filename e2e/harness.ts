@@ -153,15 +153,18 @@ export function effectiveOpenAIResponseInstructions(body: unknown): string {
   const response = body as OpenAIResponseBody;
   const initial = typeof response.instructions === "string" ? response.instructions : "";
   const sections = new Map<string, string>();
-  const opaque = [
-    initial.replace(SYSTEM_SECTION, (value, name: string) => {
+  const readBaseline = (text: string) =>
+    text.replace(SYSTEM_SECTION, (value, name: string) => {
       sections.set(name, value);
       return "";
-    }),
-  ];
+    });
+  const opaque = [readBaseline(initial)];
 
   const messages = Array.isArray(response.input) ? (response.input as OpenAIResponseInput[]) : [];
+  // Codex sends the baseline in a leading developer item, after any tool declarations.
+  let awaitingBaseline = typeof response.instructions !== "string";
   for (const message of messages) {
+    if (message.role === "user" || message.role === "assistant") awaitingBaseline = false;
     if (
       (message.role !== "developer" && message.role !== "system") ||
       typeof message.content !== "string"
@@ -169,8 +172,10 @@ export function effectiveOpenAIResponseInstructions(body: unknown): string {
       continue;
     const text = message.content;
     const matches = [...text.matchAll(SYSTEM_UPDATE)];
+    const isBaseline = awaitingBaseline;
+    awaitingBaseline = false;
     if (matches.length === 0) {
-      opaque.push(text);
+      opaque.push(isBaseline ? readBaseline(text) : text);
       continue;
     }
     for (let index = 0; index < matches.length; index += 1) {

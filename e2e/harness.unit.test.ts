@@ -111,6 +111,27 @@ describe("effective OpenAI response instructions", () => {
     expect(effective).not.toContain("/old");
   });
 
+  it("folds updates and removals over the leading Codex developer item", () => {
+    const effective = effectiveOpenAIResponseInstructions({
+      input: [
+        { role: "developer", type: "additional_tools", tools: [] },
+        {
+          role: "developer",
+          content:
+            "base\n\n<project_context>\nPROJECT_FIRST\n</project_context>\n\n<addendum>\nREMOVE_ME\n</addendum>",
+        },
+        { role: "user", content: [{ type: "input_text", text: "NOT_AN_INSTRUCTION" }] },
+        {
+          role: "developer",
+          content:
+            'Updated system prompt section "project_context":\n\n<project_context>\nPROJECT_NEXT\n</project_context>\n\nRemoved system prompt section "addendum".',
+        },
+      ],
+    });
+
+    expect(effective).toBe("base\n\n<project_context>\nPROJECT_NEXT\n</project_context>");
+  });
+
   it("folds removals without treating conversation input as instructions", () => {
     const effective = effectiveOpenAIResponseInstructions({
       instructions: "base\n\n<addendum>\nREMOVE_ME\n</addendum>",
