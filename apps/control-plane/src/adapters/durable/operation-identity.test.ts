@@ -368,7 +368,7 @@ it("starts queued input after declined overflow compaction without replaying fai
         beforeCompact: async () => {
           entered.resolve();
           await release.promise;
-          return { decline: true as const };
+          return { kind: "decline" as const };
         },
       }),
     ],

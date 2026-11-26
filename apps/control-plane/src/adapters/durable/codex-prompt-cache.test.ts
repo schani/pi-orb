@@ -13,7 +13,13 @@ type Body = {
   prompt_cache_key?: unknown;
   instructions?: unknown;
   tools?: unknown;
-  input?: Array<{ type?: string; role?: string; content?: unknown; output?: string }>;
+  input?: Array<{
+    type?: string;
+    role?: string;
+    content?: unknown;
+    output?: string;
+    encrypted_content?: string;
+  }>;
 };
 
 const spawnCode =
@@ -313,23 +319,27 @@ describe("durable Codex prompt cache key", () => {
           : `\n\n- You are a subagent. Your parent started you in this same orb; you share its filesystem.
 - To communicate with your parent agent you have \`notify_parent\`. Do not use \`orb_send\` for that!!!
 - Do not start subagents or orbs!`;
-        expect(body.instructions).toBe(bodies[0]?.instructions);
-        const instructions = String(body.instructions);
+        expect(body).not.toHaveProperty("instructions");
+        const leading = (body.input ?? []).slice(
+          0,
+          body.input?.findIndex((item) => item.role === "user"),
+        );
+        const instructions = leading
+          .filter((item) => item.role === "developer" && typeof item.content === "string")
+          .map((item) => item.content)
+          .join("\n\n");
         const sections = [...instructions.matchAll(/<([a-z-]+)>\n([\s\S]*?)\n<\/\1>/g)];
-        expect(sections.map((match) => match[1]).sort()).toEqual([
-          "orb-instructions",
-          "tool-catalogue",
-        ]);
+        expect(sections.map((match) => match[1]).sort()).toEqual(["codemode", "orb-instructions"]);
         expect(sections.map((match) => match[0]).join("\n\n")).toBe(instructions);
         expect(sections.find((match) => match[1] === "orb-instructions")?.[2]).toBe(
           `PINNED_PROMPT${childNote}`,
         );
-        expect(sections.find((match) => match[1] === "tool-catalogue")?.[2]).toEqual(
+        expect(sections.find((match) => match[1] === "codemode")?.[2]).toEqual(
           expect.stringMatching(/\S/),
         );
         expectCodemodeDeclaration(body);
-        expect(input).not.toContain("PINNED_PROMPT");
-        expect(body.input?.filter((item) => item.role === "developer")).toEqual([body.input?.[0]]);
+        expect(JSON.stringify(body.input?.slice(leading.length))).not.toContain("PINNED_PROMPT");
+        expect(body.input?.filter((item) => item.role === "developer")).toEqual(leading);
         if (input.includes("ROOT_TURN") && toolOutputs(body).length >= 2)
           expect(toolOutputs(body)[1]?.output?.split("\n").at(-1)).toBe(
             JSON.stringify({ status: "completed", result: { output: "child done" } }),
@@ -339,6 +349,12 @@ describe("durable Codex prompt cache key", () => {
         const previous = bodies[index - 1];
         if (!previous) continue;
         expect(body.tools).toEqual(previous.tools);
+        expect(body.input).toContainEqual(
+          expect.objectContaining({
+            type: "reasoning",
+            encrypted_content: expect.stringMatching(/^enc_/),
+          }),
+        );
         expect(body.input!.length).toBeGreaterThan(previous.input!.length);
         expect(body.input?.slice(0, previous.input?.length)).toEqual(previous.input);
       }

@@ -68,6 +68,7 @@ it("keeps resources-only instructions in namespace discovery, not initial provid
     expect((await bundle.ready()).isOk()).toBe(true);
     const registry = createRegistry();
     registry.install(bundle.extension);
+    for (const extension of bundle.namespaceExtensions) registry.install(extension);
     const faux = fauxProvider();
     let metadata = "";
     faux.setResponses([
@@ -88,7 +89,7 @@ it("keeps resources-only instructions in namespace discovery, not initial provid
     });
     harness.resume();
     await (await root.submit({ type: "input", content: "go" }, ctx)).wait(ctx);
-    expect(metadata).toContain("<tool-catalogue>");
+    expect(metadata).toContain("<codemode>");
     expect(metadata).not.toContain("Resolve project before reading");
     expect(metadata).not.toContain("Use server names from MCP namespaces");
     expect(metadata).not.toContain("Namespace mcp");

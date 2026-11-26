@@ -1,12 +1,14 @@
 import type { Context } from "@earendil-works/chord/context";
 import type { CodemodeJsonSchema } from "@earendil-works/pi-codemode";
 import {
+  defineExtension,
   defineTool,
+  type Extension,
   type ToolExecutionApi,
   type ToolExecutionResult,
+  type ToolNamespace,
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
-import type { CodemodeNamespace } from "@earendil-works/pi-durable/codemode";
 import { ExecutionError, FileError } from "@earendil-works/pi-durable/env";
 import { errAsync, okAsync, Result, ResultAsync } from "neverthrow";
 import type { TSchema } from "typebox";
@@ -75,8 +77,6 @@ function bashFailure(error: unknown): string | undefined {
     : undefined;
 }
 
-type ToolNamespace = Omit<CodemodeNamespace, "prefix">;
-
 const nativeOutputSchema: Exclude<CodemodeJsonSchema, boolean> = {
   anyOf: [
     { type: "string" },
@@ -143,13 +143,25 @@ export class CallableCatalog {
         }
       : metadata;
   }
-  nativeNamespaces(): readonly CodemodeNamespace[] {
-    return this.namespaceValues().flatMap((namespace) =>
-      (namespace.name === "mcp"
-        ? ["list_mcp_", "read_mcp_"]
-        : [namespace.name === "orb" ? "orb_" : `${namespace.name}__`]
-      ).map((prefix) => ({ ...namespace, prefix })),
-    );
+  namespaceExtensions(
+    prefix: string,
+    include: (name: string) => boolean = () => true,
+  ): Extension[] {
+    const registrations = this.registrations();
+    return this.namespaceValues()
+      .filter((namespace) => include(namespace.name))
+      .map((namespace) =>
+        defineExtension({
+          name: `${prefix}.${namespace.name}`,
+          namespace,
+          tools: registrations.filter(
+            (tool) => this.metadata(tool.name).namespace?.name === namespace.name,
+          ),
+        }),
+      );
+  }
+  ungroupedRegistrations(): ToolRegistration[] {
+    return this.registrations().filter((tool) => this.metadata(tool.name).namespace === undefined);
   }
   constructor(
     tools: readonly ToolRegistration[],
@@ -259,7 +271,13 @@ export class CallableCatalog {
             `${name} failed`,
           ...(name === "bash" && output ? { output } : {}),
         }),
-      ).map((result) => {
+      ).andThen((result) => {
+        // This catalog invokes callables directly; it does not own a parked task.
+        if (result.kind !== undefined)
+          return errAsync<ToolExecutionResult, ToolError>({
+            code: "unavailable",
+            message: `${name} cannot park in this catalog`,
+          });
         if (
           name !== "bash" ||
           typeof result.structuredOutput !== "object" ||
@@ -267,14 +285,14 @@ export class CallableCatalog {
           !("exitCode" in result.structuredOutput) ||
           typeof result.structuredOutput.exitCode !== "number"
         )
-          return result;
+          return okAsync(result);
         const value = result.structuredOutput as {
           output: string;
           truncated: boolean;
           fullOutputPath?: string;
           exitCode: number;
         };
-        return {
+        return okAsync({
           ...result,
           output: result.output ?? [{ type: "text" as const, text: output }],
           ...(this.metadata(name).outputSchema
@@ -288,7 +306,7 @@ export class CallableCatalog {
                 },
               }
             : {}),
-        };
+        });
       });
     });
   }

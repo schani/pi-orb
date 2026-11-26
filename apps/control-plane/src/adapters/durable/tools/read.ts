@@ -1,4 +1,5 @@
-import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
+import type { JsonValue } from "@earendil-works/chord/json";
+import { defineTool } from "@earendil-works/pi-durable";
 import {
   createReadTool,
   type ImageProcessor,
@@ -21,9 +22,9 @@ const rawImages: ImageProcessor = {
 };
 
 /** Native remote reads plus scoped immutable resources and private artifacts. */
-export function imageReadTool(files: AgentToolFiles = {}): ToolRegistration {
+export function imageReadTool(files: AgentToolFiles = {}) {
   const read = createReadTool({ images: rawImages });
-  return defineTool({
+  return defineTool<typeof read.parameters, JsonValue>({
     ...read,
     structuredOutputSchema: Type.Union([
       Type.String(),
@@ -48,6 +49,7 @@ export function imageReadTool(files: AgentToolFiles = {}): ToolRegistration {
         if (resource.value !== undefined) return resource.value;
       }
       const result = await read.execute(args, api, ctx);
+      if (result.kind !== undefined) return result;
       const value = result.structuredOutput;
       return typeof value === "object" &&
         value !== null &&

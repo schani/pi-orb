@@ -16,7 +16,7 @@ import {
   type TaskRecord,
   type ToolExecutionApi,
   type ToolExecutionResult,
-  type ToolRegistration,
+  type ToolPark,
   type WatchEnd,
 } from "@earendil-works/pi-durable";
 import { expect } from "vitest";
@@ -34,11 +34,19 @@ export function deferred<T = void>() {
 
 type Child = TaskRecord<JsonValue, JsonValue, JsonValue>;
 
-export const wait = createSubagentTools(() => {
+const waitTool = createSubagentTools(() => {
   expect.fail("Unexpected child cancellation");
-}).find((tool) => tool.name === "get_subagent_result") as ToolRegistration;
+}).find((tool) => tool.name === "get_subagent_result");
+export const wait = {
+  async execute(args: { agent_id: string; wait: boolean }, api: ToolExecutionApi, ctx: Context) {
+    const result = await waitTool?.execute(args, api, ctx);
+    if (!result || result.kind !== undefined) return expect.fail("Expected immediate wait result");
+    return result;
+  },
+};
 export const waitArgs = { agent_id: "child", wait: true };
-export function toolData(value: ToolExecutionResult) {
+export function toolData(value: ToolExecutionResult | ToolPark) {
+  expect(value.kind).toBeUndefined();
   return JSON.parse(value.output?.find((block) => block.type === "text")?.text ?? "");
 }
 

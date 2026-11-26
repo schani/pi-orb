@@ -77,7 +77,7 @@ for (const backend of ["pglite", ...(postgres ? ["postgres"] : [])]) {
         },
         ctx,
       );
-      expect(result).toEqual({ stored: 2 });
+      expect(result).toEqual({ kind: "stored", stored: 2 });
       expect(receipts.map(([index]) => index)).toEqual([0, 1]);
       expect(Number(receipts[1]![1])).toBe(Number(receipts[0]![1]) + 1);
       expect(notified).toEqual(receipts.map(([, seq]) => Number(seq)));
@@ -109,8 +109,7 @@ for (const backend of ["pglite", ...(postgres ? ["postgres"] : [])]) {
       )._unsafeUnwrap();
       const receive = vi.fn();
       const result = await storage.commit([batch(1), batch(1), batch(999)], receive, ctx);
-      expect(result).toMatchObject({ stored: 1 });
-      expect(result.refused).toBeDefined();
+      expect(result).toMatchObject({ kind: "refused", stored: 1, refused: expect.any(Error) });
       expect(receive).toHaveBeenCalledTimes(1);
       expect(receive.mock.calls[0]![0]).toBe(0);
       expect(projected).toHaveLength(1);
@@ -118,7 +117,7 @@ for (const backend of ["pglite", ...(postgres ? ["postgres"] : [])]) {
       expect(await storage.conversation(999 as ConversationId, ctx)).toBeUndefined();
       expect(await storage.mintId()).toBe(2);
       const later = vi.fn();
-      expect(await storage.commit([batch(3)], later, ctx)).toEqual({ stored: 1 });
+      expect(await storage.commit([batch(3)], later, ctx)).toEqual({ kind: "stored", stored: 1 });
       expect(Number(later.mock.calls[0]![1])).toBe(projected[0]! + 1);
       await storage.close(ctx);
     } finally {
@@ -206,7 +205,10 @@ for (const backend of ["pglite", ...(postgres ? ["postgres"] : [])]) {
         })
       )._unsafeUnwrap();
       const receive = vi.fn();
-      expect(await storage.commit([batch(1), batch(2)], receive, ctx)).toEqual({ stored: 2 });
+      expect(await storage.commit([batch(1), batch(2)], receive, ctx)).toEqual({
+        kind: "stored",
+        stored: 2,
+      });
       expect(notify).toHaveBeenCalledTimes(2);
       expect(receive).toHaveBeenCalledTimes(2);
       expect(await storage.conversation(2 as ConversationId, ctx)).toEqual({ id: 2 });
@@ -325,7 +327,10 @@ for (const backend of ["pglite", ...(postgres ? ["postgres"] : [])]) {
         )._unsafeUnwrap();
         spy.mockRestore();
         const receive = vi.fn();
-        expect(await storage.commit([batch(1), batch(2)], receive, ctx)).toEqual({ stored: 2 });
+        expect(await storage.commit([batch(1), batch(2)], receive, ctx)).toEqual({
+          kind: "stored",
+          stored: 2,
+        });
         expect(observer).toHaveBeenCalledTimes(1);
         expect(receive.mock.calls.map(([index]) => index)).toEqual([0, 1]);
         expect(await storage.conversation(2 as ConversationId, ctx)).toEqual({ id: 2 });

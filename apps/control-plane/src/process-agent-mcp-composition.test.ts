@@ -222,7 +222,9 @@ it.each(["typed-boundary", "typed-unavailable", "pglite"] as const)(
         if (api.conversationId === ROOT_CONVERSATION_ID) return progress;
         return {
           ...progress,
-          executeTool: async (name, args, context, callOptions) => {
+          executeTool: (async (name, args, context, callOptions) => {
+            if (callOptions?.wait === false)
+              return progress.executeTool(name, args, context, callOptions);
             const result = await progress.executeTool(name, args, context, callOptions);
             if (name === "mcp__fixture__read_after_reset") {
               // Exercise native dispatch as well as the sandbox's missing-member guard.
@@ -243,7 +245,7 @@ it.each(["typed-boundary", "typed-unavailable", "pglite"] as const)(
               }
             }
             return result;
-          },
+          }) as typeof progress.executeTool,
         };
       });
     let agent: DurableAgent | undefined;
@@ -555,12 +557,28 @@ it.each(["typed-boundary", "typed-unavailable", "pglite"] as const)(
           return (await storage.document(record!.id, "current", BACKGROUND_CONTEXT))!.value;
         };
         const beforeWhitelist = (await state()).tools;
-        expect(beforeWhitelist).toEqual(
-          options.registry
-            .snapshot()
-            .extension(options.childExtension!.name)!
-            .tools!.map((tool) => tool.name),
-        );
+        expect(beforeWhitelist).toEqual([
+          "read",
+          "write",
+          "edit",
+          "bash",
+          "notify_parent",
+          "mcp_status",
+          "codemode",
+          "orb_self",
+          "orb_list",
+          "orb_transcript",
+          "orb_search_history",
+          "orb_send",
+          "orb_sleep",
+          "orb_archive",
+          "orb_delete",
+          "orb_expose_port",
+          "orb_unexpose_port",
+          "orb_list_previews",
+          "orb_link",
+          "mcp__fixture__read",
+        ]);
         expect(beforeWhitelist).toContain("mcp__fixture__read");
         expect(await state()).toMatchObject({ modelTools: ["codemode"] });
         expect(JSON.stringify(await state())).not.toContain("mcp__fixture__read_after_reset");
@@ -657,9 +675,7 @@ it.each(["typed-boundary", "typed-unavailable", "pglite"] as const)(
         expect(forbiddenEffects).toBe(0);
         expect(await state()).toMatchObject({
           modelTools: ["codemode"],
-          tools: (beforeWhitelist as string[])
-            .filter((name) => name !== "codemode")
-            .concat("mcp__fixture__read_after_reset", "codemode"),
+          tools: (beforeWhitelist as string[]).concat("mcp__fixture__read_after_reset"),
         });
         const childAgent = await child.agent(BACKGROUND_CONTEXT);
         expect(childAgent.tools.map((tool) => tool.name)).toEqual(["codemode"]);

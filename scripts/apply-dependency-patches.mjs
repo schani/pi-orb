@@ -12,29 +12,25 @@ import { err, ok, Result } from "neverthrow";
 const packages = [
   {
     package: "node_modules/@earendil-works/pi-ai",
-    version: "1.5.2",
-    patch: "@earendil-works+pi-ai+1.5.2.patch",
-    sha: "5cbc618e470d84997f02f29f0afa1fcfa98f5638320ce8312b618cf5b64f1543",
+    version: "1.6.1",
+    patch: "@earendil-works+pi-ai+1.6.1.patch",
+    sha: "4be4716fab2488d2f59c3f7b2436f09b35625c901afc911090734b2ee48e9ac8",
     files: {
-      "node_modules/@earendil-works/pi-ai/dist/providers/data/openai-codex.json": [
-        "dd30453068f310317abf35d9adc6d841339a1351f0c6925a6aff45d975e0257c",
-        "f0c261c8cf125f584fb4952c0a2489b9c1b0ea78cb1c601c4cd0d9ca9c72c03f",
-      ],
       "node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js": [
-        "4a756bd6c87a6357a811ee512f47d5c3991026bcd213e00a4330be7b0fb4a80d",
-        "550d3b2d65ecb9be8791d662ddd972f3ba30b124614cafa104f1fedce46b26a7",
+        "2ad1b8b3f345b2c913fbc7ba16d1cc81e422f1a50e0db555793d14287895dbf4",
+        "2bcc8d0b02e75cf75fbafa0c457ec4659f3dd4231f46366159540e00090fa2af",
       ],
       "node_modules/@earendil-works/pi-ai/dist/types.d.ts": [
-        "c0ecd26c0170c7d6016c734ec38b551c7d8c7d8e6573f82f7f6a3818df84acd8",
-        "0bb8424711d971e0a498a410712dc959c64309471caa304517a8a905542404d3",
+        "e1cdc7dd8c777202263aa47c0cc114aac7fe5d3f97b20202b89c1d82887ef0da",
+        "9e9809dce2bce141c98f289c49cc3dfc2e5422368656554daff7f632edbf584b",
       ],
     },
   },
   {
     package: "node_modules/@earendil-works/pi-codemode",
-    version: "1.5.2",
-    patch: "@earendil-works+pi-codemode+1.5.2.patch",
-    sha: "766ee71d04ada7a1b7780e4777843cbd4aec2c3ec07f44089b1ba7b49930a0de",
+    version: "1.6.1",
+    patch: "@earendil-works+pi-codemode+1.6.1.patch",
+    sha: "da4461068e4c2335186f947ca40ab42249478a3ea8369c3b3ce5b8393aeebf70",
     files: {
       "node_modules/@earendil-works/pi-codemode/dist/runtime/host.js": [
         "74715f56e02642913caf8247abd9cf0c559f9ed1a5e7be210e43c104e8e70da4",
@@ -64,41 +60,33 @@ const packages = [
   },
   {
     package: "node_modules/@earendil-works/pi-durable",
-    version: "1.5.2",
-    patch: "@earendil-works+pi-durable+1.5.2.patch",
-    sha: "d37cc749f132a1f7dc67838a5e8287f8376a6b53eaf6e19876fa23e3dd7aa137",
+    version: "1.6.1",
+    patch: "@earendil-works+pi-durable+1.6.1.patch",
+    sha: "df8cd406718f16abb7735f01cb35dd29acbd13b7b89133f91d7ed64a8d14c3db",
     files: {
       "node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js": [
-        "5ff50eefde02cc17f4eeefc3fccba25551d4fd9245b7876ab03f8ca7015faffc",
-        "cb2ef09fdd8899370c0081e6bf4b19b01170eb1e3e8a88b4bc257d4bae7d3489",
+        "7dfb2ff2e047b96953c6e126a00abd04e2cc8d4f364e40cf95bfbd14cec409f1",
+        "05525a03c607c054c961292159df07d7d8c26621d8d39e7889a02d3c6cbc3485",
       ],
       "node_modules/@earendil-works/pi-durable/dist/codemode/index.d.ts": [
-        "957445b146e49e4b76107b97e280f763101c5c8a17989db12fdcec58e3c16e71",
-        "151862144105f9ee00b154c09b8af871a7e64d3b9b130e07f7d2d5cd09195a05",
+        "b328bcb512baba7aff3b48df1acc9c5ed6e2868d52e72aea731d61d202169e00",
+        "c678d03b880b49bbc4e27b78af952f2fd1dc000b4ff9cca61924e72fbb6a50d3",
       ],
       "node_modules/@earendil-works/pi-durable/dist/codemode/index.js": [
-        "a8989014539cd530e35d53e50f1fd0cb823a2a711f30ae20719ca92cfb99695e",
-        "51a53f80d552962f2e1bc9b85e876ac019615e5d593c533d2506f0a215aa54dd",
-      ],
-      "node_modules/@earendil-works/pi-durable/dist/codemode/output.js": [
-        "74f9e9f346c1cc807642aae02342958de661faf1e9d7e09cff3f5a3471292470",
-        "c9c97f22a63482eeaa1072dbd3800f50537072b15173b845026433ba9f57b6da",
+        "98c86bd9afb75bdceee8eecbff4353cf42e22f721b474cbd4a2f4124b00956f0",
+        "0099469df7a479b9ee57d8f1447192dd4b3e53e51b5ce86343e62eb2af3c97fe",
       ],
       "node_modules/@earendil-works/pi-durable/dist/harness/harness.js": [
-        "4096cbb0756c59606a0b6437909a879b5c603fde2d2a9bc25854398e30b25e47",
-        "af2d052776f81482ca69640dcd8968b1fc46227bc65deb2b764518c42546d82d",
+        "d609227fdad775947555702fa75acccdee5300978f0ecc172b9e08eb26c548b5",
+        "39b2ae1a2630e71516a757f6b1a89d2266f7599862f9dbcbb46c58f148d78105",
       ],
       "node_modules/@earendil-works/pi-durable/dist/harness/submissions.js": [
-        "ba88af50a76b5c3dcef990b6b3c37316da856f83cce24b1453ae5035c052d939",
-        "20b03f162939401e7eabb6afb0f916804eddd94ac2b1bbd56bf24778a74234f0",
+        "e8f0314825d70fff8200e7626198cb73e607d1f597439cbdde0abe09cbdba2d6",
+        "7f1adbd860fa669d6c0bb45cb70aa63537657903a41cd4d8f20fe2021f40f79c",
       ],
       "node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts": [
-        "413d8bf8623b52ad18ee5844e20edc977a47500961431a9b64e83bda70e92fbd",
-        "8e348a7c9e43e6e68e83a49042e55d88002d6b9b8e0e08405ae43d482530b002",
-      ],
-      "node_modules/@earendil-works/pi-durable/dist/harness/util.js": [
-        "5519388f097d51fbf8f5811edd11d04076523253a2a11ae8689082ae8e2df4d9",
-        "6e842a44631ad46b2be026f8a5a06e6805155fdc92a518a910bf8269cd109d95",
+        "b5ee8c6fc888cfbb1ff3c1378a6b2fdf127394fa927563ea2523c0af057099f9",
+        "236429712be13156fe4315f1e29c0a482f263e5fbcc16f2d3d488b917fdf07a1",
       ],
     },
   },

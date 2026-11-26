@@ -34,6 +34,7 @@ import {
 import { createAgentToolFiles } from "./adapters/durable/tool-files.ts";
 import { createDurableTools, type ToolError } from "./adapters/durable/tools/index.ts";
 import { createOrbTools } from "./adapters/durable/tools/orb-tools.ts";
+import { childTools, ROOT_ORB_GROUP, TOOLS_EXTENSION } from "./adapters/durable/tools/subagents.ts";
 import { RemoteExecutionEnv } from "./adapters/execution-client/env.ts";
 import { LazyExecutionEnv } from "./adapters/execution-client/lazy-env.ts";
 import { LunaTurnSummarizer } from "./adapters/luna-summarizer.ts";
@@ -669,10 +670,9 @@ export function createProcessAgentContext(
             if (api.conversationId !== ROOT_CONVERSATION_ID)
               await native.configure(
                 {
-                  tools: tools.childExtension.tools ?? [],
-                  modelTools: (tools.childExtension.tools ?? []).filter(
-                    (tool) => tool.name === "codemode",
-                  ),
+                  tools: childTools(registry.snapshot()),
+                  modelTools: tools.modelTools,
+                  extensions: { remove: [{ name: TOOLS_EXTENSION }, ROOT_ORB_GROUP] },
                 },
                 ctx,
               );
@@ -727,6 +727,7 @@ export function createProcessAgentContext(
       const installTools = () => {
         registry.install(instrument(tools.extension));
         registry.install(instrument(tools.childExtension));
+        for (const extension of tools.namespaceExtensions) registry.install(instrument(extension));
       };
       installTools();
       const recordModelCall = (use: ModelCallUse, response: AssistantMessage) =>

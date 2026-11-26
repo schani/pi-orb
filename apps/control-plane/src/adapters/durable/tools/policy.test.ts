@@ -23,7 +23,11 @@ it("discovers normalized names, namespaces and ranked bounded declarations", asy
     }),
   ]);
   catalog.metadata("mcp__dev-radius__search", {
-    namespace: { name: "mcp__dev-radius", instructions: "Search incidents" },
+    namespace: {
+      name: "mcp__dev-radius",
+      description: "Search server",
+      instructions: "Search incidents",
+    },
     deferred: true,
   });
   const fixture = await openCodemodeHarness(catalog);

@@ -1,14 +1,13 @@
-# Pi codemode patches
+# Pi codemode patch
 
-Package: `@earendil-works/pi-codemode@1.5.2` (MIT, notice in `patches/pi-codemode.LICENSE`).
-Upstream: https://github.com/earendil-works/pi/tree/v1.5.2/packages/codemode
-Published artifact: https://registry.npmjs.org/@earendil-works/pi-codemode/-/pi-codemode-1.5.2.tgz
-Published artifact SHA-256: `ac81bf4f4f01ede1a534d6d0fca1ab13afd66506c00904e9d5a07f590ae302e0`.
-Published artifact integrity: `sha512-HoZQ40a9RgdZ1VgmrX6x8887cNXedaRJT1l+Ie5YRIMK4gY7v0EpsiNqf6dmixrKylZlTgUSyR+vE8xhjfkr+w==`.
+Package: `@earendil-works/pi-codemode@1.6.1` (MIT).
+Upstream: https://github.com/earendil-works/pi/tree/v1.6.1/packages/codemode
+Published artifact: https://registry.npmjs.org/@earendil-works/pi-codemode/-/pi-codemode-1.6.1.tgz
+Artifact SHA-256: `69b391796f465fb7a3432c8aa5b119a0b9983d3c910aa04e2619f7f294e7b7ac`.
+Artifact integrity: `sha512-xogcFe38Ek/9cabCz6sP52FjUKtuNDwLmqeM1aQiwOF5rg7jZ//FRpnMeYyhvRyod2UYhhf/ojfg6rRdXi0peQ==`.
+Patch SHA-256: `da4461068e4c2335186f947ca40ab42249478a3ea8369c3b3ce5b8393aeebf70`.
 
-Patched file: `dist/runtime/prelude-source.js`, generated from `packages/codemode/src/runtime/prelude-source.ts`.
-Original file SHA-256: `2e985f5967370c1ebda7af9fc261c8d62ab94129d734912cba7f47e9bf7f1fe3`.
-Patch SHA-256: `766ee71d04ada7a1b7780e4777843cbd4aec2c3ec07f44089b1ba7b49930a0de`.
+MIT notice: `patches/pi-codemode.LICENSE`. Pristine/patched hashes: `scripts/apply-dependency-patches.mjs`.
 
 Validate image base64 with a quantifier-free invalid-character search and terminal-padding check. The upstream quantified regexp exhausts the 256 MiB VM heap on a 20 MiB image; a per-character JavaScript scan avoids that allocation but spends seconds in QuickJS bytecode. The search avoids both costs without slicing the payload. Public sandbox globals cannot override built-in `image`; there is no public prelude option. Keep the public sandbox and worker, not a fork or private import.
 
@@ -20,12 +19,7 @@ CPU budget extension: `dist/runtime/host.js` and `dist/types.d.ts` pass structur
 
 Output cap: upstream has a prelude cap of 16 Mi characters/100,000 items. A 20 MiB image is about 28 Mi base64 characters, so `MAX_OUTPUT_CHARS` is raised to 64 Mi; the bounded worker's 1 MiB text/32 MiB aggregate/4,096-item limits trip first for any item up to 32 Mi characters. Regression: `apps/control-plane/src/adapters/durable/tools/image-validation.test.ts`.
 
-Worker-exit correction (2026-10-16): the existing patch also removes the post-termination `worker.unref()` and its comment from published `dist/runtime/host.js` (`packages/codemode/src/runtime/host.ts`). Receipt `221` proves task25/Worker2 completed native execution, requested termination, received Node's automatic ref, then lost it to the SDK's explicit unref. Close returned, but required physical-exit drain remained pending with no referenced resources; Node exited 13. Task12/Worker1 physically exited and returned as the control. Retain Node's termination reference through actual exit; terminate/catch, interrupt, exit hooks and all other hunks remain unchanged. Evidence: `docs/postmortems/2026-10-16-codemode-worker-exit-liveness.md`.
+Worker exit: remove the post-termination `worker.unref()` from `dist/runtime/host.js` so Node keeps the termination reference through physical exit. Evidence: `docs/postmortems/2026-10-16-codemode-worker-exit-liveness.md`.
 
-Host patched SHA-256: `e9e50ef986e1889e57b16529f2c3b849c61ddc6e8d0c67e3f672fa335e920076`. The 2026-10-16 candidate-root `npm ci` (222) applied all six patches, added 604 packages and audited 612 packages with zero vulnerabilities, and verified the seals. Unchanged bare-file proof 223 passed all four native tasks and exited 0 on Node 24.22.0 at 19:45 PDT: full 20 MiB image equality/MIME, store readback, callback8/overflow9, rollback and final PASS. Apply the single patch directly to pristine 1.5.2; intermediate installed bytes are not an accepted release state. Current root/control-plane installs require the single three-patch set without installer arguments; execution/native-Claude guest closures are patch-free (`docs/stack.md`). Future exact-head offline Docker/network-none proof remains pending; Bun shutdown behavior is unqualified.
 
-All pristine/patched file hashes and three patch seals: `scripts/apply-dependency-patches.mjs`.
-
-Owned wasm accounting (2026-10-29): Node 26.13.0 omits initial and grown exported wasm capacity from both V8 heap and external-memory counters, including the actual QuickJS module. `dist/runtime/vm.js` (`packages/codemode/src/runtime/vm.ts`) publishes a getter after VM creation, before prelude/guest execution; `dist/runtime/vm.d.ts` declares it. Each read uses the current exported memory buffer (growth detaches old buffers) and returns zero after disposal. `dist/runtime/worker.js` installs it on worker-local data. The bounded worker adds the full owned capacity to V8 heap used + external; no initial-capacity deduction. Existing checkpoints sample even a quiet script's `done` before disposal, retaining peak bytes. VM limits, resource fields and deterministic fingerprints are unchanged. Regression: `apps/control-plane/src/adapters/durable/tools/wasm-memory.test.ts`, `apps/control-plane/src/adapters/durable/tools/codemode.test.ts`. The native module/QuickJS counter contract rejects future engines that count these bytes, preventing double-counting.
-
-The 1.5.2 patch retains all nine hunks. Upstream changed the prelude's numeric formatting, so the native VM fingerprint differs from 1.5.0. Drain in-flight code-mode runs before upgrading; native replay rejects a journal from a different VM fingerprint. Do not bypass that check.
+Owned wasm accounting: Node 26.13.0 omits initial and grown exported wasm capacity from both V8 heap and external-memory counters, including the actual QuickJS module. `dist/runtime/vm.js` (`packages/codemode/src/runtime/vm.ts`) publishes a getter after VM creation, before prelude/guest execution; `dist/runtime/vm.d.ts` declares it. Each read uses the current exported memory buffer (growth detaches old buffers) and returns zero after disposal. `dist/runtime/worker.js` installs it on worker-local data. The bounded worker adds the full owned capacity to V8 heap used + external; no initial-capacity deduction. Existing checkpoints sample even a quiet script's `done` before disposal, retaining peak bytes. VM limits, resource fields and deterministic fingerprints are unchanged. Regression: `apps/control-plane/src/adapters/durable/tools/wasm-memory.test.ts`, `apps/control-plane/src/adapters/durable/tools/codemode.test.ts`. The native module/QuickJS counter contract rejects future engines that count these bytes, preventing double-counting.

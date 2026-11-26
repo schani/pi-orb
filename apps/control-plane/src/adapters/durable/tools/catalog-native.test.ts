@@ -25,7 +25,7 @@ import { CODEMODE_BOOTSTRAP } from "./codemode.ts";
 import { PiCodemodeSandbox } from "./codemode-sandbox.ts";
 import { createDurableTools } from "./index.ts";
 import { createOrbTools } from "./orb-tools.ts";
-import { ChildAnchor, SUBAGENT_TOOL_NAMES } from "./subagents.ts";
+import { CHILD_ORB_GROUP, ChildAnchor, SUBAGENT_TOOL_NAMES } from "./subagents.ts";
 import { openCodemodeHarness } from "./testkit/codemode.ts";
 
 async function nativeMetadata(
@@ -40,7 +40,6 @@ async function nativeMetadata(
   const nativeSection = createCodemodeExtension({
     sandbox: new PiCodemodeSandbox(),
     models: false,
-    namespaces: bundle.catalog.nativeNamespaces(),
   }).sections?.[0];
   if (!nativeSection) return expect.fail("Native catalogue section missing");
   for (const extension of [bundle.extension, bundle.childExtension])
@@ -52,9 +51,7 @@ async function nativeMetadata(
           render: async (input, ctx) => {
             const rendered = await section.render(input, ctx);
             const native = await nativeSection.render(input, ctx);
-            const intro = "Tools scripts can call (`await tools.<name>(args)`):\n\n";
-            expect(native?.startsWith(intro)).toBe(true);
-            expect(rendered).toBe(native?.slice(intro.length));
+            expect(rendered).toBe(native);
             return rendered;
           },
         })),
@@ -64,13 +61,15 @@ async function nativeMetadata(
             : defineTool({
                 ...tool,
                 execute: async (args, api, ctx) => {
-                  result = await tool.execute(args, api, ctx);
-                  return result;
+                  const outcome = await tool.execute(args, api, ctx);
+                  if (outcome.kind === undefined) result = outcome;
+                  return outcome;
                 },
               }),
         ),
       }),
     );
+  for (const extension of bundle.namespaceExtensions) registry.install(extension);
   const faux = fauxProvider();
   faux.setResponses([
     async (request) => {
@@ -92,7 +91,7 @@ async function nativeMetadata(
       agent: {
         model: { provider: "faux", modelId: "faux-1" },
         modelTools: bundle.modelTools,
-        extensions: { remove: [bundle.childExtension] },
+        extensions: { remove: [bundle.childExtension, CHILD_ORB_GROUP] },
       },
     });
     if (scope === "child") {
@@ -117,11 +116,10 @@ async function nativeMetadata(
       );
     }
     expect(offered.map((tool) => tool.name)).toEqual(["codemode"]);
-    expect(offered[0]?.description).toBe(CODEMODE_BOOTSTRAP);
-    expect(JSON.stringify(offered[0])).not.toMatch(/Run JavaScript|Globals:|8-outstanding/);
-    expect(metadata).toContain("<tool-catalogue>");
-    expect(metadata).not.toContain("<codemode>");
-    expect(metadata).not.toContain("Tools scripts can call");
+    expect(offered[0]?.description.startsWith(`${CODEMODE_BOOTSTRAP}\n\n`)).toBe(true);
+    expect(offered[0]?.description).toContain("Globals:");
+    expect(metadata).toContain("<codemode>");
+    expect(metadata).toContain("Tools scripts can call");
     for (const guidance of [
       "Namespace orb: discover with describeNamespace(",
       "Namespace mcp: discover with describeNamespace(",
@@ -135,8 +133,7 @@ async function nativeMetadata(
     ])
       expect(metadata).not.toContain(guidance);
     for (const extension of [bundle.extension, bundle.childExtension]) {
-      expect(extension.sections?.map((section) => section.key)).toContain("tool-catalogue");
-      expect(extension.sections?.map((section) => section.key)).not.toContain("codemode");
+      expect(extension.sections?.map((section) => section.key)).toEqual(["codemode"]);
     }
     expect(CODEMODE_BOOTSTRAP).not.toContain("Tools scripts can call");
     expect(result).toBeDefined();
@@ -283,7 +280,9 @@ it.each(["root", "child"] as const)(
       else expect(metadata).not.toContain("subagent(args:");
       expect(extension.tools?.find((tool) => tool.name === "codemode")?.callers).toEqual(["model"]);
       for (const name of names) {
-        const schema = extension.tools?.find((tool) => tool.name === name)?.structuredOutputSchema;
+        const schema = [extension, ...bundle.namespaceExtensions]
+          .flatMap((group) => group.tools ?? [])
+          .find((tool) => tool.name === name)?.structuredOutputSchema;
         if (name.startsWith("orb_") || name === "notify_parent")
           expect(schema).toHaveProperty("anyOf");
         else expect(schema).toEqual({ type: "string" });
@@ -379,7 +378,9 @@ it.each(["root", "child"] as const)(
       }
       expect(metadata).not.toContain("mcp__fixture__raw(args:");
       expect(metadata).not.toContain("structuredContent?: Array<number | null | string>");
-      const native = extension.tools?.find((tool) => tool.name === "mcp__fixture__raw");
+      const native = bundle.namespaceExtensions
+        .flatMap((group) => group.tools ?? [])
+        .find((tool) => tool.name === "mcp__fixture__raw");
       if (!native) return expect.fail("Native MCP raw fixture missing");
       expect(native.deferred).toBe(true);
       expect(JSON.parse(JSON.stringify(native.structuredOutputSchema))).toEqual({
@@ -439,8 +440,13 @@ it.each(["root", "child"] as const)(
     try {
       expect((await bundle.ready()).isOk()).toBe(true);
       const extension = scope === "root" ? bundle.extension : bundle.childExtension;
-      expect(extension.tools?.map((tool) => tool.name)).toContain(own);
-      expect(extension.tools?.map((tool) => tool.name)).not.toContain(hidden);
+      const scopeTools = [
+        ...(extension.tools ?? []),
+        ...(bundle.namespaceExtensions.find((group) => group.name === `${extension.name}.orb`)
+          ?.tools ?? []),
+      ];
+      expect(scopeTools.map((tool) => tool.name)).toContain(own);
+      expect(scopeTools.map((tool) => tool.name)).not.toContain(hidden);
       if (scope === "root") {
         expect(bundle.catalog.definitions().map((tool) => tool.name)).not.toContain(hidden);
         expect(

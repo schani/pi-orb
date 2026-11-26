@@ -371,7 +371,7 @@ export class McpTools {
               const instructions = client.getInstructions();
               this.catalog.namespace({
                 name: `mcp__${endpoint.name}`,
-                ...(description ? { description } : {}),
+                description: description ?? endpoint.name,
                 ...(instructions ? { instructions } : {}),
               });
               stage("list_tools");
@@ -449,7 +449,7 @@ export class McpTools {
       }
       const namespace = {
         name: `mcp__${endpoint.name}`,
-        ...(discovered.value.description ? { description: discovered.value.description } : {}),
+        description: discovered.value.description || endpoint.description || "",
         ...(discovered.value.instructions ? { instructions: discovered.value.instructions } : {}),
       };
       this.catalog.namespace(namespace);

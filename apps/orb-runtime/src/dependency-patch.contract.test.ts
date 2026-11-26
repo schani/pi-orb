@@ -20,7 +20,7 @@ const json = (
     devDependencies?: Record<string, string>;
   };
 
-const piVersion = "1.5.2";
+const piVersion = "1.6.1";
 const helperPath = "scripts/apply-dependency-patches.mjs";
 
 describe("Pi dependency patch installation", () => {
@@ -75,11 +75,11 @@ describe("Pi dependency patch installation", () => {
       ],
       [
         "node_modules/@earendil-works/pi-coding-agent/dist/core/model-runtime.js",
-        "b17018cb70007a194f10b2aaf5ec3631329db20cf853ddc9ce4088e6b4373ab1",
+        "0f05531e14ed5309b109a63256e9c9a9a4068d6921cb372b7c8375a93414be58",
       ],
       [
         "node_modules/@earendil-works/pi-coding-agent/dist/core/provider-composer.d.ts",
-        "8b6c292d4e346cb2a45186f2b3784102aa9fa5b5bd2096ef6ec4bbb235ddb504",
+        "33a8287f0fa619dbeb8024e92b929eddfa590dcc56d7061ae571889cc644198c",
       ],
     ] as const)
       expect(createHash("sha256").update(read(path)).digest("hex")).toBe(expected);
@@ -94,7 +94,7 @@ describe("Pi dependency patch installation", () => {
     expect(read(helperPath)).not.toContain(
       'package: "node_modules/@earendil-works/pi-coding-agent"',
     );
-    expect(read("apps/control-plane/Dockerfile")).not.toContain("pi-coding-agent+1.5.2.patch");
+    expect(read("apps/control-plane/Dockerfile")).not.toContain("pi-coding-agent+1.6.1.patch");
   });
 
   it("keeps code-mode declarations pristine", () => {
@@ -102,7 +102,7 @@ describe("Pi dependency patch installation", () => {
     expect(createHash("sha256").update(read(path)).digest("hex")).toBe(
       "32a4607ab15e8e7e5f58e6979f3f7216704e716671c11442f9e9cd77c23ec75a",
     );
-    expect(read("patches/@earendil-works+pi-codemode+1.5.2.patch")).not.toContain(path);
+    expect(read("patches/@earendil-works+pi-codemode+1.6.1.patch")).not.toContain(path);
   });
 
   it("keeps native Durable journals, namespace discovery and argument semantics", () => {
@@ -111,7 +111,7 @@ describe("Pi dependency patch installation", () => {
       expect(read(`${base}${barrel}`)).toContain("CodemodeRunDoc, CodemodeJournalDoc,");
     }
     const native = read(`${base}codemode.js`);
-    expect(native).toContain("const namespaces = (this.options.namespaces ?? []).map(");
+    expect(native).toContain("const namespaces = declaredNamespaces(agent.extensions).map(");
     expect(native.match(/const matchesNamespace = [^\n]+/)?.[0]).toBe(
       "const matchesNamespace = (namespace, query) => namespace.name === query || toCodemodeIdentifier(namespace.name) === toCodemodeIdentifier(query);",
     );
@@ -136,11 +136,11 @@ describe("Pi dependency patch installation", () => {
         .slice(adapter.indexOf("harness = await Harness.open("))
         .match(/settings: \{[^}]*\}/)?.[0],
     ).toContain('afterFailedRun: "continue"');
-    const patch = read("patches/@earendil-works+pi-durable+1.5.2.patch");
+    const patch = read("patches/@earendil-works+pi-durable+1.6.1.patch");
     expect(patch).not.toContain("dist/harness/generation.js");
     const native = read("node_modules/@earendil-works/pi-durable/dist/harness/generation.js");
     expect(createHash("sha256").update(native).digest("hex")).toBe(
-      "d5d64b2be6844ba4b535880da000b6661ec08dd23cbf2bc52a3f6406b20b19ab",
+      "c47cbc7bedfb6e073dfee740acc7f3caceebdbc27ef714da0db3e13bb5c8134d",
     );
     expect(native).toContain("const policy = settings.afterFailedRun;");
     expect(native).not.toContain('prepareFailure(tx, runtime, "continue")');
@@ -156,17 +156,19 @@ describe("Pi dependency patch installation", () => {
     );
     expect(native).toContain("await startRun(tx, conversationId, live, { inputs: users, first });");
     expect(read(`${base}harness.js`)).toContain(
-      "return this.#host.submissions.admit(first, this.id, second);",
+      "return this.#host.submissions.admit(tx, this.id, submission);",
     );
     expect(read(`${base}types.d.ts`)).toContain(
-      "submit(tx: Tx, submission: SubmissionDraft): Promise<SubmissionId>;",
+      "admit(tx: Tx, submission: SubmissionDraft): Promise<SubmissionId>;",
     );
   });
 
   it("decodes native image saves with a bounded portable byte loop", () => {
-    const source = read("node_modules/@earendil-works/pi-durable/dist/codemode/output.js");
+    const base = "node_modules/@earendil-works/pi-durable/dist/";
+    expect(read(`${base}codemode/output.js`)).toContain("const bytes = fromBase64(data)");
+    const source = read(`${base}tools/image-processor.js`);
     const body = source.match(
-      / {8}const binary = atob\(data\);\n {8}const bytes = new Uint8Array\(binary.length\);\n {8}for \(let i = 0; i < binary.length; i\+\+\)\n {12}bytes\[i\] = binary.charCodeAt\(i\);/,
+      / {4}const binary = atob\(data\);\n {4}const bytes = new Uint8Array\(binary.length\);\n {4}for \(let index = 0; index < binary.length; index\+\+\)\n {8}bytes\[index\] = binary.charCodeAt\(index\);/,
     )?.[0];
     expect(body).toBeDefined();
     expect(source).not.toContain("Uint8Array.from(atob(data)");
@@ -208,9 +210,9 @@ describe("Pi dependency patch installation", () => {
     );
 
     const patchFiles = [
-      "@earendil-works+pi-ai+1.5.2.patch",
-      "@earendil-works+pi-codemode+1.5.2.patch",
-      "@earendil-works+pi-durable+1.5.2.patch",
+      "@earendil-works+pi-ai+1.6.1.patch",
+      "@earendil-works+pi-codemode+1.6.1.patch",
+      "@earendil-works+pi-durable+1.6.1.patch",
     ];
     expect(
       readdirSync(join(root, "patches"))

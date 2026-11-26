@@ -1643,7 +1643,7 @@ it.each([
               args[0].forEach((_, index) => {
                 args[1](index, (index + 1) as Seq);
               });
-              return { stored: args[0].length };
+              return { kind: "stored", stored: args[0].length };
             }
             return target.commit(...args);
           };

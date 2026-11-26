@@ -246,7 +246,7 @@ it.for([
         )
       )._unsafeUnwrap().rows;
       expect(nativeTools.some((row) => row.input_kind === "nested")).toBe(true);
-      expect(nativeTools.every((row) => row.version === "3")).toBe(true);
+      expect(nativeTools.every((row) => row.version === "4")).toBe(true);
       expect(
         (
           await db.query("SELECT id FROM durable_pg_conversations WHERE orb_id=$1", [orb.id])
