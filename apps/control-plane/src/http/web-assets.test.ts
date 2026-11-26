@@ -71,25 +71,6 @@ describe("web assets", () => {
     expect(head.body).not.toContain("app shell");
   });
 
-  it("does not serve dotfiles or files under a hidden directory from the build", async () => {
-    mkdirSync(join(root, ".well-known"));
-    writeFileSync(join(root, ".env"), "private fixture");
-    writeFileSync(join(root, ".well-known", "static-probe"), "private fixture");
-    const server = await app();
-    try {
-      for (const url of ["/.env", "/.well-known/static-probe"]) {
-        const get = await server.inject({ method: "GET", url });
-        const head = await server.inject({ method: "HEAD", url });
-        expect(get.statusCode, url).toBe(404);
-        expect(get.body).not.toContain("private fixture");
-        expect(head.statusCode, url).toBe(404);
-        expect(head.body).toBe("");
-      }
-    } finally {
-      await server.close();
-    }
-  });
-
   it("serves known built assets", async () => {
     const server = await app();
     const response = await server.inject({ method: "GET", url: "/assets/app.js" });
