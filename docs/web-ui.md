@@ -15,7 +15,7 @@ The browser app in `apps/web` serves one person who already knows the product. I
 | `/usage` | Token usage (`docs/model-usage.md`) |
 | other | "Page doesn't exist" at the requested URL |
 
-The server serves the built shell for GET/HEAD application paths, including unknown ones (the client renders not-found). Static assets stay authoritative, including the reserved `/assets` and `/favicons` namespaces. API, runtime, hosted-file, `/auth`, OAuth callback/failure and discovery paths never receive the shell; missing assets and APIs never get shell HTML.
+The server serves the built shell for GET/HEAD application paths, including unknown ones (the client renders not-found). Static assets stay authoritative, including the reserved `/assets` and `/favicons` namespaces. The build does not serve dotfiles or files under hidden directories. API, runtime, hosted-file, `/auth`, OAuth callback/failure and discovery paths never receive the shell; missing assets and APIs never get shell HTML.
 
 Every in-app link is a real anchor, so copy-link, new tab, modified/middle clicks and downloads stay native. A small adapter intercepts ordinary same-tab app links, pushes history without a reload, handles Back/Forward and replaces the creation route after success. If history mutation fails it falls back to `location.assign` or `location.replace` to match, so Back cannot recreate an orb. No hash-route compatibility.
 

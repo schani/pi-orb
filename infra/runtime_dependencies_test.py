@@ -7,6 +7,8 @@ import subprocess
 import tempfile
 import unittest
 
+from infra.workflow_testkit import steps
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -91,8 +93,8 @@ class RuntimeDependenciesTests(unittest.TestCase):
         native = (ROOT / 'infra/native-vm/install.sh').read_text()
         acceptance = (ROOT / 'infra/native-vm/acceptance.sh').read_text()
         expected = {
-            'docker-ce': '5:29.10.0-1~debian.12~bookworm',
-            'docker-ce-cli': '5:29.10.0-1~debian.12~bookworm',
+            'docker-ce': '5:29.10.1-1~debian.12~bookworm',
+            'docker-ce-cli': '5:29.10.1-1~debian.12~bookworm',
             'containerd.io': '2.4.2-4~debian.12~bookworm',
             'google-guest-agent': '1:20261021.00-g1',
         }
@@ -108,6 +110,26 @@ class RuntimeDependenciesTests(unittest.TestCase):
         for name in ['infra/build-push.sh', 'infra/native-vm/README.md']:
             self.assertIn('projects/debian-cloud/global/images/debian-12-bookworm-v20261027',
                           (ROOT / name).read_text())
+
+    def test_opentofu_archive_is_checksum_verified_before_extraction(self):
+        archive = 'tofu_1.13.10_linux_amd64.zip'
+        url = f'https://github.com/opentofu/opentofu/releases/download/v1.13.10/{archive}'
+        checksum = 'c1f0d6b34d8328f963d3b1ad10896fae30a6c6890596190ffef477dab991090f'
+        for workflow in ['ci.yml', 'deploy.yml']:
+            with self.subTest(workflow=workflow):
+                installers = [body for name, body in steps(workflow) if 'OpenTofu' in name]
+                self.assertEqual(len(installers), 1)
+                source = installers[0]
+                required = [
+                    f'archive="$RUNNER_TEMP/{archive}"',
+                    f'{url} -o "$archive"',
+                    f"printf '{checksum}  %s\\n' \"$archive\" | sha256sum --check --strict",
+                    'unzip -q "$archive" tofu',
+                ]
+                for command in required:
+                    self.assertIn(command, source)
+                offsets = [source.index(command) for command in required]
+                self.assertEqual(offsets, sorted(offsets))
 
     def test_native_node_archive_is_checksum_verified_before_extraction(self):
         source = (ROOT / 'infra/native-vm/install.sh').read_text()

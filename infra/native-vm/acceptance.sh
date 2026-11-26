@@ -52,8 +52,8 @@ runtime_pid=$(pgrep --parent "$runtime_supervisor_pid" --full '/usr/local/bin/no
 test "$(printf '%s\n' "$runtime_pid" | wc -l)" = 1
 curl --fail --silent --show-error http://127.0.0.1:8080/v1/health | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "ready"'
 
-test "$(dpkg-query -W -f='${Version}' docker-ce)" = '5:29.10.0-1~debian.12~bookworm'
-test "$(dpkg-query -W -f='${Version}' docker-ce-cli)" = '5:29.10.0-1~debian.12~bookworm'
+test "$(dpkg-query -W -f='${Version}' docker-ce)" = '5:29.10.1-1~debian.12~bookworm'
+test "$(dpkg-query -W -f='${Version}' docker-ce-cli)" = '5:29.10.1-1~debian.12~bookworm'
 test "$(dpkg-query -W -f='${Version}' containerd.io)" = '2.4.2-4~debian.12~bookworm'
 test "$(dpkg-query -W -f='${Version}' google-guest-agent)" = '1:20261021.00-g1'
 docker --version

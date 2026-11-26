@@ -47,10 +47,10 @@ describe("orb runtime Dockerfile contract", () => {
   });
 
   it("installs agent-browser with a system Chromium executable", () => {
-    expect(runtimePackage.dependencies?.["agent-browser"]).toBe("0.43.0");
+    expect(runtimePackage.dependencies?.["agent-browser"]).toBe("0.45.0");
     const lock = JSON.parse(readFileSync(join(repositoryRoot, "package-lock.json"), "utf8"));
-    expect(lock.packages["apps/orb-runtime"].dependencies["agent-browser"]).toBe("0.43.0");
-    expect(lock.packages["node_modules/agent-browser"].version).toBe("0.43.0");
+    expect(lock.packages["apps/orb-runtime"].dependencies["agent-browser"]).toBe("0.45.0");
+    expect(lock.packages["node_modules/agent-browser"].version).toBe("0.45.0");
     expect(dockerfile).toContain("gh chromium");
     expect(dockerfile).toContain(
       "ln -s /app/node_modules/.bin/agent-browser /usr/local/bin/agent-browser",

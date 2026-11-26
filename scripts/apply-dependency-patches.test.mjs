@@ -386,7 +386,8 @@ test("Pi release inputs align on stable 1.6.1 with upstream coding-agent securit
   assert.equal(family.length, 10);
   for (const [path, entry] of family) assert.equal(entry.version, "1.6.1", path);
   for (const [owner, version] of [
-    ["apps/control-plane", "8.12.4"],
+    [".", "8.13.1"],
+    ["apps/control-plane", "8.13.1"],
     ["node_modules/@earendil-works/pi-coding-agent", "8.12.4"],
   ]) {
     const require = createRequire(join(repository, owner, "package.json"));
