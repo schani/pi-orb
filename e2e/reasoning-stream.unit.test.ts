@@ -5,6 +5,14 @@ import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/provid
 import { createRegistry, Harness, LiveDoc, MemoryStorage } from "@earendil-works/pi-durable";
 import { expect, it } from "vitest";
 
+function barrier<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 it.each([false, true])("Native trailing partial commit: completion held=%s", async (held) => {
   const message = fauxAssistantMessage([{ type: "thinking", thinking: "STREAMED_REASONING" }]);
   const events = createAssistantMessageEventStream();
@@ -12,7 +20,7 @@ it.each([false, true])("Native trailing partial commit: completion held=%s", asy
   models.setProvider({ ...fauxProvider().provider, streamSimple: () => events });
 
   const interval = 137;
-  const timer = Promise.withResolvers<() => void>();
+  const timer = barrier<() => void>();
   const harness = await Harness.open(
     new MemoryStorage(),
     {
@@ -40,7 +48,7 @@ it.each([false, true])("Native trailing partial commit: completion held=%s", asy
       agent: { model: { provider: "faux", modelId: "faux-1" } },
     });
     const partials: unknown[] = [];
-    const committed = Promise.withResolvers<void>();
+    const committed = barrier<void>();
     const observation = await harness.observeConversation(
       root.id,
       {
