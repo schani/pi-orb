@@ -285,27 +285,27 @@ it("isolates only the exact summary prompt and envelope", async () => {
   const address = upstream.address();
   if (!address || typeof address === "string") throw new Error("missing listener");
   const relay = await durableFakeRelay(`http://127.0.0.1:${address.port}/backend-api`, true);
-  const post = async (instructions: string, prompt: string) =>
+  const post = async (input: unknown[], instructions?: string) =>
     (
       await fetch(`${relay.baseUrl}/codex/responses`, {
         method: "POST",
         headers: { "content-encoding": "zstd", authorization: "Bearer fixture" },
-        body: zstdCompressSync(
-          Buffer.from(
-            JSON.stringify({
-              instructions,
-              input: [{ role: "user", content: prompt }],
-            }),
-          ),
-        ),
+        body: zstdCompressSync(Buffer.from(JSON.stringify({ instructions, input }))),
       })
     ).text();
+  const developer = { role: "developer", content: summaryInstructions };
+  const user = {
+    role: "user",
+    content: [{ type: "input_text", text: summaryPrompt }],
+  };
   try {
-    expect(await post(summaryInstructions, summaryPrompt)).toContain("response.completed");
+    expect(await post([user], summaryInstructions)).toContain("response.completed");
+    expect(await post([developer, user])).toContain("response.completed");
     expect(forwarded).toEqual([]);
-    expect(await post("ordinary inference", summaryPrompt)).toBe("FORWARDED");
-    expect(await post(summaryInstructions, "ordinary turn")).toBe("FORWARDED");
-    expect(forwarded).toHaveLength(2);
+    expect(await post([user], "ordinary inference")).toBe("FORWARDED");
+    expect(await post([developer, { role: "user", content: "ordinary turn" }])).toBe("FORWARDED");
+    expect(await post([user, developer, user])).toBe("FORWARDED");
+    expect(forwarded).toHaveLength(3);
     relay.check();
   } finally {
     await relay.close();
