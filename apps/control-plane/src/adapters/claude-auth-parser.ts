@@ -1,6 +1,6 @@
 import type { ClaudeAuthView } from "@pi-orb/protocol";
 
-/** Output grammar pinned to Claude Code 2.1.328; raw output remains private. */
+/** Output grammar pinned to Claude Code 2.1.332; raw output remains private. */
 export class ClaudeSetupTokenParser {
   private raw = "";
   private submittedInput = "";

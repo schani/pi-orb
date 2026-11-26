@@ -8,8 +8,8 @@
     "dev": "PI_ORB_AUTH_MODE=local PI_ORB_GITHUB_CLIENT_ID=${PI_ORB_GITHUB_CLIENT_ID:-$DEV_GITHUB_CLIENT_ID} PI_ORB_GITHUB_CLIENT_SECRET=${PI_ORB_GITHUB_CLIENT_SECRET:-$DEV_GITHUB_CLIENT_SECRET} node src/main.ts"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.328",
-    "@anthropic-ai/claude-code": "2.1.328",
+    "@anthropic-ai/claude-agent-sdk": "0.3.332",
+    "@anthropic-ai/claude-code": "2.1.332",
     "@earendil-works/chord": "1.5.2",
     "@earendil-works/pi-ai": "1.5.2",
     "@earendil-works/pi-codemode": "1.5.2",
@@ -34,9 +34,9 @@
     "openid-client": "^6.9.0",
     "node-pty": "1.1.0",
     "pg": "^8.13.0",
-    "tldts": "7.5.4",
+    "tldts": "7.6.0",
     "typebox": "^1.4.7",
-    "undici": "8.12.4",
+    "undici": "8.13.1",
     "ws": "8.23.0",
     "zod": "4.6.7"
   },
