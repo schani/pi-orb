@@ -21,6 +21,7 @@ it.each([false, true])("Native trailing partial commit: completion held=%s", asy
 
   const interval = 137;
   const timer = barrier<() => void>();
+  let partialTimers = 0;
   const harness = await Harness.open(
     new MemoryStorage(),
     {
@@ -32,6 +33,7 @@ it.each([false, true])("Native trailing partial commit: completion held=%s", asy
           const id = setTimeout(callback, delay);
           return () => clearTimeout(id);
         }
+        partialTimers++;
         let cancelled = false;
         timer.resolve(() => {
           if (!cancelled) callback();
@@ -83,6 +85,7 @@ it.each([false, true])("Native trailing partial commit: completion held=%s", asy
     await submission.wait(context);
     await root.waitForIdle(context);
     if (!held) flush();
+    expect(partialTimers).toBe(1);
     expect(partials).toHaveLength(held ? 1 : 0);
     if (held) expect(partials[0]).toMatchObject({ content: message.content });
     expect((await harness.snapshot(LiveDoc, root.id, context))?.generation).toBeUndefined();

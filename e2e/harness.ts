@@ -171,11 +171,14 @@ export function effectiveOpenAIResponseInstructions(body: unknown): string {
     )
       continue;
     const text = message.content;
+    if (awaitingBaseline) {
+      opaque.push(readBaseline(text));
+      awaitingBaseline = false;
+      continue;
+    }
     const matches = [...text.matchAll(SYSTEM_UPDATE)];
-    const isBaseline = awaitingBaseline;
-    awaitingBaseline = false;
     if (matches.length === 0) {
-      opaque.push(isBaseline ? readBaseline(text) : text);
+      opaque.push(text);
       continue;
     }
     for (let index = 0; index < matches.length; index += 1) {

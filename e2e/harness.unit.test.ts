@@ -132,6 +132,31 @@ describe("effective OpenAI response instructions", () => {
     expect(effective).toBe("base\n\n<project_context>\nPROJECT_NEXT\n</project_context>");
   });
 
+  it("treats quoted section deltas in the leading baseline as literal instructions", () => {
+    const quoted = 'Removed system prompt section "privacy".';
+    const effective = effectiveOpenAIResponseInstructions({
+      input: [
+        {
+          role: "developer",
+          content:
+            `<project_context>\nPROJECT_FIRST\n</project_context>\n\n` +
+            `<privacy>\nPRIVACY_MARKER\n</privacy>\n\n<example>\nExample:\n\n${quoted}\n</example>`,
+        },
+        { role: "user", content: [{ type: "input_text", text: "continue" }] },
+        {
+          role: "developer",
+          content:
+            'Updated system prompt section "project_context":\n\n<project_context>\nPROJECT_NEXT\n</project_context>',
+        },
+      ],
+    });
+
+    expect(effective).toContain(quoted);
+    expect(effective).toContain("PRIVACY_MARKER");
+    expect(effective).toContain("PROJECT_NEXT");
+    expect(effective).not.toContain("PROJECT_FIRST");
+  });
+
   it("folds removals without treating conversation input as instructions", () => {
     const effective = effectiveOpenAIResponseInstructions({
       instructions: "base\n\n<addendum>\nREMOVE_ME\n</addendum>",
