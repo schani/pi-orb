@@ -31,13 +31,13 @@ it("updates Google auth 11 without replacing legacy provider auth 10", () => {
   expect(lock.packages["node_modules/google-auth-library"]?.version).toBe("10.5.0");
 });
 
-it("removes affected glob/minimatch copies and locks Pi and Chord to 1.5.2", () => {
+it("removes affected glob/minimatch copies and locks Pi and Chord to 1.6.1", () => {
   for (const [path, pkg] of Object.entries(lock.packages)) {
     if (/node_modules\/(?:glob|minimatch)$/.test(path)) {
       expect(path.endsWith("/glob") ? ["14.0.6"] : ["11.0.3", "11.0.9"]).toContain(pkg.version);
     }
     if (/^node_modules\/@earendil-works\/(?:pi-[^/]+|chord)$/.test(path)) {
-      expect(pkg.version, path).toBe("1.5.2");
+      expect(pkg.version, path).toBe("1.6.1");
     }
   }
 });

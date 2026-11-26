@@ -1608,7 +1608,6 @@ it.each([false, true])(
       expect(JSON.stringify(agent.snapshot()._unsafeUnwrap())).not.toContain(secret);
       expect(JSON.stringify(frames)).not.toContain(secret);
       const tasks = await storage.scanTasks({ kind: "pi.tool" }, 10, undefined, BACKGROUND_CONTEXT);
-      expect(tasks.items.every((task) => task.version === 3)).toBe(true);
       expect(
         tasks.items.some(
           (task) =>

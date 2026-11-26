@@ -367,11 +367,10 @@ export class McpTools {
             )().andThen(() => {
               if (this.closed || ctx.abortSignal?.aborted)
                 return errAsync<T, ToolError>({ code: "cancelled", message: "MCP cancelled" });
-              const description = endpoint.description ?? client.getServerVersion()?.name;
               const instructions = client.getInstructions();
               this.catalog.namespace({
                 name: `mcp__${endpoint.name}`,
-                description: description ?? endpoint.name,
+                description: endpoint.description ?? endpoint.name,
                 ...(instructions ? { instructions } : {}),
               });
               stage("list_tools");
@@ -408,7 +407,6 @@ export class McpTools {
             : [],
           resources: !!client.getServerCapabilities()?.resources,
           instructions: client.getInstructions(),
-          description: endpoint.description ?? client.getServerVersion()?.name,
         }),
         this.diagnostics,
       ).andThen((value) => {
@@ -449,7 +447,7 @@ export class McpTools {
       }
       const namespace = {
         name: `mcp__${endpoint.name}`,
-        description: discovered.value.description || endpoint.description || "",
+        description: endpoint.description ?? endpoint.name,
         ...(discovered.value.instructions ? { instructions: discovered.value.instructions } : {}),
       };
       this.catalog.namespace(namespace);

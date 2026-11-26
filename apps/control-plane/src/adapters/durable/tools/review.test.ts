@@ -19,12 +19,20 @@ import { createDurableTools } from "./index.ts";
 import { createOrbTools } from "./orb-tools.ts";
 import { openCodemodeHarness } from "./testkit/codemode.ts";
 
-it("keeps resources-only instructions in namespace discovery, not initial provider metadata", async () => {
+it.each([undefined, "Configured project docs"])(
+  "keeps remote MCP metadata out of inline provider sections (configured description: %s)",
+  checkResourceOnlyMcp,
+);
+
+async function checkResourceOnlyMcp(description: string | undefined) {
+  const safeDescription = description ?? "docs";
+  const remoteName = "REMOTE_SERVER_NAME_NOT_FOR_THE_SYSTEM_PROMPT";
   let connections = 0;
   const bundle = createDurableTools({
     mcp: [
       {
         name: "docs",
+        ...(description ? { description } : {}),
         connect: () => {
           const instructions =
             ++connections === 1
@@ -51,7 +59,7 @@ it("keeps resources-only instructions in namespace discovery, not initial provid
                   ? {
                       protocolVersion: "2025-11-25",
                       capabilities: { resources: {} },
-                      serverInfo: { name: "docs", version: "1" },
+                      serverInfo: { name: `${remoteName}_${connections}`, version: "1" },
                       instructions,
                     }
                   : { resources: [], resourceTemplates: [] },
@@ -90,6 +98,8 @@ it("keeps resources-only instructions in namespace discovery, not initial provid
     harness.resume();
     await (await root.submit({ type: "input", content: "go" }, ctx)).wait(ctx);
     expect(metadata).toContain("<codemode>");
+    expect(metadata).toContain(JSON.stringify(`## mcp__docs\n${safeDescription}`).slice(1, -1));
+    expect(metadata).not.toContain(remoteName);
     expect(metadata).not.toContain("Resolve project before reading");
     expect(metadata).not.toContain("Use server names from MCP namespaces");
     expect(metadata).not.toContain("Namespace mcp");
@@ -114,6 +124,13 @@ it("keeps resources-only instructions in namespace discovery, not initial provid
       ctx,
     );
     expect(resources.isOk()).toBe(true);
+    expect(
+      bundle.namespaceExtensions.find((extension) => extension.namespace?.name === "mcp__docs")
+        ?.namespace,
+    ).toMatchObject({
+      description: safeDescription,
+      instructions: "Use refreshed project guidance",
+    });
     const fixture = await openCodemodeHarness(bundle.catalog);
     try {
       const discovery = await fixture.run(
@@ -137,7 +154,7 @@ it("keeps resources-only instructions in namespace discovery, not initial provid
     await harness?.close(ctx);
     await bundle.close();
   }
-});
+}
 
 it("preserves native execution wait details without exposing nested stdout to the model", async () => {
   let entered!: () => void;

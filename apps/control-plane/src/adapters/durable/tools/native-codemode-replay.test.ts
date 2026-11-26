@@ -232,9 +232,12 @@ describe("native codemode interrupted journal recovery", () => {
                             name,
                             key: options?.key,
                           });
-                          return options?.wait === false
-                            ? api.executeTool(name, value, callContext, options)
-                            : api.executeTool(name, value, callContext, options);
+                          return Reflect.apply(api.executeTool, api, [
+                            name,
+                            value,
+                            callContext,
+                            options,
+                          ]);
                         }) as typeof api.executeTool,
                       },
                       ctx,
