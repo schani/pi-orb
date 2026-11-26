@@ -66,15 +66,19 @@ const SUMMARY_INSTRUCTIONS =
 
 function summaryPrompt(body: Record<string, unknown>): string {
   const input = body["input"];
-  if (!Array.isArray(input)) return "";
+  // Both wire formats send Luna's tool-free completion with an explicit "none".
+  if (
+    body["model"] !== LUNA_MODEL_ID ||
+    body["tool_choice"] !== "none" ||
+    body["tools"] !== undefined ||
+    !Array.isArray(input)
+  )
+    return "";
   const [first, second] = input;
-  const tools = body["tools"];
   const legacy = input.length === 1 && body["instructions"] === SUMMARY_INSTRUCTIONS;
   const codex =
     input.length === 2 &&
     body["instructions"] === undefined &&
-    body["model"] === LUNA_MODEL_ID &&
-    (tools === undefined || (Array.isArray(tools) && tools.length === 0)) &&
     first?.type === undefined &&
     first?.role === "developer" &&
     first.content === SUMMARY_INSTRUCTIONS;

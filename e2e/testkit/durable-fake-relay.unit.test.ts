@@ -291,7 +291,9 @@ it("isolates only the exact summary prompt and envelope", async () => {
         method: "POST",
         headers: { "content-encoding": "zstd", authorization: "Bearer fixture" },
         body: zstdCompressSync(
-          Buffer.from(JSON.stringify({ model: "gpt-6-luna", input, ...extras })),
+          Buffer.from(
+            JSON.stringify({ model: "gpt-6-luna", tool_choice: "none", input, ...extras }),
+          ),
         ),
       })
     ).text();
@@ -322,6 +324,23 @@ it("isolates only the exact summary prompt and envelope", async () => {
       "FORWARDED",
     );
     expect(forwarded).toHaveLength(8);
+
+    const legacy = { instructions: summaryInstructions };
+    const tools = [{ type: "custom", name: "codemode" }];
+    expect
+      .soft(await post([user], { ...legacy, model: "gpt-6.2-sol" }), "legacy model")
+      .toBe("FORWARDED");
+    expect.soft(await post([user], { ...legacy, tools }), "legacy tools").toBe("FORWARDED");
+    expect
+      .soft(await post([developer, user], { tool_choice: "required" }), "Codex tool choice")
+      .toBe("FORWARDED");
+    expect
+      .soft(
+        await post([user], { ...legacy, tool_choice: undefined }),
+        "legacy requires explicit tool choice",
+      )
+      .toBe("FORWARDED");
+    expect(forwarded).toHaveLength(12);
     relay.check();
   } finally {
     await relay.close();
