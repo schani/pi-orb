@@ -10,12 +10,12 @@ const lock = JSON.parse(
 it.each([
   ["fastify", "5.12.8"],
   ["find-my-way", "9.10.0"],
-  ["@fastify/static", "10.1.12"],
+  ["@fastify/static", "11.0.0"],
   ["@fastify/websocket", "11.3.7"],
   ["ws", "8.23.0"],
   ["openid-client", "6.9.1"],
-  ["tldts", "7.6.0"],
-  ["tldts-core", "7.6.0"],
+  ["tldts", "7.6.1"],
+  ["tldts-core", "7.6.1"],
 ])("locks every %s consumer to the qualified version", (name, version) => {
   const copies = Object.entries(lock.packages).filter(([path]) =>
     path.endsWith(`node_modules/${name}`),

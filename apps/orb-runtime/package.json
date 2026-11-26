@@ -14,7 +14,7 @@
     "@fastify/websocket": "^11.3.7",
     "@modelcontextprotocol/sdk": "1.32.2",
     "@pi-orb/protocol": "*",
-    "agent-browser": "0.44.0",
+    "agent-browser": "0.45.0",
     "determined": "^0.4.1",
     "fastify": "^5.12.8",
     "neverthrow": "^8.2.0",
