@@ -1,7 +1,8 @@
 import { EventEmitter } from "node:events";
+import { CAPABILITY_GOAL, type GoalView } from "@pi-orb/protocol";
 import { errAsync, ok, okAsync, ResultAsync } from "neverthrow";
-import { describe, expect, it } from "vitest";
-import type { AgentSessionFacade } from "../domain/agent-ports.ts";
+import { describe, expect, it, vi } from "vitest";
+import type { AgentSessionFacade, AgentSnapshot } from "../domain/agent-ports.ts";
 import { attachCentralLive } from "./central-live.ts";
 
 class Socket extends EventEmitter {
@@ -15,7 +16,7 @@ class Socket extends EventEmitter {
   }
 }
 
-function facade(): AgentSessionFacade {
+function facade(snapshot: Partial<AgentSnapshot> = {}): AgentSessionFacade {
   return {
     runtimeInstanceId: "central-process",
     snapshot: () =>
@@ -26,6 +27,7 @@ function facade(): AgentSessionFacade {
         session: { id: "session", overflow: { harness: "pi-durable" } },
         records: [],
         headId: null,
+        ...snapshot,
       }),
     liveView: () => null,
     subscribe: () => () => undefined,
@@ -33,7 +35,78 @@ function facade(): AgentSessionFacade {
   };
 }
 
+const hello = JSON.stringify({
+  v: 1,
+  type: "client.hello",
+  clientInstanceId: "browser",
+  afterRecordId: null,
+});
+
 describe("central browser protocol", () => {
+  const goal: GoalView = { revision: "1", objective: "Ship the fix", status: "active" };
+
+  it.each([null, goal])("synchronizes a supported goal snapshot (%j)", async (goal) => {
+    const socket = new Socket();
+    const request = vi.fn(() => okAsync({ type: "goal_applied" as const, duplicate: false }));
+    const cleanup = attachCentralLive(socket, { ...facade({ goal }), request }, [hello]);
+
+    const frames = socket.sent.map((text) => JSON.parse(text));
+    expect(frames[0].capabilities).toContain(CAPABILITY_GOAL);
+    expect(frames.at(-2)).toMatchObject({
+      type: "runtime.event",
+      event: { type: "goal_state", goal },
+    });
+    expect(frames.at(-1)).toMatchObject({ type: "sync.completed" });
+
+    const action = { type: "goal_set", objective: "New objective" };
+    socket.emit(
+      "message",
+      Buffer.from(JSON.stringify({ v: 1, type: "client.request", requestId: "goal", action })),
+      false,
+    );
+    await Promise.resolve();
+    expect(request).toHaveBeenCalledWith("goal", action);
+    expect(JSON.parse(socket.sent.at(-1) ?? "{}")).toMatchObject({
+      type: "request.result",
+      requestId: "goal",
+      result: { type: "goal_applied", duplicate: false },
+    });
+    cleanup();
+  });
+
+  it("does not advertise or dispatch goals on an unsupported snapshot", () => {
+    const socket = new Socket();
+    const session = facade();
+    const request = vi.spyOn(session, "request");
+    const cleanup = attachCentralLive(socket, session, [hello]);
+
+    const frames = socket.sent.map((text) => JSON.parse(text));
+    expect(frames[0].capabilities).not.toContain(CAPABILITY_GOAL);
+    expect(frames.some((frame) => frame.event?.type === "goal_state")).toBe(false);
+
+    for (const action of [
+      { type: "goal_set", objective: "Ship the fix" },
+      { type: "goal_pause", revision: "1" },
+      { type: "goal_resume", revision: "1" },
+      { type: "goal_clear", revision: "1" },
+    ]) {
+      socket.emit(
+        "message",
+        Buffer.from(
+          JSON.stringify({ v: 1, type: "client.request", requestId: action.type, action }),
+        ),
+        false,
+      );
+      expect(JSON.parse(socket.sent.at(-1) ?? "{}")).toMatchObject({
+        type: "request.result",
+        requestId: action.type,
+        result: { type: "rejected", error: { code: "unsupported", retryable: false } },
+      });
+    }
+    expect(request).not.toHaveBeenCalled();
+    cleanup();
+  });
+
   it("buffers committed publications while reading an unloaded conversation asynchronously", async () => {
     const socket = new Socket();
     const base = facade();

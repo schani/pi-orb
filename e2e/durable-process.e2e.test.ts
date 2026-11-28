@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
+  constants,
   cpSync,
   existsSync,
   mkdirSync,
@@ -14,10 +15,12 @@ import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  type ClientFrame,
   capHeadline,
   DisplayHistoryViewSchema,
   type DisplayRecord,
   RUNTIME_SUBPROTOCOL,
+  type RuntimeEvent,
   type ServerFrame,
 } from "@pi-orb/protocol";
 import { type Browser, chromium, expect as expectPage } from "@playwright/test";
@@ -166,6 +169,8 @@ it.runIf(process.env["PI_ORB_E2E_BACKEND"] === "process")(
     const root = mkdtempSync(join(tmpdir(), "pi-orb-durable-process-"));
     let failed = true;
     const frames: ServerFrame[] = [];
+    const goalEvents: RuntimeEvent[] = [];
+    const goalSets: string[] = [];
     let socket: WebSocket | undefined;
     const stop = { type: "stop", status: "completed" };
     const key = join(root, "key.pem"),
@@ -577,6 +582,25 @@ text('NOTIFY_PARENT_HANDLED');`),
         args: ["--no-sandbox"],
       });
       const page = await browser.newPage();
+      page.on("websocket", (transport) => {
+        if (new URL(transport.url()).pathname !== `/api/v1/orbs/${orb}/live`) return;
+        transport.on("framesent", ({ payload }) => {
+          const frame = JSON.parse(String(payload)) as ClientFrame;
+          if (frame.type === "client.request" && frame.action.type === "goal_set")
+            goalSets.push(frame.action.objective);
+        });
+        transport.on("framereceived", ({ payload }) => {
+          const frame = JSON.parse(String(payload)) as ServerFrame;
+          if (
+            frame.type === "runtime.event" &&
+            (frame.event.type === "status" ||
+              frame.event.type === "operation_finished" ||
+              frame.event.type === "goal_state")
+          ) {
+            goalEvents.push(frame.event);
+          }
+        });
+      });
       await page.goto(`${cp.baseUrl}/orbs/${orb}`);
       await expectPage(page.getByText("DURABLE_REMOTE_DONE", { exact: true })).toBeVisible();
       const thinking = page.getByRole("button", { name: "Change thinking", exact: true });
@@ -615,7 +639,68 @@ text('NOTIFY_PARENT_HANDLED');`),
       await expectPage(
         page.getByRole("status", { name: "Agent working", exact: true }),
       ).toBeVisible();
-      await writeFile(join(workspace, "repo", "durable-parent-release"), "release\n");
+      const operationId = await waitFor("live operation for the gated root turn", async () => {
+        const status = goalEvents.findLast((event) => event.type === "status");
+        return status?.activity === "busy" ? (status.operationId ?? null) : null;
+      });
+
+      // Goal kickoff stays queued behind the held root turn; Pause must withdraw it
+      // without interrupting that turn or consuming another scripted provider reply.
+      const header = page.locator(".orb-header-stack");
+      const objective = "Keep the workspace check focused";
+      const addGoal = header.getByRole("button", { name: "Add goal", exact: true });
+      await addGoal.click();
+      const editor = header.getByRole("form", { name: "New goal" });
+      const input = editor.getByRole("textbox", { name: "Objective" });
+      await input.fill(objective);
+      await input.press("End");
+      await input.press("Enter");
+      await expectPage(input).toHaveValue(`${objective}\n`);
+      await input.press("Backspace");
+      await input.dispatchEvent("keydown", {
+        key: "Enter",
+        ctrlKey: true,
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      await expectPage(input).toHaveValue(objective);
+      await expectPage(input).toBeEditable();
+      expect(goalSets).toEqual([]);
+      await input.press("Control+Enter");
+      const drawer = header.locator("details.orb-goal");
+      const disclosure = drawer.locator("summary");
+      await expectPage(disclosure.getByText(objective, { exact: true })).toBeVisible();
+      await expectPage(drawer).toHaveAttribute("data-status", "active");
+      await disclosure.click();
+      const abort = page.getByRole("button", { name: "abort", exact: true });
+      await expectPage(abort).toBeVisible();
+      const pause = drawer.getByRole("button", { name: "Pause", exact: true });
+      await pause.click();
+      await expectPage(drawer).toHaveAttribute("data-status", "paused");
+      await expectPage(abort).toBeVisible();
+
+      await page.reload();
+      await expectPage(disclosure.getByText(objective, { exact: true })).toBeVisible();
+      await expectPage(drawer).toHaveAttribute("data-status", "paused");
+      await disclosure.click();
+      await drawer.getByRole("button", { name: "Resume", exact: true }).click();
+      await expectPage(drawer).toHaveAttribute("data-status", "active");
+      await pause.click();
+      await expectPage(drawer).toHaveAttribute("data-status", "paused");
+      await drawer.getByRole("button", { name: "Clear", exact: true }).click();
+      await expectPage(addGoal).toBeVisible();
+      await expectPage(drawer).toHaveCount(0);
+      await expectPage(abort).toBeVisible();
+
+      await waitFor("gated parent still reading its release FIFO", () =>
+        writeFile(join(workspace, "repo", "durable-parent-release"), "release\n", {
+          flag: constants.O_WRONLY | constants.O_NONBLOCK,
+        }).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === "ENXIO") return null;
+          throw new FatalProbeError(`could not write parent release FIFO: ${error.message}`);
+        }),
+      );
       await waitFor("steering admitted at gated child checkpoint", async () =>
         existsSync(join(workspace, "repo", "durable-steer-ready")) ? true : null,
       );
@@ -626,6 +711,15 @@ text('NOTIFY_PARENT_HANDLED');`),
         return JSON.stringify(history.body).includes("DURABLE_ACCEPTANCE_DONE") ? true : null;
       });
       await expectPage(page.getByText("DURABLE_ACCEPTANCE_DONE", { exact: true })).toBeVisible();
+      const finished = await waitFor(
+        "held root operation finished",
+        async () =>
+          goalEvents.find(
+            (event) => event.type === "operation_finished" && event.operationId === operationId,
+          ) ?? null,
+      );
+      expect(finished).toMatchObject({ outcome: "completed" });
+      expect(goalSets).toEqual([objective]);
       expect(calls.filter((call) => call.method === "tools/call")).toEqual([
         { method: "tools/call", authorization: "Bearer synthetic-durable" },
         { method: "tools/call", authorization: "Bearer synthetic-durable" },
@@ -1001,6 +1095,7 @@ text('NOTIFY_PARENT_HANDLED');`),
     } finally {
       socket?.terminate();
       writeFileSync(join(root, "frames.json"), JSON.stringify(frames, null, 2));
+      writeFileSync(join(root, "goal-events.json"), JSON.stringify(goalEvents, null, 2));
       if (cp) writeFileSync(join(root, "control-plane.log"), cp.logs.join(""));
       writeFileSync(join(root, "teardown.json"), JSON.stringify({ failed, phase: "started" }));
       await browser?.close();

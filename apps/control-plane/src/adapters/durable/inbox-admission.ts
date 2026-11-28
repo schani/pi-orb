@@ -13,6 +13,7 @@ import type { Query } from "../durable-pg/executor.ts";
 import type { AuthorityError } from "../durable-pg/index.ts";
 import { readTransactionStorage } from "../durable-pg/transaction-reader.ts";
 import { arrayParam } from "../pg/client.ts";
+import { GOAL_REQUEST_PREFIX } from "./goal.ts";
 import { nativeInputContent } from "./native-input.ts";
 
 const rejected = (): AuthorityError => ({
@@ -21,17 +22,31 @@ const rejected = (): AuthorityError => ({
   message: "Input admission changed",
 });
 
-function sleepInputAdmission(sleepId: unknown, stopReason: unknown): Result<void, AuthorityError> {
+type NativeInputRefusal = AuthorityError & {
+  code: "busy";
+  disposition: "sleep" | "queued_input";
+};
+
+function sleepInputAdmission(
+  sleepId: unknown,
+  stopReason: unknown,
+): Result<void, NativeInputRefusal> {
   return sleepId != null || stopReason === "sleep"
-    ? err({ type: "authority_error", code: "busy", message: "Input admission paused by sleep" })
+    ? err({
+        type: "authority_error",
+        code: "busy",
+        disposition: "sleep",
+        message: "Input admission paused by sleep",
+      })
     : ok(undefined);
 }
 
-function queuedInputAdmission(held: boolean): Result<void, AuthorityError> {
+function queuedInputAdmission(held: boolean): Result<void, NativeInputRefusal> {
   return held
     ? err({
         type: "authority_error",
         code: "busy",
+        disposition: "queued_input",
         message: "Input admission waits for queued messages",
       })
     : ok(undefined);
@@ -42,7 +57,7 @@ export function checkNativeInputAdmission(
   query: Query,
   orbId: string,
   browser: boolean,
-): ResultAsync<void, AuthorityError | StoreError> {
+): ResultAsync<void, NativeInputRefusal | StoreError> {
   return query("SELECT sleep_id,stop_reason FROM orbs WHERE id=$1", [orbId])
     .andThen((orb) => sleepInputAdmission(orb.rows[0]?.sleep_id, orb.rows[0]?.stop_reason))
     .andThen(() =>
@@ -53,6 +68,47 @@ export function checkNativeInputAdmission(
           ).andThen((held) => queuedInputAdmission(held.rows.length > 0))
         : okAsync(undefined),
     );
+}
+
+/** The publication transaction already holds the orb and owner locks. */
+export function projectGoalInputAdmission(
+  query: Query,
+  orbId: string,
+  writes: readonly StorageWrite[],
+  admittedSubmissions: ReadonlySet<SubmissionId>,
+): ResultAsync<void, AuthorityError | StoreError> {
+  const admitting = writes.some(
+    (write) =>
+      write.type === "submission" &&
+      write.value.type === "input" &&
+      write.value.conversationId === ROOT_CONVERSATION_ID &&
+      write.value.requestId?.startsWith(GOAL_REQUEST_PREFIX) &&
+      (write.value.status === "placed" ||
+        (write.value.status === "queued" && !admittedSubmissions.has(write.value.id))),
+  );
+  if (!admitting) return okAsync(undefined);
+  return query(
+    `SELECT o.state,o.stop_reason,
+       o.agent_admission_version=p.admission_version AS current_admission
+     FROM orbs o JOIN durable_pg_owners p ON p.orb_id=o.id WHERE o.id=$1`,
+    [orbId],
+  ).andThen((result): Result<void, AuthorityError> => {
+    const orb = result.rows[0];
+    if (!orb?.current_admission || orb.stop_reason === "manual")
+      return err({
+        type: "authority_error",
+        code: "stale_owner",
+        message: "Goal admission was revoked",
+      });
+    if (orb.state === "archiving" || orb.state === "archived" || orb.state === "deleting")
+      return err({
+        type: "authority_error",
+        code: "closed",
+        message: "Goal admission is closed",
+      });
+    // A successful preflight authorizes draining across a merely pending Sleep.
+    return sleepInputAdmission(null, orb.stop_reason);
+  });
 }
 
 /** Native/public publication holds the same orb lock as pending cancellation. */

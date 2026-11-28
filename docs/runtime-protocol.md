@@ -67,6 +67,8 @@ The synchronization batch is exempt from the outbound budget: it references reco
 
 A welcome with a different `sessionId` invalidates cached records; a changed `runtimeInstanceId` with the same session does not. Browser cache rules: `docs/history.md`.
 
+**Capabilities.** `server.welcome.capabilities` starts with `abort` and `input.image`. Central Pi and the Claude guest runtime append `goal` when the hello snapshot has a supported goal field, including `null`. Both sync modes then send `goal_state` after `status`, before `sync.completed`; connections without `goal` receive no `goal_state` and reject new goal requests as `unsupported`. If Claude verifies support after hello, the runtime closes the unnegotiated connection with `1013` so the browser can negotiate on cursor-based reconnect.
+
 ## Frames
 
 ```ts
@@ -86,6 +88,10 @@ type ClientAction =
   | { type: "compact"; customInstructions?: string }
   | { type: "set_model"; model: { provider: string; id: string } }
   | { type: "set_thinking"; thinkingLevel: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" }
+  | { type: "goal_set"; objective: string }
+  | { type: "goal_pause"; revision: string }
+  | { type: "goal_resume"; revision: string }
+  | { type: "goal_clear"; revision: string }
   | { type: "message"; expectedHeadId: string | null; content: MessageInputBlock[] }
   | { type: "abort"; operationId: string };
 
@@ -120,6 +126,7 @@ interface RequestResultFrame {
   requestId: string;
   result:
     | { type: "settings_applied"; duplicate: boolean }
+    | { type: "goal_applied"; duplicate: boolean }
     | { type: "accepted"; operationId: string; duplicate: boolean }
     | {
         type: "rejected";
@@ -143,6 +150,7 @@ interface RuntimeEventFrame {
   at: string;
   event:
     | AgentSettingsEvent
+    | { type: "goal_state"; goal: GoalView | null }
     | RuntimeStatusEvent // {activity: "idle"|"busy", operationId?, work?: "compaction", compactionAfterId?: string|null}
     | OperationStartedEvent // {operationId}
     | OutputPatchEvent
@@ -150,6 +158,13 @@ interface RuntimeEventFrame {
     | SubagentsEvent
     | OperationFinishedEvent // {operationId, outcome: "completed"|"aborted"|"failed", message?}
     | TurnNotificationEvent; // {operationId, summary} — 1..240 chars
+}
+
+interface GoalView {
+  revision: string;
+  objective: string;
+  status: "active" | "paused" | "blocked" | "complete";
+  reason?: string;
 }
 
 interface OutputPatchEvent {
@@ -197,6 +212,8 @@ interface HistoryRecordFrame {
 }
 ```
 
+Goal objectives are 1–4096 characters and must contain a non-whitespace character. An optional reason is 1–512 characters. `goal_applied` confirms application; `goal_state` is authoritative and carries the full goal view or `null` when no goal is set. Claude accepts only Set and Clear, only while idle; while busy, Clear instructs the user to abort the current turn first. The Clear revision guards against a stale view. Harness behavior: [`docs/claude.md`](claude.md), [`docs/pi.md`](pi.md). UI: [`docs/web-ui.md`](web-ui.md).
+
 All schemas are closed TypeBox schemas. v1 browsers ignore well-formed unknown server events.
 
 ### Completion ordering
@@ -240,13 +257,13 @@ Live `tool_state` joins the tool's canonical card by `callId`, even after the as
 
 Frames carry no sequence number; per-connection WebSocket ordering suffices. `client.hello` is non-mutating; every request action mutates. All mutating requests from all connections pass through one synchronous request gate.
 
-Request identity is in-memory per runtime process. The registry maps request ID to action and outcome, plus in-flight entries for async settings. Identical in-flight retries join the original result; identical retries of finished requests return the original result with `duplicate: true`; a known ID with a different action returns `request_id_conflict`; an abort naming a finished or unknown operation returns `stale_operation`. A restart empties the registry; `runtimeInstanceId` tells the browser. The browser automatically resends an unacknowledged request only to the same instance; otherwise it synchronizes actual state. Live requests have no durable inbox; durable inbox identity owns message retries. Rejected: a generic hidden `pi-orb.request` marker record, which doubled every mutation.
+Request identity is in-memory per runtime process. The registry maps request ID to action and outcome, including in-flight settings and goal mutations. Identical in-flight retries join the original result; finished requests replay success with `duplicate: true` or replay rejection unchanged. A known ID with a different action returns `request_id_conflict`; an abort naming a finished or unknown operation returns `stale_operation`. A restart empties the registry; `runtimeInstanceId` tells the browser. The browser automatically resends an unacknowledged request only to the same instance; otherwise it synchronizes actual state. Live requests have no durable inbox; durable inbox identity owns message retries. Rejected: a generic hidden `pi-orb.request` marker record, which doubled every mutation.
 
-Outbound writer: 8 MiB critical budget, 512 KiB high-water mark. Under pressure, `output_patch`, `tool_state` and `status` may be coalesced to their newest state **only within the trailing transient segment**; every critical frame (welcome, sync boundaries, request results, history records, operation transitions, errors) fences the backward scan and is never dropped. Coalescing across a critical frame reorders state relative to it (finish A could follow compaction status of B). If critical data exceeds the budget, the connection closes and the browser resynchronizes.
+Outbound writer: 8 MiB critical budget, 512 KiB high-water mark. Under pressure, `output_patch`, `tool_state` and `status` may be coalesced to their newest state **only within the trailing transient segment**; every critical frame (welcome, sync boundaries, request results, history records, goal state, operation transitions, errors) fences the backward scan and is never dropped. Coalescing across a critical frame reorders state relative to it (finish A could follow compaction status of B). If critical data exceeds the budget, the connection closes and the browser resynchronizes.
 
 **Invalid frames.** Malformed JSON or schema-invalid text yields a rejected `request.result` (`invalid_request`) when the value is a non-null object with a string `requestId`, otherwise `server.error {code: "invalid_frame"}`. The connection and registry stay healthy; frame content is never logged.
 
-**Capabilities.** `server.welcome.capabilities` advertises `abort` and `input.image`; unsupported actions are rejected explicitly. Limits: 8 MiB per incoming frame, 6 MiB per prompt; `server.welcome.limits` is authoritative and the browser enforces it at paste time. Image blocks are admitted natively and retained in committed history.
+Limits: 8 MiB per incoming frame, 6 MiB per prompt; `server.welcome.limits` is authoritative and the browser enforces it at paste time. Image blocks are admitted natively and retained in committed history.
 
 ## Multiple connections
 

@@ -2819,6 +2819,23 @@ function handleAction(
     });
     return;
   }
+  if (action.type !== "message") {
+    send(session.socket, {
+      v: 1,
+      type: "request.result",
+      at: now(),
+      requestId,
+      result: {
+        type: "rejected",
+        error: {
+          code: "unsupported",
+          message: "fixture action unsupported",
+          retryable: false,
+        },
+      },
+    });
+    return;
+  }
   const records = state.histories.get(session.orbId) ?? [];
   const headId = records.at(-1)?.id ?? null;
   if (action.expectedHeadId !== headId) {

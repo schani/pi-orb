@@ -3,6 +3,7 @@ import type {
   AgentSettingsEvent,
   ClientAction,
   DeliverOrbMessageResponse,
+  GoalView,
   HarnessSessionMetadata,
   HistoryRecord,
   PrepareIdleStopResponse,
@@ -36,6 +37,8 @@ export interface AgentSnapshot {
   readonly records: readonly HistoryRecord[];
   readonly headId: string | null;
   readonly settings?: AgentSettingsEvent | null;
+  /** Omitted when unsupported; null when supported but no goal is set. */
+  readonly goal?: GoalView | null;
   readonly notice?: ServerErrorFrame["error"];
 }
 

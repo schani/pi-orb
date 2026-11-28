@@ -12,7 +12,7 @@ import { PgStorage } from "../durable-pg/storage.ts";
 import { StorageFailure } from "../durable-pg/storage-boundary.ts";
 import { arrayParam } from "../pg/client.ts";
 import { commitHistoryTransaction } from "../pg/store.ts";
-import { projectNativeInboxCommit } from "./inbox-admission.ts";
+import { projectGoalInputAdmission, projectNativeInboxCommit } from "./inbox-admission.ts";
 import { NOTIFICATION_REQUEST_PREFIX, projectNotificationAdmission } from "./notifications.ts";
 import { type PublicEntryReceipt, projectEntry, projectHistory } from "./projection.ts";
 
@@ -53,6 +53,8 @@ export async function projectNativeCommit(
   writes: readonly StorageWrite[],
   admittedSubmissions: ReadonlySet<SubmissionId> = new Set(),
 ) {
+  const goal = await projectGoalInputAdmission(query, orbId, writes, admittedSubmissions);
+  if (goal.isErr()) return err(goal.error);
   const notification = await projectNotificationAdmission(query, orbId, writes);
   if (notification.isErr()) return err(notification.error);
   const admitted = await projectNativeInboxCommit(query, orbId, writes, admittedSubmissions);

@@ -9,6 +9,7 @@ import {
 import {
   AgentDoc,
   type AgentState,
+  type CommitChange,
   type Conversation,
   type ConversationId,
   type ConversationView,
@@ -27,11 +28,13 @@ import {
   type ReportInfo,
   type Storage,
   StorageRequestError,
+  type SubmissionRecord,
   type TaskGraph,
   type TaskId,
   type ToolExecutionApi,
   type ToolRegistration,
   type Tx,
+  type UserInput,
 } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type {
@@ -39,6 +42,7 @@ import type {
   AgentSettingsEvent,
   ClientAction,
   DeliverOrbMessageResponse,
+  GoalView,
   HistoryRecord,
   OrbMessageSystem,
   PendingModel,
@@ -49,7 +53,7 @@ import type {
   RuntimeHooks,
   ServerFrame,
 } from "@pi-orb/protocol";
-import { createDisplayRecordProjector, reasoningHeadline } from "@pi-orb/protocol";
+import { createDisplayRecordProjector, isGoalAction, reasoningHeadline } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, type Result, ResultAsync } from "neverthrow";
 import {
@@ -64,11 +68,20 @@ import {
 } from "../../../../orb-runtime/src/domain/turn-summary.ts";
 import type { AgentLiveView, AgentSessionFacade, AgentSnapshot } from "../../domain/agent-ports.ts";
 import type { RuntimeClientError } from "../../domain/errors.ts";
+import { jsonEqual } from "../../domain/json-equal.ts";
 import type { ModelCallUse } from "../../domain/model-usage.ts";
 import type { OrbAgentError } from "../../domain/orb-agent-operations.ts";
 import type { DeliverMessageClientRequest } from "../../domain/ports.ts";
 import type { AuthorityError } from "../durable-pg/index.ts";
 import { storageAuthorityError } from "../durable-pg/storage-boundary.ts";
+import {
+  changeGoal,
+  type GoalAdmissionRefusal,
+  GoalDoc,
+  goalExtension,
+  goalView,
+  readGoal,
+} from "./goal.ts";
 import {
   cancelledOpen,
   definitiveStartupRefusal,
@@ -170,6 +183,10 @@ export interface DurableAgentOptions {
     acknowledge(): ResultAsync<boolean, RuntimeClientError>;
   };
   readonly checkInputAdmission?: (browser: boolean) => ResultAsync<void, InputAdmissionError>;
+  readonly goal?: {
+    readonly kickoff: (objective: string) => UserInput;
+    readonly followUp: (goal: GoalView) => UserInput;
+  };
   /** Consulted before resuming unfinished work; an error leaves it suspended. */
   readonly admitRecovery?: () => ResultAsync<void, RuntimeClientError>;
   readonly beginDrain?: AgentStorageLease["beginDrain"];
@@ -229,6 +246,9 @@ export class DurableAgent implements AgentSessionFacade {
   private readonly retiredBlocks = new Map<string, string[]>();
   private session = { id: "", timestamp: "", overflow: {} };
   private settings: AgentSettingsEvent | null = null;
+  private goal: GoalView | null | undefined;
+  private goalState: Parameters<typeof goalView>[0];
+  private goalSubmission: SubmissionRecord | undefined;
   private live: LiveState = {};
   private inboxCount = 0;
   private tasks: TaskGraph = { tasks: {} };
@@ -248,6 +268,7 @@ export class DurableAgent implements AgentSessionFacade {
   private executionNotice: AgentSnapshot["notice"];
   private unsubscribeCommits = () => {};
   private mutations: Promise<void> = Promise.resolve();
+  private admittingGoalKickoff = false;
   private projection: Promise<Result<void, RuntimeClientError>> = Promise.resolve(ok(undefined));
   private pendingProjection = 0;
   private revision = 0;
@@ -339,9 +360,17 @@ export class DurableAgent implements AgentSessionFacade {
     let stage = "registry";
     let owner: DurableAgent | undefined;
     const reports: Report[] = [];
+    let installedGoal: Extension | undefined;
     let resourceClose: ResultAsync<void, RuntimeClientError> | undefined;
-    const closeResources = () =>
-      (resourceClose ??= options.closeResources?.() ?? okAsync(undefined));
+    const closeResources = () => {
+      if (
+        installedGoal &&
+        options.registry.snapshot().extension(installedGoal.name) === installedGoal
+      )
+        options.registry.uninstall(installedGoal);
+      resourceClose ??= options.closeResources?.() ?? okAsync(undefined);
+      return resourceClose;
+    };
     // Bound by the identity commit, before scheduling can start a generation.
     let rootSessionId: string | undefined;
     const models = options.recordModelCall
@@ -351,6 +380,15 @@ export class DurableAgent implements AgentSessionFacade {
       (async () => {
         if (openAborted()) return err(cancelledOpen());
         options.registry.install(promptExtension(options.instructions));
+        if (options.goal) {
+          installedGoal = goalExtension(
+            options.goal.followUp,
+            (ctx) =>
+              owner?.checkGoalAdmission(ctx) ??
+              err({ disposition: "denied", reason: "Agent admission closed." }),
+          );
+          options.registry.install(installedGoal);
+        }
         stage = "storage";
         harness = await Harness.open(
           options.storage,
@@ -484,6 +522,15 @@ export class DurableAgent implements AgentSessionFacade {
           cursor = page.next;
         } while (cursor !== undefined);
         stage = "observations";
+        if (options.goal) {
+          agent.goalState = await harness.snapshot(GoalDoc, root.id, openContext);
+          agent.goal = null;
+          if (agent.goalState) {
+            const current = await readGoal(harness, openContext);
+            if (current.isErr()) return err(durableError("Could not read goal state"));
+            agent.goal = current.value ?? null;
+          }
+        }
         agent.view = await root.watch(context);
         agent.graph = await harness.watchTaskGraph(context);
         agent.tasks = agent.graph.value;
@@ -502,6 +549,7 @@ export class DurableAgent implements AgentSessionFacade {
         });
         const commits = harness.observeCommits({
           advance: (publication) => {
+            if (agent.goal !== undefined) agent.projectGoal(publication.changes);
             let changed = false;
             for (const change of publication.changes) {
               if (
@@ -816,7 +864,7 @@ export class DurableAgent implements AgentSessionFacade {
     return this.options.checkExecutionReady?.(ctx) ?? okAsync(undefined);
   }
   workActive(): boolean {
-    return !this.paused && this.unfinishedWork();
+    return !this.paused && (this.admittingGoalKickoff || this.unfinishedWork());
   }
   private unfinishedWork(): boolean {
     return (
@@ -825,6 +873,59 @@ export class DurableAgent implements AgentSessionFacade {
   }
   private busy(): boolean {
     return this.unfinishedWork() || this.pendingProjection > 0;
+  }
+
+  private projectGoal(changes: readonly CommitChange[]): void {
+    const document = changes.findLast(
+      (change) =>
+        change.type === "document" &&
+        change.conversationId === this.root.id &&
+        change.record.kind === GoalDoc.definition.kind,
+    );
+    if (document?.type === "document") {
+      this.goalState =
+        document.kind === "change" ? (document.value as Parameters<typeof goalView>[0]) : undefined;
+    }
+    const id = this.goalState?.goal?.submissionId;
+    if (this.goalSubmission?.id !== id) this.goalSubmission = undefined;
+    const submission = changes.findLast(
+      (change) => change.type === "submission" && change.value.id === id,
+    );
+    if (submission?.type === "submission") this.goalSubmission = submission.value;
+    if (!document && !submission) return;
+    const goal = goalView(this.goalState, this.goalSubmission) ?? null;
+    if (jsonEqual(goal, this.goal)) return;
+    this.goal = goal;
+    this.emit({ type: "goal_state", goal });
+  }
+
+  private async checkGoalAdmission(ctx: Context): Promise<Result<void, GoalAdmissionRefusal>> {
+    const closed = () =>
+      this.closing ||
+      this.paused ||
+      this.options.ownershipSignal?.aborted ||
+      ctx.abortSignal?.aborted;
+    const deny = (reason: string) =>
+      err<void, GoalAdmissionRefusal>({ disposition: "denied", reason });
+    if (closed()) return deny("Agent admission closed.");
+    const admitted = await this.options.checkAdmission?.();
+    if (closed()) return deny("Agent admission changed.");
+    const input = await this.options.checkInputAdmission?.(true);
+    if (closed()) return deny("Agent admission changed.");
+    // Suspension also denies generic admission; only inbox preflight identifies Sleep.
+    if (
+      input?.isErr() &&
+      input.error.type === "input_admission_refused" &&
+      input.error.disposition === "sleep"
+    )
+      return err({ disposition: "sleep", reason: input.error.error.message });
+    if (admitted?.isErr()) return deny("Agent admission changed.");
+    if (input?.isErr()) {
+      if (input.error.type === "input_admission_refused") return deny(input.error.error.message);
+      this.failStorage(input.error.cause);
+      return deny("Input admission unavailable.");
+    }
+    return ok(undefined);
   }
 
   private updateView(value: ConversationView): void {
@@ -1002,6 +1103,7 @@ export class DurableAgent implements AgentSessionFacade {
           records,
           headId: records.at(-1)?.id ?? null,
           settings: this.settings,
+          ...(this.goal !== undefined ? { goal: this.goal } : {}),
         };
         const persisted = await this.options.commitHistory?.(snapshot);
         if (persisted?.isErr()) return err(persisted.error);
@@ -1074,6 +1176,7 @@ export class DurableAgent implements AgentSessionFacade {
       headId: this.records.at(-1)?.id ?? null,
       activity: !this.paused && this.busy() ? "busy" : "idle",
       settings: this.settings,
+      ...(this.goal !== undefined ? { goal: this.goal } : {}),
     });
   }
 
@@ -1427,6 +1530,62 @@ export class DurableAgent implements AgentSessionFacade {
             duplicate: receipt.duplicate,
           }));
       });
+    if (isGoalAction(action)) {
+      const policy = this.options.goal;
+      if (!policy)
+        return okAsync({
+          type: "rejected",
+          error: { code: "unsupported", message: "Goals are unavailable.", retryable: false },
+        });
+      return this.serial<RequestResultFrame["result"]>(async () => {
+        if (this.failure) return err(this.failure);
+        const kickoff = action.type === "goal_set" || action.type === "goal_resume";
+        const result = await Promise.resolve(
+          changeGoal(
+            this.root,
+            requestId,
+            kickoff ? { ...action, input: policy.kickoff } : action,
+            context,
+            (ctx) => {
+              // Only Set and Resume reach preflight, before there is native work to drain.
+              this.admittingGoalKickoff = true;
+              return this.checkGoalAdmission(ctx);
+            },
+          ),
+        ).finally(() => {
+          this.admittingGoalKickoff = false;
+        });
+        if (this.failure) return err(this.failure);
+        if (result.isOk()) return ok({ type: "goal_applied", duplicate: result.value.duplicate });
+        const error = result.error;
+        if (error.code === "durable_failure") return err(durableError("Could not change goal"));
+        if (error.code === "request_conflict")
+          return ok({
+            type: "rejected",
+            error: {
+              code: "request_id_conflict",
+              message: "Goal request ID conflicts.",
+              retryable: false,
+            },
+          });
+        if (error.code === "admission_denied")
+          return ok({
+            type: "rejected",
+            error: { code: "busy", message: error.reason, retryable: true },
+          });
+        return ok({
+          type: "rejected",
+          error: {
+            code: "invalid_request",
+            message:
+              error.code === "invalid_objective"
+                ? "Invalid goal objective."
+                : "Goal action no longer applies.",
+            retryable: false,
+          },
+        });
+      });
+    }
     return this.serial<RequestResultFrame["result"]>(async () => {
       if (this.failure && action.type !== "abort") return err(this.failure);
       if (action.type === "set_model" || action.type === "set_thinking") {

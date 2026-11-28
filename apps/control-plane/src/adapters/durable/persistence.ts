@@ -14,7 +14,11 @@ export interface AgentArtifacts {
 }
 
 export type InputAdmissionError =
-  | { readonly type: "input_admission_refused"; readonly error: RuntimeClientError }
+  | {
+      readonly type: "input_admission_refused";
+      readonly disposition: "sleep" | "queued_input";
+      readonly error: RuntimeClientError;
+    }
   | { readonly type: "input_admission_failed"; readonly cause: AuthorityError };
 
 export type AgentLeaseError = RuntimeClientError & { readonly cause?: AuthorityError };

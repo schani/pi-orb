@@ -26,6 +26,12 @@ import {
 import { err, ok, Result } from "neverthrow";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
+import {
+  isNativeGoalEcho,
+  type NativeGoalRecord,
+  nativeGoalCommands,
+  nativeGoalRecord,
+} from "./goal.ts";
 
 const IndexSchema = Type.Object({
   records: Type.Array(HistoryRecordSchema),
@@ -160,6 +166,8 @@ export function claudeContent(value: JsonValue | undefined): ContentBlock[] {
 export class ClaudeHistory {
   private records: HistoryRecord[] = [];
   private fingerprints: string[] = [];
+  private goals: NativeGoalRecord[] = [];
+  private goalCommands: ReturnType<typeof nativeGoalCommands> = new Map();
   private provenance: Record<string, Provenance> = {};
   private readonly indexPath: string;
   private readonly provenancePath: string;
@@ -216,6 +224,25 @@ export class ClaudeHistory {
   }
   get view(): readonly HistoryRecord[] {
     return this.records;
+  }
+  get nativeGoals(): readonly NativeGoalRecord[] {
+    return this.goals;
+  }
+  provesGoalCommand(
+    uuid: string,
+    args: string,
+    condition: string | null,
+    clear: boolean,
+    previousGoalCount: number,
+  ): boolean {
+    const proof = this.goalCommands.get(uuid);
+    return (
+      proof !== undefined &&
+      proof.args === args &&
+      proof.goal.condition === condition &&
+      proof.goal.terminal === clear &&
+      this.goals.indexOf(proof.goal) >= previousGoalCount
+    );
   }
   correlation(uuid: string): Provenance | undefined {
     return this.provenance[uuid];
@@ -452,6 +479,7 @@ export class ClaudeHistory {
         });
       const next = [...this.records];
       const natives: JsonObject[] = [];
+      const goals: NativeGoalRecord[] = [];
       // Queued-input proof can already be fully fingerprinted on first start.
       for (let index = 0; index < lines.length; index++) {
         const parsed: Result<JsonObject, ClaudeHistoryError> = Result.fromThrowable(
@@ -469,6 +497,8 @@ export class ClaudeHistory {
             message: "Native Claude record is not an object.",
           });
         natives.push(native);
+        const goal = nativeGoalRecord(native, this.session);
+        if (goal !== null) goals.push(goal);
         if (index < this.fingerprints.length) continue;
         const id = text(native.uuid) ?? `claude:${this.session}:${index}:${fingerprints[index]}`;
         if (next.some((record) => record.id === id))
@@ -514,6 +544,27 @@ export class ClaudeHistory {
             type: "event",
             eventType: "claude.compact_command",
             overflow: { native: { type: native.type ?? "user", uuid: id } },
+          };
+        } else if (goal?.terminal && !goal.sentinel) {
+          record = {
+            ...base,
+            type: "event",
+            eventType: "claude.goal_outcome",
+            content: [
+              {
+                type: "text",
+                text: goal.failed ? "Goal could not be completed." : "Goal completed.",
+              },
+            ],
+            custom: { customType: "claude.goal_outcome", display: true },
+            overflow: {},
+          };
+        } else if (isNativeGoalEcho(native, this.session) && provenance === undefined) {
+          record = {
+            ...base,
+            type: "event",
+            eventType: "claude.goal_command",
+            overflow: { native: { type: "user", uuid: id } },
           };
         } else if (native.type === "user" && native.isMeta === true && provenance === undefined) {
           record = {
@@ -603,19 +654,24 @@ export class ClaudeHistory {
       const receipts = this.deriveInputReceipts(natives, next, inputContent);
       if (receipts.isErr()) return err(receipts.error);
       next.push(...receipts.value);
-      if (next.length === this.records.length) return ok(this.records);
-      return Result.fromThrowable(
-        () => {
-          this.files.commit(this.indexPath, JSON.stringify({ records: next, fingerprints }));
-          this.records = next;
-          this.fingerprints = fingerprints;
-          return this.records as readonly HistoryRecord[];
-        },
-        (): ClaudeHistoryError => ({
-          type: "claude_history_error",
-          message: "Cannot commit Claude history index.",
-        }),
-      )();
+      const committed =
+        next.length === this.records.length
+          ? ok(this.records)
+          : Result.fromThrowable(
+              () =>
+                this.files.commit(this.indexPath, JSON.stringify({ records: next, fingerprints })),
+              (): ClaudeHistoryError => ({
+                type: "claude_history_error",
+                message: "Cannot commit Claude history index.",
+              }),
+            )();
+      return committed.map(() => {
+        this.records = next;
+        this.fingerprints = fingerprints;
+        this.goals = goals;
+        this.goalCommands = nativeGoalCommands(natives, this.session, goals);
+        return this.records;
+      });
     });
   }
 }

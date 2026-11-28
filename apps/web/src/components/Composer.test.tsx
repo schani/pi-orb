@@ -53,6 +53,35 @@ describe("Composer", () => {
     } as unknown as Parameters<NonNullable<typeof input.onKeyDown>>[0]);
     expect(preventDefault).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["leading slash", "keep this draft", "/keep this draft", 1, "insertText", "/", ""],
+    ["whole command overwrite", "effort ", "/effort ", 8, "insertText", "/effort ", "effort "],
+    ["pasted slash", "effort ", "/effort ", 1, "insertFromPaste", "/", "effort "],
+    ["slash replacing a selection", "npm test", "/ test", 1, "insertText", "/", " test"],
+  ])("handles %s without keydown", (_, draft, value, caret, inputType, data, expected) => {
+    const onValueChange = vi.fn();
+    renderToStaticMarkup(
+      <Composer
+        text={draft}
+        mode="message"
+        onValueChange={onValueChange}
+        images={[]}
+        onImageAdd={noop}
+        onImageRemove={noop}
+        canSend
+        onSend={noop}
+        canAbort={false}
+        onAbort={noop}
+      />,
+    );
+    input.onChange?.({
+      target: { value, selectionStart: caret, selectionEnd: caret },
+      nativeEvent: { inputType, data, isComposing: false },
+    } as unknown as Parameters<NonNullable<typeof input.onChange>>[0]);
+    expect(onValueChange).toHaveBeenCalledExactlyOnceWith(expected, "command");
+  });
+
   it("starts with four lines without visible prompt text", () => {
     const message = render("message");
     expect(message).toMatch(/<textarea[^>]*aria-label="Message the orb"[^>]*rows="4"/);
@@ -131,3 +160,41 @@ describe("Composer", () => {
     expect(render("command")).toMatch(/aria-label="Send message"[^>]*disabled=""/);
   });
 });
+
+it.each([
+  ["goal", null],
+  ["goal Ship the fix", "Ship the fix"],
+] as const)(
+  "runs /%s from the picker without invoking settings or sending a message",
+  (text, objective) => {
+    const onGoalCommand = vi.fn();
+    const onSend = vi.fn();
+    const onSettingsChange = vi.fn();
+    const markup = renderToStaticMarkup(
+      <Composer
+        text={text}
+        mode="command"
+        onValueChange={noop}
+        images={[]}
+        onImageAdd={noop}
+        onImageRemove={noop}
+        canSend
+        onSend={onSend}
+        canAbort
+        onAbort={noop}
+        onSettingsChange={onSettingsChange}
+        onGoalCommand={onGoalCommand}
+      />,
+    );
+    expect(markup).toContain(">goal</span>");
+    expect(markup).toContain('aria-label="abort"');
+    input.onKeyDown?.({
+      key: "Enter",
+      nativeEvent: { isComposing: false },
+      preventDefault: noop,
+    } as unknown as Parameters<NonNullable<typeof input.onKeyDown>>[0]);
+    expect(onGoalCommand).toHaveBeenCalledWith(objective);
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onSettingsChange).not.toHaveBeenCalled();
+  },
+);

@@ -2,6 +2,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import websocketPlugin from "@fastify/websocket";
 import {
   CAPABILITY_ABORT,
+  CAPABILITY_GOAL,
   CAPABILITY_INPUT_IMAGE,
   ClientFrameSchema,
   type ClientRequest,
@@ -58,6 +59,10 @@ export function buildRuntimeServer(
 ): FastifyInstance {
   const app = Fastify({ logger: false });
   const registry = new RequestRegistry();
+  const goalPort =
+    agent.canChangeGoal && agent.changeGoal
+      ? { check: agent.canChangeGoal.bind(agent), apply: agent.changeGoal.bind(agent) }
+      : null;
   registerFileRoutes(app, {
     token: alertToken,
     incarnation,
@@ -291,6 +296,7 @@ export function buildRuntimeServer(
       const drainTimer = setInterval(() => writer.onDrain(), 50);
       let unsubscribe: (() => void) | null = null;
       let helloSeen = false;
+      let goalSupported = false;
 
       const cleanup = (): void => {
         clearInterval(drainTimer);
@@ -345,7 +351,7 @@ export function buildRuntimeServer(
         }
         // All mutating requests pass through this single synchronous gate on
         // the event loop (docs/runtime-protocol.md).
-        const decision = decideRequest(agent.gateView(), frame.action);
+        const decision = decideRequest(agent.gateView(), frame.action, goalSupported);
         if (decision.type === "reject") {
           const result: RequestResult = {
             type: "rejected",
@@ -368,6 +374,32 @@ export function buildRuntimeServer(
           registry.record(frame.requestId, frame.action, result);
           sendResult(frame.requestId, result);
           void agent.abortOperation();
+          return;
+        }
+        if (decision.type === "change_goal" && goalPort !== null) {
+          const settle = (result: RequestResult): void => {
+            registry.record(frame.requestId, frame.action, result);
+            sendResult(frame.requestId, result);
+          };
+          const admission = goalPort.check(decision.action);
+          if (admission.isErr()) {
+            settle({
+              type: "rejected",
+              error: { ...admission.error, retryable: admission.error.code === "busy" },
+            });
+            return;
+          }
+          registry.reserve(frame.requestId, frame.action);
+          void goalPort.apply(decision.action).then((outcome) => {
+            settle(
+              outcome.isOk()
+                ? { type: "goal_applied", duplicate: false }
+                : {
+                    type: "rejected",
+                    error: { ...outcome.error, retryable: outcome.error.code === "busy" },
+                  },
+            );
+          });
           return;
         }
         if (frame.action.type === "set_model" || frame.action.type === "set_thinking") {
@@ -406,17 +438,16 @@ export function buildRuntimeServer(
           void agent.compact(frame.action.customInstructions, operationId);
           return;
         }
+        if (frame.action.type !== "message") return;
         // Acceptance is not completion (docs/runtime-protocol.md).
         const operationId = randomUUID();
         const result: RequestResult = { type: "accepted", operationId, duplicate: false };
         registry.record(frame.requestId, frame.action, result);
         sendResult(frame.requestId, result);
-        if (frame.action.type === "message") {
-          // Naming is auxiliary and starts only after the request gate accepted this message.
-          agent.triggerAutoName(frame.action.content);
-          // The operation id becomes visible through operation_started once Pi starts.
-          void agent.submitMessage(frame.action.content, operationId);
-        }
+        // Naming is auxiliary and starts only after the request gate accepted this message.
+        agent.triggerAutoName(frame.action.content);
+        // The operation id becomes visible through operation_started once the agent starts.
+        void agent.submitMessage(frame.action.content, operationId);
       };
 
       socket.on("message", (data: Buffer, isBinary: boolean) => {
@@ -477,6 +508,10 @@ export function buildRuntimeServer(
             return;
           }
           const at = new Date().toISOString();
+          const { goal, ...snapshotWithoutGoal } = snapshot.value;
+          goalSupported = goalPort !== null && goal !== undefined;
+          const capabilities = [CAPABILITY_ABORT, CAPABILITY_INPUT_IMAGE];
+          if (goalSupported) capabilities.push(CAPABILITY_GOAL);
           const welcome: ServerFrame = {
             v: 1,
             type: "server.welcome",
@@ -485,21 +520,35 @@ export function buildRuntimeServer(
             runtimeInstanceId: agent.runtimeInstanceId,
             orbId: snapshot.value.orbId,
             sessionId,
-            capabilities: [CAPABILITY_ABORT, CAPABILITY_INPUT_IMAGE],
+            capabilities,
             limits: {
               maxIncomingFrameBytes: MAX_INCOMING_FRAME_BYTES,
               maxPromptBytes: MAX_PROMPT_BYTES,
             },
           };
           const sync = computeSyncFrames(
-            snapshot.value,
+            goalSupported ? snapshot.value : snapshotWithoutGoal,
             agent.liveView(),
             parsed.afterRecordId,
             at,
           );
           writer.enqueueSyncBatch([welcome, ...sync]);
           // Subsequent live frames append after sync.completed.
-          unsubscribe = agent.subscribe((frame) => writer.enqueue(frame));
+          unsubscribe = agent.subscribe((frame) => {
+            if (
+              !goalSupported &&
+              frame.type === "runtime.event" &&
+              frame.event.type === "goal_state"
+            ) {
+              // A connection negotiates capabilities only at hello.
+              if (goalPort !== null) {
+                cleanup();
+                socket.close(1013, "Goal support is now available.");
+              }
+              return;
+            }
+            writer.enqueue(frame);
+          });
           return;
         }
         if (!helloSeen) {

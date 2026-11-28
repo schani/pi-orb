@@ -1,0 +1,99 @@
+.orb-goal.activity-rail-row {
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid var(--g2);
+}
+
+.orb-goal.activity-rail-row > summary {
+  grid-template-columns: 1ch minmax(0, 1fr) auto;
+  padding-inline: 12px;
+}
+
+.orb-goal[open] {
+  max-height: min(16em, 30dvh);
+  overflow-y: auto;
+}
+
+.orb-goal[open] > summary .activity-rail-summary {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.goal-status {
+  color: var(--g3);
+}
+
+.orb-goal[data-status="active"] .goal-status {
+  color: var(--ok);
+}
+
+.orb-goal.activity-rail-row > summary:focus-visible .goal-status {
+  color: inherit;
+}
+
+.goal-body {
+  padding-inline: calc(20px + 1ch) 12px;
+}
+
+.goal-reason,
+.goal-error {
+  margin: 0;
+  padding-block: 4px;
+  overflow-wrap: anywhere;
+}
+
+.goal-error {
+  padding-inline: 12px;
+}
+
+.goal-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.goal-actions > button[aria-disabled="true"] {
+  color: var(--g3);
+  background: transparent;
+  cursor: not-allowed;
+}
+
+.goal-editor {
+  display: grid;
+  gap: 4px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--g2);
+}
+
+.goal-editor textarea {
+  display: block;
+  width: 100%;
+  resize: none;
+}
+
+@media (min-width: 601px) {
+  .orb-header > .orb-goal-add {
+    order: 4;
+    margin-inline: 4px;
+  }
+}
+
+@media (max-width: 600px), (any-pointer: coarse) {
+  .orb-header:has(> .orb-goal-add) {
+    height: auto;
+    min-height: 44px;
+  }
+
+  .orb-header > .orb-goal-add {
+    width: 44px;
+    height: 44px;
+  }
+
+  .orb-goal.activity-rail-row > summary,
+  .goal-actions > button {
+    min-height: 44px;
+  }
+
+  .goal-editor textarea {
+    font-size: 16px;
+  }
+}

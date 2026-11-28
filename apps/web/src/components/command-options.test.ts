@@ -66,3 +66,20 @@ it("offers only supported choices and never converts an unknown command to a pro
   });
   expect(commandOptions("upload", view)).toEqual([]);
 });
+
+it("offers the goal command only when goal controls are available", () => {
+  expect(commandOptions("g", view)).toEqual([]);
+  expect(commandOptions("goal fast", view)).toEqual([]);
+  expect(commandOptions("g", view, "thinking", undefined, undefined, true)).toEqual([
+    { label: "goal", goal: { objective: null } },
+  ]);
+  expect(commandOptions("goal   ", view, "thinking", undefined, undefined, true)[0]?.goal).toEqual({
+    objective: null,
+  });
+  expect(
+    commandOptions("goal  keep\n this  ", view, "thinking", undefined, undefined, true)[0]?.goal,
+  ).toEqual({ objective: "keep\n this" });
+  expect(
+    commandOptions("goal pause", view, "thinking", undefined, undefined, true)[0]?.goal,
+  ).toEqual({ objective: "pause" });
+});

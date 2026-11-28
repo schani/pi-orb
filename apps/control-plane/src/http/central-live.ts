@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
   CAPABILITY_ABORT,
+  CAPABILITY_GOAL,
   CAPABILITY_INPUT_IMAGE,
   ClientFrameSchema,
+  isGoalAction,
   type RequestResultFrame,
   type ServerFrame,
 } from "@pi-orb/protocol";
@@ -33,6 +35,7 @@ export function attachCentralLive(
     highWaterMark: 256 * 1024,
   });
   let helloSeen = false;
+  let goalSupported = false;
   let closed = false;
   let unsubscribe: () => void = () => undefined;
   const interval = setInterval(() => writer.onDrain(), 25);
@@ -131,6 +134,9 @@ export function attachCentralLive(
         return;
       }
       const at = new Date().toISOString();
+      goalSupported = snapshot.value.goal !== undefined;
+      const capabilities = [CAPABILITY_ABORT, CAPABILITY_INPUT_IMAGE];
+      if (goalSupported) capabilities.push(CAPABILITY_GOAL);
       const welcome: ServerFrame = {
         v: 1,
         type: "server.welcome",
@@ -139,7 +145,7 @@ export function attachCentralLive(
         runtimeInstanceId: session.runtimeInstanceId,
         orbId: snapshot.value.orbId,
         sessionId: snapshot.value.session.id,
-        capabilities: [CAPABILITY_ABORT, CAPABILITY_INPUT_IMAGE],
+        capabilities,
         limits: { maxIncomingFrameBytes: 8 * 1024 * 1024, maxPromptBytes: 6 * 1024 * 1024 },
       };
       writer.enqueueSyncBatch([
@@ -163,6 +169,13 @@ export function attachCentralLive(
           message: "requests are rejected before client.hello",
           retryable: false,
         },
+      });
+      return;
+    }
+    if (!goalSupported && isGoalAction(frame.action)) {
+      reply(frame.requestId, {
+        type: "rejected",
+        error: { code: "unsupported", message: "Goals are unavailable.", retryable: false },
       });
       return;
     }

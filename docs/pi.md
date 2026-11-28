@@ -138,6 +138,18 @@ Children inherit the pinned parent context, ordinary configuration and authorize
 - **Luna summaries.** Owner-scoped Luna uses the same Models and transport override as inference. Its bounded input excludes instructions, reasoning, raw tool output and child transcripts. Completion/idle publication precedes summary inference; failure never changes root outcome or health. VM idle-stop leaves the Harness and summaries running; pending summaries never demand a VM. Graceful sleep/archive wait for pending summaries and their telemetry before closing owner resources; explicit Stop aborts and drains them. The queue is process-local and best effort: a control-plane crash can lose notifications, and reopening never reruns inference to regenerate one. Edges: `harness.summary_queued`, `harness.summary_completed`, `harness.summary_failed` (sanitized, no content).
 - Durable root facts and lifecycle edges keep admission, terminal outcomes, cancellation and recovery disposition without exposing child prompts or transcripts. Healthy polling logs nothing.
 
+## Goals
+
+Central Pi admits model-only kickoff input for Set and Resume and continuation input for follow-ups, all tagged `orb.goal-input`. The only goal tool, `report_goal`, reports verified completion with evidence or blockage with a reason. Its calling code mode must belong to the live root generation. The report must match the active goal's revision and exact submission: the placed input in its own turn, or an already successfully settled input in a later root turn, including an ordinary wake message.
+
+One private root Durable document (`orb.goal`) stores the optional goal, revision, current submission, follow-up count and request receipts. `active` does not mean a turn is running; an unanswered submission reads as paused. Passive reconnect reads the document and current submission together from PostgreSQL without opening the Harness or waking compute.
+
+The durable `afterRun` task considers a follow-up only if the current submission settled with that run’s answer. A typed Sleep refusal leaves the goal active and admits nothing, even at the turn cap or with queued input. Otherwise, queued native input, a pending reset or denied continuation pauses the goal; the task blocks it rather than admitting a fourth automatic follow-up per Set or Resume. The task records its decision as a native outcome.
+
+External inbox backlog is advisory. Pending Sleep refuses Set, Resume and automatic handoffs at their in-commit preflight. A handoff that passes preflight drains even if Sleep is scheduled before native publication. Sleep waits for in-flight kickoffs and unfinished native work. Manual Stop, stopping for Sleep, revoked admission and closed authority still fence goal admission and placement at publication.
+
+Controls: [docs/web-ui.md](web-ui.md#goal-drawer). Wire: [docs/runtime-protocol.md](runtime-protocol.md).
+
 ## Upstream patches
 
 Three sealed patchsets (Pi AI, codemode, Durable) cover 17 published files, with pristine/patched hashes in `patches/pi-codemode.PROVENANCE.md` and `patches/pi-durable.PROVENANCE.md`. They keep: image/output bounds, CPU checkpoints, owned WASM capacity, actual-worker-exit liveness, run/journal document exports, resource-only namespaces, explicit-null safety, low-allocation image decoding, batch admission, handled already-aborted `Waiters.add` rejections (an unobserved one killed the control plane: `docs/postmortems/2026-11-06-control-plane-blackouts.md`), and Pi AI's typed `codex_failure`/broker diagnostics, secret-free close reasons and [model catalog additions](agent-context.md). Schemas are imported at their owning boundary (`pi-schema`), not through Pi AI reexports. Prompt or tool-description changes in an upgrade need user approval.

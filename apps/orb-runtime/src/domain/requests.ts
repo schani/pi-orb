@@ -1,4 +1,5 @@
-import type { ClientAction, RequestResultFrame } from "@pi-orb/protocol";
+import { type ClientAction, isGoalAction, type RequestResultFrame } from "@pi-orb/protocol";
+import type { RuntimeGoalAction } from "./types.ts";
 
 export type RequestResult = RequestResultFrame["result"];
 
@@ -13,12 +14,13 @@ export interface AgentGateView {
 
 export type RequestDecision =
   | { readonly type: "change_settings" }
+  | { readonly type: "change_goal"; readonly action: RuntimeGoalAction }
   | { readonly type: "compact" }
   | { readonly type: "start_message" }
   | { readonly type: "abort_operation"; readonly operationId: string }
   | {
       readonly type: "reject";
-      readonly code: "busy" | "stale_head" | "stale_operation";
+      readonly code: "busy" | "stale_head" | "stale_operation" | "unsupported";
       readonly message: string;
       readonly retryable: boolean;
     };
@@ -27,7 +29,21 @@ export type RequestDecision =
  * Pure docs/runtime-protocol.md request gate, evaluated synchronously on the event loop so the
  * view is consistent at decision time.
  */
-export function decideRequest(view: AgentGateView, action: ClientAction): RequestDecision {
+export function decideRequest(
+  view: AgentGateView,
+  action: ClientAction,
+  goalSupported = false,
+): RequestDecision {
+  if (
+    isGoalAction(action) &&
+    (!goalSupported || action.type === "goal_pause" || action.type === "goal_resume")
+  )
+    return {
+      type: "reject",
+      code: "unsupported",
+      message: "Goals are unavailable.",
+      retryable: false,
+    };
   if (!view.acceptingWork)
     return {
       type: "reject",
@@ -43,6 +59,19 @@ export function decideRequest(view: AgentGateView, action: ClientAction): Reques
       retryable: true,
     };
   switch (action.type) {
+    case "goal_set":
+    case "goal_clear":
+      return view.activity === "idle"
+        ? { type: "change_goal", action }
+        : {
+            type: "reject",
+            code: "busy",
+            message:
+              action.type === "goal_clear"
+                ? "Abort the current turn before clearing."
+                : "Wait for the current operation to finish before setting a goal.",
+            retryable: true,
+          };
     case "compact":
       return view.activity === "idle"
         ? { type: "compact" }
@@ -107,8 +136,8 @@ function actionsEqual(a: ClientAction, b: ClientAction): boolean {
 
 /**
  * In-memory request identity, scoped to one runtime process (docs/runtime-protocol.md). A resent
- * known ID with an identical action replays the original result, marked `duplicate: true` when
- * accepted or settings_applied; a known ID with a different action is a conflict. The map
+ * known ID with an identical action replays the original result, marked `duplicate: true` on
+ * success; a known ID with a different action is a conflict. The map
  * lives for the life of the process; `server.welcome.runtimeInstanceId` tells
  * browsers when it has been emptied by a restart.
  */
@@ -141,7 +170,7 @@ export class RequestRegistry {
     if (known === undefined) return { type: "new" };
     if (!actionsEqual(known.action, action)) return { type: "conflict" };
     const result = known.result;
-    if (result.type === "accepted" || result.type === "settings_applied") {
+    if (result.type !== "rejected") {
       return { type: "replay", result: { ...result, duplicate: true } };
     }
     return { type: "replay", result };
