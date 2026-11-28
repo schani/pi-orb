@@ -80,6 +80,14 @@ Claude uses the shared runtime `compact` command. Admission claims aggregate own
 - Explicit Abort advances the admission epoch and aborts the operation-owned query controller, never relying on `interrupt()` (the SDK can return `still_queued` and run the command later). Each manual operation owns its query. Ownership releases only after exit, stdout/iterator/hook drain and final history commit.
 - Success requires a canonical summary; settled failure or cancellation persists one typed `agent.compaction` outcome before idle, and the generic operation terminal stays hidden so the UI shows one row. Missing summary or uncertain persistence/drain fails readiness, keeps busy and emits one sanitized error frame. Retained manual-compaction journals recover with one typed aborted outcome, never command replay. Typed failure/cancellation events are platform-only, never model context. Display hiding of compaction artifacts: `docs/history.md`.
 
+## Goals
+
+The drawer exposes native `/goal <condition>` and `/goal clear` only when the SDK advertises the built-in. Both require an idle runtime; Clear checks the current revision. Abort the current turn before clearing. Set rejects an existing goal, a blank or invalid condition, more than 4,000 UTF-16 code units, and the native Clear aliases (`clear`, `stop`, `off`, `reset`, `none`, `cancel`, case-insensitive). Neither command uses `client_composed`.
+
+The fsynced root transcript's latest valid same-session `attachment/goal_status` restores the drawer. Claude evaluates and continues the goal natively; pi-orb stores no goal state. Evaluator completion or failure is visible in history. The structured local echo and synthetic command feedback are not human input or model output.
+
+Admission claims native operation ownership before query startup. Set acknowledges once the new sentinel, exact command echo and command output are committed. The native goal turn owns the query until its terminal result, process exit, stdout, hooks and history drain. Clear also requires its own zero-turn `goal` result before acknowledgement. Abort cancels the query, not the retained goal. Goal turns use `claude.operation_finished` with the goal action, command UUID and revision in overflow.
+
 ## History publication
 
 Native records are mapped into normalized history (`docs/history.md`); child transcripts stay local and private.

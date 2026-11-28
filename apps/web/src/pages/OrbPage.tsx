@@ -2,8 +2,11 @@ import {
   type ActiveSubagent,
   type AgentSettingsEvent,
   CAPABILITY_ABORT,
+  CAPABILITY_GOAL,
   type DisplayHistoryView,
   type DisplayRecord,
+  GOAL_OBJECTIVE_MAX_LENGTH,
+  type GoalView,
   type HostedFilesResponse,
   type MessageInputBlock,
   type OrbMessageView,
@@ -31,6 +34,7 @@ import { HostedFiles } from "../components/HostedFiles.tsx";
 import { Icon } from "../components/Icons.tsx";
 import { OrbFailureBanner } from "../components/OrbFailureBanner.tsx";
 import { OrbFilesBaseUrl } from "../components/OrbFilesBaseUrl.ts";
+import { type GoalAction, OrbGoal, type OrbGoalHandle } from "../components/OrbGoal.tsx";
 import { OrbIndex } from "../components/OrbIndex.tsx";
 import { OrbLinks } from "../components/OrbLinks.tsx";
 import { OrbNotice } from "../components/OrbNotice.tsx";
@@ -130,6 +134,8 @@ interface WelcomeInfo {
 /** Defensive prompt cap until the welcome frame supplies the real limit. */
 const FALLBACK_MAX_PROMPT_BYTES = 6 * 1024 * 1024;
 
+type GoalRequestSource = "drawer" | "command";
+
 interface OrbPageState {
   /** Insertion-ordered records keyed by id for cross-boundary dedupe. */
   records: ReadonlyMap<string, DisplayRecord>;
@@ -159,6 +165,14 @@ interface OrbPageState {
   compaction: { operationId: string; afterId: string | null } | null;
   synced: boolean;
   commandDraft: { text: string } | null;
+  goal: GoalView | null;
+  goalKnown: boolean;
+  pendingGoalRequest: {
+    id: string;
+    source: GoalRequestSource;
+    command: { text: string; draft: OrbPageState["commandDraft"] } | null;
+  } | null;
+  goalError: { source: GoalRequestSource; message: string } | null;
   pendingRequest: {
     requestId: string;
     kind: "message" | "abort" | "settings" | "compact";
@@ -197,6 +211,8 @@ type OrbPageAction =
       requestId: string;
       kind: "message" | "abort" | "settings" | "compact";
     }
+  | { type: "goal_request_sent"; requestId: string; source: GoalRequestSource }
+  | { type: "goal_error"; source: GoalRequestSource; message: string }
   | { type: "request_lost"; requestId: string }
   | { type: "message_enqueued"; requestId: string }
   | { type: "message_enqueue_failed"; requestId: string; error: ApiError }
@@ -231,6 +247,10 @@ export function initialState(orbId: string): OrbPageState {
     compaction: null,
     synced: false,
     commandDraft: null,
+    goal: null,
+    goalKnown: false,
+    pendingGoalRequest: null,
+    goalError: null,
     pendingRequest: null,
     requestError: null,
     serverError: null,
@@ -246,6 +266,10 @@ function lastKey(map: ReadonlyMap<string, DisplayRecord>): string | null {
 
 function applyRuntimeEvent(state: OrbPageState, event: RuntimeEvent): OrbPageState {
   switch (event.type) {
+    case "goal_state":
+      return state.welcome?.capabilities.includes(CAPABILITY_GOAL)
+        ? { ...state, goal: event.goal, goalKnown: true }
+        : state;
     case "agent_settings": {
       const adjusted =
         state.pendingRequest?.kind === "settings" &&
@@ -365,6 +389,11 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
       return {
         ...state,
         subagents: [],
+        goalKnown: false,
+        goal:
+          state.sessionId === frame.sessionId && frame.capabilities.includes(CAPABILITY_GOAL)
+            ? state.goal
+            : null,
         ...(state.sessionId !== null && state.sessionId !== frame.sessionId
           ? {
               records: new Map(),
@@ -396,6 +425,7 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
         subagents: [],
         settings: null,
         compacting: false,
+        goalKnown: false,
         synced: false,
       };
       if (frame.mode === "full") {
@@ -440,6 +470,35 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
     case "runtime.event":
       return applyRuntimeEvent(state, frame.event);
     case "request.result": {
+      const goalRequest = state.pendingGoalRequest;
+      if (goalRequest?.id === frame.requestId) {
+        if (frame.result.type === "goal_applied") {
+          const command = goalRequest.command;
+          return {
+            ...state,
+            ...(command !== null &&
+            state.composerMode === "command" &&
+            state.composerText === command.text &&
+            state.commandDraft === command.draft
+              ? restoreCommandDraft(state)
+              : {}),
+            pendingGoalRequest: null,
+            goalError: null,
+          };
+        }
+        if (frame.result.type === "rejected") {
+          return {
+            ...state,
+            pendingGoalRequest: null,
+            goalError: {
+              source: goalRequest.source,
+              message: frame.result.error.message,
+            },
+          };
+        }
+        return state;
+      }
+      if (frame.result.type === "goal_applied") return state;
       if (state.pendingRequest === null || frame.requestId !== state.pendingRequest.requestId) {
         return state;
       }
@@ -473,6 +532,27 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
   }
 }
 
+function restoreCommandDraft(state: OrbPageState) {
+  return {
+    composerText: state.commandDraft?.text ?? "",
+    composerMode: "message" as const,
+    commandDraft: null,
+  };
+}
+
+function loseGoalRequest(state: OrbPageState): OrbPageState {
+  return state.pendingGoalRequest === null
+    ? state
+    : {
+        ...state,
+        pendingGoalRequest: null,
+        goalError: {
+          source: state.pendingGoalRequest.source,
+          message: "Goal change not acknowledged. Check the current goal before retrying.",
+        },
+      };
+}
+
 function finishCommand(state: OrbPageState): OrbPageState {
   return {
     ...state,
@@ -480,11 +560,7 @@ function finishCommand(state: OrbPageState): OrbPageState {
     requestError: null,
     ...(state.composerMode === "command" &&
     state.composerText === state.pendingRequest?.submittedText
-      ? {
-          composerText: state.commandDraft?.text ?? "",
-          composerMode: "message",
-          commandDraft: null,
-        }
+      ? restoreCommandDraft(state)
       : {}),
   };
 }
@@ -505,6 +581,25 @@ export function canRunComposerCommand(
     state.subagents.length === 0 &&
     !state.compacting &&
     state.pendingRequest === null
+  );
+}
+
+export function canManageGoal(
+  orb: Pick<OrbView, "state" | "centralAgent" | "stopReason"> | null,
+  state: OrbPageState,
+): boolean {
+  return (
+    orb !== null &&
+    !["deleting", "archiving", "archived"].includes(orb.state) &&
+    (orb.centralAgent || orb.state === "running") &&
+    !(
+      (orb.state === "stopping" || orb.state === "stopped") &&
+      (orb.stopReason === "manual" || orb.stopReason === "sleep")
+    ) &&
+    state.connection === "open" &&
+    state.synced &&
+    state.goalKnown &&
+    state.welcome?.capabilities.includes(CAPABILITY_GOAL) === true
   );
 }
 
@@ -728,7 +823,7 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
       return applyFrame(state, action.frame);
     case "connection_status":
       return {
-        ...state,
+        ...(action.status === "closed" ? loseGoalRequest(state) : state),
         connection: action.status,
         historyEpoch: state.historyEpoch + (action.status === "connecting" ? 1 : 0),
         ...(action.status === "open"
@@ -739,6 +834,7 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
               subagents: [],
               settings: null,
               compacting: false,
+              goalKnown: false,
               synced: false,
             }),
       };
@@ -761,15 +857,17 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
       if (state.composerMode === "command" && action.mode === "message" && state.commandDraft)
         return {
           ...state,
-          composerText: state.commandDraft.text,
-          composerMode: "message",
-          commandDraft: null,
+          ...restoreCommandDraft(state),
           notice: null,
         };
       return {
         ...state,
         composerText: action.text,
         composerMode: action.mode,
+        goalError:
+          state.goalError?.source === "command" && action.mode === "command"
+            ? null
+            : state.goalError,
         notice: null,
       };
     case "image_added":
@@ -798,7 +896,23 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
         requestError: null,
         notice: null,
       };
+    case "goal_request_sent":
+      return {
+        ...state,
+        pendingGoalRequest: {
+          id: action.requestId,
+          source: action.source,
+          command:
+            action.source === "command"
+              ? { text: state.composerText, draft: state.commandDraft }
+              : null,
+        },
+        goalError: null,
+      };
+    case "goal_error":
+      return { ...state, goalError: { source: action.source, message: action.message } };
     case "request_lost": {
+      if (state.pendingGoalRequest?.id === action.requestId) return loseGoalRequest(state);
       const pendingRequest =
         state.pendingRequest !== null && state.pendingRequest.requestId === action.requestId
           ? null
@@ -1028,6 +1142,13 @@ function OrbConversation({
 }) {
   const orbId = initial.orbId;
   const composerRef = useRef<ComposerHandle>(null);
+  const goalRef = useRef<OrbGoalHandle>(null);
+  const addGoalRef = useRef<HTMLButtonElement>(null);
+  const returnGoalFocus = useCallback((from: "add" | "command") => {
+    if (from === "add" && addGoalRef.current !== null)
+      addGoalRef.current.focus({ preventScroll: true });
+    else composerRef.current?.focus();
+  }, []);
   const phone = usePhoneLayout();
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollContentRef = useRef<HTMLDivElement>(null);
@@ -1917,6 +2038,37 @@ function OrbConversation({
       });
   };
 
+  const goalWritable = canManageGoal(orb, state);
+  const openGoalCommand = goalWritable || state.goal !== null;
+  const sendGoal = (action: GoalAction, source: GoalRequestSource) => {
+    const report = (message: string) => dispatch({ type: "goal_error", source, message });
+    if (!goalWritable) {
+      report("Goal changes are unavailable.");
+      return;
+    }
+    if (state.pendingGoalRequest !== null) return;
+    if (action.type === "goal_set") {
+      if (state.goal !== null) {
+        report("Clear the current goal before setting another.");
+        return;
+      }
+      if ([...action.objective].length > GOAL_OBJECTIVE_MAX_LENGTH) {
+        report(`Objective exceeds ${GOAL_OBJECTIVE_MAX_LENGTH} characters.`);
+        return;
+      }
+    }
+    const requestId = liveRef.current?.sendRequest(action);
+    if (!requestId) report("Not connected — the goal change was not sent.");
+    else dispatch({ type: "goal_request_sent", requestId, source });
+  };
+
+  const runGoalCommand = (objective: string | null) => {
+    if (objective === null) {
+      dispatch({ type: "composer_changed", text: "", mode: "message" });
+      goalRef.current?.open("command");
+    } else sendGoal({ type: "goal_set", objective }, "command");
+  };
+
   const sendAbort = () => {
     const connection = liveRef.current;
     const operationId = pendingAbortOperation(
@@ -1988,6 +2140,8 @@ function OrbConversation({
   const canStop = orb !== null && canStopOrb(orb);
   const canSend = canSendComposer(orb, state);
   const canAbort = canAbortComposer(state, queuedMessages, orb?.centralAgent ?? false);
+  const goalErrorInPicker =
+    state.composerMode === "command" && state.goalError?.source === "command";
 
   if (orbNotFound)
     return (
@@ -2086,6 +2240,19 @@ function OrbConversation({
               <StateTile glyph={glyph} decorative={glyph.state !== "alert"} />
               <span className="orb-life-word">{lifecycleWord}</span>
             </span>
+          )}
+          {goalWritable && state.goal === null && (
+            <button
+              ref={addGoalRef}
+              type="button"
+              className="icon-button orb-goal-add"
+              data-goal-controls
+              aria-label="Add goal"
+              title="Add goal"
+              onClick={() => goalRef.current?.open("add")}
+            >
+              <Icon name="plus" />
+            </button>
           )}
           <button
             type="button"
@@ -2194,6 +2361,16 @@ function OrbConversation({
               )}
             </OrbNotice>
           )}
+          <OrbGoal
+            ref={goalRef}
+            goal={state.goal}
+            harness={orb?.harness}
+            writable={goalWritable}
+            pending={state.pendingGoalRequest !== null}
+            error={goalErrorInPicker ? null : (state.goalError?.message ?? null)}
+            onChange={(action) => sendGoal(action, "drawer")}
+            onClose={returnGoalFocus}
+          />
           {canConnectLive(orb) && connected && state.subagents.length > 0 && (
             <>
               <SubagentRail agents={state.subagents} context={detailContext} />
@@ -2373,11 +2550,14 @@ function OrbConversation({
           settings={liveSettings}
           orb={orb}
           settingsDisabled={settingsDisabled}
+          settingsConnecting={canConnectLive(orb) && !state.synced && navigator.onLine}
           settingsPending={state.pendingRequest?.kind === "settings"}
           onSettingsChange={changeSettings}
+          {...(openGoalCommand ? { onGoalCommand: runGoalCommand } : {})}
           feedback={{
             message: [
               state.pendingRequest?.kind === "settings" ? "Applying settings…" : null,
+              goalErrorInPicker ? state.goalError?.message : null,
               state.serverError === null
                 ? null
                 : `runtime error ${state.serverError.code}: ${state.serverError.message}`,
@@ -2386,19 +2566,21 @@ function OrbConversation({
                 : `request rejected (${state.requestError.code}): ${state.requestError.message}`,
               state.notice,
             ]
-              .filter((message) => message !== null)
+              .filter((message) => message != null)
               .join(" · "),
-            error: state.serverError !== null || state.requestError !== null,
+            error: goalErrorInPicker || state.serverError !== null || state.requestError !== null,
           }}
           text={state.composerText}
           mode={state.composerMode}
           onValueChange={(text, mode) => {
             if (
-              queueableModels !== undefined &&
               state.composerMode === "message" &&
-              mode === "command"
+              mode === "command" &&
+              (queueableModels !== undefined ||
+                "goal".startsWith(text.toLowerCase()) ||
+                /^goal\s/i.test(text))
             )
-              dispatch({ type: "open_settings", text: text === state.composerText ? "" : text });
+              dispatch({ type: "open_settings", text });
             else dispatch({ type: "composer_changed", text, mode });
           }}
           images={state.composerImages}

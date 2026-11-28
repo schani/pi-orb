@@ -1,6 +1,8 @@
 import type {
   ActiveSubagent,
   AgentSettingsEvent,
+  ClientAction,
+  GoalView,
   HarnessSessionMetadata,
   HistoryRecord,
 } from "@pi-orb/protocol";
@@ -21,6 +23,20 @@ export interface HarnessSnapshot {
   readonly records: readonly HistoryRecord[];
   readonly headId: string | null;
   readonly settings?: AgentSettingsEvent | null;
+  /** Omitted until native support is verified; null is a supported session without a goal. */
+  readonly goal?: GoalView | null;
+}
+
+export type RuntimeGoalAction = Extract<ClientAction, { type: "goal_set" | "goal_clear" }>;
+
+export interface GoalAdmissionError {
+  readonly code: "busy" | "unsupported" | "invalid_request";
+  readonly message: string;
+}
+
+export interface GoalChangeError {
+  readonly code: GoalAdmissionError["code"] | "internal";
+  readonly message: string;
 }
 
 /** The accumulated state of one in-flight operation, for reconnect replay. */

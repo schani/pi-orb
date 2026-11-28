@@ -7,6 +7,7 @@ export interface CommandOption {
   text?: string;
   action?: ComposerCommandAction;
   current?: boolean;
+  goal?: { objective: string | null };
 }
 export function commandOptions(
   text: string,
@@ -14,7 +15,10 @@ export function commandOptions(
   effortLabel: "thinking" | "effort" = "thinking",
   queueableModels?: ModelSelection["queueableModels"],
   queued?: AgentSettingsEvent["settings"]["model"],
+  goalAvailable = false,
 ): CommandOption[] {
+  const goal = goalAvailable ? /^goal(?:\s+(.*))?$/is.exec(text) : null;
+  if (goal) return [{ label: "goal", goal: { objective: goal[1]?.trim() || null } }];
   const compact = queueableModels === undefined ? /^compact(?:\s+(.*))?$/is.exec(text) : null;
   if (compact) {
     const customInstructions = compact[1]?.trim();
@@ -26,15 +30,20 @@ export function commandOptions(
     ];
   }
   const match = /^(model|thinking|effort)\s+(.*)$/is.exec(text);
-  if (!match)
-    return (queueableModels === undefined ? ["model", effortLabel, "compact"] : ["model"])
+  if (!match) {
+    const names = queueableModels === undefined ? ["model", effortLabel, "compact"] : ["model"];
+    if (goalAvailable) names.push("goal");
+    return names
       .filter((name) => name.startsWith(text.toLowerCase()))
       .map(
         (name): CommandOption =>
           name === "compact"
             ? { label: name, action: { type: "compact" } }
-            : { label: name, text: `${name} ` },
+            : name === "goal"
+              ? { label: name, goal: { objective: null } }
+              : { label: name, text: `${name} ` },
       );
+  }
   const query = (match[2] ?? "").toLowerCase();
   if (match[1]?.toLowerCase() === "model") {
     const current = view?.settings.model;

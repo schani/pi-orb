@@ -39,6 +39,37 @@ it("joins an async settings request and replays its receipt without reapplying",
 });
 
 describe("decideRequest", () => {
+  it.each([
+    { type: "goal_set", objective: "Ship the fix" },
+    { type: "goal_pause", revision: "1" },
+    { type: "goal_resume", revision: "1" },
+    { type: "goal_clear", revision: "1" },
+  ] as const)("rejects $type even before the busy or stopping gate", (action) => {
+    for (const view of [
+      idleView(null),
+      busyView(null, "op"),
+      { ...idleView(null), acceptingWork: false },
+      { ...idleView(null), configuring: true },
+    ]) {
+      expect(decideRequest(view, action)).toMatchObject({
+        type: "reject",
+        code: "unsupported",
+        retryable: false,
+      });
+    }
+  });
+
+  it.each([
+    ["stopping", { ...idleView(null), acceptingWork: false }],
+    ["configuring", { ...idleView(null), configuring: true }],
+  ] as const)("blocks clear while %s", (_, view) => {
+    expect(decideRequest(view, { type: "goal_clear", revision: "1" }, true)).toMatchObject({
+      type: "reject",
+      code: "busy",
+      retryable: true,
+    });
+  });
+
   it("accepts a message when idle with a matching head", () => {
     const decision = decideRequest(idleView("rec-5"), messageAction("rec-5"));
     expect(decision).toEqual({ type: "start_message" });

@@ -266,6 +266,15 @@ describe("process agent composition", () => {
       expect(ready).not.toHaveBeenCalled();
       if (result.isOk()) {
         expect(result.value.instructions).not.toMatch(/pending|<cwd>/i);
+        expect(result.value.goal).toBeDefined();
+        expect(result.value.modelTools?.map((tool) => tool.name)).toEqual(["codemode"]);
+        const registrations = result.value.registry.snapshot().extension("orb.tools")?.tools;
+        expect(registrations).toContainEqual(
+          expect.objectContaining({ name: "report_goal", callers: ["tools"] }),
+        );
+        expect(result.value.childExtension?.tools?.map((tool) => tool.name)).not.toContain(
+          "report_goal",
+        );
         await result.value.closeResources?.();
       }
     } finally {

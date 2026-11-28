@@ -14,7 +14,13 @@ import type { Result, ResultAsync } from "neverthrow";
 import type { HookEnvSource } from "../hooks/env-file.ts";
 import type { PreviewActivity } from "./preview-activity.ts";
 import type { AgentGateView } from "./requests.ts";
-import type { HarnessSnapshot, LiveOperationView } from "./types.ts";
+import type {
+  GoalAdmissionError,
+  GoalChangeError,
+  HarnessSnapshot,
+  LiveOperationView,
+  RuntimeGoalAction,
+} from "./types.ts";
 
 export interface CompactError {
   readonly code: "busy" | "unsupported" | "internal";
@@ -75,6 +81,8 @@ export interface OrbAgent {
     content: readonly MessageInputBlock[],
     operationId: string,
   ): ResultAsync<void, { message: string }>;
+  canChangeGoal?(action: RuntimeGoalAction): Result<void, GoalAdmissionError>;
+  changeGoal?(action: RuntimeGoalAction): ResultAsync<void, GoalChangeError>;
   canCompact(): Result<void, { code: "busy" | "unsupported"; message: string }>;
   compact(
     customInstructions: string | undefined,

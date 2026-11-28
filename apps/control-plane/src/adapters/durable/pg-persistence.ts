@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable";
+import type { GoalView } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import { err, errAsync, okAsync, ResultAsync } from "neverthrow";
-import type { RuntimeClientError } from "../../domain/errors.ts";
+import { err, errAsync, ok, okAsync, ResultAsync } from "neverthrow";
+import type { RuntimeClientError, StoreError } from "../../domain/errors.ts";
 import { logOrbEvent } from "../../domain/log.ts";
 import type { OrbRow } from "../../domain/orb.ts";
 import type {
@@ -10,9 +13,11 @@ import type {
   OperationContext,
 } from "../../domain/ports.ts";
 import { type AuthorityError, PgDurableAuthority } from "../durable-pg/index.ts";
+import { readTransactionStorage } from "../durable-pg/transaction-reader.ts";
 import type { PostgreSQLClient } from "../pg/client.ts";
 import { clearPendingModelInTransaction } from "../pg/store.ts";
 import { projectNativeCommit } from "./atomic-history.ts";
+import { GoalDoc, goalView } from "./goal.ts";
 import { checkNativeInputAdmission } from "./inbox-admission.ts";
 import type {
   AgentLeaseError,
@@ -218,24 +223,23 @@ export class PgAgentPersistence implements AgentPersistence {
               checkInputAdmission: (browser: boolean) =>
                 checkNativeInputAdmission(this.db.query.bind(this.db), orb.id, browser).mapErr(
                   (error): InputAdmissionError =>
-                    error.type === "authority_error" && error.code === "busy"
-                      ? { type: "input_admission_refused", error: startupRuntimeError(error) }
+                    error.type === "authority_error"
+                      ? {
+                          type: "input_admission_refused",
+                          disposition: error.disposition,
+                          error: startupRuntimeError(error),
+                        }
                       : {
                           type: "input_admission_failed",
-                          cause:
-                            error.type === "authority_error"
-                              ? error
-                              : {
-                                  type: "authority_error",
-                                  code:
-                                    error.code === "unavailable"
-                                      ? "unavailable"
-                                      : "history_integrity",
-                                  message:
-                                    error.code === "unavailable"
-                                      ? "Durable authority database unavailable"
-                                      : "Durable storage integrity failure",
-                                },
+                          cause: {
+                            type: "authority_error",
+                            code:
+                              error.code === "unavailable" ? "unavailable" : "history_integrity",
+                            message:
+                              error.code === "unavailable"
+                                ? "Durable authority database unavailable"
+                                : "Durable storage integrity failure",
+                          },
                         },
                 ),
               beginDrain: () =>
@@ -269,17 +273,68 @@ export class PgAgentPersistence implements AgentPersistence {
     return this.store
       .readHistorySnapshot(task, orb.id)
       .mapErr(() => failure("Conversation history unavailable"))
-      .map((snapshot) => ({
-        orbId: orb.id,
-        runtimeInstanceId: `conversation:${orb.id}`,
-        activity: "idle" as const,
-        session: snapshot.session ?? {
-          id: `conversation:${orb.id}`,
-          overflow: { harness: "pi-durable" },
-        },
-        records: snapshot.records,
-        headId: snapshot.headId,
-      }));
+      .andThen((snapshot) =>
+        this.snapshotGoal(orb.id).map((goal) => ({
+          orbId: orb.id,
+          runtimeInstanceId: `conversation:${orb.id}`,
+          activity: "idle" as const,
+          session: snapshot.session ?? {
+            id: `conversation:${orb.id}`,
+            overflow: { harness: "pi-durable" },
+          },
+          records: snapshot.records,
+          headId: snapshot.headId,
+          ...(goal === undefined ? {} : { goal }),
+        })),
+      );
+  }
+
+  private snapshotGoal(
+    orbId: string,
+  ): ResultAsync<GoalView | null | undefined, RuntimeClientError> {
+    return this.db
+      .transaction<GoalView | null | undefined, StoreError | RuntimeClientError>(async (query) => {
+        // Pair the goal and its submission under the lock used by publication and archive.
+        const orb = await query("SELECT state FROM orbs WHERE id=$1 FOR SHARE", [orbId]);
+        if (orb.isErr()) return err(orb.error);
+        const state = orb.value.rows[0]?.state;
+        if (!state || state === "archiving" || state === "archived" || state === "deleting")
+          return ok(undefined);
+        const metadata = await query("SELECT 1 FROM durable_pg_durable_metadata WHERE orb_id=$1", [
+          orbId,
+        ]);
+        if (metadata.isErr()) return err(metadata.error);
+        if (metadata.value.rows.length === 0) return ok(null);
+        return ResultAsync.fromThrowable(
+          async () => {
+            const storage = await readTransactionStorage(query, orbId);
+            try {
+              const context = BACKGROUND_CONTEXT;
+              const address = await storage.findDocument(
+                {
+                  kind: GoalDoc.definition.kind,
+                  scope: { kind: "conversation", conversationId: ROOT_CONVERSATION_ID },
+                },
+                "current",
+                context,
+              );
+              if (!address) return null;
+              const document = await storage.document(address.id, "current", context);
+              if (document?.version !== GoalDoc.definition.version) return null;
+              const state = document.value as Parameters<typeof goalView>[0];
+              const submission =
+                state?.goal?.status === "active"
+                  ? await storage.submission(state.goal.submissionId, context)
+                  : undefined;
+              return goalView(state, submission) ?? null;
+            } finally {
+              await storage.close(BACKGROUND_CONTEXT);
+            }
+          },
+          () => failure("Goal state unavailable"),
+        )();
+      })
+      .mapErr(() => failure("Goal state unavailable"));
   }
 
   dispose(_task: SimulationTask, _orbId: string, _deleteAuthority: boolean) {

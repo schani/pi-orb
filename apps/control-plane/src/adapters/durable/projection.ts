@@ -15,6 +15,7 @@ import {
   mapPiEntry,
   mapUserContent,
 } from "../../../../orb-runtime/src/domain/mapping.ts";
+import { GoalInput } from "./goal.ts";
 
 export function activeSubagents(
   graph: TaskGraph,
@@ -89,7 +90,12 @@ export function projectEntry(
   peer?: Pick<SystemInput, "sender" | "inboxMessageIds">,
 ): Result<HistoryRecord | null, MappingError> {
   const id = `${sessionId}:${entry.id}`;
-  if (entry.kind === "pi.system" || entry.kind === "pi.reset" || entry.kind === "orb.identity")
+  if (
+    entry.kind === "pi.system" ||
+    entry.kind === "pi.reset" ||
+    entry.kind === "orb.identity" ||
+    entry.kind === GoalInput.kind
+  )
     return ok(null);
   const data =
     entry.data !== null && typeof entry.data === "object" && !Array.isArray(entry.data)

@@ -11,7 +11,40 @@ export const LIVE_PLANNED_EXPIRY_CODE = 4001;
 export const RUNTIME_SUBPROTOCOL = "pi-orb.runtime.v1";
 
 export const CAPABILITY_ABORT = "abort";
+export const CAPABILITY_GOAL = "goal";
 export const CAPABILITY_INPUT_IMAGE = "input.image";
+
+export const GOAL_OBJECTIVE_MAX_LENGTH = 4096;
+export const GOAL_REASON_MAX_LENGTH = 512;
+
+const GoalObjectiveSchema = Type.String({
+  minLength: 1,
+  maxLength: GOAL_OBJECTIVE_MAX_LENGTH,
+  pattern: "\\S",
+});
+
+export const GoalViewSchema = Type.Object(
+  {
+    revision: Type.String(),
+    objective: GoalObjectiveSchema,
+    status: Type.Union([
+      Type.Literal("active"),
+      Type.Literal("paused"),
+      Type.Literal("blocked"),
+      Type.Literal("complete"),
+    ]),
+    reason: Type.Optional(Type.String({ minLength: 1, maxLength: GOAL_REASON_MAX_LENGTH })),
+  },
+  closed,
+);
+export type GoalView = Static<typeof GoalViewSchema>;
+
+const GoalActionSchema = Type.Union([
+  Type.Object({ type: Type.Literal("goal_set"), objective: GoalObjectiveSchema }, closed),
+  Type.Object({ type: Type.Literal("goal_pause"), revision: Type.String() }, closed),
+  Type.Object({ type: Type.Literal("goal_resume"), revision: Type.String() }, closed),
+  Type.Object({ type: Type.Literal("goal_clear"), revision: Type.String() }, closed),
+]);
 
 export const ClientHelloSchema = Type.Object(
   {
@@ -44,6 +77,7 @@ export type MessageInputBlock = Static<typeof MessageInputBlockSchema>;
 
 export const ClientActionSchema = Type.Union([
   SettingsActionSchema,
+  GoalActionSchema,
   Type.Object(
     { type: Type.Literal("compact"), customInstructions: Type.Optional(Type.String()) },
     closed,
@@ -65,6 +99,15 @@ export const ClientActionSchema = Type.Union([
   ),
 ]);
 export type ClientAction = Static<typeof ClientActionSchema>;
+
+export function isGoalAction(action: ClientAction): action is Static<typeof GoalActionSchema> {
+  return (
+    action.type === "goal_set" ||
+    action.type === "goal_pause" ||
+    action.type === "goal_resume" ||
+    action.type === "goal_clear"
+  );
+}
 
 export const ClientRequestSchema = Type.Object(
   {
@@ -264,6 +307,10 @@ export type TurnNotificationEvent = Static<typeof TurnNotificationEventSchema>;
 
 export const RuntimeEventSchema = Type.Union([
   AgentSettingsEventSchema,
+  Type.Object(
+    { type: Type.Literal("goal_state"), goal: Type.Union([GoalViewSchema, Type.Null()]) },
+    closed,
+  ),
   RuntimeStatusEventSchema,
   SubagentsEventSchema,
   OperationStartedEventSchema,
@@ -293,6 +340,7 @@ export const RequestResultFrameSchema = Type.Object(
     requestId: Type.String(),
     result: Type.Union([
       Type.Object({ type: Type.Literal("settings_applied"), duplicate: Type.Boolean() }, closed),
+      Type.Object({ type: Type.Literal("goal_applied"), duplicate: Type.Boolean() }, closed),
       Type.Object(
         {
           type: Type.Literal("accepted"),

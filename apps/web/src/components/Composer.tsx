@@ -57,8 +57,10 @@ interface ComposerProps {
   orb?: ModelSelection | null;
   effortLabel?: "thinking" | "effort";
   settingsDisabled?: boolean;
+  settingsConnecting?: boolean;
   settingsPending?: boolean;
   onSettingsChange?: (action: ComposerCommandAction) => void;
+  onGoalCommand?: (objective: string | null) => void;
 }
 
 export function Composer({
@@ -80,8 +82,10 @@ export function Composer({
   orb,
   effortLabel = "thinking",
   settingsDisabled = true,
+  settingsConnecting = false,
   settingsPending = false,
   onSettingsChange,
+  onGoalCommand,
 }: ComposerProps) {
   const isCommand = mode === "command";
   const [commandIndex, setCommandIndex] = useState(0);
@@ -94,13 +98,15 @@ export function Composer({
     effortLabel,
     orb?.queueableModels,
     phone ? orb?.pendingModel?.model : undefined,
+    onGoalCommand !== undefined,
   );
   const selectedCommand = Math.min(commandIndex, Math.max(0, choices.length - 1));
   const chooseCommand = (choice: CommandOption | undefined) => {
     if (choice?.text !== undefined) {
       onValueChange(choice.text, "command");
       setCommandIndex(0);
-    } else if (choice?.action && !settingsDisabled) onSettingsChange?.(choice.action);
+    } else if (choice?.goal) onGoalCommand?.(choice.goal.objective);
+    else if (choice?.action && !settingsDisabled) onSettingsChange?.(choice.action);
   };
   const hasInput = text.trim() !== "" || images.length > 0;
   const sendEnabled = !isCommand && canSend && hasInput;
@@ -197,7 +203,8 @@ export function Composer({
     const focus = () => {
       if (
         document.visibilityState === "visible" &&
-        document.querySelector('[role="dialog"]') === null
+        document.querySelector('[role="dialog"]') === null &&
+        !document.activeElement?.closest("[data-goal-controls]")
       )
         inputRef.current?.focus({ preventScroll: true });
     };
@@ -342,13 +349,16 @@ export function Composer({
               <div className="command-feedback" role={feedback.error ? "alert" : "status"}>
                 {feedback.message}
               </div>
-            ) : choices.length === 0 || (settings !== null && settingsDisabled) ? (
-              <div className="command-feedback">
-                {settings !== null && settingsDisabled
-                  ? "Wait for the current operation to finish."
-                  : settings === null && orb?.queueableModels === undefined
-                    ? "Settings unavailable — connect to a running orb."
-                    : "No matching command or value."}
+            ) : choices.length === 0 ||
+              (settings !== null && settingsDisabled && !choices.some((choice) => choice.goal)) ? (
+              <div className="command-feedback" role="status">
+                {settingsConnecting
+                  ? "Connecting…"
+                  : settings !== null && settingsDisabled
+                    ? "Wait for the current operation to finish."
+                    : settings === null && orb?.queueableModels === undefined
+                      ? "Settings unavailable — connect to a running orb."
+                      : "No matching command or value."}
               </div>
             ) : null}
           </div>
@@ -362,9 +372,22 @@ export function Composer({
             onChange={(event) => {
               awaitingClear.current = false;
               setCommandIndex(0);
-              const normalized = normalizeComposerChange(mode, event.target.value);
-              onValueChange(normalized.text, normalized.mode);
               const input = event.nativeEvent as InputEvent;
+              const { value, selectionStart, selectionEnd } = event.target;
+              if (
+                mode === "message" &&
+                input.inputType === "insertText" &&
+                input.data === "/" &&
+                !input.isComposing &&
+                selectionStart === 1 &&
+                selectionEnd === 1 &&
+                value === `/${text}`
+              ) {
+                onValueChange("", "command");
+                return;
+              }
+              const normalized = normalizeComposerChange(mode, value);
+              onValueChange(normalized.text, normalized.mode);
               if (
                 mode === "message" &&
                 normalized.mode === "message" &&
@@ -372,7 +395,7 @@ export function Composer({
                 input.data === "@" &&
                 !input.isComposing
               ) {
-                setMentionOffset(event.target.selectionStart - 1);
+                setMentionOffset(selectionStart - 1);
               }
             }}
             onPaste={handlePaste}
@@ -405,7 +428,7 @@ export function Composer({
                 !event.altKey
               ) {
                 event.preventDefault();
-                onValueChange(text, "command");
+                onValueChange("", "command");
                 setCommandIndex(0);
                 return;
               }

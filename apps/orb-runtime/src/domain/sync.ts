@@ -10,7 +10,7 @@ import type { HarnessSnapshot, LiveOperationView } from "./types.ts";
  * Compute the docs/runtime-protocol.md synchronization batch: sync.started, replayed complete
  * records after the client's cursor, reconstructing runtime events for the
  * live operation, sync.completed. Called synchronously from the hello handler
- * so no Pi callback can interleave; the caller enqueues the result on the
+ * so no harness callback can interleave; the caller enqueues the result on the
  * connection's ordered outbound writer.
  */
 export function computeSyncFrames(
@@ -102,6 +102,7 @@ export function computeSyncFrames(
   } else {
     events.push({ type: "status", activity: snapshot.activity });
   }
+  if (snapshot.goal !== undefined) events.push({ type: "goal_state", goal: snapshot.goal });
   for (const event of events) {
     frames.push({ v: 1, type: "runtime.event", at, event });
   }

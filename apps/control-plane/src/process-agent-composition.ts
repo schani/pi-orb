@@ -17,6 +17,7 @@ import { err, ok, okAsync, Result, ResultAsync } from "neverthrow";
 import type { DurableAgent } from "./adapters/durable/agent.ts";
 import { NativeResourceContext } from "./adapters/durable/context-storage.ts";
 import { executionWaitProgress } from "./adapters/durable/execution-wait-progress.ts";
+import { goalModelPolicy, reportGoalTool } from "./adapters/durable/goal-model.ts";
 import type { DurableAgentPlaneOptions } from "./adapters/durable/manager.ts";
 import { durableError } from "./adapters/durable/manager.ts";
 import { fenceModels } from "./adapters/durable/model-fence.ts";
@@ -517,13 +518,16 @@ export function createProcessAgentContext(
           (lease?.check() ?? okAsync(undefined)).mapErr(
             (): ToolError => ({ code: "forbidden", message: "Agent ownership revoked" }),
           ),
-        additionalTools: createOrbTools(
-          service,
-          notifyParent
-            ? (message, api, ctx) =>
-                notifyParent(orb.id, orb.agentAdmissionVersion, message, api, ctx)
-            : undefined,
-        ),
+        additionalTools: [
+          reportGoalTool,
+          ...createOrbTools(
+            service,
+            notifyParent
+              ? (message, api, ctx) =>
+                  notifyParent(orb.id, orb.agentAdmissionVersion, message, api, ctx)
+              : undefined,
+          ),
+        ],
         mcp: catalog.value.servers.map((server) => {
           let state: "needs-auth" | "available" | "unavailable" = "unavailable";
           return {
@@ -769,6 +773,7 @@ export function createProcessAgentContext(
         },
         modelTools: tools.modelTools,
         childExtension: tools.childExtension,
+        goal: goalModelPolicy,
         checkoutCommit: prepared.value.commitSha,
         checkExecutionReady,
         executionActive: () => env.active(),

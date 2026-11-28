@@ -18,6 +18,7 @@ import {
   type ClaudeRecoveryProof,
   type CommittedDisplayDetail,
   type DeliverOrbMessageResponse,
+  type GoalView,
   type JsonObject,
   type LiveDisplayDetail,
   type McpConfig,
@@ -54,7 +55,13 @@ import type { CompactError, DetailError, OrbAgent, SnapshotError } from "../doma
 import { PreviewActivity } from "../domain/preview-activity.ts";
 import type { AgentGateView } from "../domain/requests.ts";
 import { configurePersistentRust } from "../domain/rust.ts";
-import type { HarnessSnapshot, LiveOperationView } from "../domain/types.ts";
+import type {
+  GoalAdmissionError,
+  GoalChangeError,
+  HarnessSnapshot,
+  LiveOperationView,
+  RuntimeGoalAction,
+} from "../domain/types.ts";
 import { environmentPrompt } from "../environment-prompt.ts";
 import { applyGitIdentity } from "../git-identity/apply.ts";
 import type { HookEnvSource } from "../hooks/env-file.ts";
@@ -80,6 +87,7 @@ import { BOOT_BASELINE_TYPE, planBootNotification, SLEEP_WAKE_TYPE } from "./boo
 import { ClaudeDiagnostics, type ClaudeQueryError } from "./diagnostics.ts";
 import { claudeEnvironmentPrompt, claudePortExposurePrompt } from "./environment-prompt.ts";
 import { readExecutionIdentity } from "./execution-identity.ts";
+import { goalCondition, isNativeGoalFeedback, projectNativeGoal } from "./goal.ts";
 import { ClaudeHistory, type HistoryFiles, nativeHistoryFiles } from "./history.ts";
 import { FileIdleStopFence } from "./idle-stop-fence.ts";
 import { type ClaudeMcpRuntime, createClaudeMcp } from "./mcp.ts";
@@ -196,10 +204,11 @@ export type ClaudeQuery = Pick<
   | "setModel"
   | "applyFlagSettings"
   | typeof Symbol.asyncIterator
-> & {
-  // The SDK accepts this option but omits it from Query's declaration.
-  interrupt(options?: { cancelQueued?: boolean }): ReturnType<Query["interrupt"]>;
-};
+> &
+  Partial<Pick<Query, "supportedCommands">> & {
+    // The SDK accepts this option but omits it from Query's declaration.
+    interrupt(options?: { cancelQueued?: boolean }): ReturnType<Query["interrupt"]>;
+  };
 interface Delivery {
   uuid: string;
   operationId: string;
@@ -217,6 +226,15 @@ interface ManualCompaction {
   readonly startIndex: number;
   readonly initialized: Promise<void>;
   readonly finish: (result: Result<void, CompactError>) => void;
+}
+
+interface NativeGoalChange {
+  readonly commandUuid: string;
+  readonly action: RuntimeGoalAction["type"];
+  readonly condition: string | null;
+  previousGoalCount: number | null;
+  readonly initialized: Promise<void>;
+  readonly finish: (result: Result<void, GoalChangeError>) => void;
 }
 
 export interface NativeState {
@@ -305,6 +323,9 @@ export class ClaudeOrbAgent implements OrbAgent {
   private submissionEpoch = 0;
   private readonly pendingSteers = new Set<string>();
   private compaction: ManualCompaction | null = null;
+  private goalChange: NativeGoalChange | null = null;
+  private goalSupported = false;
+  private goal: GoalView | null | undefined;
   private queryAbort: AbortController | null = null;
   private drainingOperation: Promise<void> | null = null;
   private settings: AgentSettingsEvent | null = null;
@@ -387,6 +408,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       error: { code, message, retryable, ...(diagnostics === undefined ? {} : { diagnostics }) },
     };
     this.compaction?.finish(err({ code: "internal", message }));
+    this.goalChange?.finish(err({ code: "internal", message: "Claude goal operation failed." }));
     // Subscriber failures must not prevent health polling from retaining the original failure.
     Result.fromThrowable(
       () => {
@@ -936,8 +958,8 @@ export class ClaudeOrbAgent implements OrbAgent {
         .map(([, value]) => value ?? ""),
     ]);
     return this.initializeQuery(progress, diagnostics, queuedModel).orElse((error) => {
-      if (this.compaction !== null && this.outcome === "aborted")
-        return errAsync({ message: "Context compaction cancelled during initialization." });
+      if (this.manualNativeCommand !== null && this.outcome === "aborted")
+        return errAsync({ message: "Native command cancelled during initialization." });
       const code =
         this.health.status === "failed" ? this.health.error.code : "claude_initialization_failed";
       const captured =
@@ -974,8 +996,8 @@ export class ClaudeOrbAgent implements OrbAgent {
     diagnostics: ClaudeDiagnostics,
     queuedModel?: PendingModel["model"],
   ): ResultAsync<void, ClaudeQueryError> {
-    if (this.compaction !== null && this.outcome === "aborted")
-      return errAsync({ message: "Context compaction cancelled before initialization." });
+    if (this.manualNativeCommand !== null && this.outcome === "aborted")
+      return errAsync({ message: "Native command cancelled before initialization." });
     this.queryReady = false;
     this.closing = null;
     const state = this.state;
@@ -1096,7 +1118,7 @@ export class ClaudeOrbAgent implements OrbAgent {
         });
         child.once("error", (error) => {
           if (
-            this.compaction !== null &&
+            this.manualNativeCommand !== null &&
             this.outcome === "aborted" &&
             this.queryAbort?.signal.aborted
           ) {
@@ -1243,6 +1265,14 @@ export class ClaudeOrbAgent implements OrbAgent {
           this.fail(verified.error.code, verified.error.message);
           return err(verified.error);
         }
+        if (this.health.status !== "ready" || this.goalChange !== null) {
+          progress.stage = "commands";
+          this.goalSupported =
+            sdk.supportedCommands !== undefined &&
+            (await sdk.supportedCommands()).some(
+              (command) => command.name === "goal" && command.builtin === true,
+            );
+        }
         progress.stage = "models";
         const models = await sdk.supportedModels();
         this.nativeModels = models;
@@ -1361,7 +1391,7 @@ export class ClaudeOrbAgent implements OrbAgent {
     if (this.queryId !== queryId || this.sdk !== sdk) return;
     if (
       result.isErr() &&
-      this.compaction !== null &&
+      this.manualNativeCommand !== null &&
       this.outcome === "aborted" &&
       this.queryAbort?.signal.aborted
     ) {
@@ -1376,7 +1406,10 @@ export class ClaudeOrbAgent implements OrbAgent {
         true,
         result.error.diagnostics,
       );
-    } else if (this.closing === null && !(this.compaction !== null && this.outcome === "aborted")) {
+    } else if (
+      this.closing === null &&
+      !(this.manualNativeCommand !== null && this.outcome === "aborted")
+    ) {
       this.fail(
         "claude_stream_ended",
         "Claude exited unexpectedly; the retained session requires inspection.",
@@ -1443,6 +1476,11 @@ export class ClaudeOrbAgent implements OrbAgent {
   private onMessage(message: SDKMessage): void {
     const attempt = this.streamAttempt;
     const sameSession = message.session_id === this.state?.id;
+    if (message.type === "assistant" && sameSession && isNativeGoalFeedback(message)) {
+      const flushed = this.flushHistory();
+      if (flushed.isErr()) this.fail("history_unavailable", flushed.error.message);
+      return;
+    }
     if (message.type === "system" && message.subtype === "init")
       this.nativeMcpStatus(message.mcp_servers);
     if (this.closing !== null) this.shutdownDiagnostics.observe(message);
@@ -1726,6 +1764,23 @@ export class ClaudeOrbAgent implements OrbAgent {
       }
     }
     if (message.type === "result") {
+      const goalChange = this.goalChange;
+      if (goalChange !== null) {
+        const ids =
+          message.user_message_uuids ??
+          (message.user_message_uuid === undefined ? [] : [message.user_message_uuid]);
+        if (
+          !sameSession ||
+          (!ids.includes(goalChange.commandUuid) && !(message.is_error && ids.length === 0))
+        )
+          return;
+        if (
+          goalChange.action === "goal_clear" &&
+          message.subtype === "success" &&
+          (message.local_command !== "goal" || message.num_turns !== 0)
+        )
+          return;
+      }
       if (
         attempt?.phase === "stopped" &&
         attempt.assistant &&
@@ -1822,6 +1877,7 @@ export class ClaudeOrbAgent implements OrbAgent {
         this.pendingSteers.size === 0 &&
         (message.queued_turn_count ?? 0) === 0 &&
         this.compaction === null &&
+        this.goalChange?.action !== "goal_clear" &&
         this.closing === null &&
         this.health.status === "ready"
       ) {
@@ -1956,6 +2012,23 @@ export class ClaudeOrbAgent implements OrbAgent {
         children: this.activity.children,
       });
   }
+  private get manualNativeCommand(): ManualCompaction | NativeGoalChange | null {
+    return this.compaction ?? this.goalChange;
+  }
+  private provesGoalChange(change: NativeGoalChange): boolean {
+    const clear = change.action === "goal_clear";
+    return (
+      change.previousGoalCount !== null &&
+      change.condition !== null &&
+      this.history?.provesGoalCommand(
+        change.commandUuid,
+        clear ? "clear" : change.condition,
+        change.condition,
+        clear,
+        change.previousGoalCount,
+      ) === true
+    );
+  }
   private hasOwnedWork(): boolean {
     return (
       this.activity.children.length > 0 ||
@@ -2063,6 +2136,11 @@ export class ClaudeOrbAgent implements OrbAgent {
         }
       }
     }
+    const goalChange = this.goalChange;
+    if (goalChange !== null && this.outcome === "completed" && !this.provesGoalChange(goalChange)) {
+      this.outcome = "failed";
+      this.operationError = "Claude did not apply the goal command.";
+    }
     const terminal = this.platformEvent(
       "claude.operation_finished",
       this.operationError ?? `Claude operation ${this.outcome}.`,
@@ -2071,9 +2149,16 @@ export class ClaudeOrbAgent implements OrbAgent {
         outcome: this.outcome,
         ...(discardedRetryBlocks === 0 ? {} : { discardedRetryBlocks }),
         ...(compaction === null ? {} : { work: "compaction" }),
+        ...(goalChange === null
+          ? {}
+          : {
+              action: goalChange.action,
+              commandUuid: goalChange.commandUuid,
+              revision: this.history?.nativeGoals.at(-1)?.revision ?? null,
+            }),
       },
       `claude.operation:${operationId}`,
-      compaction === null && this.outcome === "failed",
+      compaction === null && goalChange === null && this.outcome === "failed",
     );
     if (terminal.isErr()) {
       this.fail("claude_terminal_persistence_failed", terminal.error.message);
@@ -2099,6 +2184,12 @@ export class ClaudeOrbAgent implements OrbAgent {
     });
     this.event({ type: "status", activity: "idle" });
     this.compaction = null;
+    this.goalChange = null;
+    goalChange?.finish(
+      this.outcome === "completed"
+        ? ok(undefined)
+        : err({ code: "internal", message: this.operationError ?? "Goal command cancelled." }),
+    );
     compaction?.finish(
       this.outcome === "completed"
         ? ok(undefined)
@@ -2349,6 +2440,20 @@ export class ClaudeOrbAgent implements OrbAgent {
       });
       this.published++;
     }
+    const previousGoal = this.goal;
+    this.goal = this.goalSupported ? projectNativeGoal(this.history.nativeGoals.at(-1)) : undefined;
+    if (
+      this.goal !== undefined &&
+      (previousGoal === undefined || previousGoal?.revision !== this.goal?.revision) &&
+      this.health.status === "ready"
+    )
+      this.event({ type: "goal_state", goal: this.goal });
+    if (
+      this.goalChange?.action === "goal_set" &&
+      this.health.status === "ready" &&
+      this.provesGoalChange(this.goalChange)
+    )
+      this.goalChange.finish(ok(undefined));
     return ok(undefined);
   }
   snapshot(): Result<HarnessSnapshot, SnapshotError> {
@@ -2377,6 +2482,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       records: this.history.view.slice(0, this.published),
       headId: this.history.view[this.published - 1]?.id ?? null,
       settings: this.settings,
+      ...(this.goal === undefined ? {} : { goal: this.goal }),
     });
   }
   replicationSnapshot(): Result<HarnessSnapshot, SnapshotError> {
@@ -2683,7 +2789,7 @@ export class ClaudeOrbAgent implements OrbAgent {
         this.health.status !== "ready" ||
         !this.queryReady ||
         this.configuring ||
-        this.compaction !== null ||
+        this.manualNativeCommand !== null ||
         this.closing !== null ||
         this.outcome !== "completed")
     )
@@ -2713,14 +2819,14 @@ export class ClaudeOrbAgent implements OrbAgent {
     this.activity.cancel();
     this.outcome = "aborted";
     this.publishChildren();
-    const compaction = this.compaction;
-    if (compaction !== null) this.queryAbort?.abort();
-    const sdk = this.sdk;
-    if (sdk === null && compaction === null) return ResultAsync.fromSafePromise(Promise.resolve());
+    const command = this.manualNativeCommand;
+    if (command !== null) this.queryAbort?.abort();
+    if (this.sdk === null && command === null)
+      return ResultAsync.fromSafePromise(Promise.resolve());
     return ResultAsync.fromThrowable(
       async () => {
-        await compaction?.initialized;
-        if (compaction === null) await this.sdk?.interrupt();
+        await command?.initialized;
+        if (command === null) await this.sdk?.interrupt();
         this.activity.rootFinished();
         await this.drainOperation();
         return this.health.status === "failed"
@@ -2729,6 +2835,110 @@ export class ClaudeOrbAgent implements OrbAgent {
       },
       () => ({ message: "Claude interrupt failed; cleanup remains busy." }),
     )().andThen((result) => result);
+  }
+  canChangeGoal(action: RuntimeGoalAction): Result<void, GoalAdmissionError> {
+    if (!this.goalSupported || !this.accepting || this.health.status !== "ready")
+      return err({ code: "unsupported", message: "Claude goals are unavailable." });
+    if (this.activity.busy || this.hasOwnedWork() || this.configuring)
+      return err({
+        code: "busy",
+        message:
+          action.type === "goal_clear"
+            ? "Abort the current turn before clearing."
+            : "Wait for the current turn to finish.",
+      });
+    if (action.type === "goal_clear" && this.goal?.revision !== action.revision)
+      return err({ code: "invalid_request", message: "The goal has changed." });
+    if (action.type === "goal_set") {
+      if (this.goal != null)
+        return err({ code: "invalid_request", message: "Clear the current goal first." });
+      if (goalCondition(action.objective) === null)
+        return err({
+          code: "invalid_request",
+          message: "Use a valid goal condition of up to 4000 characters, not a Clear alias.",
+        });
+    }
+    return ok(undefined);
+  }
+  changeGoal(action: RuntimeGoalAction): ResultAsync<void, GoalChangeError> {
+    const admitted = this.canChangeGoal(action);
+    if (admitted.isErr()) return errAsync(admitted.error);
+    const condition =
+      action.type === "goal_set" ? goalCondition(action.objective) : (this.goal?.objective ?? null);
+    const operationId = randomUUID();
+    if (!this.activity.claim(operationId))
+      return errAsync({ code: "busy", message: "Wait for the current turn to finish." });
+    const epoch = ++this.submissionEpoch;
+    let finish: NativeGoalChange["finish"] = () => undefined;
+    const completed = new Promise<Result<void, GoalChangeError>>((resolve) => {
+      finish = resolve;
+    });
+    let initializeFinished: () => void = () => undefined;
+    const initialized = new Promise<void>((resolve) => {
+      initializeFinished = resolve;
+    });
+    const commandUuid = randomUUID();
+    const goalChange: NativeGoalChange = {
+      action: action.type,
+      condition,
+      commandUuid,
+      previousGoalCount: null,
+      initialized,
+      finish,
+    };
+    this.goalChange = goalChange;
+    this.outcome = "completed";
+    this.operationError = undefined;
+    this.closing = null;
+    this.drainingOperation = null;
+    this.event({ type: "operation_started", operationId });
+    this.event({ type: "status", activity: "busy", operationId });
+    void this.startQuery().then((started) => {
+      initializeFinished();
+      if (epoch !== this.submissionEpoch || this.outcome === "aborted") return;
+      const state = this.state;
+      const history = this.history;
+      const input = this.input;
+      if (
+        started.isErr() ||
+        state === null ||
+        history === null ||
+        input === null ||
+        !this.goalSupported ||
+        this.closing !== null
+      ) {
+        this.outcome = "failed";
+        this.operationError = "Claude goal command could not start.";
+        this.activity.rootFinished();
+        void this.drainOperation();
+        return;
+      }
+      const flushed = this.flushHistory();
+      if (flushed.isErr()) {
+        this.fail("history_unavailable", flushed.error.message);
+        void this.closeExtensions();
+        return;
+      }
+      if (action.type === "goal_clear" && this.goal?.revision !== action.revision) {
+        this.outcome = "failed";
+        this.operationError = "The goal has changed.";
+        this.activity.rootFinished();
+        void this.drainOperation();
+        return;
+      }
+      goalChange.previousGoalCount = history.nativeGoals.length;
+      input.push({
+        type: "user",
+        uuid: commandUuid,
+        session_id: state.id,
+        parent_tool_use_id: null,
+        message: {
+          role: "user",
+          content: `/goal ${action.type === "goal_clear" ? "clear" : condition}`,
+        },
+      });
+    });
+    return ResultAsync.fromSafePromise(completed).andThen((result) => result);
   }
   canCompact(): Result<void, { code: "busy" | "unsupported"; message: string }> {
     if (

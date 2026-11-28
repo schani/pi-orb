@@ -5,6 +5,7 @@ import { defineExtension, type Harness, type ToolRegistration } from "@earendil-
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { SimulationTask } from "determined";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
+import { reportGoalTool } from "../goal-model.ts";
 import { type AuthorizeTool, CallableCatalog, type ToolError } from "./catalog.ts";
 import { codemodeExtension } from "./codemode.ts";
 import type { AgentToolFiles } from "./files.ts";
@@ -94,7 +95,12 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
   });
   const statusTool = () => mcp.statusTool((ctx) => void bundle.ready(ctx));
   catalog.add(statusTool());
-  const child = all.without([...boundSubagents.map((tool) => tool.name), "orb_spawn", "orb_alert"]);
+  const child = all.without([
+    ...boundSubagents.map((tool) => tool.name),
+    "orb_spawn",
+    "orb_alert",
+    reportGoalTool.name,
+  ]);
   const extensions = () => {
     const native = codemodeExtension(catalog, running, options.files, options.orb);
     const childNative = codemodeExtension(child, running, options.files, options.orb);

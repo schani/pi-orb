@@ -16,12 +16,19 @@ import {
 import { okAsync, ResultAsync } from "neverthrow";
 import { Type } from "typebox";
 import { expect, it } from "vitest";
+import { reportGoalTool } from "../goal-model.ts";
 import { MemoryAgentPersistence } from "../memory-persistence.testkit.ts";
 import { createDurableTools } from "./index.ts";
 import { ChildAnchor, SUBAGENT_TOOL_NAMES } from "./subagents.ts";
 
 const context = BACKGROUND_CONTEXT;
-const forbidden = ["orb_alert", "orb_spawn", ...SUBAGENT_TOOL_NAMES, "orb_spawn_alias"];
+const forbidden = [
+  "orb_alert",
+  "orb_spawn",
+  "report_goal",
+  ...SUBAGENT_TOOL_NAMES,
+  "orb_spawn_alias",
+];
 
 it.each([false, true])(
   "enforces a child's native callable whitelist, including guessed aliases and reattachment (restart: %s)",
@@ -43,6 +50,7 @@ it.each([false, true])(
         return okAsync(undefined);
       },
       additionalTools: [
+        reportGoalTool,
         defineTool({
           name: "orb_alert",
           description: "forbidden alert",
@@ -77,7 +85,9 @@ it.each([false, true])(
                     ? { agent_id: "missing", message: "forbidden" }
                     : name === "get_subagent_result" || name === "cancel_subagent"
                       ? { agent_id: "missing" }
-                      : {};
+                      : name === "report_goal"
+                        ? { status: "complete", evidence: "Child claims success" }
+                        : {};
               const denied = await api.executeTool(name, args, ctx, { key: `denied-${index}` });
               const reattached = await api.executeTool(name, args, ctx, { key: `denied-${index}` });
               denials.push({
@@ -135,7 +145,7 @@ it.each([false, true])(
                 offered.push([...names]);
                 return fauxAssistantMessage(
                   fauxToolCall("codemode", {
-                    code: 'for (const name of ["orb_spawn", "subagent", "orb_spawn_alias"]) { try { await tools[name]({prompt:"forbidden child"}); } catch {} } text(await tools.scope_probe({}));',
+                    code: 'for (const name of ["orb_spawn", "subagent", "orb_spawn_alias", "report_goal"]) { try { await tools[name]({prompt:"forbidden child"}); } catch {} } text(await tools.scope_probe({}));',
                   }),
                   { stopReason: "toolUse" },
                 );
