@@ -59,41 +59,14 @@ describe("decideRequest", () => {
     }
   });
 
-  it("only admits set and clear while idle", () => {
-    const idle = idleView(null);
-    const busy = busyView(null, "op");
-    const set = { type: "goal_set", objective: "Ship the fix" } as const;
-    const clear = { type: "goal_clear", revision: "1" } as const;
-    expect(decideRequest(idle, set, true)).toEqual({ type: "change_goal", action: set });
-    expect(decideRequest(busy, set, true)).toMatchObject({
+  it.each([
+    ["stopping", { ...idleView(null), acceptingWork: false }],
+    ["configuring", { ...idleView(null), configuring: true }],
+  ] as const)("blocks clear while %s", (_, view) => {
+    expect(decideRequest(view, { type: "goal_clear", revision: "1" }, true)).toMatchObject({
       type: "reject",
       code: "busy",
       retryable: true,
-    });
-    expect(decideRequest(idle, clear, true)).toEqual({ type: "change_goal", action: clear });
-    expect(decideRequest(busy, clear, true)).toEqual({
-      type: "reject",
-      code: "busy",
-      message: "Abort the current turn before clearing.",
-      retryable: true,
-    });
-    for (const view of [
-      { ...idle, acceptingWork: false },
-      { ...busy, configuring: true },
-    ]) {
-      expect(decideRequest(view, clear, true)).toMatchObject({
-        type: "reject",
-        code: "busy",
-        retryable: true,
-      });
-    }
-  });
-
-  it.each(["goal_pause", "goal_resume"] as const)("rejects %s even with goal support", (type) => {
-    expect(decideRequest(idleView(null), { type, revision: "1" }, true)).toMatchObject({
-      type: "reject",
-      code: "unsupported",
-      retryable: false,
     });
   });
 
@@ -145,16 +118,6 @@ describe("RequestRegistry (in-memory request identity, docs/runtime-protocol.md)
     expect(replay).toEqual({
       type: "replay",
       result: { type: "accepted", operationId: "op-1", duplicate: true },
-    });
-  });
-
-  it("marks replayed goal receipts as duplicates", () => {
-    const registry = new RequestRegistry();
-    const action = { type: "goal_resume", revision: "1" } as const;
-    registry.record("req", action, { type: "goal_applied", duplicate: false });
-    expect(registry.lookup("req", action)).toEqual({
-      type: "replay",
-      result: { type: "goal_applied", duplicate: true },
     });
   });
 

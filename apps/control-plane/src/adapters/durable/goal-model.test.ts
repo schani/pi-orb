@@ -15,6 +15,7 @@ import { assert, expect, it } from "vitest";
 import { DurableAgent, type DurableAgentOptions } from "./agent.ts";
 import { goalModelPolicy, reportGoalTool } from "./goal-model.ts";
 import { durableError } from "./manager.ts";
+import { MemoryAgentPersistence } from "./memory-persistence.testkit.ts";
 import { type AuthorizeTool, createDurableTools } from "./tools/index.ts";
 
 const objective = "Verify the fixture.\nKeep the output.";
@@ -33,8 +34,15 @@ function report(args: object) {
 
 async function open(
   responses: readonly (AssistantMessage | FauxResponseFactory)[],
-  authorize?: AuthorizeTool,
-  admission?: Pick<DurableAgentOptions, "checkAdmission" | "checkInputAdmission">,
+  {
+    authorize,
+    storage = new MemoryStorage(),
+    ...options
+  }: Partial<
+    Pick<DurableAgentOptions, "checkAdmission" | "checkInputAdmission" | "storage"> & {
+      authorize: AuthorizeTool;
+    }
+  > = {},
 ) {
   const received: string[] = [];
   const fake = fauxProvider();
@@ -64,7 +72,6 @@ async function open(
   const registry = createRegistry();
   registry.install(tools.extension);
   registry.install(tools.childExtension);
-  const storage = new MemoryStorage();
   const agent = (
     await DurableAgent.open({
       orbId: "orb",
@@ -74,7 +81,7 @@ async function open(
       modelTools: tools.modelTools,
       childExtension: tools.childExtension,
       goal: goalModelPolicy,
-      ...admission,
+      ...options,
       env: new NodeExecutionEnv({ cwd: "/tmp" }),
       checkoutCommit: null,
       instructions: "",
@@ -87,7 +94,7 @@ async function open(
     if (frame.type === "runtime.event" && frame.event.type === "goal_state")
       events.push(frame.event.goal);
   });
-  return { agent, events, received };
+  return { agent, events, received, state: fake.state };
 }
 
 function current(agent: DurableAgent) {
@@ -121,12 +128,21 @@ function holdFirstReport() {
 it.each([
   [completed, completed.evidence],
   [blocked, blocked.reason],
-] as const)("reports %j from the automatic follow-up", async (outcome, reason) => {
-  const { agent, events, received } = await open([
-    fauxAssistantMessage("Working"),
-    report(outcome),
-    fauxAssistantMessage("Done"),
-  ]);
+] as const)("publishes %j once from the automatic follow-up", async (outcome, reason) => {
+  const memory = new MemoryAgentPersistence();
+  const { storage } = (await memory.openOrb("orb", false))._unsafeUnwrap();
+  let duringFinalResponse: GoalView | null | undefined;
+  const { agent, events, received } = await open(
+    [
+      fauxAssistantMessage("Working"),
+      report(outcome),
+      () => {
+        duringFinalResponse = current(agent);
+        return fauxAssistantMessage("Done");
+      },
+    ],
+    { storage },
+  );
   try {
     expect((await agent.request("set", set))._unsafeUnwrap()).toEqual({
       type: "goal_applied",
@@ -134,11 +150,31 @@ it.each([
     });
     (await agent.waitForIdle())._unsafeUnwrap();
     expect(received).toEqual([kickoff, continuation, continuation]);
-    expect(events.map((goal) => goal?.status)).toEqual(["active", outcome.status]);
-    expect(current(agent)).toMatchObject({ status: outcome.status, reason });
-    expect(records(agent)).toContain(`Goal ${outcome.status}.`);
+    const before = agent.snapshot()._unsafeUnwrap();
+    expect(before.goal).toEqual({ revision: "2", objective, status: outcome.status, reason });
+    expect(duringFinalResponse).toEqual(before.goal);
+    expect(events).toEqual([{ revision: "1", objective, status: "active" }, before.goal]);
+    expect(JSON.stringify(before.records)).toContain(`Goal ${outcome.status}.`);
+    if (outcome.status === "complete") {
+      (await agent.close())._unsafeUnwrap();
+      const reopened = await open([], { storage });
+      try {
+        expect(current(reopened.agent)).toEqual(before.goal);
+        expect((await reopened.agent.request("set", set))._unsafeUnwrap()).toEqual({
+          type: "goal_applied",
+          duplicate: true,
+        });
+        (await reopened.agent.waitForIdle())._unsafeUnwrap();
+        expect(reopened.events).toEqual([]);
+        expect(reopened.agent.snapshot()._unsafeUnwrap().records).toEqual(before.records);
+        expect(reopened.state.callCount).toBe(0);
+      } finally {
+        await reopened.agent.close();
+      }
+    }
   } finally {
     await agent.close();
+    await memory.close();
   }
 });
 
@@ -155,7 +191,6 @@ it.each(["pending", "suspending"] as const)(
         report(completed),
         fauxAssistantMessage("Done"),
       ],
-      undefined,
       {
         checkAdmission: () =>
           phase === "suspending" && sleeping
@@ -208,7 +243,7 @@ it("rejects a report from an unrelated root turn with a goal queued", async () =
       report(completed),
       fauxAssistantMessage("Goal answer"),
     ],
-    hold.authorize,
+    { authorize: hold.authorize },
   );
   try {
     expect(
@@ -236,7 +271,7 @@ it("rejects a report from an unrelated root turn with a goal queued", async () =
 
 it("rejects a later root report when the goal input was aborted", async () => {
   const entered = barrier();
-  const { agent } = await open([
+  const { agent, events, received } = await open([
     async (_request, options) => {
       entered.resolve();
       if (!options?.signal?.aborted)
@@ -253,10 +288,18 @@ it("rejects a later root report when the goal input was aborted", async () => {
     await entered.promise;
     const operationId = agent.liveView()?.operationId;
     assert.exists(operationId);
-    (await agent.request("abort", { type: "abort", operationId }))._unsafeUnwrap();
+    expect(
+      (await agent.request("abort", { type: "abort", operationId }))._unsafeUnwrap(),
+    ).toMatchObject({ type: "accepted" });
     (await agent.waitForIdle())._unsafeUnwrap();
     const aborted = current(agent);
-    expect(aborted).toMatchObject({ status: "paused", reason: "Goal turn was aborted." });
+    expect(aborted).toMatchObject({
+      objective,
+      status: "paused",
+      reason: "Goal turn was aborted.",
+    });
+    expect(received).toEqual([kickoff]);
+    expect(events).toEqual([{ revision: "1", objective, status: "active" }, aborted]);
 
     (
       await agent.request("later", {
@@ -282,7 +325,7 @@ it("rejects the old running tool after Pause and Resume, even for the same objec
       report(blocked),
       fauxAssistantMessage("New answer"),
     ],
-    hold.authorize,
+    { authorize: hold.authorize },
   );
   try {
     (await agent.request("set", set))._unsafeUnwrap();

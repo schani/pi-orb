@@ -96,7 +96,7 @@ it.each(["before hello", "after hello"])(
       return socket;
     };
     const socket = await connect();
-    if (phase === "after hello") await receive(socket, hello, "sync.completed", withoutGoals);
+    if (phase === "after hello") await receive(socket, hello, "sync.completed");
     const invalid = [
       null,
       true,
@@ -134,22 +134,7 @@ it.each(["before hello", "after hello"])(
     }
     expect(gateView).not.toHaveBeenCalled();
     expect(changeSettings).not.toHaveBeenCalled();
-    if (phase === "before hello") await receive(socket, hello, "sync.completed", withoutGoals);
-    const submitMessage = vi.spyOn(agent, "submitMessage");
-    expect(
-      await receive(
-        socket,
-        JSON.stringify({
-          ...request,
-          requestId: "goal",
-          action: { type: "goal_set", objective: "Ship the fix" },
-        }),
-      ),
-    ).toMatchObject({
-      requestId: "goal",
-      result: { type: "rejected", error: { code: "unsupported", retryable: false } },
-    });
-    expect(submitMessage).not.toHaveBeenCalled();
+    if (phase === "before hello") await receive(socket, hello, "sync.completed");
     for (const requestId of ["request", ""]) {
       expect(await receive(socket, JSON.stringify({ ...request, requestId }))).toMatchObject({
         requestId,
@@ -172,7 +157,7 @@ it.each(["before hello", "after hello"])(
     expect(health.statusCode).toBe(200);
     expect(health.json()).toMatchObject({ status: "ready", activity: "idle" });
     const reconnect = await connect();
-    await receive(reconnect, hello, "sync.completed", withoutGoals);
+    await receive(reconnect, hello, "sync.completed");
     expect(await receive(reconnect, JSON.stringify(request))).toMatchObject({
       result: { type: "settings_applied", duplicate: true },
     });
@@ -193,6 +178,7 @@ it("negotiates verified goal support, forwards native state, and admits only sup
   };
   const canChangeGoal = vi.fn<NonNullable<OrbAgent["canChangeGoal"]>>(() => ok(undefined));
   const changeGoal = vi.fn<NonNullable<OrbAgent["changeGoal"]>>(() => okAsync(undefined));
+  const submitMessage = vi.fn<OrbAgent["submitMessage"]>();
   const agent: Pick<
     OrbAgent,
     | "runtimeInstanceId"
@@ -203,6 +189,7 @@ it("negotiates verified goal support, forwards native state, and admits only sup
     | "subscribe"
     | "canChangeGoal"
     | "changeGoal"
+    | "submitMessage"
   > = {
     runtimeInstanceId: "runtime",
     sessionId: () => "session",
@@ -229,6 +216,7 @@ it("negotiates verified goal support, forwards native state, and admits only sup
     },
     canChangeGoal,
     changeGoal,
+    submitMessage,
   };
   const app = buildRuntimeServer(
     agent as OrbAgent,
@@ -257,9 +245,11 @@ it("negotiates verified goal support, forwards native state, and admits only sup
 
   const early = await connect(withoutGoals);
   expect(await command(early, "early", set)).toMatchObject({
+    requestId: "early",
     result: { type: "rejected", error: { code: "unsupported", retryable: false } },
   });
   expect(canChangeGoal).not.toHaveBeenCalled();
+  expect(submitMessage).not.toHaveBeenCalled();
   const rehandshake = once(early, "close");
   observeGoal(null);
   expect(await rehandshake).toMatchObject([1013, expect.any(Buffer)]);

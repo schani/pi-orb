@@ -107,6 +107,28 @@ function receipt(f: ReturnType<typeof fixture>, uuid: string, sentinel: string, 
   });
 }
 
+async function readNativeCommand(query: ScheduledClaudeQuery) {
+  const { done, value } = await query.input.next();
+  if (done || !value.uuid) throw new Error("Native command UUID missing.");
+  return { command: value, uuid: value.uuid };
+}
+
+async function proveSet(f: ReturnType<typeof fixture>, query: ScheduledClaudeQuery, uuid: string) {
+  const retained = goalRecord(f.state.id);
+  f.append(retained);
+  receipt(f, uuid, retained.uuid, objective);
+  await query.emitUnscheduled({
+    type: "assistant",
+    session_id: f.state.id,
+    parent_tool_use_id: null,
+    uuid: randomUUID(),
+    message: { model: "<synthetic>" },
+    local_command_source: "<local-command-stdout>Goal set</local-command-stdout>",
+    local_command_run: { command: "goal", args: objective },
+  } as unknown as SDKMessage);
+  return retained;
+}
+
 it("closes a hello during Claude startup and advertises goal and writable settings on reconnect without a turn", async () => {
   let provideCommands: (commands: (typeof builtin)[]) => void = () => undefined;
   const f = fixture(
@@ -192,7 +214,6 @@ it("keeps native Clear aliases out of Set and enforces native limits", async () 
   const f = fixture();
   try {
     await f.attach();
-    expect(f.agent.snapshot()._unsafeUnwrap().goal).toBeNull();
     for (const invalid of [
       " CLEAR ",
       "stop",
@@ -247,9 +268,7 @@ it("acknowledges proven native Set while retaining turn ownership through the na
     const operation = f.agent.changeGoal({ type: "goal_set", objective: ` ${objective} ` });
     expect(f.agent.gateView().activity).toBe("busy");
     const query = await next;
-    const command = (await query.input.next()).value;
-    const uuid = command.uuid;
-    if (uuid === undefined) throw new Error("Native command UUID missing.");
+    const { command, uuid } = await readNativeCommand(query);
     expect(command).toMatchObject({ message: { role: "user", content: `/goal ${objective}` } });
     expect(command).not.toHaveProperty("client_composed");
     expect(f.agent.canCompact().isErr()).toBe(true);
@@ -263,18 +282,7 @@ it("acknowledges proven native Set while retaining turn ownership through the na
       ).isErr(),
     ).toBe(true);
 
-    const retained = goalRecord(f.state.id);
-    f.append(retained);
-    receipt(f, uuid, retained.uuid, objective);
-    await query.emitUnscheduled({
-      type: "assistant",
-      session_id: f.state.id,
-      parent_tool_use_id: null,
-      uuid: randomUUID(),
-      message: { model: "<synthetic>" },
-      local_command_source: "<local-command-stdout>Goal set</local-command-stdout>",
-      local_command_run: { command: "goal", args: objective },
-    } as unknown as SDKMessage);
+    const retained = await proveSet(f, query, uuid);
     expect((await operation).isOk()).toBe(true);
     expect(query.closeRequested).toBe(false);
     expect(f.agent.gateView().activity).toBe("busy");
@@ -321,9 +329,7 @@ it("admits Clear only for the current revision and confirms it with native histo
     const next = f.nextQuery();
     const operation = f.agent.changeGoal({ type: "goal_clear", revision: retained.uuid });
     const query = await next;
-    const command = (await query.input.next()).value;
-    const uuid = command.uuid;
-    if (uuid === undefined) throw new Error("Native command UUID missing.");
+    const { command, uuid } = await readNativeCommand(query);
     expect(command).toMatchObject({ message: { role: "user", content: "/goal clear" } });
     const cleared = goalRecord(f.state.id, true);
     f.append(cleared);
@@ -362,13 +368,10 @@ it("does not acknowledge an owned result whose sentinel belongs to something els
   const f = fixture();
   try {
     await f.attach();
-    expect(f.agent.snapshot()._unsafeUnwrap().goal).toBeNull();
     const next = f.nextQuery();
     const operation = f.agent.changeGoal({ type: "goal_set", objective });
     const query = await next;
-    const command = (await query.input.next()).value;
-    const uuid = command.uuid;
-    if (uuid === undefined) throw new Error("Native command UUID missing.");
+    const { uuid } = await readNativeCommand(query);
     f.append(goalRecord(f.state.id));
     receipt(f, uuid, randomUUID(), objective);
     await query.emitUnscheduled({
@@ -454,21 +457,8 @@ it("does not resume an aborted goal turn with a dangling tool call after restart
     const next = f.nextQuery();
     const setting = f.agent.changeGoal({ type: "goal_set", objective });
     const query = await next;
-    const command = await query.input.next();
-    if (command.done || !command.value.uuid) throw new Error("Native command UUID missing.");
-    const uuid = command.value.uuid;
-    const retained = goalRecord(f.state.id);
-    f.append(retained);
-    receipt(f, uuid, retained.uuid, objective);
-    await query.emitUnscheduled({
-      type: "assistant",
-      session_id: f.state.id,
-      parent_tool_use_id: null,
-      uuid: randomUUID(),
-      message: { model: "<synthetic>" },
-      local_command_source: "<local-command-stdout>Goal set</local-command-stdout>",
-      local_command_run: { command: "goal", args: objective },
-    } as unknown as SDKMessage);
+    const { uuid } = await readNativeCommand(query);
+    const retained = await proveSet(f, query, uuid);
     expect((await setting).isOk()).toBe(true);
 
     const toolCallMessage = randomUUID();

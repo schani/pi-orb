@@ -7,7 +7,7 @@ import {
   isGoalAction,
   type ServerFrame,
 } from "@pi-orb/protocol";
-import { expect as check } from "@playwright/test";
+import { expect as check, type WebSocketRoute } from "@playwright/test";
 import { it } from "vitest";
 import { gotoFrontendFixture } from "./testkit/frontend-fixture.ts";
 import { createFrontendFixture } from "./testkit/frontend-owned.ts";
@@ -59,6 +59,23 @@ it.each(["chromium", "webkit"] as const)(
   },
 );
 
+function sendGoalState(socket: WebSocketRoute, at: string, goal: GoalView | null) {
+  socket.send(
+    JSON.stringify({ v: 1, type: "runtime.event", at, event: { type: "goal_state", goal } }),
+  );
+}
+
+function forwardGoalSync(socket: WebSocketRoute, frame: ServerFrame, goal: GoalView | null) {
+  if (frame.type === "server.welcome") {
+    socket.send(
+      JSON.stringify({ ...frame, capabilities: [...frame.capabilities, CAPABILITY_GOAL] }),
+    );
+    return;
+  }
+  if (frame.type === "sync.completed") sendGoalState(socket, frame.at, goal);
+  socket.send(JSON.stringify(frame));
+}
+
 it("a new Claude orb exposes settings and /goal as soon as its first live sync arrives", async () => {
   const fixture = await createFrontendFixture("chromium");
   const { page, origin } = fixture;
@@ -71,21 +88,7 @@ it("a new Claude orb exposes settings and /goal as soon as its first live sync a
     const server = socket.connectToServer();
     server.onMessage((message) => {
       const frame = JSON.parse(message.toString()) as ServerFrame;
-      const send = (next: ServerFrame) => socket.send(JSON.stringify(next));
-      const forward = () => {
-        if (frame.type === "server.welcome") {
-          send({ ...frame, capabilities: [...frame.capabilities, CAPABILITY_GOAL] });
-          return;
-        }
-        if (frame.type === "sync.completed")
-          send({
-            v: 1,
-            type: "runtime.event",
-            at: frame.at,
-            event: { type: "goal_state", goal: null },
-          });
-        socket.send(message);
-      };
+      const forward = () => forwardGoalSync(socket, frame, null);
       if (released) forward();
       else pending.push(forward);
       if (frame.type === "sync.completed") syncReceived = true;
@@ -195,16 +198,8 @@ it("Claude can set and clear a native goal without Pause or Resume", async () =>
     const server = socket.connectToServer();
     const at = new Date().toISOString();
     const send = (frame: ServerFrame) => socket.send(JSON.stringify(frame));
-    const sendGoal = () =>
-      send({ v: 1, type: "runtime.event", at, event: { type: "goal_state", goal } });
     server.onMessage((message) => {
-      const frame = JSON.parse(message.toString()) as ServerFrame;
-      if (frame.type === "server.welcome") {
-        send({ ...frame, capabilities: [...frame.capabilities, CAPABILITY_GOAL] });
-        return;
-      }
-      if (frame.type === "sync.completed") sendGoal();
-      socket.send(message);
+      forwardGoalSync(socket, JSON.parse(message.toString()) as ServerFrame, goal);
     });
     socket.onMessage((message) => {
       const frame = JSON.parse(message.toString()) as ClientFrame;
@@ -221,7 +216,7 @@ it("Claude can set and clear a native goal without Pause or Resume", async () =>
       } else {
         return;
       }
-      sendGoal();
+      sendGoalState(socket, at, goal);
       send({
         v: 1,
         type: "request.result",

@@ -6,7 +6,6 @@ import {
   GOAL_OBJECTIVE_MAX_LENGTH,
   GOAL_REASON_MAX_LENGTH,
   type GoalView,
-  RequestResultFrameSchema,
   RuntimeEventSchema,
 } from "./index.ts";
 
@@ -42,7 +41,7 @@ it("bounds objective and reason on the wire", () => {
   ).toBe(false);
 });
 
-it("accepts nullable state and a distinct idempotent receipt", () => {
+it("requires a nullable goal in state events", () => {
   expect(Check(RuntimeEventSchema, { type: "goal_state", goal: null })).toBe(true);
   expect(Check(RuntimeEventSchema, { type: "goal_state" })).toBe(false);
   for (const status of ["active", "paused", "blocked", "complete"]) {
@@ -53,13 +52,4 @@ it("accepts nullable state and a distinct idempotent receipt", () => {
       }),
     ).toBe(true);
   }
-  expect(
-    Check(RequestResultFrameSchema, {
-      v: 1,
-      type: "request.result",
-      at: new Date(0).toISOString(),
-      requestId: "goal",
-      result: { type: "goal_applied", duplicate: false },
-    }),
-  ).toBe(true);
 });

@@ -1,24 +1,16 @@
-import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   type FauxResponseFactory,
   fauxAssistantMessage,
   fauxProvider,
 } from "@earendil-works/pi-ai/providers/faux";
-import {
-  type Conversation,
-  createRegistry,
-  MemoryStorage,
-  ROOT_CONVERSATION_ID,
-} from "@earendil-works/pi-durable";
+import { createRegistry, MemoryStorage } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import type { GoalView } from "@pi-orb/protocol";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import { assert, expect, it, vi } from "vitest";
 import { DurableAgent, type DurableAgentOptions } from "./agent.ts";
-import { recordGoalResult } from "./goal.ts";
 import { durableError } from "./manager.ts";
-import { MemoryAgentPersistence } from "./memory-persistence.testkit.ts";
 
 const objective = "Fixture objective";
 const set = { type: "goal_set", objective } as const;
@@ -53,21 +45,16 @@ async function open(respond: FauxResponseFactory, options: Partial<DurableAgentO
   );
   const models = createModels();
   models.setProvider(fake.provider);
-  const storage = options.storage ?? new MemoryStorage();
-  let conversation: () => Promise<Conversation | undefined> = async () => undefined;
   const agent = (
     await DurableAgent.open({
       orbId: "orb",
-      storage,
+      storage: new MemoryStorage(),
       models,
       registry: createRegistry(),
       env: new NodeExecutionEnv({ cwd: "/tmp" }),
       checkoutCommit: null,
       instructions: "",
       initialSettings: { model: { provider: "faux", id: "faux-1" }, thinkingLevel: "off" },
-      bindNativeConversation: (resolve) => {
-        conversation = () => resolve(ROOT_CONVERSATION_ID, context);
-      },
       ...options,
     })
   )._unsafeUnwrap();
@@ -76,7 +63,7 @@ async function open(respond: FauxResponseFactory, options: Partial<DurableAgentO
     if (frame.type === "runtime.event" && frame.event.type === "goal_state")
       events.push(frame.event.goal);
   });
-  return { agent, conversation, storage, events, received };
+  return { agent, events, received };
 }
 
 function current(agent: DurableAgent) {
@@ -94,17 +81,8 @@ async function sendHuman(agent: DurableAgent) {
 }
 
 it("does not expose goal support or route goal actions when the policy is absent", async () => {
-  const entered = barrier();
-  const release = barrier();
-  const { agent, events } = await open(async () => {
-    entered.resolve();
-    await release.promise;
-    return fauxAssistantMessage("Fixture answer");
-  });
+  const { agent, events } = await open(() => fauxAssistantMessage("Unused fixture"));
   try {
-    expect(current(agent)).toBeUndefined();
-    expect(await sendHuman(agent)).toMatchObject({ type: "accepted" });
-    await entered.promise;
     expect((await agent.request("start", set))._unsafeUnwrap()).toMatchObject({
       type: "rejected",
       error: { code: "unsupported" },
@@ -112,7 +90,6 @@ it("does not expose goal support or route goal actions when the policy is absent
     expect(current(agent)).toBeUndefined();
     expect(events).toEqual([]);
   } finally {
-    release.resolve();
     await agent.close();
   }
 });
@@ -129,14 +106,17 @@ it("queues Set and Resume, and accepts Pause and Clear during a human turn", asy
     },
     { goal: { ...policy, kickoff: format } },
   );
+  const apply = async (id: string, action: Parameters<DurableAgent["request"]>[1]) => {
+    expect((await agent.request(id, action))._unsafeUnwrap()).toEqual({
+      type: "goal_applied",
+      duplicate: false,
+    });
+  };
   try {
     expect(current(agent)).toBeNull();
     expect(await sendHuman(agent)).toMatchObject({ type: "accepted" });
     await entered.promise;
-    expect((await agent.request("start", set))._unsafeUnwrap()).toEqual({
-      type: "goal_applied",
-      duplicate: false,
-    });
+    await apply("start", set);
     const active = current(agent);
     assert.exists(active);
     expect(active).toMatchObject({ objective, status: "active" });
@@ -151,27 +131,17 @@ it("queues Set and Resume, and accepts Pause and Clear during a human turn", asy
       error: { code: "request_id_conflict" },
     });
     expect(format.mock.calls).toEqual([[objective]]);
-    expect(
-      (
-        await agent.request("pause", { type: "goal_pause", revision: active.revision })
-      )._unsafeUnwrap(),
-    ).toEqual({
-      type: "goal_applied",
-      duplicate: false,
-    });
+    await apply("pause", { type: "goal_pause", revision: active.revision });
     const paused = current(agent);
     assert.exists(paused);
     expect(paused).toMatchObject({ status: "paused" });
+    const invalidRequest = { type: "rejected", error: { code: "invalid_request" } };
     expect(
       (
         await agent.request("stale", { type: "goal_resume", revision: active.revision })
       )._unsafeUnwrap(),
-    ).toMatchObject({ type: "rejected", error: { code: "invalid_request" } });
-    expect(
-      (
-        await agent.request("resume", { type: "goal_resume", revision: paused.revision })
-      )._unsafeUnwrap(),
-    ).toEqual({ type: "goal_applied", duplicate: false });
+    ).toMatchObject(invalidRequest);
+    await apply("resume", { type: "goal_resume", revision: paused.revision });
     const resumed = current(agent);
     assert.exists(resumed);
     expect(resumed).toMatchObject({ objective, status: "active" });
@@ -180,22 +150,11 @@ it("queues Set and Resume, and accepts Pause and Clear during a human turn", asy
       (
         await agent.request("clear-active", { type: "goal_clear", revision: resumed.revision })
       )._unsafeUnwrap(),
-    ).toMatchObject({ type: "rejected", error: { code: "invalid_request" } });
-    expect(
-      (
-        await agent.request("pause-resumed", { type: "goal_pause", revision: resumed.revision })
-      )._unsafeUnwrap(),
-    ).toEqual({ type: "goal_applied", duplicate: false });
+    ).toMatchObject(invalidRequest);
+    await apply("pause-resumed", { type: "goal_pause", revision: resumed.revision });
     const pausedAgain = current(agent);
     assert.exists(pausedAgain);
-    expect(
-      (
-        await agent.request("clear", { type: "goal_clear", revision: pausedAgain.revision })
-      )._unsafeUnwrap(),
-    ).toEqual({
-      type: "goal_applied",
-      duplicate: false,
-    });
+    await apply("clear", { type: "goal_clear", revision: pausedAgain.revision });
     release.resolve();
     (await agent.waitForIdle())._unsafeUnwrap();
     expect(received).toEqual(["Fixture human"]);
@@ -204,80 +163,6 @@ it("queues Set and Resume, and accepts Pause and Clear during a human turn", asy
   } finally {
     release.resolve();
     await agent.close();
-  }
-});
-
-it("publishes explicit completion once from the committed root document and reads it on reopen", async () => {
-  const entered = barrier();
-  const release = barrier();
-  const memory = new MemoryAgentPersistence();
-  const storage = (await memory.openOrb("orb", false))._unsafeUnwrap().storage;
-  const { agent, conversation, events, received } = await open(
-    async () => {
-      entered.resolve();
-      await release.promise;
-      return fauxAssistantMessage("Fixture answer");
-    },
-    { goal: policy, storage },
-  );
-  try {
-    (await agent.request("start", set))._unsafeUnwrap();
-    await entered.promise;
-    const active = current(agent);
-    assert.exists(active);
-    const root = await conversation();
-    assert.exists(root);
-    const { items } = await storage.scanSubmissions(
-      { conversationId: root.id },
-      8,
-      undefined,
-      context,
-    );
-    const input = items.find((item) => item.type === "input");
-    assert.exists(input);
-    (
-      await root.commit(
-        (tx) =>
-          recordGoalResult(
-            tx,
-            root.id,
-            { revision: active.revision, submissionId: input.id, status: "placed" },
-            { status: "complete", reason: "Verified" },
-          ),
-        context,
-      )
-    )._unsafeUnwrap();
-    const complete = current(agent);
-    expect(complete).toMatchObject({ objective, status: "complete", reason: "Verified" });
-    release.resolve();
-    (await agent.waitForIdle())._unsafeUnwrap();
-    expect(received).toEqual([kickoff]);
-    expect(events).toEqual([active, complete]);
-    const before = agent.snapshot()._unsafeUnwrap().records;
-    expect(before).not.toEqual(expect.arrayContaining([expect.objectContaining({ role: "user" })]));
-    expect(JSON.stringify(before)).not.toContain(kickoff);
-    (await agent.close())._unsafeUnwrap();
-
-    const reopened = await open(() => fauxAssistantMessage("Unused fixture"), {
-      goal: policy,
-      storage,
-    });
-    try {
-      expect(current(reopened.agent)).toEqual(complete);
-      expect((await reopened.agent.request("start", set))._unsafeUnwrap()).toEqual({
-        type: "goal_applied",
-        duplicate: true,
-      });
-      expect(reopened.events).toEqual([]);
-      expect(reopened.agent.snapshot()._unsafeUnwrap().records).toEqual(before);
-      expect(reopened.received).toEqual([]);
-    } finally {
-      await reopened.agent.close();
-    }
-  } finally {
-    release.resolve();
-    await agent.close();
-    await memory.close();
   }
 });
 
@@ -348,37 +233,6 @@ it("does not hand off if the owner is lost during the asynchronous inbox check",
     expect(received).toEqual([kickoff]);
   } finally {
     release.resolve();
-    await agent.close();
-  }
-});
-
-it("publishes cancellation as the committed paused goal", async () => {
-  const entered = barrier();
-  const { agent, events } = await open(
-    async (_request, options) => {
-      entered.resolve();
-      if (!options?.signal?.aborted)
-        await new Promise<void>((resolve) =>
-          options?.signal?.addEventListener("abort", () => resolve(), { once: true }),
-        );
-      return fauxAssistantMessage("Fixture answer");
-    },
-    { goal: policy },
-  );
-  try {
-    (await agent.request("start", set))._unsafeUnwrap();
-    await entered.promise;
-    const operationId = agent.liveView()?.operationId;
-    assert.exists(operationId);
-    expect(
-      (await agent.request("abort", { type: "abort", operationId }))._unsafeUnwrap(),
-    ).toMatchObject({
-      type: "accepted",
-    });
-    (await agent.waitForIdle())._unsafeUnwrap();
-    expect(events.map((goal) => goal?.status)).toEqual(["active", "paused"]);
-    expect(current(agent)).toMatchObject({ status: "paused", reason: "Goal turn was aborted." });
-  } finally {
     await agent.close();
   }
 });

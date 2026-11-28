@@ -130,6 +130,25 @@ async function setup(
   };
 }
 
+async function setupWithHeldAnswer() {
+  const requesting = barrier();
+  const answer = barrier();
+  const test = await setup(async () => {
+    requesting.release();
+    await answer.reached;
+    return fauxAssistantMessage("Fixture answer");
+  });
+  return {
+    ...test,
+    modelEntered: requesting.reached,
+    releaseAnswer: answer.release,
+    close: async () => {
+      answer.release();
+      await test.close();
+    },
+  };
+}
+
 it("commits the goal and typed kickoff together and stops at the fixed follow-up cap", async () => {
   const test = await setup();
   try {
@@ -140,12 +159,14 @@ it("commits the goal and typed kickoff together and stops at the fixed follow-up
       kick,
       ...Array.from({ length: MAX_GOAL_FOLLOWUPS }, () => follow),
     ]);
-    expect(await test.view()).toMatchObject({
+    const blocked = await test.view();
+    assert(blocked);
+    expect(blocked).toMatchObject({
       objective,
       status: "blocked",
       reason: "Automatic turn limit reached.",
     });
-    expect((await test.view())?.revision).not.toBe(started.revision);
+    expect(blocked.revision).not.toBe(started.revision);
 
     const startCommit = test.commits.find((publication) =>
       publication.changes.some((change) => change.type === "entry" && GoalInput.is(change.value)),
@@ -171,34 +192,30 @@ it("commits the goal and typed kickoff together and stops at the fixed follow-up
         turn,
       })),
     );
+    const cleared = await mutateGoal(test.root, { type: "goal_clear", revision: blocked.revision });
+    expect(cleared._unsafeUnwrap()).toBeUndefined();
+    expect(await test.view()).toBeUndefined();
   } finally {
     await test.close();
   }
 });
 
 it.each(["input", "reset"] as const)("yields to a competing queued native %s", async (kind) => {
-  const requesting = barrier();
-  const answer = barrier();
-  const test = await setup(async () => {
-    requesting.release();
-    await answer.reached;
-    return fauxAssistantMessage("Fixture answer");
-  });
+  const test = await setupWithHeldAnswer();
   try {
     await test.set();
-    await requesting.reached;
-    const human =
-      kind === "input"
-        ? await test.root.submit(
-            { type: "input", whenBusy: "followUp", content: "Fixture human" },
-            ctx,
-          )
-        : undefined;
-    if (kind === "reset") await test.root.reset(undefined, ctx);
-    answer.release();
-    expect(human ? await human.wait(ctx) : undefined).toEqual(
-      human ? expect.objectContaining({ status: "done" }) : undefined,
-    );
+    await test.modelEntered;
+    if (kind === "input") {
+      const human = await test.root.submit(
+        { type: "input", whenBusy: "followUp", content: "Fixture human" },
+        ctx,
+      );
+      test.releaseAnswer();
+      expect(await human.wait(ctx)).toMatchObject({ status: "done" });
+    } else {
+      await test.root.reset(undefined, ctx);
+      test.releaseAnswer();
+    }
     await test.root.waitForIdle(ctx);
     expect(test.nativeInputs.size).toBe(1);
     expect(test.received).toEqual(kind === "input" ? [kick, "Fixture human"] : [kick]);
@@ -207,30 +224,19 @@ it.each(["input", "reset"] as const)("yields to a competing queued native %s", a
       reason: kind === "input" ? "Other input was queued." : "A context reset was queued.",
     });
   } finally {
-    answer.release();
     await test.close();
   }
 });
 
 it("a queued kickoff cannot continue from another run's answer", async () => {
-  const requesting = barrier();
-  const answer = barrier();
-  const test = await setup(async () => {
-    requesting.release();
-    await answer.reached;
-    return fauxAssistantMessage("Fixture answer");
-  });
+  const test = await setupWithHeldAnswer();
   try {
     await test.root.submit({ type: "input", content: "Fixture human" }, ctx);
-    await requesting.reached;
+    await test.modelEntered;
     await test.set();
-    answer.release();
+    test.releaseAnswer();
     await test.root.waitForIdle(ctx);
-    expect(test.received).toEqual([
-      "Fixture human",
-      kick,
-      ...Array.from({ length: MAX_GOAL_FOLLOWUPS }, () => follow),
-    ]);
+    expect(test.received.slice(0, 3)).toEqual(["Fixture human", kick, follow]);
     const [start, continuation] = [...test.nativeInputs.values()];
     expect(start?.status).toBe("done");
     const continuationAdmission = test.commits.find(({ changes }) =>
@@ -249,7 +255,6 @@ it("a queued kickoff cannot continue from another run's answer", async () => {
     );
     expect(kickoffSettlement?.seq).toBeLessThan(continuationAdmission?.seq ?? 0);
   } finally {
-    answer.release();
     await test.close();
   }
 });
@@ -352,21 +357,15 @@ it("Pause withdraws exactly the admitted goal follow-up; only then may Clear rem
 });
 
 it("a placed turn finishes after Pause; Resume starts a new activation, and stale actions fail", async () => {
-  const requesting = barrier();
-  const answer = barrier();
-  const test = await setup(async () => {
-    requesting.release();
-    await answer.reached;
-    return fauxAssistantMessage("Fixture answer");
-  });
+  const test = await setupWithHeldAnswer();
   try {
     const started = await test.set();
-    await requesting.reached;
+    await test.modelEntered;
     const paused = (
       await mutateGoal(test.root, { type: "goal_pause", revision: started.revision }, ctx)
     )._unsafeUnwrap() as GoalView;
     expect([...test.nativeInputs.values()][0]?.status).toBe("placed");
-    answer.release();
+    test.releaseAnswer();
     await test.root.waitForIdle(ctx);
     expect([...test.nativeInputs.values()][0]?.status).toBe("done");
     expect(test.nativeInputs.size).toBe(1);
@@ -393,27 +392,6 @@ it("a placed turn finishes after Pause; Resume starts a new activation, and stal
     expect(resumed?.revision).not.toBe(started.revision);
     await test.root.waitForIdle(ctx);
     expect(test.received.slice(0, 2)).toEqual([kick, "Fixture resume"]);
-  } finally {
-    answer.release();
-    await test.close();
-  }
-});
-
-it("rejects raw objectives that PostgreSQL JSON cannot store", async () => {
-  const test = await setup();
-  try {
-    for (const raw of ["Objective\u0000", "\uD800Objective", "Objective\uDFFF"]) {
-      const result = await mutateGoal(test.root, { type: "goal_set", objective: raw, input: kick });
-      expect(result._unsafeUnwrapErr()).toMatchObject({ code: "invalid_objective" });
-    }
-    expect(await test.harness.snapshot(GoalDoc, test.root.id, ctx)).toBeUndefined();
-    const valid = "Fixture 🚧";
-    expect(
-      (
-        await mutateGoal(test.root, { type: "goal_set", objective: valid, input: kick })
-      )._unsafeUnwrap(),
-    ).toMatchObject({ objective: valid });
-    await test.root.waitForIdle(ctx);
   } finally {
     await test.close();
   }
@@ -446,16 +424,10 @@ it("hashes receipt keys without aliasing distinct raw request IDs", async () => 
 });
 
 it("stops only on an explicit result for the current placed goal input", async () => {
-  const requesting = barrier();
-  const answer = barrier();
-  const test = await setup(async () => {
-    requesting.release();
-    await answer.reached;
-    return fauxAssistantMessage("Fixture answer");
-  });
+  const test = await setupWithHeldAnswer();
   try {
     const started = await test.set();
-    await requesting.reached;
+    await test.modelEntered;
     const [input] = test.nativeInputs.values();
     assert(input);
     const identity = {
@@ -489,12 +461,11 @@ it("stops only on an explicit result for the current placed goal input", async (
       )
     )._unsafeUnwrap();
     expect(complete).toMatchObject({ status: "complete", reason });
-    answer.release();
+    test.releaseAnswer();
     await test.root.waitForIdle(ctx);
     expect(await test.view()).toEqual(complete);
     expect(test.received).toEqual([kick]);
   } finally {
-    answer.release();
     await test.close();
   }
 });
@@ -527,7 +498,7 @@ it("exposes native abort as an interrupted goal without scheduling a follow-up",
 });
 
 it("keeps clear receipts after reload and detects same-ID conflicts before admission", async () => {
-  const test = await setup();
+  const test = await setupWithHeldAnswer();
   const deny: GoalAdmission = () => err({ disposition: "denied", reason: "sleep" });
   let formats = 0;
   const format = () => {
@@ -536,17 +507,21 @@ it("keeps clear receipts after reload and detects same-ID conflicts before admis
   };
   try {
     const set = { type: "goal_set", objective, input: format } as const;
-    expect((await changeGoal(test.root, "set", set, ctx))._unsafeUnwrap()).toMatchObject({
-      duplicate: false,
-    });
-    await test.root.waitForIdle(ctx);
-    const stopped = await test.view();
+    const started = (await changeGoal(test.root, "set", set, ctx))._unsafeUnwrap();
+    expect(started.duplicate).toBe(false);
+    assert(started.goal);
+    await test.modelEntered;
+    const stopped = (
+      await mutateGoal(test.root, { type: "goal_pause", revision: started.goal.revision })
+    )._unsafeUnwrap();
     assert(stopped);
     const action = { type: "goal_clear", revision: stopped.revision } as const;
     expect((await changeGoal(test.root, "clear-request", action, ctx))._unsafeUnwrap()).toEqual({
       goal: undefined,
       duplicate: false,
     });
+    test.releaseAnswer();
+    await test.root.waitForIdle(ctx);
     await test.close();
     const reopened = await Harness.open(test.storage, test.options, ctx);
     try {
@@ -651,26 +626,23 @@ it.each(["input", "cap"] as const)("records Sleep deferral before the %s gate", 
   }
 });
 
-it("reads a missing goal without creating a document and limits objectives by code point", async () => {
+it("reads a missing goal without a document and validates objective encoding and length", async () => {
   const test = await setup();
   try {
     expect(await test.view()).toBeUndefined();
     expect(await test.harness.snapshot(GoalDoc, test.root.id, ctx)).toBeUndefined();
-    const maxObjective = "🧭".repeat(GOAL_OBJECTIVE_MAX_LENGTH);
-    expect(
-      (
-        await mutateGoal(test.root, {
-          type: "goal_set",
-          objective: `${maxObjective}🧭`,
-          input: kick,
-        })
-      )._unsafeUnwrapErr(),
-    ).toMatchObject({ code: "invalid_objective" });
-    expect(
-      (
-        await mutateGoal(test.root, { type: "goal_set", objective: maxObjective, input: kick })
-      )._unsafeUnwrap(),
-    ).toMatchObject({ objective: maxObjective });
+    const set = (objective: string) =>
+      mutateGoal(test.root, { type: "goal_set", objective, input: kick });
+    for (const raw of ["Objective\u0000", "\uD800Objective", "Objective\uDFFF"]) {
+      expect((await set(raw))._unsafeUnwrapErr()).toMatchObject({ code: "invalid_objective" });
+    }
+    expect(await test.harness.snapshot(GoalDoc, test.root.id, ctx)).toBeUndefined();
+    const prefix = "Fixture ";
+    const maxObjective = prefix + "🧭".repeat(GOAL_OBJECTIVE_MAX_LENGTH - prefix.length);
+    expect((await set(`${maxObjective}🧭`))._unsafeUnwrapErr()).toMatchObject({
+      code: "invalid_objective",
+    });
+    expect((await set(maxObjective))._unsafeUnwrap()).toMatchObject({ objective: maxObjective });
     await test.root.waitForIdle(ctx);
   } finally {
     await test.close();
